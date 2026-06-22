@@ -1,0 +1,29 @@
+[project]
+name = "lance-ns"
+version = "0.1.0"
+description = "Lance Namespace REST Catalog (FastAPI over native pylance DirectoryNamespace, MinIO)"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pylance>=7.0.0",
+    "pyarrow",
+    "fastapi",
+    "uvicorn[standard]",
+    "pydantic-settings",
+    "lance-namespace",
+    "lance-namespace-urllib3-client",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "requests>=2.32",
+    "ruff>=0.6",
+]
+
+# pylance 7.x pins lance-namespace==0.7.7 and ships no macOS x86_64 wheel; this
+# project is developed and run in Linux (devcontainer + Docker). Restrict
+# resolution to Linux for a clean, reproducible lockfile across teammates / CI /
+# Codespaces.
+[tool.uv]
+environments = ["sys_platform == 'linux'"]

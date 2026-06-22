@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from lance_namespace import LanceNamespaceError
 
 from app.api.v1.router import api_router
+from app.core import fga
 from app.core.config import get_settings
 from app.core.exceptions import problem_detail
 from app.core.namespace import build_namespace
@@ -36,11 +37,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.namespace = build_namespace(settings)  # fail fast if storage misconfigured
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(settings.oidc_issuer, settings.oidc_audience, settings.oidc_cache_ttl)
+    if settings.fga_enabled:
+        store_id, model_id = settings.fga_store_id, settings.fga_model_id
+        if not (store_id and model_id):
+            store_id, model_id = await fga.provision(settings.fga_api_url)
+            log.info("provisioned OpenFGA store=%s model=%s", store_id, model_id)
+        app.state.fga = fga.make_client(settings.fga_api_url, store_id, model_id)
     app.state.startup_complete = True
     try:
         yield
     finally:
         app.state.shutting_down = True
+        fga_client = getattr(app.state, "fga", None)
+        if fga_client is not None:
+            await fga_client.close()
 
 
 _settings = get_settings()

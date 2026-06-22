@@ -44,11 +44,23 @@ class Settings(BaseSettings):
     oidc_audience: str | None = Field(default=None, alias="LANCE_OIDC_AUDIENCE")
     oidc_cache_ttl: int = Field(default=3600, alias="LANCE_OIDC_CACHE_TTL")
 
+    # OpenFGA authorization (opt-in; requires OIDC for the user identity). When
+    # store/model ids are unset, the app provisions them at startup (dev/e2e);
+    # in production, provision once and pin both ids.
+    fga_enabled: bool = Field(default=False, alias="LANCE_FGA_ENABLED")
+    fga_api_url: str = Field(default="http://openfga:8080", alias="LANCE_FGA_API_URL")
+    fga_store_id: str | None = Field(default=None, alias="LANCE_FGA_STORE_ID")
+    fga_model_id: str | None = Field(default=None, alias="LANCE_FGA_MODEL_ID")
+
     @model_validator(mode="after")
-    def _require_oidc_provider(self) -> Self:
-        """Fail fast if OIDC is enabled without an issuer + audience."""
+    def _validate_auth(self) -> Self:
+        """Fail fast on incomplete auth configuration."""
         if self.oidc_enabled and not (self.oidc_issuer and self.oidc_audience):
             raise ValueError("LANCE_OIDC_ISSUER and LANCE_OIDC_AUDIENCE are required when OIDC is enabled")
+        if self.fga_enabled and not self.oidc_enabled:
+            raise ValueError(
+                "LANCE_OIDC_ENABLED is required when LANCE_FGA_ENABLED is set (authz needs a user)"
+            )
         return self
 
     def namespace_properties(self) -> dict[str, str]:

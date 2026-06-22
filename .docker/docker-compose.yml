@@ -57,8 +57,68 @@ services:
       LANCE_S3_REGION: us-east-1
       LANCE_S3_ALLOW_HTTP: "true"
       LANCE_S3_VIRTUAL_HOSTED: "false"
+      # --- Auth is OFF by default. Uncomment to enforce OIDC (Dex) + OpenFGA authz.
+      #   The openfga/postgres/dex services below provide the infra.
+      # LANCE_OIDC_ENABLED: "true"
+      # LANCE_OIDC_ISSUER: http://dex:5556/dex
+      # LANCE_OIDC_AUDIENCE: lance-catalog
+      # LANCE_FGA_ENABLED: "true"
+      # LANCE_FGA_API_URL: http://openfga:8080
     ports:
       - "2333:2333"
 
+  # --- OpenFGA authorization (Postgres-backed) ---
+  fga-postgres:
+    image: postgres:16
+    container_name: lance-fga-postgres
+    environment:
+      POSTGRES_USER: openfga
+      POSTGRES_PASSWORD: openfga
+      POSTGRES_DB: openfga
+    volumes:
+      - fga-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openfga"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  openfga-migrate:
+    image: openfga/openfga:latest
+    container_name: lance-openfga-migrate
+    command: migrate
+    depends_on:
+      fga-postgres:
+        condition: service_healthy
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga:openfga@fga-postgres:5432/openfga?sslmode=disable
+
+  openfga:
+    image: openfga/openfga:latest
+    container_name: lance-openfga
+    command: run
+    depends_on:
+      openfga-migrate:
+        condition: service_completed_successfully
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://openfga:openfga@fga-postgres:5432/openfga?sslmode=disable
+      OPENFGA_LOG_FORMAT: json
+    ports:
+      - "8080:8080"   # HTTP API
+      - "3000:3000"   # Playground (dev only)
+
+  # --- Dex OIDC provider (static config; dev IdP) ---
+  dex:
+    image: dexidp/dex:latest
+    container_name: lance-dex
+    command: dex serve /etc/dex/config.yaml
+    volumes:
+      - ./dex.config.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "5556:5556"
+
 volumes:
   minio-data:
+  fga-postgres-data:

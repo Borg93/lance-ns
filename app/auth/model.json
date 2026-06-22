@@ -1,0 +1,38 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    { "type": "user" },
+    {
+      "type": "namespace",
+      "relations": {
+        "owner": { "this": {} },
+        "writer": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "owner" } }] } },
+        "reader": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "writer" } }] } }
+      },
+      "metadata": {
+        "relations": {
+          "owner": { "directly_related_user_types": [{ "type": "user" }] },
+          "writer": { "directly_related_user_types": [{ "type": "user" }] },
+          "reader": { "directly_related_user_types": [{ "type": "user" }] }
+        }
+      }
+    },
+    {
+      "type": "table",
+      "relations": {
+        "parent": { "this": {} },
+        "owner": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "owner" } } }] } },
+        "writer": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "writer" } } }] } },
+        "reader": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "reader" } } }] } }
+      },
+      "metadata": {
+        "relations": {
+          "parent": { "directly_related_user_types": [{ "type": "namespace" }] },
+          "owner": { "directly_related_user_types": [{ "type": "user" }] },
+          "writer": { "directly_related_user_types": [{ "type": "user" }] },
+          "reader": { "directly_related_user_types": [{ "type": "user" }] }
+        }
+      }
+    }
+  ]
+}

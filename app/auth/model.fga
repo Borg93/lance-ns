@@ -1,0 +1,20 @@
+model
+  schema 1.1
+
+type user
+
+# A namespace owns its tables; permissions on a namespace cascade to its tables.
+type namespace
+  relations
+    define owner: [user]
+    define writer: [user] or owner
+    define reader: [user] or writer
+
+# A table inherits reader/writer/owner from its parent namespace, and may also be
+# granted directly. Read ops require `reader`, mutations `writer`, lifecycle `owner`.
+type table
+  relations
+    define parent: [namespace]
+    define owner: [user] or owner from parent
+    define writer: [user] or writer from parent
+    define reader: [user] or reader from parent

@@ -32,7 +32,7 @@ from app.services import native
 router = APIRouter(prefix="/v1/table", tags=["table"])
 
 
-@router.get("/", response_model_exclude_none=True)
+@router.get("", response_model_exclude_none=True)
 def list_all_tables(
     ns: NamespaceDep, page_token: str | None = None, limit: int | None = None
 ) -> ListTablesResponse:

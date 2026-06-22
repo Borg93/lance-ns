@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from lance_namespace import (
     CreateTableIndexRequest,
     CreateTableIndexResponse,
+    CreateTableScalarIndexResponse,
     DescribeTableIndexStatsRequest,
     DescribeTableIndexStatsResponse,
     DropTableIndexRequest,
@@ -32,7 +33,7 @@ def create_index(
 @router.post("/{id}/create_scalar_index", response_model_exclude_none=True)
 def create_scalar_index(
     id: str, body: CreateTableIndexRequest, ns: NamespaceDep, settings: SettingsDep
-) -> CreateTableIndexResponse:
+) -> CreateTableScalarIndexResponse:
     body.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "create_table_scalar_index", body)
 

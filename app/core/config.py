@@ -9,8 +9,9 @@ silent fallback) so a misconfigured deployment fails fast at boot.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Self
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _STORAGE_PREFIX = "storage."
@@ -35,6 +36,20 @@ class Settings(BaseSettings):
     s3_region: str = Field(default="us-east-1", alias="LANCE_S3_REGION")
     s3_allow_http: bool = Field(default=True, alias="LANCE_S3_ALLOW_HTTP")
     s3_virtual_hosted: bool = Field(default=False, alias="LANCE_S3_VIRTUAL_HOSTED")
+
+    # OIDC authentication (opt-in). When disabled, all routes are open. When
+    # enabled, every /v1 route requires a valid bearer token from the issuer.
+    oidc_enabled: bool = Field(default=False, alias="LANCE_OIDC_ENABLED")
+    oidc_issuer: str | None = Field(default=None, alias="LANCE_OIDC_ISSUER")
+    oidc_audience: str | None = Field(default=None, alias="LANCE_OIDC_AUDIENCE")
+    oidc_cache_ttl: int = Field(default=3600, alias="LANCE_OIDC_CACHE_TTL")
+
+    @model_validator(mode="after")
+    def _require_oidc_provider(self) -> Self:
+        """Fail fast if OIDC is enabled without an issuer + audience."""
+        if self.oidc_enabled and not (self.oidc_issuer and self.oidc_audience):
+            raise ValueError("LANCE_OIDC_ISSUER and LANCE_OIDC_AUDIENCE are required when OIDC is enabled")
+        return self
 
     def namespace_properties(self) -> dict[str, str]:
         """Return properties for ``lance_namespace.connect(impl, properties)``."""

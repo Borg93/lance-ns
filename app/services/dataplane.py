@@ -4,8 +4,9 @@ The native ``DirectoryNamespace`` stubs several table data, schema, and tag
 operations. These functions fill the gap: resolve the table's dataset via the
 namespace, then perform the operation with pylance.
 
-Each function takes ``(ns, storage_options, request)`` and returns the typed
-``lance_namespace`` response model matching the spec response shape.
+Each function takes ``(ns, storage_options, request)`` — except
+``update_field_metadata``, which takes ``(ns, storage_options, table_id, updates)``
+— and returns the typed ``lance_namespace`` response model.
 """
 
 from __future__ import annotations
@@ -125,7 +126,10 @@ def update_field_metadata(
     field_updates = {u["path"]: dict(u.get("metadata") or {}) for u in updates if u.get("path")}
     replace = any(bool(u.get("replace")) for u in updates)
     open_dataset(ns, so, table_id).update_field_metadata(field_updates, replace=replace)
-    return UpdateFieldMetadataResponse(version=_version(ns, so, table_id), fields=field_updates)
+    # A None value is the key-deletion signal for the backend; drop those from the
+    # echoed map since the response model's field values are non-nullable strings.
+    fields = {path: {k: v for k, v in meta.items() if v is not None} for path, meta in field_updates.items()}
+    return UpdateFieldMetadataResponse(version=_version(ns, so, table_id), fields=fields)
 
 
 def list_tags(ns: LanceNamespace, so: StorageOptions, req: ListTableTagsRequest) -> ListTableTagsResponse:
@@ -133,10 +137,9 @@ def list_tags(ns: LanceNamespace, so: StorageOptions, req: ListTableTagsRequest)
     table_id = _table_id(req)
     tags: dict[str, dict] = {}
     for name, tag in open_dataset(ns, so, table_id).tags.list().items():
-        version = getattr(tag, "version", None)
-        if version is None and isinstance(tag, dict):
-            version = tag.get("version")
-        tags[name] = {"version": version, "manifest_size": getattr(tag, "manifest_size", None) or 0}
+        # pylance's Tag is a TypedDict (plain dict at runtime), so read by key.
+        entry = tag if isinstance(tag, dict) else {"version": getattr(tag, "version", None)}
+        tags[name] = {"version": entry.get("version"), "manifest_size": entry.get("manifest_size") or 0}
     # model_validate coerces the inner dicts into TagContents (not exported to name directly).
     return ListTableTagsResponse.model_validate({"tags": tags})
 

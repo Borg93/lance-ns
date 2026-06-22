@@ -20,6 +20,7 @@ from app.api.v1.router import api_router
 from app.core.config import get_settings
 from app.core.exceptions import problem_detail
 from app.core.namespace import build_namespace
+from app.core.oidc import OIDCVerifier
 
 log = logging.getLogger(__name__)
 
@@ -33,6 +34,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.shutting_down = False
     app.state.startup_complete = False
     app.state.namespace = build_namespace(settings)  # fail fast if storage misconfigured
+    if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
+        app.state.oidc = OIDCVerifier(settings.oidc_issuer, settings.oidc_audience, settings.oidc_cache_ttl)
     app.state.startup_complete = True
     try:
         yield

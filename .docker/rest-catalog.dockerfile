@@ -43,9 +43,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1
 
-WORKDIR /app
+WORKDIR /srv
 COPY --from=builder --link /opt/venv /opt/venv
-COPY --link server ./server
+COPY --link app ./app
 
 USER app
 EXPOSE 2333
@@ -54,4 +54,4 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2333/livez').read()"]
 
 ENTRYPOINT ["tini", "--"]
-CMD ["uvicorn", "server.app:app", "--host", "0.0.0.0", "--port", "2333"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "2333"]

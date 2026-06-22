@@ -77,7 +77,7 @@ def main() -> None:
     do("DescribeNamespace", "POST", f"/v1/namespace/{NS}/describe")
 
     # ---- table create / inspect ----
-    do(
+    create_resp = do(
         "CreateTable",
         "POST",
         f"/v1/table/{T}/create?mode=overwrite",
@@ -108,19 +108,19 @@ def main() -> None:
         "QueryTable",
         "POST",
         f"/v1/table/{T}/query",
-        json={"k": 10, "filter": "id >= 4"},
+        json={"k": 10, "filter": "id >= 4", "vector": {}},
     )
     do(
         "ExplainTableQueryPlan",
         "POST",
         f"/v1/table/{T}/explain_plan",
-        json={"query": {"k": 5, "filter": "id > 0"}},
+        json={"query": {"k": 5, "filter": "id > 0", "vector": {}}},
     )
     do(
         "AnalyzeTableQueryPlan",
         "POST",
         f"/v1/table/{T}/analyze_plan",
-        json={"query": {"k": 5, "filter": "id > 0"}},
+        json={"k": 5, "filter": "id > 0", "vector": {}},
     )
     do(
         "UpdateTable",
@@ -144,7 +144,7 @@ def main() -> None:
         "AlterTableAddColumns",
         "POST",
         f"/v1/table/{T}/add_columns",
-        json={"new_columns": [{"name": "score", "expression": "id * 1.0"}]},
+        json={"new_columns": [{"name": "score", "expression": "cast(id as double)"}]},
     )
     do(
         "AlterTableAlterColumns",
@@ -257,7 +257,7 @@ def main() -> None:
         "RegisterTable",
         "POST",
         f"/v1/table/{NS}$reg/register",
-        json={"location": f"s3://lance-catalog/{NS}/users.lance"},
+        json={"location": create_resp.json().get("location", "").replace("s3://lance-catalog/", "")},
     )
     do("RestoreTable", "POST", f"/v1/table/{T}/restore", json={"version": 1})
     do(
@@ -268,7 +268,7 @@ def main() -> None:
     )
     do("DeregisterTable", "POST", f"/v1/table/{NS}$reg/deregister")
 
-    # ---- transactions / materialized views (likely UNSUP in 0.7.7) ----
+    # ---- transactions / materialized views (UNSUP on the native dir backend) ----
     do("DescribeTransaction", "POST", "/v1/transaction/txn1/describe")
     do("AlterTransaction", "POST", "/v1/transaction/txn1/alter", json={"actions": []})
     do(

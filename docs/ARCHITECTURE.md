@@ -198,7 +198,7 @@ code (see §7).
 | Distributed promotion at scale (lance-ray) | ⛔ not built |
 | `project` type + 3-axis governance (teams × projects × layers) | 🔶 P1, planned |
 | Orchestration (cron → NATS → Dapr Workflow) | 🔶 deferred |
-| Lineage (OpenLineage + backend) | 🔶 deferred (see §9) |
+| Lineage (OpenLineage ingest + graph queries over Apache AGE; producer-side emitter) | ✅ service built & e2e-verified; UI/authz next (see §9, `docs/LINEAGE.md`) |
 | OTel observability | 🔶 deferred |
 
 ---
@@ -248,8 +248,15 @@ lineage is a later governance/observability layer.
 ```
 commit  ──▶  OpenFGA check (may you?)        ← access control      [done]
         ──▶  Lance new version (what/when)   ← audit trail         [free]
-        ──▶  OpenLineage event (from where?) ← lineage graph       [later]
+        ──▶  OpenLineage event (from where?) ← lineage graph       [built]
 ```
+
+**Built as a lightweight Marquez.** Rather than Marquez (Java/Dropwizard + relational
+Postgres) or Neo4j, the `lineage/` service is a small FastAPI app that ingests OpenLineage
+events at the standard `POST /api/v1/lineage` path and stores them in **Apache AGE** (a
+Postgres graph extension), so lineage traversal is native openCypher. Producers emit via the
+official `openlineage-python` client (see `lineage/seed.py` for the mock medallion emitter).
+Full design + API in [`docs/LINEAGE.md`](LINEAGE.md).
 
 ---
 

@@ -39,7 +39,37 @@ compute/ETL jobs ─POST /api/v1/lineage─▶ lineage svc ──owns──▶ A
 The dataset node's `name` **is** the catalog table id (e.g. `bronze$images`), so the same
 object is governed by OpenFGA, versioned by Lance, and traced here — one identity across all
 three axes. (Read-side authz — gating lineage views by `can_get_metadata` on `table:<id>`
-via the shared OpenFGA store — is the planned next step; see §Next.)
+via the shared OpenFGA store — is the planned next step; see the next section.)
+
+## Read-side authz (planned — query endpoints are open today)
+
+> ⚠️ **Today the query endpoints are unauthenticated** — anyone who can reach the service can
+> read any dataset's lineage. This is the top item on §Next.
+
+The gate, when added, is two layers — the same the catalog already applies to `describe table`:
+
+1. **OIDC (who are you?)** — require a valid Bearer JWT verified against the IdP (Dex); no /
+   invalid token → **401**.
+2. **OpenFGA (may you see it?)** — check `can_get_metadata` on `table:<id>` before returning
+   lineage; denied → **403**.
+
+**Principle:** you may see a dataset's lineage only if you may see that table's metadata — the
+*same* `can_get_metadata` permission, so policy lives in one place (the OpenFGA model) and is
+never duplicated here. It matters because lineage leaks the data estate: `upstream` /
+`downstream` reveal which datasets exist and how they connect, and `producers` reveals who ran
+which jobs.
+
+**What it does and does not couple.** It does **not** couple lineage to the catalog — the two
+services still never call each other; their only link is the shared `table:<id>` identity
+convention. It makes lineage a **client of the shared auth plane** (the same OpenFGA store +
+the same IdP). "Reusing the catalog's store" means lineage only **reads** the tuples the
+catalog **already wrote** on table creation — it never seeds or writes tuples, so OpenFGA
+stays the single source of truth for who-can.
+
+**Alternative — gateway gating.** Keep lineage dependency-free and enforce `can_get_metadata`
+at the gateway / SSR layer instead; lineage stays open behind it. Weaker boundary (lineage
+trusts the gateway) but zero OpenFGA/OIDC dependency in the service. Decide between in-service
+and gateway gating when this is picked up.
 
 ## Relation to Marquez (what we kept, what we made lighter)
 
@@ -96,6 +126,9 @@ Layered, no raw Cypher in the endpoints:
 OpenLineage default, any OpenLineage-instrumented producer (our emitter, Airflow, Spark, dbt)
 pointed here with `OPENLINEAGE_URL` ingests with no glue.
 
+> ⚠️ The query endpoints are **unauthenticated today** — gating them is the top §Next item;
+> see [Read-side authz](#read-side-authz-planned--query-endpoints-are-open-today).
+
 ## Mock medallion data (a real OpenLineage producer)
 
 `lineage/seed.py` is the **producer** — compute-layer instrumentation that uses the official
@@ -144,8 +177,9 @@ LINEAGE_DATABASE_URL=postgresql://lineage:lineage@localhost:5433/lineage \
 
 ## Next
 
-- **Read-side authz:** gate the query endpoints with OIDC + OpenFGA (`can_get_metadata`
-  on `table:<id>`), reusing the catalog's store — who-can stays in OpenFGA.
+- **Read-side authz** *(top priority — endpoints are open today)*: gate reads with OIDC +
+  OpenFGA `can_get_metadata` on `table:<id>` (in-service), or at the gateway. Full design +
+  the in-service-vs-gateway tradeoff in the **Read-side authz** section above.
 - **Async ingest at scale:** jobs publish OpenLineage to NATS; the service consumes
   (same owner, just decoupled). Direct `POST /api/v1/lineage` is fine until then.
 - **Frontend:** an SSR micro-frontend renders the DAG by calling `/graph` via the gateway

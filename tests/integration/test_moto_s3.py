@@ -7,7 +7,6 @@ Lance data. This is the deterministic, infra-free counterpart to the Docker e2e.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Iterator
 
 import boto3
@@ -47,17 +46,19 @@ def moto_endpoint() -> Iterator[str]:
 
 
 @pytest.fixture
-def moto_client(moto_endpoint: str) -> Iterator[TestClient]:
-    os.environ.update(
-        LANCE_REST_IMPL="dir",
-        LANCE_REST_ROOT=f"s3://{BUCKET}",
-        LANCE_S3_ENDPOINT=moto_endpoint,
-        LANCE_S3_ACCESS_KEY_ID="test",
-        LANCE_S3_SECRET_ACCESS_KEY="test",
-        LANCE_S3_ALLOW_HTTP="true",
-        LANCE_OIDC_ENABLED="false",
-        LANCE_FGA_ENABLED="false",
-    )
+def moto_client(moto_endpoint: str, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
+    for key, value in {
+        "LANCE_REST_IMPL": "dir",
+        "LANCE_REST_ROOT": f"s3://{BUCKET}",
+        "LANCE_S3_ENDPOINT": moto_endpoint,
+        "LANCE_S3_ACCESS_KEY_ID": "test",
+        "LANCE_S3_SECRET_ACCESS_KEY": "test",
+        "LANCE_S3_ALLOW_HTTP": "true",
+        "LANCE_OIDC_ENABLED": "false",
+        "LANCE_FGA_ENABLED": "false",
+    }.items():
+        monkeypatch.setenv(key, value)  # auto-restored on teardown -> order-independent
+
     from app.core.config import get_settings
 
     get_settings.cache_clear()
@@ -72,17 +73,18 @@ def test_catalog_roundtrip_on_moto_s3(moto_client: TestClient) -> None:
     assert moto_client.post("/v1/namespace/m1/create", json={}).status_code == 200
 
     rows = pa.table({"id": pa.array([1, 2, 3], pa.int64()), "name": ["a", "b", "c"]})
-    created = moto_client.post(
-        "/v1/table/m1$t/create?mode=overwrite", content=_ipc(rows), headers=ARROW
-    )
+    created = moto_client.post("/v1/table/m1$t/create?mode=overwrite", content=_ipc(rows), headers=ARROW)
     assert created.status_code == 200, created.text
     assert created.json()["location"].startswith(f"s3://{BUCKET}/")
 
-    assert moto_client.post(
-        "/v1/table/m1$t/insert?mode=append",
-        content=_ipc(pa.table({"id": pa.array([4], pa.int64()), "name": ["d"]})),
-        headers=ARROW,
-    ).status_code == 200
+    assert (
+        moto_client.post(
+            "/v1/table/m1$t/insert?mode=append",
+            content=_ipc(pa.table({"id": pa.array([4], pa.int64()), "name": ["d"]})),
+            headers=ARROW,
+        ).status_code
+        == 200
+    )
     assert int(moto_client.post("/v1/table/m1$t/count_rows", json={}).text) == 4
 
     query = moto_client.post("/v1/table/m1$t/query", json={"k": 10, "filter": "id >= 2", "vector": {}})

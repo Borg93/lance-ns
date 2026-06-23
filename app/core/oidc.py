@@ -9,7 +9,6 @@ Keycloak, Dex, Okta, Auth0, Entra, or Google by setting the issuer + audience.
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import httpx
 import jwt
@@ -31,6 +30,14 @@ class IDToken(BaseModel):
     iat: int
 
 
+class _Discovery(BaseModel):
+    """The subset of the provider's discovery document we rely on (boundary-validated)."""
+
+    issuer: str
+    jwks_uri: str
+    id_token_signing_alg_values_supported: list[str]
+
+
 class OIDCVerifier:
     """Verify ID tokens against a provider, caching discovery + JWKS for ``cache_ttl`` seconds."""
 
@@ -38,9 +45,9 @@ class OIDCVerifier:
         self._issuer = issuer.rstrip("/")
         self._audience = audience
         self._ttl = cache_ttl
-        self._cache: tuple[float, dict[str, Any], jwt.PyJWKClient] | None = None
+        self._cache: tuple[float, _Discovery, jwt.PyJWKClient] | None = None
 
-    def _provider(self) -> tuple[dict[str, Any], jwt.PyJWKClient]:
+    def _provider(self) -> tuple[_Discovery, jwt.PyJWKClient]:
         """Return the cached (discovery document, JWKS client), refreshing past the TTL."""
         now = time.monotonic()
         if self._cache is not None and (now - self._cache[0]) < self._ttl:
@@ -48,8 +55,8 @@ class OIDCVerifier:
         with httpx.Client(timeout=15.0) as client:
             response = client.get(f"{self._issuer}{_DISCOVERY_SUFFIX}")
             response.raise_for_status()
-            spec = response.json()
-        jwk_client = jwt.PyJWKClient(spec["jwks_uri"], cache_jwk_set=True, max_cached_keys=16)
+            spec = _Discovery.model_validate(response.json())
+        jwk_client = jwt.PyJWKClient(spec.jwks_uri, cache_jwk_set=True, max_cached_keys=16)
         self._cache = (now, spec, jwk_client)
         return spec, jwk_client
 
@@ -61,9 +68,9 @@ class OIDCVerifier:
             payload = jwt.decode(
                 token,
                 signing_key,
-                algorithms=spec["id_token_signing_alg_values_supported"],
+                algorithms=spec.id_token_signing_alg_values_supported,
                 audience=self._audience,
-                issuer=spec["issuer"],
+                issuer=spec.issuer,
             )
         except (jwt.PyJWTError, jwt.PyJWKClientError) as exc:
             # Never leak the underlying JWT/crypto error to the client.

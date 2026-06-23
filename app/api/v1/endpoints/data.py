@@ -6,6 +6,7 @@ import json
 from typing import Annotated
 
 from fastapi import APIRouter, Body, Header
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse, Response
 from lance_namespace import (
     AnalyzeTableQueryPlanRequest,
@@ -25,7 +26,9 @@ from lance_namespace import (
     UpdateTableResponse,
 )
 
-from app.api.dependencies import NamespaceDep, SettingsDep, StorageOptionsDep
+from app.api import fga_deps
+from app.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep, StorageOptionsDep
+from app.api.security import CurrentToken
 from app.core.identifiers import parse_identifier
 from app.core.serialization import dump
 from app.services import dataplane, native
@@ -37,10 +40,12 @@ router = APIRouter(prefix="/v1/table", tags=["data"])
 
 
 @router.post("/{id}/create", response_model_exclude_none=True)
-def create_table(
+async def create_table(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
     properties_header: Annotated[str | None, Header(alias="x-lance-table-properties")] = None,
@@ -51,8 +56,12 @@ def create_table(
             properties = json.loads(properties_header)
         except json.JSONDecodeError as exc:
             raise InvalidInputError(f"x-lance-table-properties is not valid JSON: {exc}") from exc
-    req = CreateTableRequest(id=parse_identifier(id, settings.delimiter), mode=mode, properties=properties)
-    return native.call(ns, "create_table", req, data)
+    segments = parse_identifier(id, settings.delimiter)
+    req = CreateTableRequest(id=segments, mode=mode, properties=properties)
+    response: CreateTableResponse = await run_in_threadpool(native.call, ns, "create_table", req, data)
+    # Make the caller owner + link the new table to its parent so it inherits the cascade.
+    await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    return response
 
 
 @router.post("/{id}/insert", response_model_exclude_none=True)

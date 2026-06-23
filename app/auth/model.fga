@@ -1,20 +1,67 @@
 model
   schema 1.1
 
+# Lance catalog authorization model.
+#
+# Hierarchy:  catalog -> namespace (self-nesting) -> table
+# Privileges: concentric rungs  owner > writer > reader, cascading DOWN via `parent`.
+# Permissions: every API operation is checked against a `can_*` ACTION relation
+#   (e.g. can_read_data, can_write_data, can_drop) — the model, not the app, owns
+#   the op->privilege mapping. Roles (`role#assignee`) are first-class subjects so a
+#   grant can target a team/service account, not just a single user.
+#
+# MEDALLION layout maps straight onto this: top-level namespaces `bronze`/`silver`/
+# `gold` (or per-domain sub-namespaces), with persona roles granted per layer —
+# e.g. role:ingestion writer on bronze, role:data_engineer reader on bronze +
+# writer on silver, role:analyst reader on gold — inheriting to all child tables.
+
 type user
 
-# A namespace owns its tables; permissions on a namespace cascade to its tables.
+# First-class subject: grant a role on an object, then add members to the role.
+# `role:analysts#assignee` is usable anywhere a `[user]` is.
+type role
+  relations
+    define assignee: [user, role#assignee]
+
+# The single root container (replaces the out-of-model `settings.fga_root_object`
+# magic string). Top-level namespaces parent to it; admins are granted here.
+type catalog
+  relations
+    define owner: [user, role#assignee]
+    define writer: [user, role#assignee] or owner
+    define reader: [user, role#assignee] or writer
+    # ---- actions (checked, never assigned) ----
+    define can_get_metadata: reader
+    define can_create_namespace: writer
+    define can_create_table: writer
+
 type namespace
   relations
-    define owner: [user]
-    define writer: [user] or owner
-    define reader: [user] or writer
+    define parent: [catalog, namespace]
+    # concentric rungs, inheriting from the parent (catalog or namespace)
+    define owner: [user, role#assignee] or owner from parent
+    define writer: [user, role#assignee] or owner or writer from parent
+    define reader: [user, role#assignee] or writer or reader from parent
+    # ---- actions ----
+    define can_get_metadata: reader
+    define can_list: reader
+    define can_create_namespace: writer
+    define can_create_table: writer
+    define can_update_properties: writer
+    define can_delete: owner
 
-# A table inherits reader/writer/owner from its parent namespace, and may also be
-# granted directly. Read ops require `reader`, mutations `writer`, lifecycle `owner`.
 type table
   relations
     define parent: [namespace]
-    define owner: [user] or owner from parent
-    define writer: [user] or writer from parent
-    define reader: [user] or reader from parent
+    define owner: [user, role#assignee] or owner from parent
+    define writer: [user, role#assignee] or owner or writer from parent
+    define reader: [user, role#assignee] or writer or reader from parent
+    # ---- actions ----
+    define can_get_metadata: reader
+    define can_read_data: reader
+    define can_write_data: writer
+    define can_alter: writer
+    define can_commit: writer
+    define can_rename: writer
+    define can_drop: owner
+    define can_deregister: owner

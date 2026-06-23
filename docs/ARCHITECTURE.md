@@ -1,0 +1,285 @@
+# lance-ns — Architecture & Status
+
+The doc to read first. Plain-language map of **what we're building, how the pieces fit,
+where we are right now, and what's next**. Skim the diagrams; read the section you need.
+
+---
+
+## 1. What this is (one paragraph)
+
+`lance-ns` is a **REST catalog for Lance datasets** — a thin HTTP service (FastAPI) that
+lets clients create/list/describe namespaces & tables, read/write table data (Arrow-IPC),
+and does it with **authentication** (OIDC) and **fine-grained authorization** (OpenFGA,
+Zanzibar-style). The actual table bytes live in object storage (MinIO/S3) as **Lance
+datasets**; the catalog is the *control plane* that names them, locates them, hands out
+scoped credentials, and decides **who may do what**. Think "Iceberg REST catalog /
+Lakekeeper, but for Lance (multimodal: vectors + blobs + columns)."
+
+---
+
+## 2. The two planes (the single most important idea)
+
+```
+                CONTROL PLANE                          DATA PLANE
+        (this service — decides + locates)     (engines — move the bytes)
+   ┌─────────────────────────────────────┐   ┌──────────────────────────────┐
+   │  FastAPI REST catalog                │   │  lance-ray / pylance / a job │
+   │  - namespaces & tables CRUD          │   │  - read_lance / write_lance  │
+   │  - describe -> location + creds      │──▶│  - add_columns_from (ETL)    │
+   │  - OIDC authn + OpenFGA authz        │   │  - compaction / vector search│
+   │  - seeds ownership tuples on create  │   │  - commits new Lance versions│
+   └─────────────────────────────────────┘   └──────────────────────────────┘
+                    │                                        │
+                    ▼                                        ▼
+        OpenFGA (tuples)  +  OIDC IdP (Dex)          Object store (MinIO/S3)
+                                                      Lance dataset dirs (*.lance)
+```
+
+The catalog **never moves data itself** (no heavy ETL inside the API process). It
+authorizes, locates, and records. Compute is a **client** of the catalog. This is why
+"promotion between layers" (below) is a *job*, not a catalog endpoint.
+
+---
+
+## 3. Component map
+
+```mermaid
+flowchart LR
+  C[Client / lance-ray / curl] -->|Bearer token| API[FastAPI catalog]
+  API -->|verify JWT via JWKS| DEX[(OIDC IdP — Dex in dev)]
+  API -->|check can_* / write tuples| FGA[(OpenFGA)]
+  FGA --> PG[(OpenFGA datastore — Postgres or SQLite)]
+  API -->|pylance DirectoryNamespace| OS[(Object store — MinIO/S3)]
+  OS --- L[Lance dataset dirs: bronze/…, silver/…, gold/…]
+```
+
+Code layout (where each concern lives):
+
+| Path | Responsibility |
+|---|---|
+| `app/main.py` | App lifespan: build OIDC verifier + OpenFGA client into `app.state`, graceful shutdown |
+| `app/api/security.py` | **Authn** — verify the OIDC token → `CurrentToken` (or fail closed) |
+| `app/api/fga_deps.py` | **Authz** — `authorize` (router-level pre-op `can_*` check) **and** `seed_ownership` (post-create grant). The op→`can_*` map is the only policy logic in the app. |
+| `app/core/fga.py` | OpenFGA client wrapper: `check`/`batch_check`/`list_objects`/`write_tuples`/`grant_on_create`, id helpers, retry + fail-closed |
+| `app/auth/model.fga` / `model.json` / `model.fga.yaml` | The authorization **model** (DSL, the JSON the app loads, and the model tests) — the model owns the privilege math |
+| `app/api/v1/endpoints/*` | Thin HTTP handlers → `services.native`/`services.dataplane` for the backend, `fga_deps.seed_ownership` for grants |
+| `app/services/native.py`, `dataplane.py` | Call pylance (run in a threadpool — it's blocking) |
+| `app/core/config.py` | `pydantic-settings` (env-driven config) |
+
+---
+
+## 4. Request lifecycle (what happens on every call)
+
+```
+HTTP request
+  │
+  ├─ 1. Authn  (app/api/security.py)
+  │      verify the OIDC JWT (signature via JWKS, iss/aud/exp, alg allowlist).
+  │      → CurrentToken (the caller's sub) or 401. Fail closed if verifier missing → 503.
+  │
+  ├─ 2. Authz  (app/api/fga_deps.authorize — a router-level dependency)
+  │      derive (object, can_* relation) from the route, e.g.
+  │        describe table  -> check can_get_metadata on table:<id>
+  │        insert  table   -> check can_write_data   on table:<id>
+  │        drop    table   -> check can_drop         on table:<id>   (owner tier)
+  │        create  table   -> check can_create_table on the PARENT    (create-on-parent)
+  │      OpenFGA says yes/no. No → 403. OpenFGA down → 503 (never silent allow).
+  │
+  ├─ 3. Handler  (app/api/v1/endpoints/*)
+  │      run the pylance backend op in a threadpool (it's blocking I/O).
+  │
+  └─ 4. Seed  (only on create — fga_deps.seed_ownership)
+         write owner + parent tuples for the new object so the creator keeps access
+         and the new object inherits the cascade. No-op when FGA is off/unauthenticated.
+```
+
+**Why two authz touch-points?** Step 2 is the *pre-op check* ("may you?"). Step 4 is the
+*post-create grant* ("you made it, you own it; link it into the tree"). Both live in
+`fga_deps.py` so all request-time authz policy is in one module.
+
+---
+
+## 5. The authorization model (OpenFGA)
+
+### What exists today (P0 — shipped & tested)
+
+```
+catalog                      (the root; "the project" today)
+  └── namespace              (self-nesting: bronze, bronze$domain1, …)
+        └── table
+
+types:   user, role, catalog, namespace, table
+subjects: user:<sub>  AND  role:<name>#assignee   (grant a team/role, not just a person)
+rungs:   owner ⊇ writer ⊇ reader   (concentric; cascade DOWN via `parent`)
+actions: can_get_metadata, can_read_data, can_write_data, can_drop, can_deregister,
+         can_delete, can_create_table, can_create_namespace, …   (the app checks THESE)
+```
+
+- **Concentric**: an `owner` is automatically a `writer` is automatically a `reader`.
+- **Cascade**: a grant on a namespace flows to its nested namespaces and tables via the
+  `parent` edge (which `seed_ownership` writes on create).
+- **Roles as subjects**: `role:data_eng#assignee` can be granted a rung on any object;
+  add people to the role and they all inherit it. (This is how "teams" work.)
+- **`can_*` actions**: the app never checks raw `owner/writer/reader`; it checks an action
+  like `can_write_data`, and the *model* decides that reduces to the writer rung. Move the
+  policy in the model, not the code.
+
+The model is in three kept-in-sync files: `model.fga` (human DSL, source of truth),
+`model.json` (what the app loads into OpenFGA), `model.fga.yaml` (model tests with a
+medallion scenario: bronze/silver/gold + ingestion/data_engineer/analyst roles).
+
+### Planned (P1 — the 3-axis model you asked for)
+
+Three separations — **teams × projects × layers**:
+
+```
+catalog
+  └── project            (NEW: membership boundary; per-project admin)
+        └── namespace     (= layer: project$bronze / project$silver / project$gold)
+              └── table
+
+teams/roles  = role:<x>#assignee  granted a rung per (project, layer)
+projects     = a `project` type; project membership cascades to its layers
+layers       = namespaces; a person's can_* is restricted per layer
+```
+
+A person is in a **team**; the team is granted a **rung per layer** of a **project**
+(e.g. `data_eng#assignee` → reader on `alpha$bronze`, writer on `alpha$silver`). Optional
+hard isolation: gate every layer grant on project membership (intersection). This is a
+*superset* of P0 — add a `project` type, keep everything else. See §8.
+
+---
+
+## 6. The medallion data flow (bronze → silver → gold)
+
+Layers are **namespaces**; datasets are **Lance tables** (each a `*.lance` directory).
+Default storage: **one bucket per project, layers = prefixes** (a layer is *not* its own
+bucket unless you deliberately configure per-layer storage — authz and physical storage
+are independent axes).
+
+```mermaid
+flowchart LR
+  EVT[events] -->|NATS JetStream| ING[ingest job]
+  IMG[images] --> ING
+  ING -->|write_lance append, via catalog| B[bronze tables — raw, append-only]
+  B -->|read version-range = Change Data Feed| ETL1[lance-ray ETL]
+  ETL1 -->|append + add_columns_from| S[silver tables — cleaned + features]
+  S --> ETL2[lance-ray aggregate] --> G[gold tables — curated, read-mostly]
+  ROLES[per-layer OpenFGA roles] -. gate .- B & S & G
+```
+
+- **Bronze** = raw (images/events) appended as-is. Lance is blob/vector-native.
+- **Silver** = cleaned + enriched via `lance-ray` (`write_lance(mode="append")`,
+  `add_columns_from` for distributed backfill like embeddings). Read only the **new
+  bronze versions** since last run — Lance's version history *is* the Change Data Feed.
+- **Gold** = curated/aggregated, analysts get reader.
+
+**"Promotion" is a compute job (a client), not a catalog feature.** It: authenticates →
+`describe`(bronze) [authz `can_read_data` + get location/creds] → read → transform →
+`create`/`insert`(silver) [authz `can_create_table`/`can_write_data`] → commit a new
+Lance version. The catalog authorizes + locates + records; the engine moves bytes. **You
+can do this today with the existing endpoints** — what's missing is the *job*, not catalog
+code (see §7).
+
+---
+
+## 7. Where we are right now (status)
+
+| Capability | Status |
+|---|---|
+| Control plane: namespaces/tables CRUD, `describe` → location + creds | ✅ done |
+| Data plane (single-table): insert/append, merge_insert, update, delete, query, count, add_columns | ✅ done |
+| Authn (OIDC, PyJWT, JWKS, alg allowlist, fail-closed) | ✅ done |
+| Authz (OpenFGA, `can_*` per op, concentric + parent cascade, roles-as-subjects) | ✅ done, e2e-verified |
+| Post-create ownership seeding (single `seed_ownership` helper) | ✅ done |
+| Resilience (retry + fail-closed incl. transport errors; one retry layer; bounded) | ✅ done |
+| Medallion model + tests (bronze/silver/gold + persona roles) | ✅ done (model + `model.fga.yaml`) |
+| **Promotion job** (bronze→silver→gold; a *client* of the catalog) | ⛔ not built (thin demo next) |
+| Distributed promotion at scale (lance-ray) | ⛔ not built |
+| `project` type + 3-axis governance (teams × projects × layers) | 🔶 P1, planned |
+| Orchestration (cron → NATS → Dapr Workflow) | 🔶 deferred |
+| Lineage (OpenLineage + backend) | 🔶 deferred (see §9) |
+| OTel observability | 🔶 deferred |
+
+---
+
+## 8. "Commit auth" — what it is and how it's already handled
+
+A **commit** here = writing a new Lance version (append/merge/update/delete, or a
+version/batch-commit). In a governed catalog you want a commit to be **(a) authorized,
+(b) audited, (c) lineage-tracked** — three *different* things:
+
+| Concern | Question | Who answers it | Status |
+|---|---|---|---|
+| **(a) Authorization** | "May this caller commit to this table?" | **OpenFGA** — `authorize` checks `can_write_data` (or `can_commit`) on the table before the handler runs | ✅ already wired |
+| **(b) Audit trail** | "What versions exist; what changed?" | **Lance versioning** — every commit is an immutable, time-travelable version | ✅ free from the format |
+| **(c) Lineage** | "Where did this data come from?" | **OpenLineage** (emit on commit) → a lineage backend | 🔶 deferred (§9) |
+
+So **commit auth already exists**: committing goes through the same `authorize` dependency
+that gates every write, checking `can_write_data` on `table:<id>`. **It does NOT need
+OpenLineage or a graph database.**
+
+If you want **commit as a *distinct* permission** (e.g. a "reviewer" who can stage writes
+but not commit an official version), the model already has a `can_commit` relation — we'd
+route the commit/version endpoints to `can_commit` instead of `can_write_data`. That's a
+small, contained change in `fga_deps._action_relation`, no new infrastructure.
+
+---
+
+## 9. Lineage (OpenLineage + graph DB) — a *separate* axis
+
+This is what your "OpenLineage + graph database + dummies in between" intuition is really
+about — and it's **provenance/observability, not access control**:
+
+- **OpenLineage** = an open standard for emitting "a job *run* read inputs X, wrote outputs
+  Y" events. The **promotion job emits** these (it's instrumentation in the compute layer,
+  not the catalog).
+- **Backend** = where events land and become a queryable graph: **Marquez** (the reference
+  server, Postgres-backed) or a **graph database** (Neo4j) if you want rich graph traversal
+  ("what gold tables derive from this bronze image set?").
+- **"Dummies in between"** = the dev stubs we already use elsewhere (Dex for OIDC, moto for
+  S3) — for lineage you'd run a local/dummy collector or Marquez until the real one exists.
+
+How it relates to commit auth: **complementary, not the same.** On a governed commit:
+OpenFGA says *may you* (authz), Lance records *a new version* (audit), OpenLineage records
+*derived-from bronze@v3* (lineage). You can ship commit auth **without any of this**;
+lineage is a later governance/observability layer.
+
+```
+commit  ──▶  OpenFGA check (may you?)        ← access control      [done]
+        ──▶  Lance new version (what/when)   ← audit trail         [free]
+        ──▶  OpenLineage event (from where?) ← lineage graph       [later]
+```
+
+---
+
+## 10. How to run / verify (dev)
+
+```bash
+# unit + integration tests (no network)
+uv run pytest -q
+uvx ruff check . && uvx ty check
+
+# full auth stack end-to-end (Docker: catalog + Dex + OpenFGA + Postgres + MinIO)
+./scripts/auth_e2e.sh           # anon 401 → alice create/read/write 200 → bob 403
+AUTH_OVERLAY=.docker/docker-compose.auth.sqlite.yml ./scripts/auth_e2e.sh   # lighter SQLite stack
+```
+
+Config is env-driven (`LANCE_*`, see `app/core/config.py`): `LANCE_OIDC_ENABLED`,
+`LANCE_FGA_ENABLED`, `LANCE_FGA_API_URL`, `LANCE_FGA_ROOT_OBJECT` (default `catalog:lance`),
+`LANCE_FGA_TIMEOUT_SECONDS`, etc.
+
+---
+
+## 11. Glossary
+
+- **Control plane / data plane** — decide+locate (this service) vs move bytes (engines).
+- **Namespace** — a logical container (a path prefix); a medallion *layer* is a namespace.
+- **Table / dataset** — a Lance dataset; physically a `*.lance` **directory** (versioned).
+- **Tuple** — an OpenFGA fact, e.g. `user:alice owner table:db1$users`.
+- **`can_*` relation** — an action permission the app checks (model maps it to a rung).
+- **Concentric** — owner ⊇ writer ⊇ reader.
+- **Cascade** — a grant flows down the `parent` edge (catalog → namespace → table).
+- **Create-on-parent** — creating a child is authorized against its parent.
+- **Credential vending** — the catalog returns scoped storage creds per table (`describe`).
+- **Medallion** — bronze (raw) → silver (cleaned) → gold (curated) data tiers.

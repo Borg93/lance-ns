@@ -10,3 +10,6 @@ wheels/
 .venv
 lance-ns-impls/
 lance-namespace/
+lance-namespace-impls/
+lance-format-lance-ray/
+lakekeeper-ref/

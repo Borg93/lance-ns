@@ -26,7 +26,62 @@ jobs:
       - name: Type-check (ty)
         run: uvx ty check app
 
-      # Integration tests (our logic only) + the moto-S3 end-to-end round-trip.
-      # No external infra needed — moto runs an in-process S3 server.
-      - name: Tests
-        run: uv run --no-sync pytest tests/integration -q
+      # Unit + integration tests (our logic only) + the moto-S3 round-trip.
+      # No external infra needed — moto runs an in-process S3 server, and the
+      # auth/authz tests fake the OIDC verifier + fga.check. The `e2e` marker is
+      # excluded here; the live stack runs in the `auth-e2e` job below.
+      # `tests/unit` is included when present (guarded so CI is green before the
+      # write-side unit suite lands).
+      - name: Tests (unit + integration)
+        run: |
+          paths="tests/integration"
+          [ -d tests/unit ] && paths="tests/unit $paths"
+          uv run --no-sync pytest $paths -q -m "not e2e"
+
+  # Gated live auth end-to-end: brings up the SQLite OpenFGA + Dex stack via
+  # docker compose and runs scripts/auth_e2e.sh, which asserts APP-SIDE SEEDING
+  # (create namespace/table -> owner + parent cascade) and a 403 for a second
+  # user with no grant. GitHub-hosted ubuntu runners ship Docker + Compose v2,
+  # so this is feasible in CI. Skipped on forked-PR runs (no infra guarantees /
+  # to avoid untrusted-code docker builds) but always runs on branch pushes.
+  auth-e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Sync dependencies (Linux-only lockfile)
+        run: uv sync --frozen --all-groups
+
+      - name: Show docker / compose versions
+        run: |
+          docker version
+          docker compose version
+
+      # Builds the server image, starts MinIO + SQLite OpenFGA + Dex, and runs
+      # the full app-side-seeding assertion chain. The script tears the stack
+      # down on exit (trap). A non-zero exit fails the job.
+      # KEEP_STACK=1 leaves the stack up so the next step can collect logs on
+      # failure; the always() cleanup below tears it down regardless of outcome.
+      - name: Auth e2e (Dex + SQLite OpenFGA, app-side seeding)
+        env:
+          KEEP_STACK: "1"
+        run: bash scripts/auth_e2e.sh
+
+      - name: Dump stack logs on failure
+        if: failure()
+        run: |
+          docker compose -f .docker/docker-compose.yml \
+                         -f .docker/docker-compose.auth.sqlite.yml logs --no-color || true
+
+      - name: Tear down stack
+        if: always()
+        run: |
+          docker compose -f .docker/docker-compose.yml \
+                         -f .docker/docker-compose.auth.sqlite.yml down -v || true

@@ -3,17 +3,61 @@
   "type_definitions": [
     { "type": "user" },
     {
-      "type": "namespace",
+      "type": "role",
+      "relations": { "assignee": { "this": {} } },
+      "metadata": {
+        "relations": {
+          "assignee": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] }
+        }
+      }
+    },
+    {
+      "type": "catalog",
       "relations": {
         "owner": { "this": {} },
         "writer": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "owner" } }] } },
-        "reader": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "writer" } }] } }
+        "reader": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "writer" } }] } },
+        "can_get_metadata": { "computedUserset": { "relation": "reader" } },
+        "can_create_namespace": { "computedUserset": { "relation": "writer" } },
+        "can_create_table": { "computedUserset": { "relation": "writer" } }
       },
       "metadata": {
         "relations": {
-          "owner": { "directly_related_user_types": [{ "type": "user" }] },
-          "writer": { "directly_related_user_types": [{ "type": "user" }] },
-          "reader": { "directly_related_user_types": [{ "type": "user" }] }
+          "owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "writer": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "reader": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "can_get_metadata": {},
+          "can_create_namespace": {},
+          "can_create_table": {}
+        }
+      }
+    },
+    {
+      "type": "namespace",
+      "relations": {
+        "parent": { "this": {} },
+        "owner": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "owner" } } }] } },
+        "writer": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "owner" } }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "writer" } } }] } },
+        "reader": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "writer" } }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "reader" } } }] } },
+        "can_get_metadata": { "computedUserset": { "relation": "reader" } },
+        "can_list": { "computedUserset": { "relation": "reader" } },
+        "can_create_namespace": { "computedUserset": { "relation": "writer" } },
+        "can_create_table": { "computedUserset": { "relation": "writer" } },
+        "can_update_properties": { "computedUserset": { "relation": "writer" } },
+        "can_delete": { "computedUserset": { "relation": "owner" } }
+      },
+      "metadata": {
+        "relations": {
+          "parent": { "directly_related_user_types": [{ "type": "catalog" }, { "type": "namespace" }] },
+          "owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "writer": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "reader": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "can_get_metadata": {},
+          "can_list": {},
+          "can_create_namespace": {},
+          "can_create_table": {},
+          "can_update_properties": {},
+          "can_delete": {}
         }
       }
     },
@@ -22,15 +66,31 @@
       "relations": {
         "parent": { "this": {} },
         "owner": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "owner" } } }] } },
-        "writer": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "writer" } } }] } },
-        "reader": { "union": { "child": [{ "this": {} }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "reader" } } }] } }
+        "writer": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "owner" } }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "writer" } } }] } },
+        "reader": { "union": { "child": [{ "this": {} }, { "computedUserset": { "relation": "writer" } }, { "tupleToUserset": { "tupleset": { "relation": "parent" }, "computedUserset": { "relation": "reader" } } }] } },
+        "can_get_metadata": { "computedUserset": { "relation": "reader" } },
+        "can_read_data": { "computedUserset": { "relation": "reader" } },
+        "can_write_data": { "computedUserset": { "relation": "writer" } },
+        "can_alter": { "computedUserset": { "relation": "writer" } },
+        "can_commit": { "computedUserset": { "relation": "writer" } },
+        "can_rename": { "computedUserset": { "relation": "writer" } },
+        "can_drop": { "computedUserset": { "relation": "owner" } },
+        "can_deregister": { "computedUserset": { "relation": "owner" } }
       },
       "metadata": {
         "relations": {
           "parent": { "directly_related_user_types": [{ "type": "namespace" }] },
-          "owner": { "directly_related_user_types": [{ "type": "user" }] },
-          "writer": { "directly_related_user_types": [{ "type": "user" }] },
-          "reader": { "directly_related_user_types": [{ "type": "user" }] }
+          "owner": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "writer": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "reader": { "directly_related_user_types": [{ "type": "user" }, { "type": "role", "relation": "assignee" }] },
+          "can_get_metadata": {},
+          "can_read_data": {},
+          "can_write_data": {},
+          "can_alter": {},
+          "can_commit": {},
+          "can_rename": {},
+          "can_drop": {},
+          "can_deregister": {}
         }
       }
     }

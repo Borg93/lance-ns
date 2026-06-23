@@ -1,60 +1,290 @@
 """OpenFGA authorization dependency.
 
-Router-level guard: when FGA is enabled it derives the resource object from the
-request path (``namespace:<id>`` / ``table:<id>``) and the required relation from
-the operation (read ops → ``reader``, mutations → ``writer``), then checks the
-authenticated user against OpenFGA. A no-op when FGA is disabled.
+Router-level guard: when FGA is enabled it maps the request (resource + operation) to a
+``can_*`` ACTION relation defined in the model (``app/auth/model.fga``) and checks the
+authenticated caller against OpenFGA. A no-op when FGA is disabled.
+
+The op -> ``can_*`` mapping below is the ONLY policy logic in the app; the privilege math
+(which rung each ``can_*`` reduces to, and how owner/writer/reader cascade through
+``parent``) lives in the model — so it is testable in ``model.fga.yaml`` and precise for
+``list_objects``. Mapping (behaviour-identical to the previous reader/writer/owner code):
+
+  read ops   -> can_get_metadata / can_read_data        (reader rung)
+  mutations  -> can_write_data / can_update_properties   (writer rung)
+  lifecycle  -> can_drop / can_deregister / can_delete   (owner rung)
+  create     -> can_create_table / can_create_namespace on the PARENT (create-on-parent)
+
+Create-on-parent: creating a child authorizes the parent (the child has no id yet); a
+top-level child gates on the catalog root only when ``fga_lock_root_create`` is set,
+else it is open self-serve. Batch routes read the (Starlette-cached) body and check each
+named table. Fail-closed twice over: an unwired client raises 503 here, and
+``fga.check``/``fga.batch_check`` raise 503 on an OpenFGA outage rather than allowing.
 """
 
 from __future__ import annotations
 
 from fastapi import Request
-from lance_namespace import PermissionDeniedError, UnauthenticatedError
+from lance_namespace import (
+    PermissionDeniedError,
+    ServiceUnavailableError,
+    UnauthenticatedError,
+)
+from openfga_sdk import OpenFgaClient
 
 from app.api.dependencies import SettingsDep
 from app.api.security import CurrentToken
 from app.core import fga
+from app.core.config import Settings
+from app.core.identifiers import parse_identifier
+from app.core.oidc import IDToken
 
-# Trailing path segment of read-only operations; everything else mutates → writer.
-_READ_ACTIONS = frozenset(
-    {
-        "describe",
-        "exists",
-        "list",
-        "query",
-        "count_rows",
-        "stats",
-        "explain_plan",
-        "analyze_plan",
-        "version",
-    }
+# Guarded resource prefixes, in match order. ``materialized_view`` and ``transaction`` have
+# no dedicated FGA type yet, so they are scoped to the ``table`` type (stopgap).
+_RESOURCES: tuple[str, ...] = ("namespace", "table", "materialized_view", "transaction")
+_FGA_TYPE: dict[str, str] = {
+    "namespace": "namespace",
+    "table": "table",
+    "materialized_view": "table",
+    "transaction": "table",
+}
+
+# Read-only trailing actions (reader rung). ``query``/``count_rows`` read DATA; the rest
+# read metadata — split so list_objects(can_read_data) is meaningful (both are reader).
+_DATA_READ_ACTIONS = frozenset({"query", "count_rows"})
+_META_READ_ACTIONS = frozenset(
+    {"describe", "exists", "list", "stats", "explain_plan", "analyze_plan", "version"}
 )
+
+# Full route suffixes that create a NEW child -> authorize the parent (create-on-parent).
+_CREATE_ON_PARENT_SUFFIXES: dict[str, frozenset[str]] = {
+    "table": frozenset({"create", "declare", "register"}),
+    "namespace": frozenset({"create"}),
+    "materialized_view": frozenset({"create"}),
+}
+
+# Full route suffixes that are lifecycle/destructive on the object itself (owner rung).
+# Matched on the FULL suffix so ``index/{name}/drop`` / ``version/delete`` stay writer-tier.
+_OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
+    "table": {"drop": "can_drop", "deregister": "can_deregister"},
+    "namespace": {"drop": "can_delete"},
+}
+
+# Body-keyed batch routes (no ``{id}`` path param); the tables are named in the body.
+_BATCH_PATHS = frozenset({"/v1/table/version/batch-create", "/v1/table/batch-commit"})
+
+# Destructive batch-commit operations require the owner tier — same as their dedicated
+# routes — so a writer can't deregister a table by wrapping it in a batch-commit (the
+# generic writer batch_check would otherwise pass). The wire model (CommitTableOperation)
+# has no drop op, so deregister_table is the only destructive batch kind. Maps op key ->
+# can_* relation.
+_BATCH_OWNER_OPS: dict[str, str] = {"deregister_table": "can_deregister"}
+
+
+def _resource_for(path: str) -> str | None:
+    """The guarded resource a ``/v1/<resource>/…`` path belongs to, else ``None``."""
+    for resource in _RESOURCES:
+        if path.startswith(f"/v1/{resource}/"):
+            return resource
+    return None
+
+
+def _suffix(path: str, resource: str, object_id: str) -> str:
+    """The route part after ``/v1/<resource>/{id}/`` (e.g. ``version/create``)."""
+    clean = path.rstrip("/")
+    prefix = f"/v1/{resource}/{object_id}/"
+    return clean.removeprefix(prefix) if clean.startswith(prefix) else ""
+
+
+def _object(fga_type: str, id_segments: list[str] | str, delimiter: str) -> str:
+    """``<type>:<canonical-id>`` for an object (e.g. ``table:db1$users``)."""
+    return f"{fga_type}:{fga.canonical_object_id(id_segments, delimiter=delimiter)}"
+
+
+def _action_relation(fga_type: str, suffix: str) -> str:
+    """The ``can_*`` relation to check for a non-create op, by object type + route suffix.
+
+    Owner-tier matches the FULL suffix; reader-tier matches the trailing segment; everything
+    else is writer-tier. Every returned relation exists on ``fga_type`` in the model and
+    reduces to the same rung the previous reader/writer/owner code used.
+    """
+    owner = _OWNER_SUFFIX_RELATION.get(fga_type, {})
+    if suffix in owner:
+        return owner[suffix]
+    action = suffix.rsplit("/", 1)[-1] if suffix else ""
+    if fga_type == "namespace":
+        if action in _META_READ_ACTIONS or action in _DATA_READ_ACTIONS:
+            return "can_get_metadata"
+        return "can_update_properties"
+    # table type (materialized_view / transaction are aliased to table)
+    if action in _DATA_READ_ACTIONS:
+        return "can_read_data"
+    if action in _META_READ_ACTIONS:
+        return "can_get_metadata"
+    return "can_write_data"
+
+
+def _create_parent_check(
+    resource: str, id_segments: list[str] | str, settings: Settings
+) -> tuple[str, str] | None:
+    """``(parent_object, can_create_* relation)`` for a create-on-parent op, or ``None`` to allow.
+
+    Nested child -> its parent ``namespace:<parent>``. Top-level child -> the catalog root
+    object only when ``fga_lock_root_create`` is set; otherwise ``None`` (open self-serve
+    top-level create — preserves the default behaviour).
+    """
+    relation = "can_create_namespace" if resource == "namespace" else "can_create_table"
+    parent_id = fga.parent_namespace_id(id_segments, delimiter=settings.delimiter)
+    if parent_id is not None:
+        return f"namespace:{parent_id}", relation
+    if settings.fga_lock_root_create:
+        return settings.fga_root_object, relation
+    return None
+
+
+async def _require(client: OpenFgaClient, *, user: str, relation: str, obj: str) -> None:
+    """Check one ``relation`` on ``obj`` and raise 403 on denial."""
+    if not await fga.check(client, user=user, relation=relation, obj=obj):
+        raise PermissionDeniedError(f"{relation} required on {obj}")
+
+
+async def _authorize_batch(request: Request, client: OpenFgaClient, settings: Settings, *, user: str) -> None:
+    """Authorize body-keyed batch routes (no ``{id}`` path param); tables named in the body.
+
+    version/commit/delete on an existing table -> ``can_write_data`` on the table; a
+    ``declare_table`` operation is create-on-parent -> ``can_create_table`` on the parent
+    namespace. Two batch_checks (different relations/types). ``request.json()`` is cached by
+    Starlette, so the downstream endpoint re-parses the same body.
+
+    Fails CLOSED on malformed input: a non-dict body or a non-list ``entries``/``operations``
+    (client-controlled JSON, validated here BEFORE Pydantic since authorize runs first) is a
+    403 deny, never a 500 crash or a silently-skipped check.
+    """
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise PermissionDeniedError("malformed batch request body")
+    entries = body.get("entries")
+    operations = body.get("operations")
+    if entries is not None and not isinstance(entries, list):
+        raise PermissionDeniedError("malformed batch request body: 'entries' must be a list")
+    if operations is not None and not isinstance(operations, list):
+        raise PermissionDeniedError("malformed batch request body: 'operations' must be a list")
+    delimiter = settings.delimiter
+    table_objs: set[str] = set()
+    parent_objs: set[str] = set()
+    owner_checks: list[tuple[str, str]] = []  # (object, owner-tier can_* relation)
+
+    for entry in entries or []:
+        segments = entry.get("id") if isinstance(entry, dict) else None
+        if isinstance(segments, list):
+            table_objs.add(_object("table", segments, delimiter))
+
+    for op in operations or []:
+        if not isinstance(op, dict):
+            continue
+        for kind, sub in op.items():
+            if not isinstance(sub, dict):
+                continue
+            segments = sub.get("id")
+            if not isinstance(segments, list):
+                continue
+            if kind == "declare_table":  # creating a table -> can_create_table on its parent
+                check = _create_parent_check("table", segments, settings)
+                if check is not None:
+                    parent_objs.add(check[0])
+            elif kind in _BATCH_OWNER_OPS:  # destructive -> owner tier (no writer back-door)
+                owner_checks.append((_object("table", segments, delimiter), _BATCH_OWNER_OPS[kind]))
+            else:  # version/commit/append on an existing table -> can_write_data on it
+                table_objs.add(_object("table", segments, delimiter))
+
+    denied: list[str] = []
+    if table_objs:
+        objs = sorted(table_objs)
+        allowed = await fga.batch_check(client, user=user, relation="can_write_data", objects=objs)
+        denied += [o for o in objs if not allowed.get(o)]
+    if parent_objs:
+        objs = sorted(parent_objs)
+        allowed = await fga.batch_check(client, user=user, relation="can_create_table", objects=objs)
+        denied += [o for o in objs if not allowed.get(o)]
+    for obj, relation in owner_checks:  # rare; per-object keeps the per-op relation exact
+        if not await fga.check(client, user=user, relation=relation, obj=obj):
+            denied.append(obj)
+    if denied:
+        raise PermissionDeniedError(f"permission denied on {', '.join(sorted(denied))}")
 
 
 async def authorize(request: Request, settings: SettingsDep, token: CurrentToken) -> None:
     """Enforce the caller's OpenFGA permission for this route (no-op when FGA is off)."""
     if not settings.fga_enabled:
         return
+    # Fail closed: enabled but unwired authz must never silently allow the request.
     client = getattr(request.app.state, "fga", None)
     if client is None:
-        return
+        raise ServiceUnavailableError("authorization service is not available")
     if token is None:
         raise UnauthenticatedError("authentication required")
 
-    object_id = request.path_params.get("id")
-    if object_id is None:
-        return  # collection / batch route — authentication already enforced
-
     path = request.url.path
-    if path.startswith("/v1/namespace/"):
-        resource = "namespace"
-    elif path.startswith("/v1/table/"):
-        resource = "table"
-    else:
-        return  # transaction / materialized_view — no resource object to check
+    object_id = request.path_params.get("id")
 
-    action = path.rstrip("/").rsplit("/", 1)[-1]
-    relation = "reader" if action in _READ_ACTIONS else "writer"
-    obj = f"{resource}:{object_id}"
-    if not await fga.check(client, user=token.sub, relation=relation, obj=obj):
-        raise PermissionDeniedError(f"{relation} required on {obj}")
+    # Body-keyed batch routes have no {id} path param — authorize by reading the body.
+    if object_id is None:
+        if path.rstrip("/") in _BATCH_PATHS:
+            await _authorize_batch(request, client, settings, user=token.sub)
+        # Other id-less routes (collection lists, health) need only authentication.
+        return
+
+    resource = _resource_for(path)
+    if resource is None:
+        return  # not a guarded resource path — authentication already enforced
+    suffix = _suffix(path, resource, object_id)
+    # Canonicalize the id ONCE, the same way the endpoints + grant path do (parse_identifier),
+    # so the check object and the seeded object agree byte-for-byte even for edge forms
+    # (e.g. the delimiter-only root id). Passing the raw URL string here would diverge.
+    segments = parse_identifier(object_id, settings.delimiter)
+
+    # Create-on-parent: child does not exist yet → authorize the parent.
+    if suffix in _CREATE_ON_PARENT_SUFFIXES.get(resource, frozenset()):
+        check = _create_parent_check(resource, segments, settings)
+        if check is not None:  # None => open top-level create (authn already enforced)
+            await _require(client, user=token.sub, relation=check[1], obj=check[0])
+        return
+
+    fga_type = _FGA_TYPE[resource]
+    relation = _action_relation(fga_type, suffix)
+    obj = _object(fga_type, segments, settings.delimiter)
+    await _require(client, user=token.sub, relation=relation, obj=obj)
+
+
+# --------------------------------------------------------------------------- #
+# Post-create ownership seeding — the single write-side authz policy. Every create
+# endpoint calls this instead of inlining the guard + grant_on_create + parent_object.
+# --------------------------------------------------------------------------- #
+
+
+async def seed_ownership(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    resource: str,
+    segments: list[str],
+) -> None:
+    """Grant the creator ``owner`` + the ``parent`` edge on a just-created object.
+
+    No-op when FGA is off, the request is unauthenticated, or the client is unwired — so
+    create endpoints call it unconditionally with one line. This is the ONE place the
+    post-create seed policy lives (previously copy-pasted across four endpoint modules).
+    Ids come from ``fga`` so this grant and the later :func:`authorize` check agree
+    byte-for-byte.
+    """
+    if not (settings.fga_enabled and token is not None and client is not None):
+        return
+    await fga.grant_on_create(
+        client,
+        user_sub=token.sub,
+        resource=resource,
+        obj_id=fga.canonical_object_id(segments, delimiter=settings.delimiter),
+        parent_object=fga.parent_object(
+            resource, segments, delimiter=settings.delimiter, root_object=settings.fga_root_object
+        ),
+    )

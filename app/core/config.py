@@ -43,6 +43,10 @@ class Settings(BaseSettings):
     oidc_issuer: str | None = Field(default=None, alias="LANCE_OIDC_ISSUER")
     oidc_audience: str | None = Field(default=None, alias="LANCE_OIDC_AUDIENCE")
     oidc_cache_ttl: int = Field(default=3600, alias="LANCE_OIDC_CACHE_TTL")
+    # Clock-skew leeway (seconds) for exp/iat checks, and an explicit opt-in to accept
+    # an http:// issuer/JWKS (needed only for the local Dex dev IdP — never in prod).
+    oidc_leeway: int = Field(default=60, alias="LANCE_OIDC_LEEWAY")
+    oidc_allow_insecure: bool = Field(default=False, alias="LANCE_OIDC_ALLOW_INSECURE")
 
     # OpenFGA authorization (opt-in; requires OIDC for the user identity). When
     # store/model ids are unset, the app provisions them at startup (dev/e2e);
@@ -51,6 +55,21 @@ class Settings(BaseSettings):
     fga_api_url: str = Field(default="http://openfga:8080", alias="LANCE_FGA_API_URL")
     fga_store_id: str | None = Field(default=None, alias="LANCE_FGA_STORE_ID")
     fga_model_id: str | None = Field(default=None, alias="LANCE_FGA_MODEL_ID")
+    # The FGA `catalog:` root object. Two roles: (1) every top-level namespace links to it
+    # as its `parent`, so a grant here cascades into all namespaces/tables (the medallion
+    # "project" catalog); (2) it gates create-on-parent for top-level creation when
+    # fga_lock_root_create is on (creating a top-level object then needs can_create_* here).
+    # Grant admins owner/writer on it to bootstrap. Must be a `catalog:` object (the model's
+    # root type). Dev/e2e seeds it; see scripts/seed_demo.sh.
+    fga_root_object: str = Field(default="catalog:lance", alias="LANCE_FGA_ROOT_OBJECT")
+    # When False (default), any authenticated caller may create a TOP-LEVEL namespace/
+    # table and becomes its owner (the "users create their own workspaces" model). When
+    # True, top-level creation also requires can_create_* on fga_root_object — an admin-gated
+    # root that must be seeded to bootstrap. Nested creation always gates on the parent.
+    fga_lock_root_create: bool = Field(default=False, alias="LANCE_FGA_LOCK_ROOT_CREATE")
+    # Per-request OpenFGA client timeout (seconds). A hung authz call fails fast and is
+    # retried rather than pinning a request worker. Wired into fga.make_client at startup.
+    fga_timeout_seconds: float = Field(default=5.0, ge=0.1, alias="LANCE_FGA_TIMEOUT_SECONDS")
 
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:

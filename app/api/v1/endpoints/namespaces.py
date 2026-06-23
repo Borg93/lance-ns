@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     CreateNamespaceRequest,
     CreateNamespaceResponse,
@@ -17,7 +18,9 @@ from lance_namespace import (
     NamespaceExistsRequest,
 )
 
-from app.api.dependencies import NamespaceDep, SettingsDep
+from app.api import fga_deps
+from app.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
+from app.api.security import CurrentToken
 from app.core.identifiers import parse_identifier
 from app.services import native
 
@@ -25,12 +28,23 @@ router = APIRouter(prefix="/v1/namespace", tags=["namespace"])
 
 
 @router.post("/{id}/create", response_model_exclude_none=True)
-def create_namespace(
-    id: str, ns: NamespaceDep, settings: SettingsDep, body: CreateNamespaceRequest | None = None
+async def create_namespace(
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
+    body: CreateNamespaceRequest | None = None,
 ) -> CreateNamespaceResponse:
+    segments = parse_identifier(id, settings.delimiter)
     req = body or CreateNamespaceRequest()
-    req.id = parse_identifier(id, settings.delimiter)
-    return native.call(ns, "create_namespace", req)
+    req.id = segments
+    response: CreateNamespaceResponse = await run_in_threadpool(native.call, ns, "create_namespace", req)
+    # Owner + parent edge (parent namespace if nested, else the catalog root) so the
+    # concentric cascade reaches the namespace and its tables — stops a nested-namespace
+    # lockout and lets a layer-level grant (medallion bronze/silver/gold) reach children.
+    await fga_deps.seed_ownership(client, settings, token, resource="namespace", segments=segments)
+    return response
 
 
 @router.get("/{id}/list", response_model_exclude_none=True)

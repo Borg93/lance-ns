@@ -44,6 +44,37 @@ The catalog **never moves data itself** (no heavy ETL inside the API process). I
 authorizes, locates, and records. Compute is a **client** of the catalog. This is why
 "promotion between layers" (below) is a *job*, not a catalog endpoint.
 
+### Credential vending & STS — how, and why it matters for the lakehouse
+
+When a client opens a table, `describe_table?vend_credentials=true` returns the table's
+**location** plus a **credential** to reach object storage directly. Three pluggable shapes
+(`app/core/vending.py`), strongest first:
+
+1. **STS vending (`StsVendor`) — recommended.** The catalog calls the S3 backend's STS
+   `AssumeRole` with an **inline session policy** scoped to *just this table's bucket/prefix and
+   tier* (read vs write), and gets a **short-TTL** `{access_key, secret_key, session_token}`. The
+   client reads/writes the bytes directly with that token. Works on **MinIO, Ceph RGW, AWS**.
+2. **Mode B (`ModeBVendor`) — safe default.** No credential is vended; the client uses the
+   catalog's server-mediated Arrow-IPC endpoints. Backend-agnostic; nothing is delegated.
+3. **Static (`StaticPrefixVendor`).** A long-lived per-bucket key — for S3 backends without STS
+   *policy scoping* (e.g. GCS interop, or **RustFS** today: it has `AssumeRole` but not yet
+   ARN/inline policies, so temp creds inherit the user's perms).
+
+**Why STS is the right default for a *governed* lakehouse:**
+
+- **Least privilege, per table.** The session policy means a token minted for `silver$features`
+  can't touch `gold$revenue`. The OpenFGA decision (`can_read_data` / `can_write_data`) is
+  **projected onto the storage layer**, so authorization still holds on the direct-I/O fast path —
+  not just at the API.
+- **Short-lived.** Tokens expire in minutes (`expires_at_millis`); a leaked one has a small,
+  bounded blast radius instead of being a standing key.
+- **No durable secrets on compute.** lance-ray / jobs never hold long-lived storage keys — they
+  get a fresh scoped token per table and authenticate to the catalog with **workload identity**.
+- **Direct I/O, no proxy bottleneck.** Bytes flow client ↔ storage (not through the catalog), so
+  the catalog stays a thin control plane while large **multimodal** reads/writes scale on the engine.
+- **One identity, three axes.** The same `table:<id>` gates *who-may* (OpenFGA), *which token*
+  (the vended STS creds), and *what-changed* (Lance versions + lineage).
+
 ---
 
 ## 3. Component map

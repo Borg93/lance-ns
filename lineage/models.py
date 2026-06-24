@@ -14,11 +14,16 @@ _MODEL = ConfigDict(extra="allow", populate_by_name=True)
 
 
 class Dataset(BaseModel):
-    """An OpenLineage dataset (a Lance table / source); ``name`` is the catalog id."""
+    """An OpenLineage dataset (a Lance table / source); ``name`` is the catalog id.
+
+    ``facets`` carries the standard dataset facets (e.g. ``schema``, ``version``); we read
+    the ``version`` facet on outputs to record which Lance dataset version a run produced.
+    """
 
     model_config = _MODEL
     namespace: str
     name: str
+    facets: dict[str, Any] = Field(default_factory=dict)
 
 
 class Job(BaseModel):
@@ -65,3 +70,16 @@ class RunEvent(BaseModel):
         """
         lance = (self.run.facets or {}).get("lance")
         return lance.get("operation") if isinstance(lance, dict) else None
+
+    def output_version(self, name: str) -> str | None:
+        """The Lance dataset version this run produced for output ``name`` (``version`` facet).
+
+        Ties a provenance run to the exact dataset version it wrote, so two refinement passes
+        over the same table (e.g. add a column, then another) are distinguishable.
+        """
+        for ds in self.outputs:
+            if ds.name == name:
+                facet = (ds.facets or {}).get("version")
+                version = facet.get("datasetVersion") if isinstance(facet, dict) else None
+                return str(version) if version is not None else None
+        return None

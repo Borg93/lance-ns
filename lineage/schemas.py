@@ -13,12 +13,13 @@ class DatasetRef(BaseModel):
 
 
 class ProducerInfo(BaseModel):
-    """A run that wrote a dataset — the who / when / how answer."""
+    """A run that wrote a dataset — the who / when / how / which-version answer."""
 
     run_id: str
     author: str | None = None
     event_time: str | None = None
     event_type: str | None = None
+    dataset_version: str | None = None
 
 
 class Neighbors(BaseModel):

@@ -48,6 +48,10 @@
 - ✅ **HCP dropped → S3-compatible only** (MinIO default; AWS / Ceph RGW / RustFS / GCS-interop). Code +
   docs + diagram reframed to **Mode B (server-mediated) vs STS vending**. RustFS storage-agnostic e2e:
   `.docker/docker-compose.rustfs.yml` + `scripts/rustfs_e2e.sh` (same lifecycle test, bytes on RustFS).
+- ✅ **Realistic medallion lineage sim + version linkage (P1 #10)** — `lineage/seed.py`: alice ingests
+  bronze → data_eng embeds silver (v1, +`embedding`) → refines silver in place (v2, +`caption`) →
+  analyst aggregates gold; each output carries its Lance `version`. `producers()` surfaces the version;
+  in-place refine bumps version (no self-loop). Unit-tested; `test_lineage_e2e.py` asserts the chain + v1/v2.
 
 ---
 
@@ -118,8 +122,10 @@
 8. ✅ **Deploy lineage** — `lineage-api` service (`.docker/docker-compose.governance.yml`, same image)
    + `COPY lineage` in the dockerfile. Bring up the full stack + verify: `scripts/governance_e2e.sh`.
 9. ⛔ **Routes-vs-spec conformance test** — FastAPI routes ⊆ lance-namespace spec ops.
-10. ⛔ **Lineage version linkage** — record the Lance dataset **version** each run event maps to,
-    so provenance and time-travel line up.
+10. ✅ **Lineage version linkage** — the `WROTE` edge carries the Lance **version** each run
+    produced (OpenLineage `version` facet → `producers().dataset_version`), so refinement passes
+    (silver v1 → v2) are distinguishable and provenance lines up with time-travel. In-place refines
+    bump the version instead of creating a self-`DERIVED_FROM` edge. `lineage/{models,repository}.py`.
 
 ### P1 — verified security/consistency cleanups (audit `w8u4rc2tg`)
 - ⛔ **OpenFGA tuple cleanup on drop / deregister / rename** — `app/core/fga.py` is **write-only**
@@ -136,6 +142,10 @@
 11. 🔶 **Lineage events for delete/drop, schema evolution, compaction/maintenance** — complete
     the provenance surface beyond create/append.
 12. 🔶 **Read/access audit** in lineage (who *read* what, not only who wrote).
+12b. 🔶 **Column-level lineage** — producers emit OpenLineage `columnLineage` facets, but the AGE
+    graph stores **dataset-level** edges only. Add `(:Column)` nodes + column-level edges so
+    "which output column came from which input column" is queryable (the medallion seed already
+    carries schema changes per pass: silver +`embedding`, then +`caption`).
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
 14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows · **OTel** traces/metrics.

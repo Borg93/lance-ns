@@ -45,7 +45,7 @@ def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
             for event in events:
                 await repo.ingest_event(event)
             upstream = await repo.upstream("gold$catalog")
-            downstream = await repo.downstream("raw_images")
+            downstream = await repo.downstream("raw_events")
             producers = await repo.producers("silver$features")
             graph = await repo.graph("silver$features")
             return upstream, downstream, producers, graph
@@ -54,16 +54,18 @@ def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
 
     upstream, downstream, producers, graph = asyncio.run(run())
 
-    # gold derives (transitively) from silver, bronze and the raw sources.
-    assert {"silver$features", "bronze$images", "raw_images"} <= {d.name for d in upstream.related}
-    # raw_images flows downstream into bronze/silver/gold.
-    assert {"bronze$images", "silver$features", "gold$catalog"} <= {d.name for d in downstream.related}
-    # silver was produced by the lance-ray embed run, authored by data_eng.
-    assert producers.producers and producers.producers[0].author == "data_eng"
-    # the graph around silver spans the whole connected medallion DAG.
+    # gold derives (transitively) from silver, bronze and the raw source.
+    assert {"silver$features", "bronze$events", "raw_events"} <= {d.name for d in upstream.related}
+    # raw_events flows downstream into bronze/silver/gold.
+    assert {"bronze$events", "silver$features", "gold$catalog"} <= {d.name for d in downstream.related}
+    # silver was written twice — v1 (embed) then v2 (caption), both by data_eng (the refinement passes).
+    assert {p.author for p in producers.producers} == {"data_eng"}
+    assert {p.dataset_version for p in producers.producers} >= {"1", "2"}
+    # the graph around silver spans the connected medallion DAG.
     node_ids = {n.id for n in graph.nodes}
-    assert {"raw_images", "raw_images_batch2", "bronze$images", "silver$features", "gold$catalog"} <= node_ids
-    # silver derives from bronze (a DERIVED_FROM edge), and gold derives from silver.
+    assert {"raw_events", "bronze$events", "silver$features", "gold$catalog"} <= node_ids
+    # silver derives from bronze, gold from silver; the in-place refine is NOT a self-derivation.
     edges = {(e.source, e.target) for e in graph.edges}
-    assert ("silver$features", "bronze$images") in edges
+    assert ("silver$features", "bronze$events") in edges
     assert ("gold$catalog", "silver$features") in edges
+    assert ("silver$features", "silver$features") not in edges

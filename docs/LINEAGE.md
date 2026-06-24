@@ -98,10 +98,18 @@ relational tables, and we drop everything not needed for the medallion flow.
 (:User {name})                        # an OIDC sub (the verified principal)
 (:Run)-[:OF_JOB]->(:Job)
 (:Run)-[:READ]->(:Dataset)            # inputs
-(:Run)-[:WROTE]->(:Dataset)           # outputs
+(:Run)-[:WROTE {version}]->(:Dataset) # outputs; version = the Lance version this run produced
 (:Dataset)-[:DERIVED_FROM]->(:Dataset)# output ← input (dataset-level lineage)
 (:User)-[:CREATED]->(:Dataset)        # who created the table (catalog create event)
 ```
+
+The `WROTE` edge carries the **Lance version** produced (from the OpenLineage `version` dataset
+facet), so two refinement passes over one table — e.g. *embed* (silver v1) then *caption* (silver
+v2) — are distinguishable in `producers()` even though `Dataset` is MERGEd on name. An **in-place
+refinement** (a run that reads *and* writes the same table) bumps the version via `WROTE` and does
+**not** create a self-`DERIVED_FROM` edge. *Dataset-level only: column-level lineage (which output
+column came from which input column) is emitted by producers as a facet but not yet stored as
+graph nodes/edges — see `todo.md`.*
 
 `author` is read from a custom OpenLineage `author` run facet (the OIDC sub of whoever ran
 the job). On a catalog **create** event (`lance` facet `operation=create_table`, emitted by

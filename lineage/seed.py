@@ -25,13 +25,12 @@ from typing import Any
 import attr
 from openlineage.client import OpenLineageClient
 from openlineage.client.event_v2 import InputDataset, Job, OutputDataset, Run, RunEvent, RunState
-from openlineage.client.facet_v2 import RunFacet, schema_dataset
+from openlineage.client.facet_v2 import RunFacet, dataset_version_dataset, schema_dataset
 from openlineage.client.serde import Serde
 from openlineage.client.transport.http import HttpConfig, HttpTransport
 
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/lineage"
 _JOB_NS = "lance-jobs"
-_BRONZE_FIELDS = (("image", "binary"), ("img_src", "string"))
 
 
 @attr.define
@@ -59,8 +58,11 @@ def _in(namespace: str, name: str, *fields: tuple[str, str]) -> InputDataset:
     return InputDataset(namespace=namespace, name=name, facets=_schema(fields))
 
 
-def _out(namespace: str, name: str, *fields: tuple[str, str]) -> OutputDataset:
-    return OutputDataset(namespace=namespace, name=name, facets=_schema(fields))
+def _out(namespace: str, name: str, version: int, *fields: tuple[str, str]) -> OutputDataset:
+    """An output dataset with its schema + the Lance version this run produced (``version`` facet)."""
+    facets: dict[str, Any] = dict(_schema(fields))
+    facets["version"] = dataset_version_dataset.DatasetVersionDatasetFacet(datasetVersion=str(version))
+    return OutputDataset(namespace=namespace, name=name, facets=facets)
 
 
 def _event(
@@ -84,52 +86,54 @@ def _event(
 
 
 def build_events() -> list[RunEvent]:
-    """The medallion run history as spec-correct OpenLineage events.
+    """The realistic medallion run history as spec-correct OpenLineage events.
 
-    Mirrors ``docs/ARCHITECTURE.md`` §6: an ingest job and a lance-ray append build the
-    bronze table; lance-ray embeds bronze → silver; an aggregate builds gold. Dataset
-    names are catalog table ids; authors are OIDC subs. Run ids are fixed (idempotent
-    re-ingest under AGE MERGE).
+    The flow (each output carries its produced Lance ``version``; authors are OIDC subs):
+
+    1. **alice** ingests ``raw_events`` → ``bronze$events`` (v1).
+    2. **data_eng** embeds ``bronze$events`` → ``silver$features`` (v1, adds ``embedding``).
+    3. **data_eng** refines ``silver$features`` in place → v2 (adds ``caption``) — the
+       "run against silver again" pass; a version bump, not a self-derivation.
+    4. **analyst** aggregates ``silver$features`` → ``gold$catalog`` (v1).
+
+    Run ids are fixed (idempotent re-ingest under AGE MERGE). COMPLETE events only (a real
+    producer also emits START; omitted here for a compact, terminal-state history).
     """
-    silver_features = _out(
-        "silver",
-        "silver$features",
-        ("image", "binary"),
-        ("img_src", "string"),
-        ("embedding", "array<float>"),
-    )
+    bronze_cols = (("id", "int"), ("payload", "binary"), ("src", "string"))
+    silver_v1_cols = (*bronze_cols, ("embedding", "array<float>"))
+    silver_v2_cols = (*silver_v1_cols, ("caption", "string"))
     return [
         _event(
             run_id="11111111-1111-1111-1111-111111111111",
             event_time="2026-06-20T09:00:00Z",
-            job_name="ingest_images",
+            job_name="ingest_events",
             author="alice",
-            inputs=[_in("source", "raw_images")],
-            outputs=[_out("bronze", "bronze$images", *_BRONZE_FIELDS)],
+            inputs=[_in("source", "raw_events")],
+            outputs=[_out("bronze", "bronze$events", 1, *bronze_cols)],
         ),
         _event(
             run_id="22222222-2222-2222-2222-222222222222",
-            event_time="2026-06-20T10:00:00Z",
-            job_name="lanceray_append_images",
-            author="alice",
-            inputs=[_in("source", "raw_images_batch2")],
-            outputs=[_out("bronze", "bronze$images", *_BRONZE_FIELDS)],
+            event_time="2026-06-21T09:00:00Z",
+            job_name="embed_features",
+            author="data_eng",
+            inputs=[_in("bronze", "bronze$events", *bronze_cols)],
+            outputs=[_out("silver", "silver$features", 1, *silver_v1_cols)],
         ),
         _event(
             run_id="33333333-3333-3333-3333-333333333333",
-            event_time="2026-06-21T09:00:00Z",
-            job_name="lanceray_embed",
+            event_time="2026-06-21T11:00:00Z",
+            job_name="caption_features",
             author="data_eng",
-            inputs=[_in("bronze", "bronze$images", *_BRONZE_FIELDS)],
-            outputs=[silver_features],
+            inputs=[_in("silver", "silver$features", *silver_v1_cols)],
+            outputs=[_out("silver", "silver$features", 2, *silver_v2_cols)],
         ),
         _event(
             run_id="44444444-4444-4444-4444-444444444444",
             event_time="2026-06-21T12:00:00Z",
             job_name="aggregate_gold",
             author="analyst",
-            inputs=[_in("silver", "silver$features")],
-            outputs=[_out("gold", "gold$catalog", ("img_src", "string"), ("embedding", "array<float>"))],
+            inputs=[_in("silver", "silver$features", *silver_v2_cols)],
+            outputs=[_out("gold", "gold$catalog", 1, ("caption", "string"), ("embedding", "array<float>"))],
         ),
     ]
 

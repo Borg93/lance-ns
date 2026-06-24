@@ -13,7 +13,7 @@ Graph shape::
     (:User {name})                            # an OIDC sub (the verified principal)
     (:Run)-[:OF_JOB]->(:Job)
     (:Run)-[:READ]->(:Dataset)                # inputs
-    (:Run)-[:WROTE]->(:Dataset)               # outputs
+    (:Run)-[:WROTE {version}]->(:Dataset)     # outputs (version = the Lance version produced)
     (:Dataset)-[:DERIVED_FROM]->(:Dataset)    # output <- input (dataset lineage)
     (:User)-[:CREATED]->(:Dataset)            # who created the table (catalog create event)
 
@@ -53,7 +53,12 @@ _LINK_RUN_JOB: Final = (
 )
 _MERGE_DATASET: Final = "MERGE (d:Dataset {name:$name}) SET d.namespace=$ns RETURN 1"
 _LINK_READ: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:READ]->(d) RETURN 1"
-_LINK_WROTE: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:WROTE]->(d) RETURN 1"
+# The WROTE edge carries the Lance dataset version this run produced (from the OpenLineage
+# ``version`` facet), so two refinement passes over one table are distinguishable in producers().
+_LINK_WROTE: Final = (
+    "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) "
+    "MERGE (r)-[w:WROTE]->(d) SET w.version=$ver RETURN 1"
+)
 _DERIVED_FROM: Final = (
     "MATCH (o:Dataset {name:$on}), (i:Dataset {name:$inp}) MERGE (o)-[:DERIVED_FROM]->(i) RETURN 1"
 )
@@ -65,7 +70,8 @@ _DOWNSTREAM: Final = (
     "MATCH (d:Dataset {name:$name})<-[:DERIVED_FROM*1..]-(x:Dataset) RETURN DISTINCT x.name, x.namespace"
 )
 _PRODUCERS: Final = (
-    "MATCH (r:Run)-[:WROTE]->(d:Dataset {name:$name}) RETURN r.run_id, r.author, r.event_time, r.event_type"
+    "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) "
+    "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version"
 )
 _MERGE_USER: Final = "MERGE (u:User {name:$name}) RETURN 1"
 # Latest-create-wins: the CREATED edge carries the create event_time so creator() is deterministic
@@ -136,10 +142,14 @@ class LineageRepository:
                     conn,
                     self._graph,
                     _LINK_WROTE,
-                    {"rid": event.run.run_id, "name": ds.name},
+                    {"rid": event.run.run_id, "name": ds.name, "ver": event.output_version(ds.name) or ""},
                 )
             for out in event.outputs:
                 for inp in event.inputs:
+                    # An in-place refinement (reads and writes the same table — e.g. add a column)
+                    # bumps the version via WROTE; it is NOT a self-DERIVED_FROM edge.
+                    if out.name == inp.name:
+                        continue
                     await run_cypher(
                         conn,
                         self._graph,
@@ -177,12 +187,19 @@ class LineageRepository:
         return Neighbors(dataset=name, related=[DatasetRef(name=r[0], namespace=r[1]) for r in rows])
 
     async def producers(self, name: str) -> Producers:
-        """The runs that wrote ``name`` — who / when / how (the commit-author answer)."""
-        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=4)
+        """The runs that wrote ``name`` — who / when / how / which version (the commit answer)."""
+        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=5)
         return Producers(
             dataset=name,
             producers=[
-                ProducerInfo(run_id=r[0], author=r[1], event_time=r[2], event_type=r[3]) for r in rows
+                ProducerInfo(
+                    run_id=r[0],
+                    author=r[1],
+                    event_time=r[2],
+                    event_type=r[3],
+                    dataset_version=(r[4] or None),
+                )
+                for r in rows
             ],
         )
 

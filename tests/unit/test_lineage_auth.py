@@ -214,6 +214,7 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         "/datasets/{name}/downstream",
         "/datasets/{name}/producers",
         "/datasets/{name}/graph",
+        "/datasets/{name}/creator",
     }
     seen = set()
     for route in app.routes:

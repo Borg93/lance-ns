@@ -9,6 +9,7 @@ from lance_namespace import LanceNamespace
 from openfga_sdk import OpenFgaClient
 
 from app.core.config import Settings, get_settings
+from app.core.lineage_emit import LineageEmitter, NoopEmitter
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -40,3 +41,12 @@ def get_storage_options(settings: SettingsDep) -> dict[str, str]:
 
 
 StorageOptionsDep = Annotated[dict[str, str], Depends(get_storage_options)]
+
+
+def get_lineage_emitter(request: Request) -> LineageEmitter:
+    """The lineage emitter built in the app lifespan — a no-op when emission is disabled."""
+    emitter = getattr(request.app.state, "lineage_emitter", None)
+    return emitter if emitter is not None else NoopEmitter()
+
+
+LineageEmitterDep = Annotated[LineageEmitter, Depends(get_lineage_emitter)]

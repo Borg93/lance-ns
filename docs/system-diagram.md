@@ -31,10 +31,12 @@ graph node (how/who). The diagram is built around that single identity threading
 | **Data** | the bytes | **Object store** (HCP / MinIO·S3), reached by **Mode B** or **Vending** |
 | **Provenance** | how/who did it change | **Lineage svc** (OpenLineage) → **AGE graph** *(job-emitted; partial — see note)* |
 
-> ⚠️ **Provenance is partial today (audit `w8u4rc2tg`).** The **catalog emits no lineage** (`grep app/`
-> = no matches) — the AGE graph is populated only by the `lineage/seed.py` demo emitter. Table
-> creation/DDL is **not** captured, and the run `author` is **self-asserted by the producer**, not
-> verified against a token. Treat the provenance plane as *designed, not yet authoritative*.
+> ✅ **Provenance records the verified principal (audit `w8u4rc2tg` P0 #2/#3).** The catalog emits
+> OpenLineage on table **create** with `author` = the verified token sub — a
+> `(:User)-[:CREATED]->(:Dataset)` edge, so "who created the table" is an audit fact queryable at
+> `GET /datasets/{id}/creator`. Job-emitted lineage (promote/compaction) binds the author
+> server-side on ingest, so it can't be forged. Still open: emit on insert/delete/compaction (P2)
+> and Lance-version linkage. (Emission is opt-in: `LANCE_LINEAGE_EMIT_ENABLED`.)
 
 ---
 
@@ -123,10 +125,12 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 >    estate** (no authz). **P0**.
 > 2. The lineage **ingest** side is *also* unauthenticated, and the `author` is **self-asserted** —
 >    so recorded provenance/authorship is **forgeable** (latent: the lineage svc isn't deployed yet). **P0-on-deploy**.
-> 3. The **catalog emits no lineage at all** — so "who created the table" is *not* recorded as an
->    audit fact (only an OpenFGA `owner` tuple, which is an *access* fact). **P0**.
+> 3. ✅ The catalog now **emits create-lineage** with the verified author — "who created the table"
+>    is an audit fact at `GET /datasets/{id}/creator` (default OFF: `LANCE_LINEAGE_EMIT_ENABLED`).
+>    Remaining: emit on insert/delete/compaction.
 >
-> All three are tracked in [`todo.md`](../todo.md) (Next, P0).
+> Tracked in [`todo.md`](../todo.md). Run the whole loop: `scripts/governance_e2e.sh` (or
+> `DEMO=1 scripts/governance_e2e.sh` for the narrated [`governance_demo.py`](../scripts/governance_demo.py)).
 
 ---
 

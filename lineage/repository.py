@@ -10,10 +10,12 @@ Graph shape::
     (:Job {namespace, name})
     (:Run {run_id, author, event_type, event_time})
     (:Dataset {name, namespace})              # name = catalog table id
+    (:User {name})                            # an OIDC sub (the verified principal)
     (:Run)-[:OF_JOB]->(:Job)
     (:Run)-[:READ]->(:Dataset)                # inputs
     (:Run)-[:WROTE]->(:Dataset)               # outputs
     (:Dataset)-[:DERIVED_FROM]->(:Dataset)    # output <- input (dataset lineage)
+    (:User)-[:CREATED]->(:Dataset)            # who created the table (catalog create event)
 
 Datasets are MERGEd on ``{name}`` only (then ``namespace`` is SET) so a dataset
 referenced by several runs is never duplicated.
@@ -28,6 +30,7 @@ from psycopg_pool import AsyncConnectionPool
 from lineage.age import fetch, run_cypher
 from lineage.models import Dataset, RunEvent
 from lineage.schemas import (
+    Creator,
     DatasetRef,
     GraphEdge,
     GraphNode,
@@ -36,6 +39,10 @@ from lineage.schemas import (
     ProducerInfo,
     Producers,
 )
+
+# Must match app.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
+# catalog emits on create, which keys the (:User)-[:CREATED]->(:Dataset) edge below (wire contract).
+_CREATE_TABLE_OP: Final = "create_table"
 
 _MERGE_JOB: Final = "MERGE (j:Job {namespace:$ns, name:$nm}) RETURN 1"
 _MERGE_RUN: Final = (
@@ -60,6 +67,11 @@ _DOWNSTREAM: Final = (
 _PRODUCERS: Final = (
     "MATCH (r:Run)-[:WROTE]->(d:Dataset {name:$name}) RETURN r.run_id, r.author, r.event_time, r.event_type"
 )
+_MERGE_USER: Final = "MERGE (u:User {name:$name}) RETURN 1"
+_LINK_CREATED: Final = (
+    "MATCH (u:User {name:$name}), (d:Dataset {name:$ds}) MERGE (u)-[:CREATED]->(d) RETURN 1"
+)
+_CREATOR: Final = "MATCH (u:User)-[:CREATED]->(d:Dataset {name:$name}) RETURN u.name LIMIT 1"
 
 # AGE rejects zero-length variable paths (``*0..``), so the connected node set is
 # assembled from the upstream + downstream traversals (``*1..``) plus the root itself,
@@ -128,6 +140,12 @@ class LineageRepository:
                         _DERIVED_FROM,
                         {"on": out.name, "inp": inp.name},
                     )
+            # A catalog "create_table" event carries the verified author → record who created the
+            # table as a first-class (:User)-[:CREATED]->(:Dataset) edge (the who-created answer).
+            if event.operation == _CREATE_TABLE_OP and event.author:
+                await run_cypher(conn, self._graph, _MERGE_USER, {"name": event.author})
+                for ds in event.outputs:
+                    await run_cypher(conn, self._graph, _LINK_CREATED, {"name": event.author, "ds": ds.name})
 
     async def _merge_dataset(self, conn, ds: Dataset) -> None:
         await run_cypher(
@@ -156,6 +174,11 @@ class LineageRepository:
                 ProducerInfo(run_id=r[0], author=r[1], event_time=r[2], event_type=r[3]) for r in rows
             ],
         )
+
+    async def creator(self, name: str) -> Creator:
+        """Who created ``name`` — the verified principal on the catalog create event."""
+        rows = await fetch(self._pool, self._graph, _CREATOR, {"name": name}, columns=1)
+        return Creator(dataset=name, creator=rows[0][0] if rows else None)
 
     async def graph(self, name: str) -> LineageGraph:
         """The connected dataset-lineage subgraph around ``name`` (nodes + edges)."""

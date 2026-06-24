@@ -11,6 +11,7 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+import httpx
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -21,6 +22,7 @@ from app.api.v1.router import api_router
 from app.core import fga
 from app.core.config import get_settings
 from app.core.exceptions import problem_detail
+from app.core.lineage_emit import make_emitter
 from app.core.namespace import build_namespace
 from app.core.oidc import OIDCVerifier
 
@@ -52,6 +54,19 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.fga = fga.make_client(
             settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
         )
+    # Lineage emission (opt-in, best-effort). Build a shared httpx client only when enabled.
+    lineage_http = (
+        httpx.AsyncClient(timeout=settings.lineage_emit_timeout_seconds)
+        if settings.lineage_emit_enabled and settings.lineage_url
+        else None
+    )
+    app.state.lineage_http = lineage_http
+    app.state.lineage_emitter = make_emitter(
+        enabled=settings.lineage_emit_enabled,
+        url=settings.lineage_url,
+        client=lineage_http,
+        job_namespace=settings.lineage_job_namespace,
+    )
     app.state.startup_complete = True
     try:
         yield
@@ -60,6 +75,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         fga_client = getattr(app.state, "fga", None)
         if fga_client is not None:
             await fga_client.close()
+        if lineage_http is not None:
+            await lineage_http.aclose()
 
 
 _settings = get_settings()

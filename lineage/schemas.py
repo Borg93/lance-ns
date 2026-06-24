@@ -35,6 +35,13 @@ class Producers(BaseModel):
     producers: list[ProducerInfo]
 
 
+class Creator(BaseModel):
+    """Who created ``dataset`` — the verified catalog principal at create time (or ``None``)."""
+
+    dataset: str
+    creator: str | None = None
+
+
 class GraphNode(BaseModel):
     """A dataset node in the lineage graph (``id`` is the catalog table id)."""
 

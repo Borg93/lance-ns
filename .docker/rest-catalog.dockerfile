@@ -46,6 +46,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
 WORKDIR /srv
 COPY --from=builder --link /opt/venv /opt/venv
 COPY --link app ./app
+# The lineage service ships in the same image; run it with a different command:
+#   command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000
+COPY --link lineage ./lineage
 
 USER app
 EXPOSE 2333

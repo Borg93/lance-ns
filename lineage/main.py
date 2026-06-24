@@ -23,7 +23,7 @@ from lineage.auth import CurrentToken, FilterDep, enforce_author, require_metada
 from lineage.config import get_settings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import LineageGraph, Neighbors, Producers
+from lineage.schemas import Creator, LineageGraph, Neighbors, Producers
 
 log = logging.getLogger(__name__)
 PROBLEM_JSON = "application/problem+json"
@@ -132,6 +132,12 @@ async def get_downstream(name: str, repository: RepositoryDep, datasets: FilterD
 async def get_producers(name: str, repository: RepositoryDep) -> Producers:
     """The runs that wrote ``name`` — who / when / how. Gated on ``can_get_metadata``."""
     return await repository.producers(name)
+
+
+@app.get("/datasets/{name}/creator", tags=["query"], dependencies=[Depends(require_metadata_access)])
+async def get_creator(name: str, repository: RepositoryDep) -> Creator:
+    """Who created ``name`` (the verified catalog principal). Gated on ``can_get_metadata``."""
+    return await repository.creator(name)
 
 
 @app.get("/datasets/{name}/graph", tags=["query"], dependencies=[Depends(require_metadata_access)])

@@ -35,6 +35,10 @@
   `lineage/auth.py`, `lineage/config.py`, `lineage/main.py` (reviewed by audit `wi2l437mq`).
 - ✅ **Structured logging standardized** repo-wide (event-name + `extra=`, level discipline per
   `observability.md`) + authz-decision audit logging (`access_denied`) in catalog + lineage.
+- ✅ **Catalog → lineage emission (P0 #3)** — table create emits OpenLineage with the verified author
+  → `(:User)-[:CREATED]->(:Dataset)` + `GET /datasets/{id}/creator`. Default OFF, fire-and-forget.
+- ✅ **Lineage service deployed** (`lineage-api`, P1 #8) + **governance demo/e2e** — `scripts/governance_demo.py`
+  (narrated) + `tests/e2e/test_governance_e2e.py` (gated) + `scripts/governance_e2e.sh` over the full stack.
 
 ---
 
@@ -75,18 +79,16 @@
    body-claimed facet (`lineage/auth.py`, `lineage/main.py`). Tested end-to-end so deleting the
    bind regresses a test. *(Remaining: optional FGA authz that the producer may write the named
    outputs — attributable today, not yet output-scoped.)*
-3. ⛔ **Catalog emits lineage on create / insert / delete** with `author` = authenticated `token.sub` —
-   *this is how "who created the table" actually gets logged authoritatively* (the catalog is the
-   only component that knows the verified principal on every write). Catalog currently emits
-   **nothing** to lineage. Add a first-class `(:User)-[:CREATED]->(:Dataset)` edge + the resulting
-   Lance `version` on the Dataset; wire emission **fire-and-forget** (async/NATS) so it never blocks
-   the commit. **✔audit** (no `emit`/`openlineage` anywhere in `app/`). Touch: `app/api/v1/endpoints/data.py`,
-   `tables.py`, `namespaces.py` (emit); `lineage/repository.py`, `models.py` (CREATED edge + version).
-4. ⛔ **Identity-consistency guard + test** — assert `table:<id>` is byte-identical across the
-   OpenFGA object id, the catalog table id, and the AGE `Dataset` node name. The catalog delimiter is
-   **configurable** (`LANCE_NS_DELIMITER`, `config.py:28`) but lineage **hardcodes `$`** (`lineage/seed.py`)
-   → silent cross-axis mismatch under a non-default delimiter. **✔audit** (latent). Touch:
-   `app/core/identifiers.py`, `app/core/fga.py`, `lineage/config.py` (+ derive names from `canonical_object_id`).
+3. ✅ **Catalog emits lineage on create** with `author` = the verified `token.sub` — "who created
+   the table" is now an audit fact: a `(:User)-[:CREATED]->(:Dataset)` edge, queryable at
+   `GET /datasets/{id}/creator`. Fire-and-forget + best-effort (never blocks/fails a write), default
+   OFF (`LANCE_LINEAGE_EMIT_ENABLED`), canonical id (lineage Dataset == OpenFGA object id).
+   `app/core/lineage_emit.py`, `app/api/v1/endpoints/data.py`, `lineage/{models,repository,main}.py`.
+   *(Remaining → P2: emit on insert/merge/delete/compaction + Lance-version linkage.)*
+4. 🟡 **Identity-consistency** — the catalog now emits lineage via `fga.canonical_object_id`, so a
+   catalog-created Dataset name == its OpenFGA object id under any delimiter. **Still TODO:** the
+   `lineage/seed.py` demo emitter hardcodes `$`, and a byte-identical cross-axis test under a
+   non-default delimiter. Touch: `lineage/config.py`, `lineage/seed.py` + a test.
 
 ### P1 — needed for prod
 5. ⛔ **Finish HCP Mode-B vendor** + wire `describe_table?vend_credentials=true`
@@ -99,7 +101,8 @@
    This is the medallion flow end-to-end.
 7. ⛔ **OpenBao SecretStore** (KV v2): move catalog base storage cred + OIDC client secret +
    OpenFGA/AGE DB creds out of env; lineage AGE DB creds. lance-ray = **workload identity** (no Bao).
-8. ⛔ **Deploy lineage** — `lineage-api` compose service + `COPY lineage` in the image.
+8. ✅ **Deploy lineage** — `lineage-api` service (`.docker/docker-compose.governance.yml`, same image)
+   + `COPY lineage` in the dockerfile. Bring up the full stack + verify: `scripts/governance_e2e.sh`.
 9. ⛔ **Routes-vs-spec conformance test** — FastAPI routes ⊆ lance-namespace spec ops.
 10. ⛔ **Lineage version linkage** — record the Lance dataset **version** each run event maps to,
     so provenance and time-travel line up.

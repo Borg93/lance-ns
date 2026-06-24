@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Header
+from fastapi import APIRouter, BackgroundTasks, Body, Header
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import PlainTextResponse, Response
 from lance_namespace import (
@@ -27,8 +27,15 @@ from lance_namespace import (
 )
 
 from app.api import fga_deps
-from app.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep, StorageOptionsDep
+from app.api.dependencies import (
+    FgaClientDep,
+    LineageEmitterDep,
+    NamespaceDep,
+    SettingsDep,
+    StorageOptionsDep,
+)
 from app.api.security import CurrentToken
+from app.core import fga
 from app.core.identifiers import parse_identifier
 from app.core.serialization import dump
 from app.services import dataplane, native
@@ -46,6 +53,8 @@ async def create_table(
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    emitter: LineageEmitterDep,
+    background_tasks: BackgroundTasks,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
     properties_header: Annotated[str | None, Header(alias="x-lance-table-properties")] = None,
@@ -61,6 +70,16 @@ async def create_table(
     response: CreateTableResponse = await run_in_threadpool(native.call, ns, "create_table", req, data)
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget
+    # (after the response, best-effort) so the lineage service can never block/fail a create. The
+    # canonical id keeps the lineage Dataset == the OpenFGA object id == the catalog table id.
+    background_tasks.add_task(
+        emitter.emit_create,
+        table_id=fga.canonical_object_id(segments, delimiter=settings.delimiter),
+        namespace=fga.parent_namespace_id(segments, delimiter=settings.delimiter) or "",
+        author=token.sub if token is not None else None,
+        version=1,
+    )
     return response
 
 

@@ -95,15 +95,20 @@ relational tables, and we drop everything not needed for the medallion flow.
 (:Job {namespace, name})
 (:Run {run_id, author, event_type, event_time})
 (:Dataset {name, namespace})          # name = catalog table id; MERGEd on name only
+(:User {name})                        # an OIDC sub (the verified principal)
 (:Run)-[:OF_JOB]->(:Job)
 (:Run)-[:READ]->(:Dataset)            # inputs
 (:Run)-[:WROTE]->(:Dataset)           # outputs
 (:Dataset)-[:DERIVED_FROM]->(:Dataset)# output ← input (dataset-level lineage)
+(:User)-[:CREATED]->(:Dataset)        # who created the table (catalog create event)
 ```
 
 `author` is read from a custom OpenLineage `author` run facet (the OIDC sub of whoever ran
-the job). Datasets are MERGEd on `{name}` only, then `namespace` is `SET`, so a dataset
-referenced by several runs is never duplicated.
+the job). On a catalog **create** event (`lance` facet `operation=create_table`, emitted by
+`app.core.lineage_emit`), the verified author is also recorded as a first-class
+`(:User)-[:CREATED]->(:Dataset)` edge — the authoritative "who created this table" answer.
+Datasets are MERGEd on `{name}` only, then `namespace` is `SET`, so a dataset referenced by
+several runs is never duplicated.
 
 ## Code shape (FastAPI house style)
 
@@ -124,6 +129,7 @@ Layered, no raw Cypher in the endpoints:
 | `GET /datasets/{name}/upstream` | What `name` was derived from (provenance) |
 | `GET /datasets/{name}/downstream` | What derives from `name` (impact) |
 | `GET /datasets/{name}/producers` | The runs that wrote `name` — who / when / how |
+| `GET /datasets/{name}/creator` | **Who created** `name` (the verified catalog principal) |
 | `GET /datasets/{name}/graph` | Connected lineage subgraph (`nodes` + `edges`) for a DAG view |
 | `GET /livez` | Liveness |
 

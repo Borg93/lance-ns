@@ -886,8 +886,8 @@ pylance.create_table(location="s3://lance/alpha/bronze/images.lance")`, chips:["
   ("namespace:alpha$bronze", "parent", "table:alpha$bronze$images")
 ]`, chips:["grant_on_create"] },
       { from:"catalog", to:"client", color:"--c-user", title:"201 Created", route:"201",
-        desc:"Table created; the caller is its <em>owner</em> (⇒ writer ⇒ reader by the concentric model). <em>Gap (P0):</em> no lineage is emitted on create — the only record of the creator is this OpenFGA <em>owner</em> tuple, which is an <em>access</em> fact, not an audit fact. Catalog-emitted create-lineage with a token-verified author is planned.",
-        payload:`{ "location": "...", "version": 1 }`, chips:["owner⇒writer⇒reader","no audit trail yet"] }
+        desc:"Table created; the caller is its <em>owner</em> (⇒ writer ⇒ reader by the concentric model). The catalog now <em>emits OpenLineage</em> (fire-and-forget, default OFF) with <em>author = the verified token sub</em> — so 'who created this table' is recorded as an audit fact (a <code>(:User)-[:CREATED]->(:Dataset)</code> edge), distinct from the OpenFGA owner <em>access</em> tuple.",
+        payload:`{ "location": "...", "version": 1 }`, chips:["owner⇒writer⇒reader","emits create-lineage"] }
     ]
   },
 

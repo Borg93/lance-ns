@@ -75,9 +75,7 @@ class Settings(BaseSettings):
     # server-mediated — no credential leaves the catalog (correct for HCP, which has no STS).
     # "static": pre-provisioned per-bucket keys. "sts": STS AssumeRole short-TTL scoped tokens
     # (the gold standard, for S3-family stores: MinIO/Ceph/S3).
-    vending_mode: Literal["mode_b", "static", "sts"] = Field(
-        default="mode_b", alias="LANCE_VENDING_MODE"
-    )
+    vending_mode: Literal["mode_b", "static", "sts"] = Field(default="mode_b", alias="LANCE_VENDING_MODE")
     vending_ttl_seconds: int = Field(default=900, ge=60, alias="LANCE_VENDING_TTL_SECONDS")
     s3_assume_role_arn: str | None = Field(default=None, alias="LANCE_S3_ASSUME_ROLE_ARN")
     s3_sts_endpoint: str | None = Field(default=None, alias="LANCE_S3_STS_ENDPOINT")
@@ -86,15 +84,30 @@ class Settings(BaseSettings):
     # zero-downtime model/schema migration windows. Default off (no-op).
     maintenance_read_only: bool = Field(default=False, alias="LANCE_MAINTENANCE_READ_ONLY")
 
+    # Lineage emission (opt-in). When enabled, the catalog emits an OpenLineage event to the
+    # lineage service on a table write (create today) — fire-and-forget + best-effort, so the
+    # lineage service being down can never block or fail a catalog write. The catalog is the only
+    # component that knows the verified principal, so it is the authoritative source of "who
+    # created/changed a table" (author = token.sub). This is the direct-HTTP producer transport;
+    # the durable path (publish to NATS, lineage consumes) is future work behind the same emitter.
+    lineage_emit_enabled: bool = Field(default=False, alias="LANCE_LINEAGE_EMIT_ENABLED")
+    lineage_url: str | None = Field(default=None, alias="LANCE_LINEAGE_URL")
+    lineage_emit_timeout_seconds: float = Field(
+        default=5.0, ge=0.1, alias="LANCE_LINEAGE_EMIT_TIMEOUT_SECONDS"
+    )
+    lineage_job_namespace: str = Field(default="lance-catalog", alias="LANCE_LINEAGE_JOB_NAMESPACE")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
-        """Fail fast on incomplete auth configuration."""
+        """Fail fast on incomplete auth / lineage configuration."""
         if self.oidc_enabled and not (self.oidc_issuer and self.oidc_audience):
             raise ValueError("LANCE_OIDC_ISSUER and LANCE_OIDC_AUDIENCE are required when OIDC is enabled")
         if self.fga_enabled and not self.oidc_enabled:
             raise ValueError(
                 "LANCE_OIDC_ENABLED is required when LANCE_FGA_ENABLED is set (authz needs a user)"
             )
+        if self.lineage_emit_enabled and not self.lineage_url:
+            raise ValueError("LANCE_LINEAGE_URL is required when LANCE_LINEAGE_EMIT_ENABLED is set")
         return self
 
     def namespace_properties(self) -> dict[str, str]:

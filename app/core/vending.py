@@ -92,9 +92,7 @@ def build_session_policy(bucket: str, prefix: str, tier: Tier) -> dict[str, obje
     prefix = prefix.rstrip("/")
     obj_actions = list(_WRITE_ACTIONS if tier == "write" else _READ_ACTIONS)
     list_prefixes = [f"{prefix}/*"] if prefix else ["*"]
-    obj_resource = (
-        f"arn:aws:s3:::{bucket}/{prefix}/*" if prefix else f"arn:aws:s3:::{bucket}/*"
-    )
+    obj_resource = f"arn:aws:s3:::{bucket}/{prefix}/*" if prefix else f"arn:aws:s3:::{bucket}/*"
     return {
         "Version": "2012-10-17",
         "Statement": [

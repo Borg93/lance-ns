@@ -52,6 +52,13 @@
   bronze → data_eng embeds silver (v1, +`embedding`) → refines silver in place (v2, +`caption`) →
   analyst aggregates gold; each output carries its Lance `version`. `producers()` surfaces the version;
   in-place refine bumps version (no self-loop). Unit-tested; `test_lineage_e2e.py` asserts the chain + v1/v2.
+- ✅ **OpenLineage standards fidelity (P1 #10b)** — emit only via official `openlineage-python` facet
+  classes (Marquez-ingestible). Capture the standard facets: `producer`, `ownership` (author fallback),
+  `jobType` (Ray compute, BATCH, ETL into bronze / TRANSFORMATION between layers), `dataSource`
+  (→ node `source_uri`), `tags` (→ node `tags`), `errorMessage`. **Failed runs recorded** (FAIL/ABORT
+  → run + error + `WROTE` with no version, **no** `DERIVED_FROM`/`CREATED` — no fabricated lineage);
+  seed includes a failed embed. Gold **embeds its lineage as a JSONB column** in the Lance file
+  (`pa.json_()`). Unit + e2e updated. Ray=compute / Lance=data documented in `docs/LINEAGE.md`.
 
 ---
 
@@ -149,6 +156,12 @@
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
 14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows · **OTel** traces/metrics.
+15. 🔶 **Live medallion demo + thin viz frontend** — a real docker-compose e2e that *executes* the
+    flow against real services (catalog + MinIO + lineage/AGE): write bronze (blob `payload`), add
+    `embedding` then `caption` to silver (Lance add-column → v1, v2), aggregate gold with the embedded
+    `lineage` JSONB — each step emitting OpenLineage — and a thin SSR/HTML page that polls `/graph` +
+    `/producers` so you *watch* the DAG appear and the versions evolve. Today only `lineage/seed.py`
+    (synthetic events) + gated graph e2e exist; no UI and no compute actually mutates Lance files yet.
 
 ---
 

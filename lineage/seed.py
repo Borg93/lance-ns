@@ -25,12 +25,39 @@ from typing import Any
 import attr
 from openlineage.client import OpenLineageClient
 from openlineage.client.event_v2 import InputDataset, Job, OutputDataset, Run, RunEvent, RunState
-from openlineage.client.facet_v2 import RunFacet, dataset_version_dataset, schema_dataset
+from openlineage.client.facet_v2 import (
+    RunFacet,
+    dataset_version_dataset,
+    datasource_dataset,
+    error_message_run,
+    job_type_job,
+    ownership_job,
+    schema_dataset,
+    tags_dataset,
+)
 from openlineage.client.serde import Serde
 from openlineage.client.transport.http import HttpConfig, HttpTransport
 
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/lineage"
-_JOB_NS = "lance-jobs"
+# Ray is the compute engine that runs these jobs (the OpenLineage ``Job``); Lance is the data
+# they read/write (the ``Dataset``). The ``jobType`` facet's integration records that.
+_JOB_NS = "ray-jobs"
+_INTEGRATION = "RAY"
+
+# Where each Lance table physically lives (S3-compatible) — the standard ``dataSource`` facet.
+_URIS: dict[str, str] = {
+    "raw_events": "s3://landing/raw/events",
+    "bronze$events": "s3://lakehouse/bronze/events",
+    "silver$features": "s3://lakehouse/silver/features",
+    "gold$catalog": "s3://lakehouse/gold/catalog",
+}
+# Governance labels per dataset — the standard ``tags`` facet.
+_TAGS: dict[str, tuple[tuple[str, str], ...]] = {
+    "raw_events": (("layer", "raw"),),
+    "bronze$events": (("layer", "bronze"),),
+    "silver$features": (("layer", "silver"), ("pii", "false")),
+    "gold$catalog": (("layer", "gold"),),
+}
 
 
 @attr.define
@@ -45,7 +72,7 @@ class AuthorRunFacet(RunFacet):
     sub: str | None = attr.field(default=None)
 
 
-def _schema(fields: tuple[tuple[str, str], ...]) -> dict[str, schema_dataset.DatasetFacet]:
+def _schema(fields: tuple[tuple[str, str], ...]) -> dict[str, Any]:
     if not fields:
         return {}
     facet = schema_dataset.SchemaDatasetFacet(
@@ -54,15 +81,55 @@ def _schema(fields: tuple[tuple[str, str], ...]) -> dict[str, schema_dataset.Dat
     return {"schema": facet}
 
 
-def _in(namespace: str, name: str, *fields: tuple[str, str]) -> InputDataset:
-    return InputDataset(namespace=namespace, name=name, facets=_schema(fields))
-
-
-def _out(namespace: str, name: str, version: int, *fields: tuple[str, str]) -> OutputDataset:
-    """An output dataset with its schema + the Lance version this run produced (``version`` facet)."""
+def _ds_facets(name: str, fields: tuple[tuple[str, str], ...]) -> dict[str, Any]:
+    """Standard dataset facets for ``name``: ``schema`` + ``dataSource`` (where it lives) + ``tags``."""
     facets: dict[str, Any] = dict(_schema(fields))
-    facets["version"] = dataset_version_dataset.DatasetVersionDatasetFacet(datasetVersion=str(version))
+    uri = _URIS.get(name)
+    if uri:
+        facets["dataSource"] = datasource_dataset.DatasourceDatasetFacet(name=uri, uri=uri)
+    tags = _TAGS.get(name)
+    if tags:
+        facets["tags"] = tags_dataset.TagsDatasetFacet(
+            tags=[tags_dataset.TagsDatasetFacetFields(key=k, value=v) for k, v in tags]
+        )
+    return facets
+
+
+def _in(namespace: str, name: str, *fields: tuple[str, str]) -> InputDataset:
+    return InputDataset(namespace=namespace, name=name, facets=_ds_facets(name, fields))
+
+
+def _out(namespace: str, name: str, version: int | None, *fields: tuple[str, str]) -> OutputDataset:
+    """An output dataset with its standard facets + the Lance ``version`` this run produced.
+
+    ``version=None`` (a failed run produced no version) omits the ``version`` facet.
+    """
+    facets = _ds_facets(name, fields)
+    if version is not None:
+        facets["version"] = dataset_version_dataset.DatasetVersionDatasetFacet(
+            datasetVersion=str(version)
+        )
     return OutputDataset(namespace=namespace, name=name, facets=facets)
+
+
+def _job(name: str, author: str, kind: str) -> Job:
+    """The compute job (Ray) with standard ``ownership`` + ``jobType`` facets.
+
+    ``kind`` is the OpenLineage ``jobType``: ``ETL`` (land raw into bronze) or
+    ``TRANSFORMATION`` (between medallion layers).
+    """
+    return Job(
+        namespace=_JOB_NS,
+        name=name,
+        facets={
+            "ownership": ownership_job.OwnershipJobFacet(
+                owners=[ownership_job.Owner(name=author, type="user")]
+            ),
+            "jobType": job_type_job.JobTypeJobFacet(
+                processingType="BATCH", integration=_INTEGRATION, jobType=kind
+            ),
+        },
+    )
 
 
 def _event(
@@ -71,15 +138,23 @@ def _event(
     event_time: str,
     job_name: str,
     author: str,
+    kind: str,
     inputs: list[InputDataset],
     outputs: list[OutputDataset],
+    state: RunState = RunState.COMPLETE,
+    error: str | None = None,
 ) -> RunEvent:
+    run_facets: dict[str, Any] = {"author": AuthorRunFacet(name=author, sub=author)}
+    if error is not None:
+        run_facets["errorMessage"] = error_message_run.ErrorMessageRunFacet(
+            message=error, programmingLanguage="PYTHON"
+        )
     return RunEvent(
         eventTime=event_time,
         producer=_PRODUCER,
-        eventType=RunState.COMPLETE,
-        run=Run(runId=run_id, facets={"author": AuthorRunFacet(name=author, sub=author)}),
-        job=Job(namespace=_JOB_NS, name=job_name),
+        eventType=state,
+        run=Run(runId=run_id, facets=run_facets),
+        job=_job(job_name, author, kind),
         inputs=inputs,
         outputs=outputs,
     )
@@ -88,34 +163,56 @@ def _event(
 def build_events() -> list[RunEvent]:
     """The realistic medallion run history as spec-correct OpenLineage events.
 
-    The flow (each output carries its produced Lance ``version``; authors are OIDC subs):
+    The flow (Ray runs each compute ``Job``; each output carries its produced Lance ``version``;
+    authors are OIDC subs; ``jobType`` = ETL into bronze, TRANSFORMATION between layers):
 
-    1. **alice** ingests ``raw_events`` → ``bronze$events`` (v1).
-    2. **data_eng** embeds ``bronze$events`` → ``silver$features`` (v1, adds ``embedding``).
-    3. **data_eng** refines ``silver$features`` in place → v2 (adds ``caption``) — the
+    1. **alice** runs an **ETL** job: ``raw_events`` → ``bronze$events`` (v1). ``payload`` is a
+       Lance **blob** column (multimodal bytes — image/video/audio).
+    2. **data_eng**'s embed job **FAILS** (CUDA OOM) — recorded with its ``errorMessage``, but it
+       produced no data (no version, no derivation).
+    3. **data_eng** retries: embeds ``bronze$events`` → ``silver$features`` (v1, adds ``embedding``
+       — a Lance data-evolution add-column).
+    4. **data_eng** refines ``silver$features`` in place → v2 (adds ``caption``) — the
        "run against silver again" pass; a version bump, not a self-derivation.
-    4. **analyst** aggregates ``silver$features`` → ``gold$catalog`` (v1).
+    5. **analyst** aggregates ``silver$features`` → ``gold$catalog`` (v1) and embeds the upstream
+       provenance as a JSONB ``lineage`` column inside the Lance file (Lance ``pa.json_()``), so the
+       lineage travels with the data and is queryable in place (``json_extract``/``json_get``).
 
-    Run ids are fixed (idempotent re-ingest under AGE MERGE). COMPLETE events only (a real
-    producer also emits START; omitted here for a compact, terminal-state history).
+    Run ids are fixed (idempotent re-ingest under AGE MERGE). Terminal-state events only (a real
+    producer also emits START/RUNNING; omitted here for a compact history).
     """
-    bronze_cols = (("id", "int"), ("payload", "binary"), ("src", "string"))
+    bronze_cols = (("id", "int"), ("payload", "blob"), ("src", "string"))
     silver_v1_cols = (*bronze_cols, ("embedding", "array<float>"))
     silver_v2_cols = (*silver_v1_cols, ("caption", "string"))
+    # Gold carries the appended feature columns plus its own provenance as a JSONB column.
+    gold_cols = (("caption", "string"), ("embedding", "array<float>"), ("lineage", "json"))
     return [
         _event(
             run_id="11111111-1111-1111-1111-111111111111",
             event_time="2026-06-20T09:00:00Z",
             job_name="ingest_events",
             author="alice",
+            kind="ETL",
             inputs=[_in("source", "raw_events")],
             outputs=[_out("bronze", "bronze$events", 1, *bronze_cols)],
+        ),
+        _event(
+            run_id="22222222-2222-2222-2222-222222222220",
+            event_time="2026-06-21T08:00:00Z",
+            job_name="embed_features",
+            author="data_eng",
+            kind="TRANSFORMATION",
+            inputs=[_in("bronze", "bronze$events", *bronze_cols)],
+            outputs=[_out("silver", "silver$features", None, *silver_v1_cols)],
+            state=RunState.FAIL,
+            error="CUDA OOM while embedding batch 7/12",
         ),
         _event(
             run_id="22222222-2222-2222-2222-222222222222",
             event_time="2026-06-21T09:00:00Z",
             job_name="embed_features",
             author="data_eng",
+            kind="TRANSFORMATION",
             inputs=[_in("bronze", "bronze$events", *bronze_cols)],
             outputs=[_out("silver", "silver$features", 1, *silver_v1_cols)],
         ),
@@ -124,6 +221,7 @@ def build_events() -> list[RunEvent]:
             event_time="2026-06-21T11:00:00Z",
             job_name="caption_features",
             author="data_eng",
+            kind="TRANSFORMATION",
             inputs=[_in("silver", "silver$features", *silver_v1_cols)],
             outputs=[_out("silver", "silver$features", 2, *silver_v2_cols)],
         ),
@@ -132,8 +230,9 @@ def build_events() -> list[RunEvent]:
             event_time="2026-06-21T12:00:00Z",
             job_name="aggregate_gold",
             author="analyst",
+            kind="TRANSFORMATION",
             inputs=[_in("silver", "silver$features", *silver_v2_cols)],
-            outputs=[_out("gold", "gold$catalog", 1, ("caption", "string"), ("embedding", "array<float>"))],
+            outputs=[_out("gold", "gold$catalog", 1, *gold_cols)],
         ),
     ]
 

@@ -58,12 +58,19 @@ def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
     assert {"silver$features", "bronze$events", "raw_events"} <= {d.name for d in upstream.related}
     # raw_events flows downstream into bronze/silver/gold.
     assert {"bronze$events", "silver$features", "gold$catalog"} <= {d.name for d in downstream.related}
-    # silver was written twice — v1 (embed) then v2 (caption), both by data_eng (the refinement passes).
+    # silver was written by data_eng across all attempts (failed embed, embed v1, caption v2).
     assert {p.author for p in producers.producers} == {"data_eng"}
     assert {p.dataset_version for p in producers.producers} >= {"1", "2"}
-    # the graph around silver spans the connected medallion DAG.
+    # the failed embed attempt is recorded too: a FAIL run with an error and no produced version.
+    failed = [p for p in producers.producers if p.event_type and "FAIL" in p.event_type.upper()]
+    assert failed and failed[0].error_message and "OOM" in failed[0].error_message
+    assert failed[0].dataset_version is None
+    # the graph around silver spans the connected medallion DAG, with storage + tags on each node.
     node_ids = {n.id for n in graph.nodes}
     assert {"raw_events", "bronze$events", "silver$features", "gold$catalog"} <= node_ids
+    silver_node = next(n for n in graph.nodes if n.id == "silver$features")
+    assert silver_node.source_uri == "s3://lakehouse/silver/features"
+    assert "layer=silver" in silver_node.tags
     # silver derives from bronze, gold from silver; the in-place refine is NOT a self-derivation.
     edges = {(e.source, e.target) for e in graph.edges}
     assert ("silver$features", "bronze$events") in edges

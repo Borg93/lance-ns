@@ -92,10 +92,10 @@ relational tables, and we drop everything not needed for the medallion flow.
 ## Graph model (Apache AGE)
 
 ```
-(:Job {namespace, name})
-(:Run {run_id, author, event_type, event_time})
-(:Dataset {name, namespace})          # name = catalog table id; MERGEd on name only
-(:User {name})                        # an OIDC sub (the verified principal)
+(:Job {namespace, name})                          # the compute job — Ray (Ray runs jobs, Lance is the data)
+(:Run {run_id, author, event_type, event_time, producer, error_message})
+(:Dataset {name, namespace, source_uri, tags})    # name = catalog table id; MERGEd on name only
+(:User {name})                                    # an OIDC sub (the verified principal)
 (:Run)-[:OF_JOB]->(:Job)
 (:Run)-[:READ]->(:Dataset)            # inputs
 (:Run)-[:WROTE {version}]->(:Dataset) # outputs; version = the Lance version this run produced
@@ -107,16 +107,63 @@ The `WROTE` edge carries the **Lance version** produced (from the OpenLineage `v
 facet), so two refinement passes over one table — e.g. *embed* (silver v1) then *caption* (silver
 v2) — are distinguishable in `producers()` even though `Dataset` is MERGEd on name. An **in-place
 refinement** (a run that reads *and* writes the same table) bumps the version via `WROTE` and does
-**not** create a self-`DERIVED_FROM` edge. *Dataset-level only: column-level lineage (which output
-column came from which input column) is emitted by producers as a facet but not yet stored as
-graph nodes/edges — see `todo.md`.*
+**not** create a self-`DERIVED_FROM` edge.
+
+**Successful vs failed runs.** Only a **successful** run (`COMPLETE`) asserts data: it gets a
+versioned `WROTE` edge plus `DERIVED_FROM` (and `CREATED` on a catalog create). A **failed** run
+(`FAIL`/`ABORT`) is still recorded — its `Run` carries the `error_message`, and it keeps a `WROTE`
+edge so `producers()` surfaces the attempt — but with **no version** and **no `DERIVED_FROM`**: a
+failed run produced no data, so it must never assert lineage. (The seed includes one failed embed
+to prove this end-to-end.)
+
+Each `Dataset` node also carries `source_uri` (where the table physically lives — the S3-compatible
+location, from the standard `dataSource` facet) and `tags` (governance labels like `layer=silver`,
+`pii=false`, from the standard `tags` facet). *Dataset-level only: column-level lineage (which
+output column came from which input column) is emitted as a facet but not yet stored as graph
+nodes/edges — see `todo.md` P2 #12b.*
 
 `author` is read from a custom OpenLineage `author` run facet (the OIDC sub of whoever ran
-the job). On a catalog **create** event (`lance` facet `operation=create_table`, emitted by
-`app.core.lineage_emit`), the verified author is also recorded as a first-class
+the job), falling back to the standard `ownership` job facet so events from external producers
+still attribute an owner. On a catalog **create** event (`lance` facet `operation=create_table`,
+emitted by `app.core.lineage_emit`), the verified author is also recorded as a first-class
 `(:User)-[:CREATED]->(:Dataset)` edge — the authoritative "who created this table" answer.
 Datasets are MERGEd on `{name}` only, then `namespace` is `SET`, so a dataset referenced by
 several runs is never duplicated.
+
+## OpenLineage facets we capture (and Marquez reuse)
+
+We emit events **only via the official `openlineage-python` client classes**, so they are
+spec-correct by construction (canonical facet keys, `_producer`/`_schemaURL` on every facet) and a
+Marquez instance — or any OpenLineage consumer — can ingest them unchanged at the same
+`/api/v1/lineage` path. Our ingest tolerates *every* facet (`extra="allow"`) and reads these:
+
+| Facet | Kind | What it gives us | Where it lands |
+|---|---|---|---|
+| `producer` (event field) | run | the software that emitted the event | `Run.producer` |
+| `author` (custom) → `ownership` | run / job | who ran the job (OIDC sub), standard owner fallback | `Run.author` |
+| `lance` (custom) | run | catalog `operation=create_table` → who-created | `(:User)-[:CREATED]` |
+| `jobType` | job | `processingType` BATCH/STREAMING, `integration=RAY`, `jobType` ETL/TRANSFORMATION | (read; surfaced via job) |
+| `schema` | dataset | column names/types per layer | (emitted; column-level storage is P2 #12b) |
+| `version` | dataset | the Lance version a run produced | `WROTE.version` |
+| `dataSource` | dataset | where the table physically lives (S3-compatible URI) | `Dataset.source_uri` |
+| `tags` | dataset | governance labels (`layer`, `pii`, …) | `Dataset.tags` |
+| `errorMessage` | run | failure message on a `FAIL`/`ABORT` run | `Run.error_message` |
+
+**Ray is the compute, Lance is the data.** Each `Job` is a Ray job; each `Dataset` is a Lance
+table. The `jobType` facet records that split: `integration=RAY`, and `jobType` distinguishes the
+**ETL** that lands raw data into bronze from the **TRANSFORMATION** jobs that move data between
+medallion layers.
+
+## Closing the loop: gold embeds its lineage as JSONB
+
+The final `aggregate_gold` job writes the upstream provenance **into the gold Lance file itself** as
+a JSONB `lineage` column (Lance's `pa.json_()` / `lance.json` extension type — stored as binary
+JSONB). So the lineage travels *with* the data: a consumer reading `gold$catalog` can query its own
+provenance in place via Lance's JSON functions (`json_extract(lineage, '$.upstream[*].name')`,
+`json_get_string`, `json_array_contains`, and a JSON scalar/INVERTED index on hot paths) through
+DataFusion — no round-trip to the lineage service required. The external AGE graph remains the
+queryable, cross-dataset source of truth; the embedded JSONB is the self-describing, co-located copy
+"where the data exists". gold's schema is therefore `caption`, `embedding`, **`lineage` (JSONB)**.
 
 ## Code shape (FastAPI house style)
 
@@ -151,20 +198,23 @@ pointed here with `OPENLINEAGE_URL` ingests with no glue.
 ## Mock medallion data (a real OpenLineage producer)
 
 `lineage/seed.py` is the **producer** — compute-layer instrumentation that uses the official
-`openlineage-python` client to build spec-correct events for the medallion flow (faithful to
-`ARCHITECTURE.md` §6: dataset names = catalog ids, authors = OIDC subs, bronze carries a
-schema facet `{image, img_src}`):
+`openlineage-python` client to build spec-correct events for the medallion flow (dataset names =
+catalog ids, authors = OIDC subs, Ray = the compute job, Lance = the data; each output carries
+`schema` + `dataSource` + `tags` + `version` facets):
 
 ```
-ingest_images          (alice)    raw_images          → bronze$images {image, img_src}
-lanceray_append_images (alice)    raw_images_batch2   → bronze$images          (append)
-lanceray_embed         (data_eng) bronze$images       → silver$features {…, embedding}
-aggregate_gold         (analyst)  silver$features     → gold$catalog
+ingest_events    ETL            (alice)    raw_events      → bronze$events  v1  {id, payload:blob, src}
+embed_features    TRANSFORM FAIL (data_eng) bronze$events   ⇏ silver$features    (CUDA OOM — recorded, no data)
+embed_features    TRANSFORM      (data_eng) bronze$events   → silver$features v1  (+embedding)
+caption_features  TRANSFORM      (data_eng) silver$features → silver$features v2  (+caption, in place)
+aggregate_gold    TRANSFORM      (analyst)  silver$features → gold$catalog   v1  (+lineage JSONB)
 ```
 
 `lineage/sample_events.json` is generated from it (`--write`), so the static fixture stays in
 sync with what a real OpenLineage client emits. After ingest: `upstream(gold$catalog)` →
-silver, bronze, both raw sources; `producers(silver$features)` → the `data_eng` lance-ray run.
+silver, bronze, raw source; `producers(silver$features)` → the failed attempt (with its error,
+no version) **and** the two successful `data_eng` runs (v1, v2); `graph(silver$features)` carries
+each node's `source_uri` + `tags`.
 
 ## Run / verify (dev)
 

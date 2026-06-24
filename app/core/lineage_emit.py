@@ -28,6 +28,10 @@ log = logging.getLogger(__name__)
 #: string (see ``lineage/repository.py``).
 CREATE_TABLE = "create_table"
 
+#: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
+#: and what a Marquez-style consumer records as the event source).
+_PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/app/core/lineage_emit.py"
+
 
 def build_create_event(
     *,
@@ -52,6 +56,7 @@ def build_create_event(
     return {
         "eventType": "COMPLETE",
         "eventTime": event_time,
+        "producer": _PRODUCER,
         "run": {"runId": run_id, "facets": run_facets},
         "job": {"namespace": job_namespace, "name": CREATE_TABLE},
         "inputs": [],

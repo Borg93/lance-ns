@@ -9,7 +9,7 @@ silent fallback) so a misconfigured deployment fails fast at boot.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Self
+from typing import Literal, Self
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -70,6 +70,21 @@ class Settings(BaseSettings):
     # Per-request OpenFGA client timeout (seconds). A hung authz call fails fast and is
     # retried rather than pinning a request worker. Wired into fga.make_client at startup.
     fga_timeout_seconds: float = Field(default=5.0, ge=0.1, alias="LANCE_FGA_TIMEOUT_SECONDS")
+
+    # Data-plane credential vending (pluggable; see app/core/vending.py). Default "mode_b":
+    # server-mediated — no credential leaves the catalog (correct for HCP, which has no STS).
+    # "static": pre-provisioned per-bucket keys. "sts": STS AssumeRole short-TTL scoped tokens
+    # (the gold standard, for S3-family stores: MinIO/Ceph/S3).
+    vending_mode: Literal["mode_b", "static", "sts"] = Field(
+        default="mode_b", alias="LANCE_VENDING_MODE"
+    )
+    vending_ttl_seconds: int = Field(default=900, ge=60, alias="LANCE_VENDING_TTL_SECONDS")
+    s3_assume_role_arn: str | None = Field(default=None, alias="LANCE_S3_ASSUME_ROLE_ARN")
+    s3_sts_endpoint: str | None = Field(default=None, alias="LANCE_S3_STS_ENDPOINT")
+
+    # Maintenance: when true, reject mutating /v1 requests with 503 + Retry-After — for
+    # zero-downtime model/schema migration windows. Default off (no-op).
+    maintenance_read_only: bool = Field(default=False, alias="LANCE_MAINTENANCE_READ_ONLY")
 
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:

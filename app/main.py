@@ -16,6 +16,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from lance_namespace import LanceNamespaceError
 
+from app.api.maintenance import maintenance_middleware
 from app.api.v1.router import api_router
 from app.core import fga
 from app.core.config import get_settings
@@ -70,6 +71,8 @@ app = FastAPI(
     openapi_url="/openapi.json" if _settings.docs_enabled else None,
 )
 app.include_router(api_router)
+# Read-only maintenance gate (no-op unless LANCE_MAINTENANCE_READ_ONLY=true).
+app.middleware("http")(maintenance_middleware)
 
 
 @app.exception_handler(LanceNamespaceError)

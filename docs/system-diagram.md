@@ -94,7 +94,8 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 3. **Catalog → OpenFGA** — `check can_create_table` on the **parent** namespace.
 4. **Catalog → Object store** — create the Lance dataset location + record the table (version 1).
 5. **Catalog → OpenFGA** — `grant_on_create`: seed `owner` grant + `parent` edge (inherits cascade).
-6. **Catalog → Client** — `201`; caller is the table's **owner** (⇒ writer ⇒ reader).
+6. **Catalog → Lineage** *(P0 #3, default OFF)* — emit OpenLineage with `author` = the **verified** sub → a `(:User)-[:CREATED]->(:Dataset)` edge (the audit fact behind `GET /datasets/{id}/creator`). **Fire-and-forget** — never blocks the 201.
+7. **Catalog → Client** — `201`; caller is the table's **owner** (⇒ writer ⇒ reader).
 
 ### 2. Read / query — `GET describe_table` (+ read)
 1. **Client → Catalog** — describe (optionally `?vend_credentials=true`).

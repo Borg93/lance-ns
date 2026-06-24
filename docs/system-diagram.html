@@ -268,7 +268,7 @@
   .stage{
     position:relative;
     width: 100%;
-    height: 460px;
+    height: 560px;
   }
 
   .stage svg.wires{
@@ -738,35 +738,35 @@
 
     <div class="stage" id="stage">
 
-      <div class="node" data-role="user" data-id="client" style="left:2%; top:40%;">
+      <div class="node" data-role="user" data-id="client" style="left:1%; top:40%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></div>
         <div class="label">Client</div>
         <div class="tech">LanceDB SDK · lance-ray · app</div>
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="compute" data-id="ray" style="left:2%; top:73%;">
+      <div class="node" data-role="compute" data-id="ray" style="left:1%; top:80%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg></div>
         <div class="label">lance-ray job</div>
         <div class="tech">promotion · compaction</div>
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="embed" data-id="oidc" style="left:27%; top:6%;">
+      <div class="node" data-role="embed" data-id="oidc" style="left:28%; top:6%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg></div>
         <div class="label">OIDC IdP</div>
         <div class="tech">Dex · OIDC / JWKS</div>
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="seed" data-id="openbao" style="left:51%; top:6%;">
+      <div class="node" data-role="seed" data-id="openbao" style="left:52%; top:6%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M11.5 11.5 21 2"/><path d="M18 2l3 3-3 3"/></svg></div>
         <div class="label">OpenBao</div>
         <div class="tech">secrets · KV v2 — catalog/lineage only</div>
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="orch" data-id="catalog" style="left:30%; top:40%;">
+      <div class="node" data-role="orch" data-id="catalog" style="left:28%; top:40%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2"/><rect x="2" y="14" width="20" height="8" rx="2"/><circle cx="6" cy="6" r="0.5"/><circle cx="6" cy="18" r="0.5"/></svg></div>
         <div class="label">Catalog</div>
         <div class="tech">FastAPI · pylance</div>
@@ -774,21 +774,21 @@
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="vector" data-id="openfga" style="left:30%; top:73%;">
+      <div class="node" data-role="vector" data-id="openfga" style="left:52%; top:56%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></div>
         <div class="label">OpenFGA</div>
         <div class="tech">authz · Postgres</div>
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="vector" data-id="store" style="left:69%; top:40%;">
+      <div class="node" data-role="vector" data-id="store" style="left:76%; top:40%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></div>
         <div class="label" data-label-offline="Hitachi HCP" data-label-online="MinIO / S3">Hitachi HCP</div>
         <div class="tech" data-tech-offline="S3 API · no STS" data-tech-online="S3 + STS">S3 API · no STS</div>
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="orch" data-id="lineage" style="left:69%; top:73%;">
+      <div class="node" data-role="orch" data-id="lineage" style="left:52%; top:80%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.7 7.3 10.6 16M17.3 7.3 13.4 16"/></svg></div>
         <div class="label">Lineage svc</div>
         <div class="tech">FastAPI · OpenLineage</div>
@@ -796,7 +796,7 @@
         <span class="step-badge">·</span>
       </div>
 
-      <div class="node" data-role="vector" data-id="age" style="left:88%; top:73%;">
+      <div class="node" data-role="vector" data-id="age" style="left:78%; top:80%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="18" r="2"/><path d="M6.7 7.3 10.6 16M17.3 7.3 13.4 16"/></svg></div>
         <div class="label">AGE graph</div>
         <div class="tech">Apache AGE · Postgres</div>
@@ -885,9 +885,17 @@ pylance.create_table(location="s3://lance/alpha/bronze/images.lance")`, chips:["
   ("user:alice", "owner",  "table:alpha$bronze$images"),
   ("namespace:alpha$bronze", "parent", "table:alpha$bronze$images")
 ]`, chips:["grant_on_create"] },
+      { from:"catalog", to:"lineage", color:"--c-orch", title:"Record creator (async)", route:"POST /api/v1/lineage",
+        desc:"<em>P0 #3:</em> the catalog emits OpenLineage with <em>author = the verified token sub</em> → a <code>(:User)-[:CREATED]->(:Dataset)</code> edge, so 'who created this table' is an <em>audit</em> fact (queryable at <code>/datasets/{id}/creator</code>) — distinct from the OpenFGA owner <em>access</em> tuple. <em>Fire-and-forget + best-effort</em> (runs after the response; a down lineage service never blocks/fails the create). Default OFF.",
+        payload:`{ "eventType":"COMPLETE",
+  "run":{ "facets":{
+    "author":{ "sub":"alice" },
+    "lance":{ "operation":"create_table", "version":1 } } },
+  "job":{ "name":"create_table" },
+  "outputs":[{ "name":"alpha$bronze$images" }] }`, chips:["fire-and-forget","default OFF","author verified"] },
       { from:"catalog", to:"client", color:"--c-user", title:"201 Created", route:"201",
-        desc:"Table created; the caller is its <em>owner</em> (⇒ writer ⇒ reader by the concentric model). The catalog now <em>emits OpenLineage</em> (fire-and-forget, default OFF) with <em>author = the verified token sub</em> — so 'who created this table' is recorded as an audit fact (a <code>(:User)-[:CREATED]->(:Dataset)</code> edge), distinct from the OpenFGA owner <em>access</em> tuple.",
-        payload:`{ "location": "...", "version": 1 }`, chips:["owner⇒writer⇒reader","emits create-lineage"] }
+        desc:"Table created; the caller is its <em>owner</em> (⇒ writer ⇒ reader by the concentric model). The 201 returns immediately — the lineage emit above already ran fire-and-forget, so it never delays this response.",
+        payload:`{ "location": "...", "version": 1 }`, chips:["owner⇒writer⇒reader"] }
     ]
   },
 

@@ -64,14 +64,28 @@ class LineageEmitter(Protocol):
     """Emits catalog write events to the lineage service (best-effort)."""
 
     async def emit_create(
-        self, *, table_id: str, namespace: str, author: str | None, version: int
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int,
+        authorization: str | None = None,
     ) -> None: ...
 
 
 class NoopEmitter:
     """The emitter used when lineage emission is disabled — does nothing."""
 
-    async def emit_create(self, *, table_id: str, namespace: str, author: str | None, version: int) -> None:  # noqa: ARG002
+    async def emit_create(  # noqa: ARG002
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int,
+        authorization: str | None = None,
+    ) -> None:
         return None
 
 
@@ -83,7 +97,15 @@ class HttpLineageEmitter:
         self._url = url
         self._job_namespace = job_namespace
 
-    async def emit_create(self, *, table_id: str, namespace: str, author: str | None, version: int) -> None:
+    async def emit_create(
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int,
+        authorization: str | None = None,
+    ) -> None:
         event = build_create_event(
             table_id=table_id,
             namespace=namespace,
@@ -93,8 +115,12 @@ class HttpLineageEmitter:
             event_time=datetime.now(UTC).isoformat(),
             job_namespace=self._job_namespace,
         )
+        # Forward the caller's bearer so ingest accepts the event when the lineage service has OIDC
+        # on (else every create event 401s and is silently dropped). The lineage side then binds the
+        # author to this same verified principal.
+        headers = {"Authorization": authorization} if authorization else None
         try:
-            response = await self._client.post(self._url, json=event)
+            response = await self._client.post(self._url, json=event, headers=headers)
             response.raise_for_status()
         except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
             log.warning(

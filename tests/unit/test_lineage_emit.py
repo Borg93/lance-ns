@@ -87,13 +87,15 @@ class _Resp:
 
 
 class _CapturingClient:
-    """Fake httpx client capturing the posted JSON."""
+    """Fake httpx client capturing the posted JSON + headers."""
 
     def __init__(self) -> None:
         self.posted: Any = None
+        self.headers: Any = None
 
     async def post(self, *_args: object, **kwargs: object) -> _Resp:
         self.posted = kwargs["json"]
+        self.headers = kwargs.get("headers")
         return _Resp()
 
 
@@ -111,6 +113,29 @@ def test_http_emitter_posts_the_event() -> None:
     assert client.posted is not None
     assert client.posted["outputs"] == [{"namespace": "a", "name": "a$b"}]
     assert client.posted["run"]["facets"]["author"]["sub"] == "alice"
+
+
+def test_http_emitter_forwards_authorization() -> None:
+    # So ingest accepts the event when the lineage service has OIDC on (else 401 + silent drop).
+    client = _CapturingClient()
+    emitter = HttpLineageEmitter(
+        cast(httpx.AsyncClient, client), "http://lineage", job_namespace="lance-catalog"
+    )
+    asyncio.run(
+        emitter.emit_create(
+            table_id="a$b", namespace="a", author="alice", version=1, authorization="Bearer xyz"
+        )
+    )
+    assert client.headers == {"Authorization": "Bearer xyz"}
+
+
+def test_http_emitter_omits_auth_header_when_absent() -> None:
+    client = _CapturingClient()
+    emitter = HttpLineageEmitter(
+        cast(httpx.AsyncClient, client), "http://lineage", job_namespace="lance-catalog"
+    )
+    asyncio.run(emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=1))
+    assert client.headers is None
 
 
 def test_http_emitter_swallows_failures() -> None:

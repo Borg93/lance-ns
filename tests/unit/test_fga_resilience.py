@@ -60,8 +60,13 @@ def test_check_fails_closed_on_network_error() -> None:
     with pytest.raises(ServiceUnavailableError):
         asyncio.run(
             fga.check(
-                _down(), user="alice", relation="can_read_data", obj="table:t",
-                retry_attempts=1, retry_backoff_seconds=0.0, retry_max_backoff_seconds=0.0,
+                _down(),
+                user="alice",
+                relation="can_read_data",
+                obj="table:t",
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+                retry_max_backoff_seconds=0.0,
             )
         )
 
@@ -70,8 +75,13 @@ def test_batch_check_fails_closed_on_network_error() -> None:
     with pytest.raises(ServiceUnavailableError):
         asyncio.run(
             fga.batch_check(
-                _down(), user="alice", relation="can_write_data", objects=["table:t"],
-                retry_attempts=1, retry_backoff_seconds=0.0, retry_max_backoff_seconds=0.0,
+                _down(),
+                user="alice",
+                relation="can_write_data",
+                objects=["table:t"],
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+                retry_max_backoff_seconds=0.0,
             )
         )
 
@@ -80,8 +90,13 @@ def test_list_objects_fails_closed_on_network_error() -> None:
     with pytest.raises(ServiceUnavailableError):
         asyncio.run(
             fga.list_objects(
-                _down(), user="alice", relation="can_read_data", object_type="table",
-                retry_attempts=1, retry_backoff_seconds=0.0, retry_max_backoff_seconds=0.0,
+                _down(),
+                user="alice",
+                relation="can_read_data",
+                object_type="table",
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+                retry_max_backoff_seconds=0.0,
             )
         )
 
@@ -91,8 +106,11 @@ def test_write_tuples_fails_closed_on_network_error() -> None:
     with pytest.raises(ServiceUnavailableError):
         asyncio.run(
             fga.write_tuples(
-                _down(), tuples,
-                retry_attempts=1, retry_backoff_seconds=0.0, retry_max_backoff_seconds=0.0,
+                _down(),
+                tuples,
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+                retry_max_backoff_seconds=0.0,
             )
         )
 
@@ -100,11 +118,11 @@ def test_write_tuples_fails_closed_on_network_error() -> None:
 @pytest.mark.parametrize(
     ("table_id", "expected"),
     [
-        ("$", None),          # delimiter-only root collapses to None (grant/check agree)
-        ("", None),           # empty id
-        ("db1", None),        # single top-level segment has no parent namespace
-        ("a$b", "a"),         # nested table -> parent namespace
-        ("a$b$c", "a$b"),     # two levels deep
+        ("$", None),  # delimiter-only root collapses to None (grant/check agree)
+        ("", None),  # empty id
+        ("db1", None),  # single top-level segment has no parent namespace
+        ("a$b", "a"),  # nested table -> parent namespace
+        ("a$b$c", "a$b"),  # two levels deep
     ],
 )
 def test_parent_namespace_id_root_and_nesting(table_id: str, expected: str | None) -> None:

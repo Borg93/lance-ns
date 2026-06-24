@@ -73,10 +73,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     finally:
         app.state.shutting_down = True
         fga_client = getattr(app.state, "fga", None)
+        # Each close is isolated so one failing teardown can't strand the other resource.
         if fga_client is not None:
-            await fga_client.close()
+            with suppress(Exception):
+                await fga_client.close()
         if lineage_http is not None:
-            await lineage_http.aclose()
+            with suppress(Exception):
+                await lineage_http.aclose()
 
 
 _settings = get_settings()

@@ -58,6 +58,7 @@ async def create_table(
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
     properties_header: Annotated[str | None, Header(alias="x-lance-table-properties")] = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> CreateTableResponse:
     properties = None
     if properties_header:
@@ -72,13 +73,15 @@ async def create_table(
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
     # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget
     # (after the response, best-effort) so the lineage service can never block/fail a create. The
-    # canonical id keeps the lineage Dataset == the OpenFGA object id == the catalog table id.
+    # canonical id keeps the lineage Dataset == the OpenFGA object id == the catalog table id; the
+    # caller's bearer is forwarded so ingest accepts it when the lineage service has OIDC on.
     background_tasks.add_task(
         emitter.emit_create,
         table_id=fga.canonical_object_id(segments, delimiter=settings.delimiter),
         namespace=fga.parent_namespace_id(segments, delimiter=settings.delimiter) or "",
         author=token.sub if token is not None else None,
-        version=1,
+        version=response.version or 1,
+        authorization=authorization,
     )
     return response
 

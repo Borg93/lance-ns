@@ -966,13 +966,13 @@ Idempotency-Key: <run-uuid>      // check can_write_data`, chips:["can_write_dat
       { from:"ray", to:"store", color:"--c-vector", title:"Write silver", route:"write_lance(append)",
         desc:"The engine writes the new silver dataset version (immutable; old versions remain for time-travel).",
         payload:`write_lance("silver$features", mode="append")`, chips:["new version"] },
-      { from:"ray", to:"lineage", color:"--c-orch", title:"Emit OpenLineage (planned)", route:"POST /api/v1/lineage",
-        desc:"<em>Planned / P0:</em> the job (not the catalog) emits a run event. Today ingest is <em>unauthenticated</em> and the <em>author is self-asserted</em> (a producer-set facet, NOT verified against a token) — so recorded authorship is forgeable until the ingest authz gate + server-side author derivation land.",
+      { from:"ray", to:"lineage", color:"--c-orch", title:"Emit OpenLineage", route:"POST /api/v1/lineage",
+        desc:"The job (not the catalog) emits a run event. <em>Ingest now binds the author</em> to the verified token sub (P0 #2) — provenance is no longer forgeable. The lance-ray promote job itself is still TODO (P1 #6).",
         payload:`{ "eventType":"COMPLETE",
   "job":{ "name":"lanceray_embed" },
   "run":{ "facets":{ "author":{ "name":"dee" } } },
   "inputs":[{"name":"alpha$bronze$images"}],
-  "outputs":[{"name":"alpha$silver$features"}] }`, chips:["OpenLineage","planned","author unverified"] },
+  "outputs":[{"name":"alpha$silver$features"}] }`, chips:["OpenLineage","author verified","job: P1 #6"] },
       { from:"lineage", to:"age", color:"--c-vector", title:"MERGE graph", route:"openCypher",
         desc:"Lineage upserts Run/Job/Dataset nodes + READ/WROTE/DERIVED_FROM edges. Dataset node name = catalog table:<id> — one identity across all three axes.",
         payload:`MERGE (r:Run)-[:WROTE]->(d:Dataset {name:"alpha$silver$features"})
@@ -981,22 +981,22 @@ MERGE (d)-[:DERIVED_FROM]->(:Dataset {name:"alpha$bronze$images"})`, chips:["Apa
   },
 
   lineage_query: {
-    name:"Lineage query", note:"GET upstream — provenance over the AGE graph (read-authz P0-planned)",
+    name:"Lineage query", note:"GET upstream — provenance over the AGE graph (read-authz: OIDC + can_get_metadata, opt-in)",
     steps:[
       { from:"client", to:"lineage", color:"--c-user", title:"Ask provenance", route:"GET upstream",
         desc:"Where did gold come from? Query the provenance axis.",
         payload:`GET /datasets/alpha$gold$catalog/upstream
 Authorization: Bearer <JWT>`, chips:["provenance"] },
-      { from:"lineage", to:"oidc", color:"--c-embed", title:"Verify token (planned)", route:"JWKS verify",
-        desc:"<em>P0 GAP:</em> read endpoints are unauthenticated today. The planned gate verifies the JWT first (401 if absent).",
-        payload:`verify(JWT) -> { sub: "ana" }   // NOT enforced yet (P0)`, chips:["P0 gap","planned"] },
-      { from:"lineage", to:"openfga", color:"--c-vector", title:"Authorize (planned)", route:"check can_get_metadata",
-        desc:"<em>P0 GAP (planned):</em> same permission as describe-table — you may see lineage only if you may see the table's metadata. Reuses the shared OpenFGA store, read-only.",
+      { from:"lineage", to:"oidc", color:"--c-embed", title:"Verify token (opt-in)", route:"JWKS verify",
+        desc:"<em>Implemented (P0 #1):</em> when <code>LINEAGE_OIDC_ENABLED</code>, the bearer JWT is verified first (401 if absent), reusing the catalog's verifier. Default OFF in dev.",
+        payload:`verify(JWT) -> { sub: "ana" }`, chips:["JWKS","default OFF"] },
+      { from:"lineage", to:"openfga", color:"--c-vector", title:"Authorize (opt-in)", route:"check can_get_metadata",
+        desc:"<em>Implemented (P0 #1):</em> same permission as describe-table — you see lineage only if you may see the table's metadata. Reuses the shared OpenFGA store read-only; related/graph datasets you can't see are filtered out (<code>batch_check</code>). Default OFF.",
         payload:`check {
   user:     "user:ana",
   relation: "can_get_metadata",
   object:   "table:alpha$gold$catalog"
-}`, chips:["reuse OpenFGA","planned"] },
+}`, chips:["reuse OpenFGA","default OFF"] },
       { from:"lineage", to:"age", color:"--c-vector", title:"Traverse graph", route:"Cypher *1..",
         desc:"openCypher transitive upstream over DERIVED_FROM. Injection-safe: the dataset name flows as an agtype bind param, never interpolated.",
         payload:`MATCH (d:Dataset {name:$name})-[:DERIVED_FROM*1..]->(u:Dataset)

@@ -14,7 +14,8 @@
 #
 # Note: the lineage service runs with its own auth OFF here (the demo focuses on catalog
 # authz + provenance authorship). In production, enable LINEAGE_OIDC_ENABLED +
-# LINEAGE_FGA_ENABLED and pin LINEAGE_FGA_STORE_ID/MODEL_ID to the catalog's store.
+# LINEAGE_FGA_ENABLED and pin LINEAGE_FGA_STORE_ID/MODEL_ID to the catalog's store — the catalog
+# forwards the caller's bearer on emit (app/core/lineage_emit.py), so create events are accepted.
 services:
   server:
     environment:
@@ -28,6 +29,10 @@ services:
       context: ..
       dockerfile: .docker/rest-catalog.dockerfile
     container_name: lance-lineage-api
+    init: true
+    read_only: true
+    tmpfs:
+      - /tmp
     command: ["uvicorn", "lineage.main:app", "--host", "0.0.0.0", "--port", "8000"]
     depends_on:
       lineage-postgres:
@@ -35,5 +40,11 @@ services:
     environment:
       LINEAGE_DATABASE_URL: postgresql://lineage:lineage@lineage-postgres:5432/lineage
       LINEAGE_GRAPH: lineage
+    # The image bakes a HEALTHCHECK on the catalog's port 2333; override it for the lineage port.
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/livez').read()"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
     ports:
       - "8000:8000"

@@ -11,6 +11,12 @@
 > **Update:** P0 #1 + #2 (lineage read/ingest authz) are now **implemented + adversarially
 > reviewed** (audit `wi2l437mq`, verdict ship-with-nits; mediums fixed). Default OFF — prod must
 > enable `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED`.
+>
+> **Update:** P0 #3 (catalog create-lineage) + lineage deploy + governance demo/e2e shipped &
+> reviewed (audit `w1f441qze`, ship-with-nits). Nits fixed: emitter **forwards the caller's bearer**
+> (so prod lineage-OIDC accepts create events), real `version` from the response, **deterministic
+> `creator()`** (latest-create-wins), suppressed shutdown closes, lineage-api healthcheck/hardening,
+> `EXPOSE 8000`, and a docs/diagram staleness sweep.
 
 ---
 

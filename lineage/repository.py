@@ -68,10 +68,16 @@ _PRODUCERS: Final = (
     "MATCH (r:Run)-[:WROTE]->(d:Dataset {name:$name}) RETURN r.run_id, r.author, r.event_time, r.event_type"
 )
 _MERGE_USER: Final = "MERGE (u:User {name:$name}) RETURN 1"
+# Latest-create-wins: the CREATED edge carries the create event_time so creator() is deterministic
+# even when a table name is dropped+recreated by a different principal (the most recent create is
+# authoritative). A re-create updates this principal; drop-lineage GC is future work.
 _LINK_CREATED: Final = (
-    "MATCH (u:User {name:$name}), (d:Dataset {name:$ds}) MERGE (u)-[:CREATED]->(d) RETURN 1"
+    "MATCH (u:User {name:$name}), (d:Dataset {name:$ds}) "
+    "MERGE (u)-[c:CREATED]->(d) SET c.created_at=$tm RETURN 1"
 )
-_CREATOR: Final = "MATCH (u:User)-[:CREATED]->(d:Dataset {name:$name}) RETURN u.name LIMIT 1"
+_CREATOR: Final = (
+    "MATCH (u:User)-[c:CREATED]->(d:Dataset {name:$name}) RETURN u.name ORDER BY c.created_at DESC LIMIT 1"
+)
 
 # AGE rejects zero-length variable paths (``*0..``), so the connected node set is
 # assembled from the upstream + downstream traversals (``*1..``) plus the root itself,
@@ -145,7 +151,12 @@ class LineageRepository:
             if event.operation == _CREATE_TABLE_OP and event.author:
                 await run_cypher(conn, self._graph, _MERGE_USER, {"name": event.author})
                 for ds in event.outputs:
-                    await run_cypher(conn, self._graph, _LINK_CREATED, {"name": event.author, "ds": ds.name})
+                    await run_cypher(
+                        conn,
+                        self._graph,
+                        _LINK_CREATED,
+                        {"name": event.author, "ds": ds.name, "tm": event.event_time},
+                    )
 
     async def _merge_dataset(self, conn, ds: Dataset) -> None:
         await run_cypher(

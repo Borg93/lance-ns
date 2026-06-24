@@ -29,7 +29,7 @@ graph node (how/who). The diagram is built around that single identity threading
 |---|---|---|
 | **Control** | who may, where is it | **Catalog** (FastAPI/pylance) + **OIDC** + **OpenFGA** |
 | **Data** | the bytes | **Object store** (HCP / MinIO·S3), reached by **Mode B** or **Vending** |
-| **Provenance** | how/who did it change | **Lineage svc** (OpenLineage) → **AGE graph** *(job-emitted; partial — see note)* |
+| **Provenance** | how/who did it change | **Lineage svc** (OpenLineage) → **AGE graph** *(catalog create-events + job-emitted)* |
 
 > ✅ **Provenance records the verified principal (audit `w8u4rc2tg` P0 #2/#3).** The catalog emits
 > OpenLineage on table **create** with `author` = the verified token sub — a
@@ -105,7 +105,7 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 5. **Catalog → Object store** — return location; **S3** also returns a short-TTL STS token, **HCP** returns location only.
 6. **Client → Object store** — **S3:** read directly with the vended token. **Mode B:** the read instead goes through the catalog's Arrow-IPC query endpoint (no creds on the client).
 
-### 3. Promote (medallion) — `lance-ray` bronze → silver → gold  *(target flow — the lance-ray jobs and lineage emission are not built yet; today only the `lineage/seed.py` demo emitter populates the graph)*
+### 3. Promote (medallion) — `lance-ray` bronze → silver → gold  *(the catalog already emits create-lineage; the **lance-ray promote/compaction jobs** themselves are not built yet (P1 #6), so bronze→silver promotion lineage today comes from a job/demo emitter)*
 1. **Job → Catalog** — describe bronze (the job is a catalog client; it authenticates with **workload identity**, never OpenBao).
 2. **Catalog → OpenFGA** — `check can_read_data` for `role:data_engineer#assignee` (role-as-subject).
 3. **Job → Object store** — read only the **new bronze versions** — the version range *is* the change feed.
@@ -121,14 +121,13 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 4. **Lineage → AGE** — openCypher `DERIVED_FROM*1..` traversal; the dataset name is an **agtype bind param**, never interpolated (injection-safe).
 5. **Lineage → Client** — `200` with the transitive upstream set.
 
-> **The headline gaps the diagram makes visible (audit `w8u4rc2tg`):**
-> 1. *Lineage query* steps 2–3 are dashed "planned" — the read endpoints **leak the entire data
->    estate** (no authz). **P0**.
-> 2. The lineage **ingest** side is *also* unauthenticated, and the `author` is **self-asserted** —
->    so recorded provenance/authorship is **forgeable** (latent: the lineage svc isn't deployed yet). **P0-on-deploy**.
-> 3. ✅ The catalog now **emits create-lineage** with the verified author — "who created the table"
->    is an audit fact at `GET /datasets/{id}/creator` (default OFF: `LANCE_LINEAGE_EMIT_ENABLED`).
->    Remaining: emit on insert/delete/compaction.
+> **The governance gaps the diagram tracked (audit `w8u4rc2tg`) — now resolved:**
+> 1. ✅ *Lineage query* reads are **authz-gated** (OIDC + `can_get_metadata`) with transitive-disclosure
+>    filtering — was a full data-estate leak (P0 #1). Opt-in: `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED`.
+> 2. ✅ Lineage **ingest** requires a verified token and **binds the author** to it — provenance is no
+>    longer forgeable (P0 #2); the catalog forwards the caller's bearer on emit.
+> 3. ✅ The catalog **emits create-lineage** with the verified author — "who created the table" is an
+>    audit fact at `GET /datasets/{id}/creator` (P0 #3). Remaining: emit on insert/delete/compaction.
 >
 > Tracked in [`todo.md`](../todo.md). Run the whole loop: `scripts/governance_e2e.sh` (or
 > `DEMO=1 scripts/governance_e2e.sh` for the narrated [`governance_demo.py`](../scripts/governance_demo.py)).
@@ -139,5 +138,5 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 
 - **"Show me security end-to-end"** — run *Create table*; pause on steps 2→3→5 (verify → authorize → seed-ownership). The cascade is why one create grants exactly the right future access.
 - **"Why is HCP different?"** — open *Read / query*, step through once in **HCP · Mode B**, then flip to **S3 · Vending** and step again. Same flow, two credential stories.
-- **"Where does lineage come from?"** — run *Promote*; the last two steps (emit → MERGE) show provenance is a **byproduct of the job** (the *target* design). Caveat: not built yet, and the author is producer-claimed until ingest authz lands.
+- **"Where does lineage come from?"** — run *Promote*; the last two steps (emit → MERGE) show provenance is a **byproduct of the job**. Ingest now **binds the verified author** (P0 #2); the lance-ray promote job itself is still TODO (P1 #6).
 - **"What's still open?"** — *Lineage query*, steps 2–3: the dashed planned authz gate (P0).

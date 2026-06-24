@@ -253,9 +253,7 @@ def test_verify_rejects_wrong_issuer(
         verifier.verify(token)
 
 
-def test_verify_rejects_bad_signature(
-    rsa_keypair: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_rejects_bad_signature(rsa_keypair: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     # Sign with a DIFFERENT RSA private key; the verifier holds the original public key,
     # so the signature must not validate.
     verifier = _make_verifier(rsa_keypair, monkeypatch)
@@ -310,9 +308,7 @@ def test_verify_rejects_disallowed_algorithm_hs256(
         verifier.verify(forged)
 
 
-def test_verify_rejects_alg_none(
-    rsa_keypair: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_verify_rejects_alg_none(rsa_keypair: tuple[Any, Any], monkeypatch: pytest.MonkeyPatch) -> None:
     # An unsigned ("alg": "none") token must never be accepted. Build it by hand —
     # the empty signature segment is the whole point of the "none" forgery.
     verifier = _make_verifier(rsa_keypair, monkeypatch, advertised_algorithms=["RS256", "none"])

@@ -69,9 +69,7 @@ def test_settings_rejects_enabled_oidc_without_provider(missing: str) -> None:
 def test_settings_rejects_fga_without_oidc() -> None:
     # FGA needs a user identity, so enabling it without OIDC must fail fast at construct.
     with pytest.raises(ValueError, match="OIDC"):
-        Settings.model_validate(
-            {"fga_enabled": True, "s3_access_key_id": "x", "s3_secret_access_key": "x"}
-        )
+        Settings.model_validate({"fga_enabled": True, "s3_access_key_id": "x", "s3_secret_access_key": "x"})
 
 
 def test_oidc_verifier_failure_maps_to_401_problem_json(client: TestClient) -> None:

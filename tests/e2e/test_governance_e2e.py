@@ -77,6 +77,14 @@ def _ipc(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+def _get_json(url: str) -> dict:
+    """GET + parse JSON, degrading to ``{}`` on any transport/non-JSON error (so polls fail cleanly)."""
+    try:
+        return requests.get(url, timeout=10).json()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def _poll(fn: Callable[[], object], want: object, *, tries: int = 20, delay: float = 0.5) -> object:
     """Poll ``fn`` until it equals ``want`` — emission is async/fire-and-forget — or give up."""
     last: object = None
@@ -117,10 +125,7 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
     assert requests.post(f"{server}/v1/table/{bronze}/describe", headers=ah, timeout=10).status_code == 200
 
     # 4. lineage recorded alice as the VERIFIED creator (emission is async -> poll)
-    creator = _poll(
-        lambda: requests.get(f"{lineage}/datasets/{bronze}/creator", timeout=10).json().get("creator"),
-        alice_sub,
-    )
+    creator = _poll(lambda: _get_json(f"{lineage}/datasets/{bronze}/creator").get("creator"), alice_sub)
     assert creator == alice_sub, f"expected lineage creator={alice_sub}, got {creator}"
 
     # 5. a promote run (bronze -> silver), as a lance-ray job would emit
@@ -139,10 +144,7 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
 
     # 6. silver's upstream includes bronze (the medallion lineage)
     up = _poll(
-        lambda: [
-            r["name"]
-            for r in requests.get(f"{lineage}/datasets/{silver}/upstream", timeout=10).json()["related"]
-        ],
+        lambda: [r["name"] for r in _get_json(f"{lineage}/datasets/{silver}/upstream").get("related", [])],
         [bronze],
     )
     assert isinstance(up, list) and bronze in up, f"expected {bronze} in silver upstream, got {up}"

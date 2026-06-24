@@ -82,6 +82,14 @@ def ipc(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+def get_json(url: str) -> dict:
+    """GET + parse JSON, degrading to ``{}`` on any transport/non-JSON error (clean poll failure)."""
+    try:
+        return requests.get(url, timeout=10).json()
+    except Exception:  # noqa: BLE001
+        return {}
+
+
 def poll(fn: Callable[[], object], want: object, *, tries: int = 20, delay: float = 0.5) -> object:
     """Poll ``fn`` until it equals ``want`` (lineage emission is async) or give up."""
     last: object = None
@@ -122,11 +130,8 @@ def main() -> int:
     r = requests.post(f"{CATALOG}/v1/table/{bronze}/describe", headers=ah, timeout=10)
     check(r.status_code == 200, f"alice describe {bronze} -> {r.status_code} (want 200, cascade from owner)")
 
-    step("how/who: the catalog recorded alice as the VERIFIED creator (not a self-asserted claim)")
-    creator = poll(
-        lambda: requests.get(f"{LINEAGE}/datasets/{bronze}/creator", timeout=10).json().get("creator"),
-        alice_sub,
-    )
+    step("how/who: the catalog (which verified alice's token) recorded her as the creator")
+    creator = poll(lambda: get_json(f"{LINEAGE}/datasets/{bronze}/creator").get("creator"), alice_sub)
     check(creator == alice_sub, f"lineage creator of {bronze} = {creator} (want {alice_sub})")
 
     step("a lance-ray job promotes bronze -> silver and emits OpenLineage")
@@ -146,10 +151,7 @@ def main() -> int:
 
     step("how: silver's provenance points back to bronze (the medallion lineage)")
     up = poll(
-        lambda: [
-            d["name"]
-            for d in requests.get(f"{LINEAGE}/datasets/{silver}/upstream", timeout=10).json()["related"]
-        ],
+        lambda: [d["name"] for d in get_json(f"{LINEAGE}/datasets/{silver}/upstream").get("related", [])],
         [bronze],
     )
     check(isinstance(up, list) and bronze in up, f"upstream({silver}) = {up} (want it to include {bronze})")

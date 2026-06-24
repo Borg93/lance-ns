@@ -192,10 +192,11 @@ LINEAGE_DATABASE_URL=postgresql://lineage:lineage@localhost:5433/lineage \
   binding, transitive-disclosure filtering). Default OFF; enable in prod. See **Read-side authz** above.
 - **Output-scoped ingest authz** — additionally check the producer may write the named output
   tables (`can_write_data`), not just that it is authenticated. Attributable today, not yet scoped.
-- **Deploy** the service (compose + image) so the gate is actually in front of traffic.
+- ✅ **Deployed** — `lineage-api` service (`.docker/docker-compose.governance.yml`, same image) +
+  `COPY lineage/` in the dockerfile. Catalog emits create-lineage to it (`/datasets/{id}/creator`).
 - **Async ingest at scale:** jobs publish OpenLineage to NATS; the service consumes
   (same owner, just decoupled). Direct `POST /api/v1/lineage` is fine until then.
 - **Frontend:** an SSR micro-frontend renders the DAG by calling `/graph` via the gateway
   (no direct DB access).
-- **Deploy:** a `lineage-api` compose service + `COPY lineage` in the image (the service is
-  runnable today via `uvicorn`; packaging it is the only gap).
+- **Verify the whole loop:** `scripts/governance_e2e.sh` (or `DEMO=1 …` for the narrated
+  `scripts/governance_demo.py`) — authz + create-lineage + medallion provenance over the full stack.

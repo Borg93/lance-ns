@@ -121,9 +121,7 @@ def test_generic_mutation_checks_writer(client: TestClient, fake_ns: MagicMock, 
     assert captured[-1] == {"user": "alice", "relation": "can_write_data", "obj": "table:db1$users"}
 
 
-def test_drop_table_requires_owner_and_403_is_problem_json(
-    client: TestClient, monkeypatch
-) -> None:
+def test_drop_table_requires_owner_and_403_is_problem_json(client: TestClient, monkeypatch) -> None:
     """CONTRACT: dropping a table requires the owner tier via ``can_drop``, 403 -> problem+json.
 
     NOTE: this supersedes the old behaviour where ``drop`` mapped to ``writer``. Per
@@ -366,9 +364,7 @@ def test_batch_malformed_body_fails_closed(client: TestClient, fake_ns: MagicMoc
     assert resp.json()["code"] == 15  # PERMISSION_DENIED, not a 500
 
 
-def test_batch_create_versions_requires_writer(
-    client: TestClient, fake_ns: MagicMock, monkeypatch
-) -> None:
+def test_batch_create_versions_requires_writer(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
     """CONTRACT: ``/v1/table/version/batch-create`` requires ``can_write_data`` on each entry."""
     _wire(client)
     seen: dict = {}
@@ -382,9 +378,7 @@ def test_batch_create_versions_requires_writer(
     monkeypatch.setattr(fga_module, "batch_check", fake_batch_check)
 
     body = {"entries": [{"id": ["db1", "users"]}]}
-    resp = client.post(
-        "/v1/table/version/batch-create", json=body, headers={"Authorization": "Bearer t"}
-    )
+    resp = client.post("/v1/table/version/batch-create", json=body, headers={"Authorization": "Bearer t"})
     assert resp.status_code == 403
     assert seen["relation"] == "can_write_data"
     assert seen["objects"] == ["table:db1$users"]

@@ -51,7 +51,9 @@ COPY --link app ./app
 COPY --link lineage ./lineage
 
 USER app
-EXPOSE 2333
+# 2333 = catalog (app.main:app); 8000 = lineage service (lineage.main:app) — same image, run with
+# `command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000` (see docker-compose.governance.yml).
+EXPOSE 2333 8000
 
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2333/livez').read()"]

@@ -3,6 +3,10 @@
 > Living status doc (bird's-eye). Detailed design: [`ARCHITECTURE.md`](ARCHITECTURE.md)
 > (catalog) and [`LINEAGE.md`](LINEAGE.md) (provenance). Roadmap: [`../todo.md`](../todo.md).
 > This file = the sketch of everything + the gap register + the Lakekeeper diff.
+>
+> 🖱️ **Interactive version:** [`system-diagram.html`](system-diagram.html) — click-through
+> diagram of the four flows with per-mode payloads (HCP·ModeB vs S3·Vending).
+> Text companion: [`system-diagram.md`](system-diagram.md). The ASCII below is the static fallback.
 
 ## 1. The whole system at a glance
 

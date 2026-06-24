@@ -3,6 +3,11 @@
 The doc to read first. Plain-language map of **what we're building, how the pieces fit,
 where we are right now, and what's next**. Skim the diagrams; read the section you need.
 
+> 🖱️ **Prefer to click through it?** Open [`system-diagram.html`](system-diagram.html) — an
+> interactive walk-through of the four core flows (create / read / promote / lineage), with the
+> data-plane mode toggle (HCP·ModeB vs S3·Vending) and real payloads per step.
+> ([`system-diagram.md`](system-diagram.md) is the text companion.)
+
 ---
 
 ## 1. What this is (one paragraph)

@@ -135,8 +135,9 @@ Severity in brackets; "latent" = real but not live today (lineage svc undeployed
 - ✅ **[high→latent]** Lineage **ingest** unauthenticated + `author` **self-asserted** → forgeable
   audit graph. **FIXED** — ingest requires a verified token; `enforce_author` binds `author`=`token.sub`
   (`lineage/auth.py`, `lineage/main.py`). → **P0 #2**. *(Remaining: optional output-scoped ingest authz.)*
-- **[high]** Catalog emits **no lineage** on any write → no audit record of **who created/changed a table**
-  (`grep app/` = 0). → **P0 #3**.
+- ✅ **[high]** Catalog emitted **no lineage** → no audit record of who created a table. **FIXED (create)** —
+  catalog emits create-lineage with the verified author → `(:User)-[:CREATED]->(:Dataset)` + `/creator`
+  (`app/core/lineage_emit.py`). → **P0 #3**. *(Remaining: insert/delete/compaction → P2.)*
 - **[low→latent]** Lineage hardcodes `$` while catalog delimiter is configurable → cross-axis identity
   mismatch (`config.py:28` vs `lineage/seed.py`). → **P0 #4 / P1 cleanup**.
 - **[high consistency]** HCP "static per-bucket keys from OpenBao" is **false** — HCP keys are tenant-wide

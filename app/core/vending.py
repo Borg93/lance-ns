@@ -130,6 +130,12 @@ class StaticPrefixVendor:
     ``keys_by_bucket`` maps a bucket name to the ``storage_options`` for that
     bucket (typically loaded from OpenBao). Returns ``None`` for an unknown
     bucket so the caller falls back to Mode B rather than vending nothing useful.
+
+    Applies to **S3 / MinIO / Ceph**, where you can provision a dedicated,
+    rotatable, least-privilege key per bucket. It does **not** model Hitachi
+    HCP: HCP has no per-bucket keys — its only credential is the user's
+    tenant-wide, non-expiring ``md5(password)``-derived identity key — so HCP
+    must use :class:`ModeBVendor`, not this vendor. (audit w8u4rc2tg)
     """
 
     mode: VendingMode = "static"

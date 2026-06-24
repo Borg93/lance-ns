@@ -762,7 +762,7 @@
       <div class="node" data-role="seed" data-id="openbao" style="left:51%; top:6%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="7.5" cy="15.5" r="5.5"/><path d="M11.5 11.5 21 2"/><path d="M18 2l3 3-3 3"/></svg></div>
         <div class="label">OpenBao</div>
-        <div class="tech">secrets · KV v2 · planned</div>
+        <div class="tech">secrets · KV v2 — catalog/lineage only</div>
         <span class="step-badge">·</span>
       </div>
 
@@ -886,8 +886,8 @@ pylance.create_table(location="s3://lance/alpha/bronze/images.lance")`, chips:["
   ("namespace:alpha$bronze", "parent", "table:alpha$bronze$images")
 ]`, chips:["grant_on_create"] },
       { from:"catalog", to:"client", color:"--c-user", title:"201 Created", route:"201",
-        desc:"Table created; the caller is its <em>owner</em> (⇒ writer ⇒ reader by the concentric model).",
-        payload:`{ "location": "...", "version": 1 }`, chips:["owner⇒writer⇒reader"] }
+        desc:"Table created; the caller is its <em>owner</em> (⇒ writer ⇒ reader by the concentric model). <em>Gap (P0):</em> no lineage is emitted on create — the only record of the creator is this OpenFGA <em>owner</em> tuple, which is an <em>access</em> fact, not an audit fact. Catalog-emitted create-lineage with a token-verified author is planned.",
+        payload:`{ "location": "...", "version": 1 }`, chips:["owner⇒writer⇒reader","no audit trail yet"] }
     ]
   },
 
@@ -909,7 +909,7 @@ Authorization: Bearer <JWT>`, chips:["describe"] },
   object:   "table:alpha$silver$features"
 }`, chips:["reader rung","cascade"] },
       { from:"catalog", to:"openbao", color:"--c-seed", title:"Fetch scoped key (planned)", route:"KV v2 read",
-        desc:"<em>S3 vending (planned):</em> the catalog reads the per-prefix storage key from OpenBao to mint/return scoped creds. <em>HCP · Mode B</em> needs no key — nothing is fetched here.",
+        desc:"<em>Secret-responsibility:</em> only the <em>catalog</em> (and the lineage svc) hold durable secrets in OpenBao — compute jobs never read it. <em>S3 vending (planned):</em> the catalog reads the per-prefix key here to mint scoped creds; <em>HCP · Mode B</em> fetches nothing.",
         payloadOnline:`GET secret/data/storage/lance        # OpenBao KV v2`,
         payloadOffline:`# Mode B: skipped — no credential is fetched or vended`,
         chips:["OpenBao","planned"] },
@@ -938,9 +938,9 @@ Authorization: Bearer <JWT>`, chips:["describe"] },
     name:"Promote (medallion)", note:"lance-ray bronze → silver → gold, then emit lineage",
     steps:[
       { from:"ray", to:"catalog", color:"--c-compute", title:"Describe bronze", route:"GET describe_table",
-        desc:"The promotion job is a <em>catalog client</em>, not an endpoint. It locates bronze and gets authorized to read.",
+        desc:"The promotion job is a <em>catalog client</em>, not an endpoint. It authenticates with <em>workload identity</em> (KubeRay SA / OIDC token) — <em>not</em> a vault secret — gets short-TTL scoped creds from the catalog, and <em>never touches OpenBao</em>.",
         payload:`GET /v1/table/alpha$bronze$images?vend_credentials=true
-Authorization: Bearer <service JWT>`, chips:["lance-ray job"] },
+Authorization: Bearer <workload-identity token>`, chips:["lance-ray job","workload identity"] },
       { from:"catalog", to:"openfga", color:"--c-vector", title:"Authorize read bronze", route:"check can_read_data",
         desc:"Role-as-subject: the job runs as a role whose members get read on bronze.",
         payload:`check {
@@ -958,13 +958,13 @@ Idempotency-Key: <run-uuid>      // check can_write_data`, chips:["can_write_dat
       { from:"ray", to:"store", color:"--c-vector", title:"Write silver", route:"write_lance(append)",
         desc:"The engine writes the new silver dataset version (immutable; old versions remain for time-travel).",
         payload:`write_lance("silver$features", mode="append")`, chips:["new version"] },
-      { from:"ray", to:"lineage", color:"--c-orch", title:"Emit OpenLineage", route:"POST /api/v1/lineage",
-        desc:"The job (not the catalog) emits a run event: inputs=[bronze], outputs=[silver], author=OIDC sub.",
+      { from:"ray", to:"lineage", color:"--c-orch", title:"Emit OpenLineage (planned)", route:"POST /api/v1/lineage",
+        desc:"<em>Planned / P0:</em> the job (not the catalog) emits a run event. Today ingest is <em>unauthenticated</em> and the <em>author is self-asserted</em> (a producer-set facet, NOT verified against a token) — so recorded authorship is forgeable until the ingest authz gate + server-side author derivation land.",
         payload:`{ "eventType":"COMPLETE",
   "job":{ "name":"lanceray_embed" },
   "run":{ "facets":{ "author":{ "name":"dee" } } },
   "inputs":[{"name":"alpha$bronze$images"}],
-  "outputs":[{"name":"alpha$silver$features"}] }`, chips:["OpenLineage"] },
+  "outputs":[{"name":"alpha$silver$features"}] }`, chips:["OpenLineage","planned","author unverified"] },
       { from:"lineage", to:"age", color:"--c-vector", title:"MERGE graph", route:"openCypher",
         desc:"Lineage upserts Run/Job/Dataset nodes + READ/WROTE/DERIVED_FROM edges. Dataset node name = catalog table:<id> — one identity across all three axes.",
         payload:`MERGE (r:Run)-[:WROTE]->(d:Dataset {name:"alpha$silver$features"})

@@ -47,6 +47,20 @@ authz on the catalog → creds via the vendor (Mode B today) → bytes moved by 
 emit an OpenLineage event. Layers are **separate Lance tables** (namespaces); promotion is a
 **compute client**, never a catalog endpoint.
 
+> ### ⚠️ Audit-verified corrections (`w8u4rc2tg`, 2026-06-24)
+> A grounded re-audit of the real code (full citations in §6 / [`../todo.md`](../todo.md)) refined three things:
+> - **Secret responsibility (least-privilege).** Only the **catalog** and **lineage svc** consume
+>   OpenBao. Compute jobs (**lance-ray**) never read it — they get short-TTL scoped creds *from the
+>   catalog* and authenticate with **workload identity** (KubeRay SA / OIDC token). The sketch showing
+>   only the catalog on OpenBao is intentional, not a missing wire.
+> - **HCP credential reality.** HCP has **no STS and no per-bucket/per-prefix keys** — its only key is
+>   the user's tenant-wide, non-expiring `md5(password)`-derived identity key (`ra-hcp …/auth_utils.py:37-38`).
+>   So **HCP is Mode B only**; the "static per-bucket keys from OpenBao" story applies to **S3 / MinIO**, not HCP.
+> - **Provenance is partial + not yet trustworthy.** The **catalog emits no lineage** (`grep app/` = 0 matches),
+>   so "who created the table" is *not* recorded as an audit fact (only an OpenFGA `owner` access tuple);
+>   and lineage **ingest is unauthenticated** with a **self-asserted author** → forgeable (latent today —
+>   the lineage svc is undeployed). All three are P0s in [`../todo.md`](../todo.md).
+
 ## 2. Component status
 
 | Component | What | Status |
@@ -203,7 +217,10 @@ Our production object store is **Hitachi HCP**: no STS, no IAM, no per-prefix po
 
 - **HCP data plane = Mode B (server-mediated) by default**, or **static per-bucket keys** when direct client I/O is required. `ModeBVendor.vend()` returns `None`, and clients fall back to the server-mediated (Arrow-IPC) data endpoints. Prod pins `LANCE_VENDING_MODE=mode_b`.
 - **STS credential vending is S3-family-only (AWS / MinIO / Ceph) and OPTIONAL.** It exists for dev (MinIO) and any future S3 deployment, never for HCP. All of Lakekeeper's expiring-credential machinery — revalidation windows, `/refresh-credentials`, `credentials_expiration_ms` gating of `304 Not Modified` — lives on this STS branch and is **off the HCP critical path**.
-- Static per-bucket keys (for the static vendor) and master/STS creds (for S3-family) are sourced from **OpenBao** (Vault-fork, KV v2), never from raw env in production.
+- Static per-bucket keys (for the static vendor) and master/STS creds are sourced from **OpenBao**
+  (Vault-fork, KV v2), never from raw env in production — **S3/MinIO only**. *HCP has no per-bucket
+  keys (only a tenant-wide `md5(password)` identity key), so on HCP this means Mode B, not static
+  vending — see the Audit corrections in §1.*
 
 Our `CredentialVendor` protocol (`app/core/vending.py`) already mirrors Lakekeeper's per-backend `TableConfig` abstraction: `ModeBVendor` / `StaticPrefixVendor` / `StsVendor`, returning `{storage_options, expires_at_millis}`. The remaining vending work is metadata-shape parity (separate `credentials` from static `config`; always set `expires_at_millis` when vending an expiring token), not new backends.
 

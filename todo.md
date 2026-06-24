@@ -3,9 +3,11 @@
 **Legend:** ✅ done · 🟡 in progress · ⛔ not started · 🔶 deferred
 **Priority:** `P0` security/correctness blocker · `P1` needed for prod · `P2` later
 
-> A grounded design audit (`w8u4rc2tg`) is verifying these against the real code with
-> `file:line` citations + adversarial refutation. Items already confirmed by direct code
-> scan are tagged **✔scan**; the audit will add verified items + severities when it lands.
+> Reconciled with the grounded audit **`w8u4rc2tg`** (4 read-only auditors → adversarial
+> verification → synthesis; **5/9 high-criticals confirmed**, all `file:line`-cited). Items tagged
+> **✔audit** are verified against the real code. Caveat: the lineage authz items are real but
+> currently **latent** — the lineage service is undeployed/unreachable today, so they are
+> **P0-on-deploy** rather than live prod exposure.
 
 ---
 
@@ -60,17 +62,25 @@
    so anyone can POST forged provenance and poison the audit graph. Require a service identity
    on ingest **and** set `author` = the authenticated principal (reject/override client-claimed
    author). **✔scan** `lineage/main.py`, `lineage/models.py`.
-3. ⛔ **Catalog emits lineage on create / insert / delete** with `author` = authenticated sub —
+3. ⛔ **Catalog emits lineage on create / insert / delete** with `author` = authenticated `token.sub` —
    *this is how "who created the table" actually gets logged authoritatively* (the catalog is the
    only component that knows the verified principal on every write). Catalog currently emits
-   **nothing** to lineage. **✔scan** (no `emit`/`openlineage` in `app/`). Touch: `app/api/v1/endpoints/tables.py`, `data.py`.
+   **nothing** to lineage. Add a first-class `(:User)-[:CREATED]->(:Dataset)` edge + the resulting
+   Lance `version` on the Dataset; wire emission **fire-and-forget** (async/NATS) so it never blocks
+   the commit. **✔audit** (no `emit`/`openlineage` anywhere in `app/`). Touch: `app/api/v1/endpoints/data.py`,
+   `tables.py`, `namespaces.py` (emit); `lineage/repository.py`, `models.py` (CREATED edge + version).
 4. ⛔ **Identity-consistency guard + test** — assert `table:<id>` is byte-identical across the
-   OpenFGA object id, the catalog table id, and the AGE `Dataset` node name. One drift breaks all
-   three governance axes. Touch: `app/core/identifiers.py`, `app/core/fga.py`, lineage naming.
+   OpenFGA object id, the catalog table id, and the AGE `Dataset` node name. The catalog delimiter is
+   **configurable** (`LANCE_NS_DELIMITER`, `config.py:28`) but lineage **hardcodes `$`** (`lineage/seed.py`)
+   → silent cross-axis mismatch under a non-default delimiter. **✔audit** (latent). Touch:
+   `app/core/identifiers.py`, `app/core/fga.py`, `lineage/config.py` (+ derive names from `canonical_object_id`).
 
 ### P1 — needed for prod
 5. ⛔ **Finish HCP Mode-B vendor** + wire `describe_table?vend_credentials=true`
    (OpenFGA-tiered: `can_read_data`→read, `can_write_data`→write). Default OFF. `app/core/vending.py`, `app/api/v1/endpoints/data.py`.
+   **Pin `LANCE_VENDING_MODE=mode_b` for HCP** and do **not** use `static` on HCP — HCP has no
+   per-bucket keys, only the user's tenant-wide `md5(password)` identity key (audit). *(vending.py
+   docstring corrected ✔audit.)*
 6. ⛔ **lance-ray promotion + compaction jobs** (bronze→silver→gold) on the KubeRay cluster,
    using the Mode-B/vending data plane **and** emitting OpenLineage (template: `lineage/seed.py`).
    This is the medallion flow end-to-end.
@@ -80,6 +90,17 @@
 9. ⛔ **Routes-vs-spec conformance test** — FastAPI routes ⊆ lance-namespace spec ops.
 10. ⛔ **Lineage version linkage** — record the Lance dataset **version** each run event maps to,
     so provenance and time-travel line up.
+
+### P1 — verified security/consistency cleanups (audit `w8u4rc2tg`)
+- ⛔ **OpenFGA tuple cleanup on drop / deregister / rename** — `app/core/fga.py` is **write-only**
+  (`write_tuples` issues `ClientWriteRequest(writes=…)`, no deletes); `drop_table`/`deregister_table`/
+  `drop_namespace`/`rename_table` leave stale `owner`/`parent` tuples → **stale-grant privilege bleed**
+  if an id is reused. Add a `ClientWriteRequest(deletes=…)` path + call on drop/deregister/rename.
+  **✔audit**. Touch: `app/core/fga.py`, `app/api/v1/endpoints/tables.py`, `namespaces.py`.
+- ⛔ **Wire or remove unused `can_list` / `can_alter` / `can_commit` / `can_rename`** — defined in
+  `app/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
+  Maintenance hazard: the model advertises finer granularity than enforcement implements. **✔audit**.
+  Touch: `app/api/fga_deps.py`, `app/auth/model.fga`.
 
 ### P2 — later / deferred
 11. 🔶 **Lineage events for delete/drop, schema evolution, compaction/maintenance** — complete
@@ -91,12 +112,22 @@
 
 ---
 
-## Security & consistency backlog (from the audit — provisional until `w8u4rc2tg` confirms)
-- Unauthenticated lineage **read** endpoints → data-estate disclosure *(P0 #1)*.
-- Unauthenticated lineage **ingest** + self-asserted author → provenance **forgery** *(P0 #2)*.
-- No authoritative record of **who created/changed a table** *(P0 #3)*.
-- `table:<id>` identity must be proven consistent across all three axes *(P0 #4)*.
-- HCP credential surface (STS vs presign vs static) must be verified before choosing its vendor.
+## Security & consistency backlog (verified — audit `w8u4rc2tg`, 5/9 high-criticals confirmed)
+Severity in brackets; "latent" = real but not live today (lineage svc undeployed).
+- **[high]** Lineage **read** endpoints (`upstream/downstream/producers/graph`) unauthenticated →
+  data-estate disclosure (`lineage/main.py:63-85`). → **P0 #1**.
+- **[high→latent]** Lineage **ingest** unauthenticated + `author` **self-asserted** (`lineage/main.py:51-60`,
+  `models.py:51-57`) → forgeable audit graph; `producers()` returns the spoofable author verbatim. → **P0 #2**.
+- **[high]** Catalog emits **no lineage** on any write → no audit record of **who created/changed a table**
+  (`grep app/` = 0). → **P0 #3**.
+- **[low→latent]** Lineage hardcodes `$` while catalog delimiter is configurable → cross-axis identity
+  mismatch (`config.py:28` vs `lineage/seed.py`). → **P0 #4 / P1 cleanup**.
+- **[high consistency]** HCP "static per-bucket keys from OpenBao" is **false** — HCP keys are tenant-wide
+  `md5(password)` identity keys, unrotatable, non-expiring (`ra-hcp …/auth_utils.py:37-38`). Docs +
+  `vending.py` docstring corrected; pin `mode_b`. → folded into **P1 #5**.
+- **[low security]** Stale OpenFGA tuples on drop/rename → stale-grant bleed. → **P1 cleanups**.
+- **positives (verified):** catalog OpenFGA enforcement is consistently **fail-closed**; lineage openCypher
+  is **injection-safe** (agtype bind params). *(Refuted/false-positive: 4/9 — adversarial filter working.)*
 
 ---
 

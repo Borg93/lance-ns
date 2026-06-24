@@ -174,7 +174,7 @@ def _log_retry(retry_state: RetryCallState) -> None:
     """Log each retry so a flapping OpenFGA is visible (silent retries hide outages)."""
     exc = retry_state.outcome.exception() if retry_state.outcome else None
     log.warning(
-        "openfga call retry",
+        "openfga_call_retry",
         extra={
             "attempt": retry_state.attempt_number,
             "exception_type": type(exc).__name__ if exc else None,
@@ -298,7 +298,7 @@ async def check(
     try:
         return await _do_check()
     except _FAIL_CLOSED as exc:
-        log.error("openfga check unavailable for %s on %s: %s", relation, obj, exc)
+        log.error("openfga_check_unavailable", extra={"relation": relation, "object": obj}, exc_info=True)
         raise ServiceUnavailableError("authorization service unavailable") from exc
 
 
@@ -328,7 +328,7 @@ async def batch_check(
     try:
         return await _do_batch_check()
     except _FAIL_CLOSED as exc:
-        log.error("openfga batch_check unavailable for %s: %s", relation, exc)
+        log.error("openfga_batch_check_unavailable", extra={"relation": relation}, exc_info=True)
         raise ServiceUnavailableError("authorization service unavailable") from exc
 
 
@@ -358,7 +358,11 @@ async def list_objects(
     try:
         return await _do_list_objects()
     except _FAIL_CLOSED as exc:
-        log.error("openfga list_objects unavailable for %s %s: %s", relation, object_type, exc)
+        log.error(
+            "openfga_list_objects_unavailable",
+            extra={"relation": relation, "object_type": object_type},
+            exc_info=True,
+        )
         raise ServiceUnavailableError("authorization service unavailable") from exc
 
 
@@ -399,9 +403,9 @@ async def write_tuples(
         await _do_write()
     except _FAIL_CLOSED as exc:
         if isinstance(exc, ApiException) and _is_duplicate_write(exc):
-            log.debug("openfga write skipped — tuple(s) already exist")
+            log.debug("openfga_write_duplicate_skipped")
             return
-        log.error("openfga write unavailable: %s", exc)
+        log.error("openfga_write_unavailable", exc_info=True)
         raise ServiceUnavailableError("authorization service unavailable") from exc
 
 

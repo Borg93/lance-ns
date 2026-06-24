@@ -5,9 +5,12 @@
 
 > Reconciled with the grounded audit **`w8u4rc2tg`** (4 read-only auditors → adversarial
 > verification → synthesis; **5/9 high-criticals confirmed**, all `file:line`-cited). Items tagged
-> **✔audit** are verified against the real code. Caveat: the lineage authz items are real but
-> currently **latent** — the lineage service is undeployed/unreachable today, so they are
-> **P0-on-deploy** rather than live prod exposure.
+> **✔audit** are verified against the real code. Caveat: the lineage authz items were real but
+> currently **latent** — the lineage service is undeployed/unreachable today.
+>
+> **Update:** P0 #1 + #2 (lineage read/ingest authz) are now **implemented + adversarially
+> reviewed** (audit `wi2l437mq`, verdict ship-with-nits; mediums fixed). Default OFF — prod must
+> enable `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED`.
 
 ---
 
@@ -26,6 +29,12 @@
   `upstream/downstream/producers/graph`; dataset name = catalog `table:<id>`; injection-safe
   Cypher (agtype bind params). **Open holes below.**
 - ✅ Interactive system diagram — `docs/system-diagram.html` + `docs/system-diagram.md`.
+- ✅ **Lineage auth (P0 #1/#2)** — in-service OIDC + OpenFGA `can_get_metadata` gate on all reads
+  (+ `batch_check` transitive-disclosure filtering via `DatasetFilter`) and ingest authn +
+  verified-author binding; reuses the catalog's verifier/check. Default OFF, fail-closed.
+  `lineage/auth.py`, `lineage/config.py`, `lineage/main.py` (reviewed by audit `wi2l437mq`).
+- ✅ **Structured logging standardized** repo-wide (event-name + `extra=`, level discipline per
+  `observability.md`) + authz-decision audit logging (`access_denied`) in catalog + lineage.
 
 ---
 
@@ -54,14 +63,18 @@
 ## Next (priority order)
 
 ### P0 — security / correctness (do first)
-1. ⛔ **Lineage READ authz** — gate `upstream/downstream/producers/graph` with OIDC +
-   OpenFGA `can_get_metadata` on `table:<id>`. Reuse `app/core/oidc.py` + `app/core/fga.py`.
-   *Today these are unauthenticated → they leak the entire data estate.* **✔scan** `lineage/main.py`.
-2. ⛔ **Lineage INGEST authz + verified author (anti-forgery)** — the ingest endpoint is
-   unauthenticated and the author is **self-asserted** (`lineage/seed.py:79` → `lineage/models.py:52`),
-   so anyone can POST forged provenance and poison the audit graph. Require a service identity
-   on ingest **and** set `author` = the authenticated principal (reject/override client-claimed
-   author). **✔scan** `lineage/main.py`, `lineage/models.py`.
+1. ✅ **Lineage READ authz** — `upstream/downstream/producers/graph` gated on OIDC +
+   OpenFGA `can_get_metadata` on `table:<name>`, reusing the catalog's `OIDCVerifier` +
+   `fga.check` (`lineage/auth.py`, `lineage/main.py`). Default OFF, fail-closed when enabled.
+   **Plus** transitive-disclosure filtering: related/graph datasets the caller can't see are
+   dropped via `fga.batch_check` (`DatasetFilter`), mirroring the catalog's `list_objects`
+   filtering. *(audit `w8u4rc2tg` follow-up; reviewed by `wi2l437mq`.)* **Prod must set
+   `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED`.**
+2. ✅ **Lineage INGEST authz + verified author (anti-forgery)** — ingest requires a verified
+   token (401 otherwise) and `enforce_author` binds `author` = `token.sub`, overwriting any
+   body-claimed facet (`lineage/auth.py`, `lineage/main.py`). Tested end-to-end so deleting the
+   bind regresses a test. *(Remaining: optional FGA authz that the producer may write the named
+   outputs — attributable today, not yet output-scoped.)*
 3. ⛔ **Catalog emits lineage on create / insert / delete** with `author` = authenticated `token.sub` —
    *this is how "who created the table" actually gets logged authoritatively* (the catalog is the
    only component that knows the verified principal on every write). Catalog currently emits
@@ -114,10 +127,11 @@
 
 ## Security & consistency backlog (verified — audit `w8u4rc2tg`, 5/9 high-criticals confirmed)
 Severity in brackets; "latent" = real but not live today (lineage svc undeployed).
-- **[high]** Lineage **read** endpoints (`upstream/downstream/producers/graph`) unauthenticated →
-  data-estate disclosure (`lineage/main.py:63-85`). → **P0 #1**.
-- **[high→latent]** Lineage **ingest** unauthenticated + `author` **self-asserted** (`lineage/main.py:51-60`,
-  `models.py:51-57`) → forgeable audit graph; `producers()` returns the spoofable author verbatim. → **P0 #2**.
+- ✅ **[high]** Lineage **read** endpoints unauthenticated → data-estate disclosure. **FIXED** —
+  OIDC + `can_get_metadata` gate + `batch_check` transitive-disclosure filter (`lineage/auth.py`). → **P0 #1**.
+- ✅ **[high→latent]** Lineage **ingest** unauthenticated + `author` **self-asserted** → forgeable
+  audit graph. **FIXED** — ingest requires a verified token; `enforce_author` binds `author`=`token.sub`
+  (`lineage/auth.py`, `lineage/main.py`). → **P0 #2**. *(Remaining: optional output-scoped ingest authz.)*
 - **[high]** Catalog emits **no lineage** on any write → no audit record of **who created/changed a table**
   (`grep app/` = 0). → **P0 #3**.
 - **[low→latent]** Lineage hardcodes `$` while catalog delimiter is configurable → cross-axis identity

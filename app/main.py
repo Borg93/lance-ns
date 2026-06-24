@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         store_id, model_id = settings.fga_store_id, settings.fga_model_id
         if not (store_id and model_id):
             store_id, model_id = await fga.provision(settings.fga_api_url)
-            log.info("provisioned OpenFGA store=%s model=%s", store_id, model_id)
+            log.info("openfga_provisioned", extra={"store_id": store_id, "model_id": model_id})
         app.state.fga = fga.make_client(
             settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
         )
@@ -79,7 +79,9 @@ app.middleware("http")(maintenance_middleware)
 async def handle_domain_error(request: Request, exc: LanceNamespaceError) -> JSONResponse:
     status, body = problem_detail(exc)
     if status >= 500:
-        log.exception("domain error on %s %s", request.method, request.url.path)
+        log.exception(
+            "domain_error", extra={"method": request.method, "path": request.url.path, "status": status}
+        )
     return JSONResponse(status_code=status, content=body, media_type=PROBLEM_JSON)
 
 
@@ -103,7 +105,7 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
 @app.exception_handler(Exception)
 async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
     # Internals (native/Arrow/S3 error text, paths) leak via logs only — never the body.
-    log.exception("unhandled error on %s %s", request.method, request.url.path)
+    log.exception("unhandled_error", extra={"method": request.method, "path": request.url.path})
     return JSONResponse(
         status_code=500,
         content={

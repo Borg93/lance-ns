@@ -38,15 +38,19 @@ compute/ETL jobs ─POST /api/v1/lineage─▶ lineage svc ──owns──▶ A
 
 The dataset node's `name` **is** the catalog table id (e.g. `bronze$images`), so the same
 object is governed by OpenFGA, versioned by Lance, and traced here — one identity across all
-three axes. (Read-side authz — gating lineage views by `can_get_metadata` on `table:<id>`
-via the shared OpenFGA store — is the planned next step; see the next section.)
+three axes. Read-side authz — gating lineage views by `can_get_metadata` on `table:<id>`
+via the shared OpenFGA store — is now **implemented** (see the next section).
 
-## Read-side authz (planned — query endpoints are open today)
+## Read-side authz (implemented — in-service, default OFF)
 
-> ⚠️ **Today the query endpoints are unauthenticated** — anyone who can reach the service can
-> read any dataset's lineage. This is the top item on §Next.
+> ✅ **Implemented** (audit `w8u4rc2tg` P0; reviewed by `wi2l437mq`). The query + ingest
+> endpoints are gated in-service (`lineage/auth.py`), **default OFF** like the catalog — set
+> `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED` (+ the shared `LINEAGE_FGA_STORE_ID` /
+> `LINEAGE_FGA_MODEL_ID`) in production. Ingest also requires a verified token and binds the run
+> author to it (no forged provenance), and related/graph datasets the caller can't see are
+> filtered out (`DatasetFilter`, via `fga.batch_check`).
 
-The gate, when added, is two layers — the same the catalog already applies to `describe table`:
+The gate is two layers — the same the catalog applies to `describe table`:
 
 1. **OIDC (who are you?)** — require a valid Bearer JWT verified against the IdP (Dex); no /
    invalid token → **401**.
@@ -68,8 +72,9 @@ stays the single source of truth for who-can.
 
 **Alternative — gateway gating.** Keep lineage dependency-free and enforce `can_get_metadata`
 at the gateway / SSR layer instead; lineage stays open behind it. Weaker boundary (lineage
-trusts the gateway) but zero OpenFGA/OIDC dependency in the service. Decide between in-service
-and gateway gating when this is picked up.
+trusts the gateway) but zero OpenFGA/OIDC dependency in the service. **Decision: in-service**
+(implemented above) — the lineage service owns the audit graph, so it enforces its own
+boundary rather than trusting a gateway.
 
 ## Relation to Marquez (what we kept, what we made lighter)
 
@@ -126,8 +131,8 @@ Layered, no raw Cypher in the endpoints:
 OpenLineage default, any OpenLineage-instrumented producer (our emitter, Airflow, Spark, dbt)
 pointed here with `OPENLINEAGE_URL` ingests with no glue.
 
-> ⚠️ The query endpoints are **unauthenticated today** — gating them is the top §Next item;
-> see [Read-side authz](#read-side-authz-planned--query-endpoints-are-open-today).
+> ✅ The query + ingest endpoints are **gated in-service** (default OFF; enable in prod) — see
+> [Read-side authz](#read-side-authz-implemented--in-service-default-off).
 
 ## Mock medallion data (a real OpenLineage producer)
 
@@ -177,9 +182,11 @@ LINEAGE_DATABASE_URL=postgresql://lineage:lineage@localhost:5433/lineage \
 
 ## Next
 
-- **Read-side authz** *(top priority — endpoints are open today)*: gate reads with OIDC +
-  OpenFGA `can_get_metadata` on `table:<id>` (in-service), or at the gateway. Full design +
-  the in-service-vs-gateway tradeoff in the **Read-side authz** section above.
+- ✅ **Read-side authz** — done (in-service OIDC + OpenFGA `can_get_metadata`, ingest author
+  binding, transitive-disclosure filtering). Default OFF; enable in prod. See **Read-side authz** above.
+- **Output-scoped ingest authz** — additionally check the producer may write the named output
+  tables (`can_write_data`), not just that it is authenticated. Attributable today, not yet scoped.
+- **Deploy** the service (compose + image) so the gate is actually in front of traffic.
 - **Async ingest at scale:** jobs publish OpenLineage to NATS; the service consumes
   (same owner, just decoupled). Direct `POST /api/v1/lineage` is fine until then.
 - **Frontend:** an SSR micro-frontend renders the DAG by calling `/graph` via the gateway

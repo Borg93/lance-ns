@@ -23,6 +23,8 @@ named table. Fail-closed twice over: an unwired client raises 503 here, and
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import Request
 from lance_namespace import (
     PermissionDeniedError,
@@ -37,6 +39,8 @@ from app.core import fga
 from app.core.config import Settings
 from app.core.identifiers import parse_identifier
 from app.core.oidc import IDToken
+
+log = logging.getLogger(__name__)
 
 # Guarded resource prefixes, in match order. ``materialized_view`` and ``transaction`` have
 # no dedicated FGA type yet, so they are scoped to the ``table`` type (stopgap).
@@ -144,6 +148,7 @@ def _create_parent_check(
 async def _require(client: OpenFgaClient, *, user: str, relation: str, obj: str) -> None:
     """Check one ``relation`` on ``obj`` and raise 403 on denial."""
     if not await fga.check(client, user=user, relation=relation, obj=obj):
+        log.info("access_denied", extra={"sub": user, "relation": relation, "object": obj})
         raise PermissionDeniedError(f"{relation} required on {obj}")
 
 
@@ -209,6 +214,7 @@ async def _authorize_batch(request: Request, client: OpenFgaClient, settings: Se
         if not await fga.check(client, user=user, relation=relation, obj=obj):
             denied.append(obj)
     if denied:
+        log.info("access_denied", extra={"sub": user, "objects": sorted(denied)})
         raise PermissionDeniedError(f"permission denied on {', '.join(sorted(denied))}")
 
 

@@ -668,15 +668,15 @@
   <!-- 1. Top-of-page text. Change SYSTEM_NAME, the accented words, and the subtitle. -->
   <span class="eyebrow"><span class="dot"></span> Lance REST Catalog</span>
   <h1>Lance Namespace Catalog <span class="accent">control · data · provenance</span></h1>
-  <p class="sub">Three planes, three governance axes, one identity (table:&lt;id&gt;). Toggle the data-plane mode (HCP · Mode B vs S3 · Vending) and pick a flow to watch it run, step by step.</p>
+  <p class="sub">Three planes, three governance axes, one identity (table:&lt;id&gt;). Toggle the data-plane mode (Mode B server-mediated vs STS vending) on MinIO/S3 and pick a flow to watch it run, step by step.</p>
 </header>
 
 <div class="controls">
   <!-- 2. Mode toggle. Rename or add a 3rd button if you have 3 modes.
        data-mode values become keys in JS — keep them snake_case. -->
   <div class="modepick" role="tablist" aria-label="Deployment mode">
-    <button data-mode="offline" aria-pressed="true">HCP · Mode B <span class="pill">prod</span></button>
-    <button data-mode="online"  aria-pressed="false">S3 · Vending <span class="pill">dev / S3</span></button>
+    <button data-mode="offline" aria-pressed="true">Mode B <span class="pill">server-mediated</span></button>
+    <button data-mode="online"  aria-pressed="false">STS vending <span class="pill">S3 direct</span></button>
   </div>
 
   <!-- 3. Legend. One .item per role used in the diagram. Order = visual priority. -->
@@ -783,8 +783,8 @@
 
       <div class="node" data-role="vector" data-id="store" style="left:76%; top:40%;">
         <div class="icon"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14a9 3 0 0 0 18 0V5"/><path d="M3 12a9 3 0 0 0 18 0"/></svg></div>
-        <div class="label" data-label-offline="Hitachi HCP" data-label-online="MinIO / S3">Hitachi HCP</div>
-        <div class="tech" data-tech-offline="S3 API · no STS" data-tech-online="S3 + STS">S3 API · no STS</div>
+        <div class="label">MinIO / S3</div>
+        <div class="tech" data-tech-offline="via catalog (Mode B)" data-tech-online="STS AssumeRole">via catalog (Mode B)</div>
         <span class="step-badge">·</span>
       </div>
 
@@ -875,10 +875,7 @@ Content-Type: application/vnd.apache.arrow.stream`, chips:["Arrow IPC","OIDC"] }
 }`, chips:["create-on-parent"] },
       { from:"catalog", to:"store", color:"--c-vector", title:"Create dataset + record", route:"DirectoryNamespace.create_table",
         desc:"Catalog creates the Lance dataset location and records the table. Control-plane only — the dataset starts at version 1.",
-        payloadOffline:`# HCP (prod)
-pylance.create_table(location="hcp://bucket/alpha/bronze/images.lance")`,
-        payloadOnline:`# MinIO / S3 (dev)
-pylance.create_table(location="s3://lance/alpha/bronze/images.lance")`, chips:["control plane"] },
+        payload:`pylance.create_table(location="s3://lance/alpha/bronze/images.lance")`, chips:["control plane"] },
       { from:"catalog", to:"openfga", color:"--c-vector", title:"Seed ownership + parent", route:"write tuples",
         desc:"<em>grant_on_create</em> seeds the owner grant + the parent edge, so the new table inherits the cascade (owner ⇒ writer ⇒ reader).",
         payload:`write [
@@ -917,16 +914,16 @@ Authorization: Bearer <JWT>`, chips:["describe"] },
   object:   "table:alpha$silver$features"
 }`, chips:["reader rung","cascade"] },
       { from:"catalog", to:"openbao", color:"--c-seed", title:"Fetch scoped key (planned)", route:"KV v2 read",
-        desc:"<em>Secret-responsibility:</em> only the <em>catalog</em> (and the lineage svc) hold durable secrets in OpenBao — compute jobs never read it. <em>S3 vending (planned):</em> the catalog reads the per-prefix key here to mint scoped creds; <em>HCP · Mode B</em> fetches nothing.",
+        desc:"<em>Secret-responsibility:</em> only the <em>catalog</em> (and the lineage svc) hold durable secrets in OpenBao — compute jobs never read it. <em>STS vending (planned):</em> the catalog reads its base/role credential here to mint scoped STS creds; <em>Mode B</em> (server-mediated) fetches nothing.",
         payloadOnline:`GET secret/data/storage/lance        # OpenBao KV v2`,
         payloadOffline:`# Mode B: skipped — no credential is fetched or vended`,
         chips:["OpenBao","planned"] },
       { from:"catalog", to:"store", color:"--c-vector", title:"Locate (+ vend creds)", route:"describe -> location",
-        desc:"The catalog returns the dataset location. <em>S3:</em> it also mints a short-TTL, table-scoped STS token. <em>HCP:</em> no STS exists, so it returns only the location.",
-        payloadOffline:`# HCP · Mode B
-{ "location": "hcp://.../images.lance",
+        desc:"The catalog returns the dataset location. <em>STS vending:</em> it also mints a short-TTL, table-scoped STS token (AssumeRole). <em>Mode B:</em> it returns only the location; data flows server-mediated.",
+        payloadOffline:`# Mode B (server-mediated)
+{ "location": "s3://.../images.lance",
   "storage_options": {} }      // no creds vended`,
-        payloadOnline:`# S3 · Vending
+        payloadOnline:`# STS vending
 { "location": "s3://.../features.lance",
   "storage_options": {
     "access_key_id": "...", "secret_access_key": "...",
@@ -934,10 +931,10 @@ Authorization: Bearer <JWT>`, chips:["describe"] },
   "expires_at_millis": 1750000000000 }`,
         chipsOffline:["Mode B","no creds leave catalog"], chipsOnline:["STS scoped","~15m TTL"] },
       { from:"client", to:"store", color:"--c-vector", title:"Read data", route:"GET object(s)",
-        desc:"<em>S3 · Vending:</em> the client reads the dataset <em>directly</em> with the vended token (shown). <em>HCP · Mode B:</em> there are no client creds — this read instead goes through the catalog's Arrow-IPC query endpoint (catalog reads HCP server-side).",
+        desc:"<em>STS vending:</em> the client reads the dataset <em>directly</em> with the vended token (shown). <em>Mode B:</em> there are no client creds — this read instead goes through the catalog's Arrow-IPC query endpoint (catalog reads S3 server-side).",
         payloadOnline:`GET s3://.../features.lance/*   (object_store, vended STS)`,
         payloadOffline:`POST /v1/table/alpha$silver$features/query  -> Arrow
-# catalog reads HCP on the client's behalf (server-mediated)`,
+# catalog reads S3 on the client's behalf (server-mediated)`,
         chipsOffline:["server-mediated"], chipsOnline:["direct","object_store"] }
     ]
   },

@@ -1,0 +1,62 @@
+# RustFS (Rust, S3-compatible) as the object store instead of MinIO — proves the catalog is
+# storage-agnostic: the SAME storage-agnostic lifecycle e2e (tests/e2e/test_e2e.py) passes whether
+# the bytes live on MinIO or RustFS. RustFS is S3 + boto3 compatible (sig v4, **path-style only** —
+# which is already our default LANCE_S3_VIRTUAL_HOSTED=false).
+#
+#   docker compose -f .docker/docker-compose.yml -f .docker/docker-compose.rustfs.yml up -d
+#   ./scripts/rustfs_e2e.sh
+#
+# NOTE: RustFS supports STS AssumeRole but (per the maintainers, Dec 2025) not yet inline/ARN policy
+# scoping — temp creds inherit the user's permissions. So on RustFS use mode_b/static vending, not
+# per-table STS scoping, until that lands. This e2e exercises the data path, not vending.
+services:
+  # Gate the base MinIO services off (this overlay swaps in RustFS).
+  minio:
+    profiles: ["disabled-by-rustfs-overlay"]
+  createbuckets:
+    profiles: ["disabled-by-rustfs-overlay"]
+
+  rustfs:
+    # VERIFY image/command/env against https://hub.docker.com/r/rustfs/rustfs if a knob differs;
+    # the catalog only needs an S3 endpoint on :9000 with these keys + path-style addressing.
+    image: rustfs/rustfs:latest
+    container_name: lance-rustfs
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfssecret
+    volumes:
+      - rustfs-data:/data
+    ports:
+      - "9000:9000"
+
+  # Bucket bootstrap via the MinIO client (mc speaks plain S3, so it works against RustFS too).
+  # Retries until RustFS answers, then creates the catalog bucket — readiness gate for the server.
+  createbuckets-rustfs:
+    image: minio/mc:latest
+    container_name: lance-rustfs-init
+    depends_on:
+      - rustfs
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set rfs http://rustfs:9000 rustfsadmin rustfssecret >/dev/null 2>&1; do
+        echo 'waiting for rustfs...'; sleep 2;
+      done &&
+      mc mb --ignore-existing rfs/lance-catalog &&
+      echo 'bucket lance-catalog ready on rustfs';
+      "
+
+  server:
+    # !override replaces the base server's depends_on (minio/createbuckets) so the profile-gated
+    # MinIO services aren't referenced (needs Docker Compose v2.24+).
+    depends_on: !override
+      createbuckets-rustfs:
+        condition: service_completed_successfully
+    environment:
+      LANCE_S3_ENDPOINT: http://rustfs:9000
+      LANCE_S3_ACCESS_KEY_ID: rustfsadmin
+      LANCE_S3_SECRET_ACCESS_KEY: rustfssecret
+      LANCE_S3_ALLOW_HTTP: "true"
+      LANCE_S3_VIRTUAL_HOSTED: "false"   # RustFS is path-style only
+
+volumes:
+  rustfs-data:

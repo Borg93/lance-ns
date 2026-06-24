@@ -45,16 +45,23 @@
   → `(:User)-[:CREATED]->(:Dataset)` + `GET /datasets/{id}/creator`. Default OFF, fire-and-forget.
 - ✅ **Lineage service deployed** (`lineage-api`, P1 #8) + **governance demo/e2e** — `scripts/governance_demo.py`
   (narrated) + `tests/e2e/test_governance_e2e.py` (gated) + `scripts/governance_e2e.sh` over the full stack.
+- ✅ **HCP dropped → S3-compatible only** (MinIO default; AWS / Ceph RGW / RustFS / GCS-interop). Code +
+  docs + diagram reframed to **Mode B (server-mediated) vs STS vending**. RustFS storage-agnostic e2e:
+  `.docker/docker-compose.rustfs.yml` + `scripts/rustfs_e2e.sh` (same lifecycle test, bytes on RustFS).
 
 ---
 
 ## Decisions locked
 - **Secret manager:** OpenBao (Vault-API / KV-v2 compatible).
-- **Prod object store reality = Hitachi HCP** (S3 API via boto3; **NOT** the long-term target).
+- **Object store = S3-compatible** (MinIO is the default test backend; AWS S3, Ceph RGW, RustFS,
+  GCS-via-interop). HCP was dropped — no non-standard backends.
 - **Data plane = vending-first, pluggable `CredentialVendor`:**
-  - MinIO/S3 target → **`StsVendor`** (short-TTL, per-table scoped) — the optimized path.
-  - HCP → **`ModeBVendor`** (server-mediated; no credential leaves the catalog) or
-    **`StaticPrefixVendor`** (per-bucket key from OpenBao) — pending HCP's real cred surface (audit).
+  - **`StsVendor`** (short-TTL, per-table-scoped `AssumeRole`) — the **recommended path**; works on
+    any STS-capable S3 (MinIO, Ceph RGW, AWS).
+  - **`ModeBVendor`** (server-mediated; no credential leaves the catalog) — the simple,
+    backend-agnostic default (nothing delegated).
+  - **`StaticPrefixVendor`** (static per-bucket key from OpenBao) — for S3 backends without STS
+    (e.g. GCS interop).
   - Presigned URLs ruled out (don't fit Lance `object_store`: LIST + many-GET).
 - **Credential / secret responsibility (least privilege)** — *this is why only the catalog
   touches OpenBao in the sketch; it is by design, not an omission:*
@@ -97,11 +104,12 @@
    non-default delimiter. Touch: `lineage/config.py`, `lineage/seed.py` + a test.
 
 ### P1 — needed for prod
-5. ⛔ **Finish HCP Mode-B vendor** + wire `describe_table?vend_credentials=true`
+5. ⛔ **Wire the credential vendor** into `describe_table?vend_credentials=true`
    (OpenFGA-tiered: `can_read_data`→read, `can_write_data`→write). Default OFF. `app/core/vending.py`, `app/api/v1/endpoints/data.py`.
-   **Pin `LANCE_VENDING_MODE=mode_b` for HCP** and do **not** use `static` on HCP — HCP has no
-   per-bucket keys, only the user's tenant-wide `md5(password)` identity key (audit). *(vending.py
-   docstring corrected ✔audit.)*
+   **`StsVendor` is the recommended path** (MinIO/Ceph/AWS all implement STS `AssumeRole` + inline
+   session policy → short-TTL table-scoped creds). `mode_b` (server-mediated) stays the safe OOTB
+   default; `static` for S3 backends without STS (GCS interop). Point the STS client at the S3
+   endpoint via `LANCE_S3_STS_ENDPOINT` + `LANCE_S3_ASSUME_ROLE_ARN`.
 6. ⛔ **lance-ray promotion + compaction jobs** (bronze→silver→gold) on the KubeRay cluster,
    using the Mode-B/vending data plane **and** emitting OpenLineage (template: `lineage/seed.py`).
    This is the medallion flow end-to-end.
@@ -146,9 +154,9 @@ Severity in brackets; "latent" = real but not live today (lineage svc undeployed
   (`app/core/lineage_emit.py`). → **P0 #3**. *(Remaining: insert/delete/compaction → P2.)*
 - **[low→latent]** Lineage hardcodes `$` while catalog delimiter is configurable → cross-axis identity
   mismatch (`config.py:28` vs `lineage/seed.py`). → **P0 #4 / P1 cleanup**.
-- **[high consistency]** HCP "static per-bucket keys from OpenBao" is **false** — HCP keys are tenant-wide
-  `md5(password)` identity keys, unrotatable, non-expiring (`ra-hcp …/auth_utils.py:37-38`). Docs +
-  `vending.py` docstring corrected; pin `mode_b`. → folded into **P1 #5**.
+- ✅ **[resolved — HCP dropped]** The old "HCP has no STS / static-keys-only" constraint no longer
+  applies: the target is **S3-compatible only** (MinIO/Ceph/AWS), all of which implement STS. `StsVendor`
+  is the recommended path → **P1 #5**.
 - **[low security]** Stale OpenFGA tuples on drop/rename → stale-grant bleed. → **P1 cleanups**.
 - **positives (verified):** catalog OpenFGA enforcement is consistently **fail-closed**; lineage openCypher
   is **injection-safe** (agtype bind params). *(Refuted/false-positive: 4/9 — adversarial filter working.)*

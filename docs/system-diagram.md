@@ -14,7 +14,7 @@ gap register + Lakekeeper diff see [`SYSTEM-SKETCH.md`](./SYSTEM-SKETCH.md).
 
 > **What the HTML adds:** pick a flow tab, press **Space** to play, and watch each request hop
 > light up one wire + one node with its real payload on the side panel. Toggle the **data-plane
-> mode** to see how the *same* operation changes shape on HCP vs S3. Click any node to jump to
+> mode** to see how the *same* operation changes shape between Mode B and STS vending. Click any node to jump to
 > where it first appears; drag to re-layout; **T** = light/dark, **F** = fullscreen.
 
 ---
@@ -28,7 +28,7 @@ graph node (how/who). The diagram is built around that single identity threading
 | Plane | Question | Component in the diagram |
 |---|---|---|
 | **Control** | who may, where is it | **Catalog** (FastAPI/pylance) + **OIDC** + **OpenFGA** |
-| **Data** | the bytes | **Object store** (HCP / MinIO·S3), reached by **Mode B** or **Vending** |
+| **Data** | the bytes | **Object store** (MinIO / S3-compatible), reached by **Mode B** (server-mediated) or **STS vending** |
 | **Provenance** | how/who did it change | **Lineage svc** (OpenLineage) → **AGE graph** *(catalog create-events + job-emitted)* |
 
 > ✅ **Provenance records the verified principal (audit `w8u4rc2tg` P0 #2/#3).** The catalog emits
@@ -45,23 +45,24 @@ graph node (how/who). The diagram is built around that single identity threading
 Modes are **not** alternate flows; they're the deployment shape of the *data plane*. The same
 flow runs in both — only the credential/byte-path changes.
 
-| | **HCP · Mode B** *(default, prod reality)* | **S3 · Vending** *(dev / S3-family target)* |
+| | **Mode B** *(server-mediated, default)* | **STS vending** *(S3 direct, recommended)* |
 |---|---|---|
-| Object store | Hitachi HCP — S3 API, **no STS** | MinIO / Ceph / S3 — **STS** |
-| Credential | **none leaves the catalog** | short-TTL, table-scoped **STS token** |
+| Object store | MinIO / S3-compatible (AWS, Ceph RGW, RustFS) | same — any STS-capable S3 (MinIO / Ceph / AWS) |
+| Credential | **none leaves the catalog** | short-TTL, table-scoped **STS token** (`AssumeRole`) |
 | Byte path | **server-mediated** (catalog reads on the client's behalf) | client reads storage **directly** with the vended token |
-| OpenBao | not consulted per-request | catalog reads **its own** base key to mint STS (planned) |
+| OpenBao | not consulted per-request | catalog reads its base/role credential to mint STS (planned) |
 
-HCP is today's *reality*, not the long-term *target* — so the design is **vending-first** with a
-pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPrefixVendor` /
-`StsVendor`), and Mode B is the most-secure option achievable where STS doesn't exist.
+The target is **S3-compatible storage** — MinIO is the default test backend; AWS S3, Ceph RGW,
+RustFS, GCS-via-interop all work the same way. The design is **vending-first** with a pluggable
+`CredentialVendor` (`app/core/vending.py`: `StsVendor` / `StaticPrefixVendor` / `ModeBVendor`).
+The toggle is the *credential-delivery* shape — both modes run on the **same** S3 storage.
 
-> ⚠️ **HCP credential reality (audit `w8u4rc2tg`).** HCP has **no STS** and **no per-bucket / per-prefix
-> keys**. Its only key material is the *user's own* identity key — `access_key=base64(username)`,
-> `secret_key=md5(password)` (`ra-hcp .../auth_utils.py:37-38`) — long-lived, unrotatable without a
-> password change, and **tenant-wide**. So on HCP "static" would mean handing out a full-privilege
-> identity key, *not* a scoped per-bucket key. **HCP is Mode B only**; the "static per-bucket keys
-> from OpenBao" story applies to **S3 / MinIO**, never HCP.
+> ℹ️ **STS works on MinIO** (and Ceph RGW, AWS): `StsVendor` points boto3's STS client at the S3
+> endpoint and calls `AssumeRole` with an inline session policy scoped to the table's bucket/prefix
+> → a short-TTL `{access_key, secret_key, session_token}`. For a backend without STS *or without
+> inline-policy scoping* — GCS interop, or **RustFS** (which has `AssumeRole` but not ARN/policy
+> scoping *yet*, Dec 2025) — use `StaticPrefixVendor`/`ModeBVendor`. That's the point of pluggable
+> vending. *(RustFS lifecycle e2e: `scripts/rustfs_e2e.sh`.)*
 
 > 🔑 **Who holds secrets (least-privilege).** Only the **catalog** and **lineage svc** consume OpenBao.
 > Compute jobs (**lance-ray**) **never** read OpenBao — they get short-TTL scoped creds *from the
@@ -80,7 +81,7 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 | **OpenBao** | seed (orange) | secrets · KV v2 — **catalog + lineage only**; jobs use workload identity (planned) |
 | **Catalog** | orch (sky) | FastAPI over native `pylance` `DirectoryNamespace`; the control plane |
 | **OpenFGA** | vector (violet) | authz (Postgres) — `can_*` actions, concentric owner⊇writer⊇reader, parent cascade |
-| **Object store** | vector (violet) | the data plane — HCP (prod) or MinIO/S3 (dev), label/tech swap by mode |
+| **Object store** | vector (violet) | the data plane — MinIO / S3-compatible; the mode toggle swaps the credential path (Mode B vs STS), not the backend |
 | **Lineage svc** | orch (sky) | FastAPI; ingests OpenLineage, serves upstream/downstream/producers/graph |
 | **AGE graph** | vector (violet) | Apache AGE (Postgres) — the provenance DAG, queried with openCypher |
 
@@ -102,7 +103,7 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 2. **Catalog → OIDC** — verify token.
 3. **Catalog → OpenFGA** — `check can_read_data` (reader rung; cascades).
 4. **Catalog → OpenBao** *(planned, S3 only)* — read the catalog's **own base key** to mint an STS token; **Mode B fetches nothing** (compute jobs never read OpenBao — see the Secrets note above).
-5. **Catalog → Object store** — return location; **S3** also returns a short-TTL STS token, **HCP** returns location only.
+5. **Catalog → Object store** — return location; **STS vending** also returns a short-TTL STS token, **Mode B** returns the location only.
 6. **Client → Object store** — **S3:** read directly with the vended token. **Mode B:** the read instead goes through the catalog's Arrow-IPC query endpoint (no creds on the client).
 
 ### 3. Promote (medallion) — `lance-ray` bronze → silver → gold  *(the catalog already emits create-lineage; the **lance-ray promote/compaction jobs** themselves are not built yet (P1 #6), so bronze→silver promotion lineage today comes from a job/demo emitter)*
@@ -137,6 +138,6 @@ pluggable `CredentialVendor` (`app/core/vending.py`: `ModeBVendor` / `StaticPref
 ## Workshop scenarios
 
 - **"Show me security end-to-end"** — run *Create table*; pause on steps 2→3→5 (verify → authorize → seed-ownership). The cascade is why one create grants exactly the right future access.
-- **"Why is HCP different?"** — open *Read / query*, step through once in **HCP · Mode B**, then flip to **S3 · Vending** and step again. Same flow, two credential stories.
+- **"Two credential modes"** — open *Read / query*, step through once in **Mode B** (server-mediated), then flip to **STS vending** and step again. Same flow, same S3 storage, two credential paths.
 - **"Where does lineage come from?"** — run *Promote*; the last two steps (emit → MERGE) show provenance is a **byproduct of the job**. Ingest now **binds the verified author** (P0 #2); the lance-ray promote job itself is still TODO (P1 #6).
 - **"What's still open?"** — *Lineage query*, steps 2–3: the dashed planned authz gate (P0).

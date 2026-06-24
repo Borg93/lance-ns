@@ -3,17 +3,19 @@
 The catalog authenticates (OIDC) and authorizes (OpenFGA), then a
 :class:`CredentialVendor` turns *(table object-store location, access tier)* into
 the ``storage_options`` a client (LanceDB SDK / lance-ray / pylance) uses to reach
-object storage directly. The design is **vending-first**; each backend gets the
-strongest plug it can support:
+object storage directly. The target is **S3-compatible** storage — MinIO (the
+default), AWS S3, Ceph RGW, RustFS, GCS via S3 interop. The design is
+**vending-first**; each deployment picks the strongest plug it wants:
 
+* :class:`StsVendor` — STS ``AssumeRole`` + an inline session policy: short-TTL,
+  per-table, read/write-scoped tokens. The **gold standard / recommended path** —
+  works on any backend that implements the STS API (MinIO, Ceph RGW, AWS).
+* :class:`StaticPrefixVendor` — hands out a pre-provisioned per-bucket key
+  (long-lived). For simple setups (e.g. a static MinIO/HMAC key, or GCS interop)
+  where direct client I/O is wanted but STS isn't configured.
 * :class:`ModeBVendor` — ``vend`` returns ``None``: no credential ever leaves the
   catalog; the client uses the server-mediated (Arrow-IPC) data endpoints. The
-  most-secure option on stores without temporary credentials (e.g. Hitachi HCP).
-* :class:`StaticPrefixVendor` — hands out pre-provisioned per-bucket keys
-  (long-lived). For HCP-style stores when direct client I/O is required.
-* :class:`StsVendor` — STS ``AssumeRole`` + an inline session policy: short-TTL,
-  per-table, read/write-scoped tokens. The gold standard; for S3-family stores
-  (AWS / MinIO / Ceph).
+  simplest, backend-agnostic default — nothing is delegated.
 
 OpenFGA decides the tier: ``can_read_data`` -> ``"read"``, ``can_write_data`` ->
 ``"write"``.
@@ -129,11 +131,10 @@ class StaticPrefixVendor:
     bucket (typically loaded from OpenBao). Returns ``None`` for an unknown
     bucket so the caller falls back to Mode B rather than vending nothing useful.
 
-    Applies to **S3 / MinIO / Ceph**, where you can provision a dedicated,
-    rotatable, least-privilege key per bucket. It does **not** model Hitachi
-    HCP: HCP has no per-bucket keys — its only credential is the user's
-    tenant-wide, non-expiring ``md5(password)``-derived identity key — so HCP
-    must use :class:`ModeBVendor`, not this vendor. (audit w8u4rc2tg)
+    For S3-compatible stores where you provision a dedicated, rotatable,
+    least-privilege key per bucket (e.g. a static MinIO/HMAC key or GCS interop
+    key). Prefer :class:`StsVendor` when the backend supports STS — static keys
+    are long-lived and can't be scoped per-table the way a session policy can.
     """
 
     mode: VendingMode = "static"

@@ -5,7 +5,7 @@
 > This file = the sketch of everything + the gap register + the Lakekeeper diff.
 >
 > 🖱️ **Interactive version:** [`system-diagram.html`](system-diagram.html) — click-through
-> diagram of the four flows with per-mode payloads (HCP·ModeB vs S3·Vending).
+> diagram of the four flows with per-mode payloads (Mode B server-mediated vs STS vending).
 > Text companion: [`system-diagram.md`](system-diagram.md). The ASCII below is the static fallback.
 
 ## 1. The whole system at a glance
@@ -23,7 +23,7 @@
                                 │               │ describe_table → location (+creds via
               OpenFGA ◀─can_*?──┘               │ CredentialVendor: ModeB today)
               (Postgres)                        ▼
-                                       object store  (HCP prod / MinIO dev)   ── DATA PLANE ──
+                                       object store  (MinIO / S3-compatible)   ── DATA PLANE ──
                                           ▲  compute (lance-ray / pylance) moves bytes
                                           │  (Mode B: via catalog endpoints today)
    compute/ETL jobs ──OpenLineage──▶  ┌──┴──────────────────────────┐
@@ -53,13 +53,13 @@ emit an OpenLineage event. Layers are **separate Lance tables** (namespaces); pr
 >   OpenBao. Compute jobs (**lance-ray**) never read it — they get short-TTL scoped creds *from the
 >   catalog* and authenticate with **workload identity** (KubeRay SA / OIDC token). The sketch showing
 >   only the catalog on OpenBao is intentional, not a missing wire.
-> - **HCP credential reality.** HCP has **no STS and no per-bucket/per-prefix keys** — its only key is
->   the user's tenant-wide, non-expiring `md5(password)`-derived identity key (`ra-hcp …/auth_utils.py:37-38`).
->   So **HCP is Mode B only**; the "static per-bucket keys from OpenBao" story applies to **S3 / MinIO**, not HCP.
-> - **Provenance is partial + not yet trustworthy.** The **catalog emits no lineage** (`grep app/` = 0 matches),
->   so "who created the table" is *not* recorded as an audit fact (only an OpenFGA `owner` access tuple);
->   and lineage **ingest is unauthenticated** with a **self-asserted author** → forgeable (latent today —
->   the lineage svc is undeployed). All three are P0s in [`../todo.md`](../todo.md).
+> - **Storage = S3-compatible (HCP dropped).** Target is **MinIO** (default test backend) + AWS S3,
+>   Ceph RGW, RustFS, GCS-via-interop. **STS vending** (`AssumeRole` + inline session policy) is the
+>   recommended scoped-cred path — works on MinIO / Ceph / AWS. **Mode B** (server-mediated) is the
+>   simple default; **static keys** for S3 backends without STS (e.g. GCS interop).
+> - **Provenance — ✅ now done (P0 #1/#2/#3).** Lineage reads + ingest are authz-gated, ingest binds the
+>   verified author (no forgery), and the catalog emits create-lineage so "who created the table" is an
+>   audit fact (`GET /datasets/{id}/creator`). The lineage service is deployed. Default OFF; enable in prod.
 
 ## 2. Component status
 
@@ -84,7 +84,7 @@ emit an OpenLineage event. Layers are **separate Lance tables** (namespaces); pr
 | 1 | **Lineage read endpoints unauthenticated** | provenance | leaks the data estate (which tables exist, how they connect, who ran what) | **P0** |
 | 2 | **Lineage ingest endpoint unauthenticated** | provenance | anyone can inject false provenance / flood the graph (no producer trust) | **P0** |
 | 3 | CredentialVendor not wired into `describe_table` | data | vending unavailable; only Mode B (via catalog) usable | P1 |
-| 4 | HCP plug not finalized (Mode B vs static keys) | data | medallion jobs can't reach storage with scoping decided | P1 |
+| 4 | Credential vendor not wired (STS for S3-family) | data | medallion jobs can't get scoped creds yet | P1 |
 | 5 | Secrets in env (no OpenBao SecretStore) | security | one static long-lived S3 key in env; no rotation/least-priv | P1 |
 | 6 | lance-ray promotion + compaction jobs absent | data/medallion | the actual bronze→silver→gold movement doesn't exist yet | P1 |
 | 7 | Lineage not deployed (no image / compose service) | provenance | runs only via `uvicorn`; not in the stack | P1 |
@@ -124,8 +124,8 @@ DB-per-service · spec-faithful (Lance Namespace REST).
 |---|---|---|---|
 | Catalog impl | Rust, multi-warehouse, many crates | Python FastAPI over pylance, ~focused | **smaller, Lance-native** |
 | Table format | Iceberg tables (+ generic tables) | Lance datasets (vector / blob / medallion) | **our domain** |
-| Control vs data plane | catalog never moves data | same + **Mode B** server-mediated fallback | we add Mode B (for HCP) |
-| Credential vending | STS (S3) · SAS (Azure) · bearer (GCS) + remote signing | pluggable `CredentialVendor` (ModeB/Static/Sts), vending-first | **design matches**; HCP→ModeB (Lakekeeper has no HCP plug) |
+| Control vs data plane | catalog never moves data | same + **Mode B** server-mediated fallback | we add Mode B as the simple default |
+| Credential vending | STS (S3) · SAS (Azure) · bearer (GCS) + remote signing | pluggable `CredentialVendor` (Sts/Static/ModeB), vending-first | **design matches**; STS is the recommended path (MinIO/Ceph/AWS) |
 | AuthZ model | OpenFGA v4: hierarchy/ownership tuple split, golden drift tests, **reconcile-from-catalog**, **versioned model migration** | OpenFGA `can_*` + cascade + roles + `grant_on_create` | core matches; **ADOPT** reconcile + versioned migration + golden drift tests |
 | Lineage | emits **CloudEvents** → external consumer (Kafka/NATS); no built-in graph | **built-in lightweight-Marquez** (OpenLineage → AGE openCypher) | **we're more integrated** |
 | Secrets | pluggable `SecretStore` (Postgres-encrypted + Vault KV2) | planned **OpenBao** (KV v2, Vault-compatible) | **ADOPT** (OpenBao drops into the KV2 pattern) |
@@ -141,11 +141,11 @@ _The three sections below are the **cited Lakekeeper study output** (study `wfb2
 
 ## Lakekeeper → Lance-NS adoption backlog (prioritized, de-duped)
 
-> Citations verified against the cloned repos. "Our state" cites `/home/blackwell/Desktop/lance-ns/...`; Lakekeeper cites `/home/blackwell/Desktop/lakekeeper-ref/...`. Data-plane reality: **HCP (prod) = Mode B or static keys (no STS/IAM/per-prefix policy); STS is S3-family-only and optional.**
+> Citations verified against the cloned repos. "Our state" cites `/home/blackwell/Desktop/lance-ns/...`; Lakekeeper cites `/home/blackwell/Desktop/lakekeeper-ref/...`. Data-plane reality: **target = S3-compatible (MinIO default; AWS/Ceph/RustFS). STS vending (`AssumeRole`) is the recommended scoped-cred path and works on MinIO/Ceph/AWS; Mode B is the server-mediated default; static keys for STS-less S3 backends.**
 
 | # | Pattern | Maps to | Our state | Recommendation | Priority | Effort |
 |---|---------|---------|-----------|----------------|----------|--------|
-| 1 | **Decide HCP data-plane mode and build that ONE vendor plug** (Mode B vs static per-bucket keys) | CREDENTIAL_VENDING / SECRETS | `ModeBVendor` returns `None` (vending.py:118-124); `StaticPrefixVendor` reads `keys_by_bucket` (vending.py:127-145); default `vending_mode="mode_b"` (config.py:78-80). Static keys currently come from a plain dict, not OpenBao. | Pin `LANCE_VENDING_MODE=mode_b` for HCP prod (correct default — Lakekeeper `vends_expiring_credentials` is the STS path; HCP has none). If/when direct client I/O is required, switch to `static` and load per-bucket keys from OpenBao. Do not build STS for HCP. | **P0** | S |
+| 1 | **Wire the credential vendor into `describe_table?vend_credentials`** (STS-first) | CREDENTIAL_VENDING / SECRETS | `StsVendor`/`StaticPrefixVendor`/`ModeBVendor` exist (vending.py); default `vending_mode="mode_b"` (config.py). Not yet wired into the describe endpoint. | Build `StsVendor` as the recommended path — `AssumeRole` + inline session policy against the S3 endpoint (MinIO/Ceph/AWS all implement STS); keep `mode_b` as the OOTB default and `static` for STS-less S3 backends. Source the base/role credential from OpenBao. | **P1** | M |
 | 2 | **Always-present `expires_at_millis` + separate `credentials` vs `config`** in vended/load-table response | CREDENTIAL_VENDING | `VendedCredentials` mixes everything into `storage_options`; `expires_at_millis` optional (vending.py:36-45). | Mirror Lakekeeper `TableConfig` (s3.rs:499,568,599): add a `config` dict beside `storage_options`; require `expires_at_millis` whenever an expiring token is vended (STS). Keep null/absent for Mode B and static. | **P0** | M |
 | 3 | **Trace-ID + actor propagation on every request** (UUID request_id + OIDC sub) | OBSERVABILITY/EVENTS | Absent — no request_id, no actor threaded to a context. OIDC token verified but not propagated. | Add a tiny middleware/dependency generating `request_id` (UUID) and capturing actor (OIDC sub); store on request scope. This is the cheap precondition for events, audit, and lineage correlation. | **P0** | S |
 | 4 | **Emit only table/namespace mutation events** (NOT warehouse/role/multi-format) | OBSERVABILITY/EVENTS / GOVERNANCE_P1 | Absent. | Deliberately scope events to create/drop/rename of namespace/table. Add project_* events only when GOVERNANCE_P1 lands. (Avoids Lakekeeper's role/warehouse event sprawl — publisher.rs:223-251.) | **P0** | S |
@@ -157,10 +157,10 @@ _The three sections below are the **cited Lakekeeper study output** (study `wfb2
 | 10 | **Split hierarchy vs ownership tuple helpers + golden tuple tests** | AUTHZ / GOVERNANCE_P1 | Single inline grant in `grant_on_create` (fga.py:408+); no split, no golden tests. | Extract `tuples.py` with `hierarchy_tuples_for_*()` / `ownership_tuples_for_*()`; add golden unit tests pinning exact triples per entity (Lakekeeper tuples.rs:248-547). Precondition for reconcile (#11). | **P1** | M |
 | 11 | **Reconcile-from-catalog (additive + drift deletion)** for safe model evolution | AUTHZ / GOVERNANCE_P1 | Absent — no rebuild path, no drift detection/deletion, no dry-run. | Implement `reconcile.py`: `rebuild_*` (additive) + `reconcile_*` (drift deletion, dry-run flag). Deletion only targets managed structural relations; preserves ownership/grants (Lakekeeper reconcile.rs:1-108,199-247). Use `asyncio.Lock` not Postgres advisory lock at our scale. | **P1** | L |
 | 12 | **URL-encode user IDs** when serializing to OpenFGA | AUTHZ | No encoding in fga.py (confirmed: identity passed directly as `user:<sub>`). | Apply `urllib.parse.quote`/`unquote` on user IDs (Lakekeeper entities.rs:156-189). Mandatory before prod OIDC if subjects contain `@`/`+`/`:`. Audit your IdP's subject claim first. | **P1** | S |
-| 13 | **STS endpoint separation from S3 endpoint** | CREDENTIAL_VENDING | `s3_sts_endpoint` defined (config.py:83) but `StsVendor` stores it as the single `self._endpoint` and emits one endpoint (vending.py:177,203-204). | No action for MinIO/Ceph (same endpoint). If a deployment ever splits them, emit separate keys. STS is S3-family-only, so this never affects HCP. | P2 | S |
-| 14 | **Credential expiry / revalidation window + `/refresh-credentials` endpoint** | CREDENTIAL_VENDING | `expires_at_millis` set for STS but no refresh endpoint, no revalidation window (vending.py:45). | Only relevant if STS vending is enabled. Then add a refresh endpoint + `revalidation_window_ms` (half remaining TTL, cap 1h — Lakekeeper storage/mod.rs:148-165). **Not for HCP/Mode B.** | P2 | M |
-| 15 | **Azure SAS / GCS bearer-token vendors** | CREDENTIAL_VENDING | Absent — vending is S3-only. | Add `AzureSasVendor` / `GcsDownscopeVendor` only if those backends are ever adopted (Lakekeeper az_profile.rs:235-275, gcs/mod.rs:348-448). Not on the HCP/MinIO roadmap. | P2 | L |
-| 16 | **S3 KMS-on-write advertising** | CREDENTIAL_VENDING | Absent — no KMS in Settings or vended config. | Only if AWS S3 with KMS is adopted. MinIO/HCP don't use AWS KMS. Add `s3_kms_key_arn` to the `config` half then (Lakekeeper s3.rs:525-530). | P2 | S |
+| 13 | **STS endpoint separation from S3 endpoint** | CREDENTIAL_VENDING | `s3_sts_endpoint` defined (config.py:83) but `StsVendor` stores it as the single `self._endpoint` and emits one endpoint (vending.py:177,203-204). | No action for MinIO/Ceph (same endpoint). If a deployment ever splits the STS and S3 endpoints, emit separate keys. | P2 | S |
+| 14 | **Credential expiry / revalidation window + `/refresh-credentials` endpoint** | CREDENTIAL_VENDING | `expires_at_millis` set for STS but no refresh endpoint, no revalidation window (vending.py:45). | Only relevant if STS vending is enabled. Then add a refresh endpoint + `revalidation_window_ms` (half remaining TTL, cap 1h — Lakekeeper storage/mod.rs:148-165). **Mode B doesn't vend, so N/A there.** | P2 | M |
+| 15 | **Azure SAS / GCS bearer-token vendors** | CREDENTIAL_VENDING | Absent — vending is S3-only. | Add `AzureSasVendor` / `GcsDownscopeVendor` only if those backends are ever adopted (Lakekeeper az_profile.rs:235-275, gcs/mod.rs:348-448). Not on the current S3/MinIO roadmap. | P2 | L |
+| 16 | **S3 KMS-on-write advertising** | CREDENTIAL_VENDING | Absent — no KMS in Settings or vended config. | Only if AWS S3 with KMS is adopted. MinIO doesn't use AWS KMS. Add `s3_kms_key_arn` to the `config` half then (Lakekeeper s3.rs:525-530). | P2 | S |
 | 17 | **`role#assignee` tuple generation on role create** | GOVERNANCE_P1 | Model defines `role` with `assignee` (model.fga.yaml) but grant-on-create does not seed role tuples programmatically. | If the 3-axis model adds project-scoped roles, add `ownership_tuples_for_role()` and call it in `grant_on_create`. | P2 | S |
 | 18 | **`fga model test` in CI / pre-commit** | AUTHZ | model.fga.yaml has comprehensive check/list_objects tests but no automated runner. | Add a CI step running `fga model test app/auth/model.fga.yaml`; keep model.fga / model.fga.yaml / model.json in sync. Status: GOOD, just gate it. | P2 | S |
 | 19 | **Lightweight RequestMetadata for audit** (request_id + actor + privilege_source) | OBSERVABILITY/EVENTS | Absent. | Start minimal (covered by #3); add `privilege_source` only when GOVERNANCE_P1 introduces admin-only ops. Do NOT build Lakekeeper's heavyweight struct (request_metadata.rs:92-170). | P2 | M |
@@ -175,11 +175,11 @@ _The three sections below are the **cited Lakekeeper study output** (study `wfb2
 
 ## Top 5 highest-leverage adoptions (sequenced for our near-term path)
 
-### 1. Decide the HCP data-plane mode and build that single CredentialVendor plug
-- **What:** Commit to **Mode B (server-mediated, already works)** as the HCP prod default and pin `LANCE_VENDING_MODE=mode_b`; keep `static` per-bucket keys as the only alternative if direct client I/O is ever required. Do **not** build STS for HCP.
-- **Why now:** This is the fork in the road every other vending decision hangs on. Lakekeeper's whole expiring-credential machinery (`vends_expiring_credentials`, revalidation windows, refresh endpoints) is the **STS path** — and HCP has no STS/IAM/per-prefix policy, so that entire branch is dead weight for prod. `ModeBVendor` already returns `None` correctly (vending.py:118-124); the work is mostly a decision + a config pin, not code.
-- **First step:** Confirm with ops that HCP exposes no per-prefix delegation; set `LANCE_VENDING_MODE=mode_b` in the prod profile. If static keys are needed, wire `StaticPrefixVendor.keys_by_bucket` from OpenBao (threads into #3).
-- **Threads with:** STS stays an **optional S3-family-only** plug (MinIO/Ceph/dev). OpenBao becomes the source for static-vendor keys. No STS refresh/revalidation work is on the HCP critical path.
+### 1. Wire the credential vendor into `describe_table?vend_credentials` (STS-first)
+- **What:** Build **`StsVendor`** as the recommended path — `AssumeRole` + an inline session policy against the S3 endpoint → short-TTL, per-table, read/write-scoped creds. Keep **`mode_b`** (server-mediated) as the safe OOTB default and **`static`** for S3 backends without STS.
+- **Why now:** It's the fork every other vending decision hangs on, and it's now buildable: MinIO, Ceph RGW, and AWS all implement the STS `AssumeRole` API, so the scoped-credential path is real (it was dead weight only when the target was a non-STS backend). `StsVendor` already has the boto3 plumbing (vending.py); the work is wiring it into `describe_table` + the OpenFGA tier gate.
+- **First step:** Wire `describe_table?vend_credentials=true` → pick the vendor by `LANCE_VENDING_MODE`; for `sts`, point boto3's STS client at `LANCE_S3_STS_ENDPOINT` and call `AssumeRole(LANCE_S3_ASSUME_ROLE_ARN, Policy=<session policy>)`. Source the base/role credential from OpenBao (threads into #3).
+- **Threads with:** OpenBao supplies the base/role credential. The expiring-credential machinery (refresh window, `expires_at_millis`) lives on the STS branch (#13/#14).
 
 ### 2. lance-ray promotion + compaction jobs with idempotency keys
 - **What:** Build the bronze→silver→gold promotion job and compaction job as **clients of the catalog**, and add `Idempotency-Key` handling on their write ops (check-on-read fast path + insert-at-commit), mirroring Lakekeeper's idempotency module.
@@ -213,14 +213,18 @@ We studied the cloned Lakekeeper source (`/home/blackwell/Desktop/lakekeeper-ref
 
 ### Data-plane reality (read this first)
 
-Our production object store is **Hitachi HCP**: no STS, no IAM, no per-prefix policy. Therefore:
+The object store is **S3-compatible**: MinIO is the default test backend; AWS S3, Ceph RGW, RustFS,
+and GCS-via-interop are all targets. Therefore:
 
-- **HCP data plane = Mode B (server-mediated) by default**, or **static per-bucket keys** when direct client I/O is required. `ModeBVendor.vend()` returns `None`, and clients fall back to the server-mediated (Arrow-IPC) data endpoints. Prod pins `LANCE_VENDING_MODE=mode_b`.
-- **STS credential vending is S3-family-only (AWS / MinIO / Ceph) and OPTIONAL.** It exists for dev (MinIO) and any future S3 deployment, never for HCP. All of Lakekeeper's expiring-credential machinery — revalidation windows, `/refresh-credentials`, `credentials_expiration_ms` gating of `304 Not Modified` — lives on this STS branch and is **off the HCP critical path**.
-- Static per-bucket keys (for the static vendor) and master/STS creds are sourced from **OpenBao**
-  (Vault-fork, KV v2), never from raw env in production — **S3/MinIO only**. *HCP has no per-bucket
-  keys (only a tenant-wide `md5(password)` identity key), so on HCP this means Mode B, not static
-  vending — see the Audit corrections in §1.*
+- **STS vending is the recommended path.** `StsVendor` calls `AssumeRole` + an inline session policy
+  against the S3 endpoint → short-TTL, per-table, read/write-scoped creds. MinIO, Ceph RGW, and AWS
+  all implement the STS API. The expiring-credential machinery — revalidation windows,
+  `/refresh-credentials`, `credentials_expiration_ms` gating of `304 Not Modified` — lives on this branch.
+- **Mode B (server-mediated) is the safe OOTB default** — `ModeBVendor.vend()` returns `None` and
+  clients use the catalog's Arrow-IPC data endpoints. **Static per-bucket keys** are the fallback for
+  S3 backends without STS (e.g. GCS interop). `LANCE_VENDING_MODE` selects the vendor.
+- The base/role credential (for STS) and static-vendor keys are sourced from **OpenBao**
+  (Vault-fork, KV v2), never from raw env in production.
 
 Our `CredentialVendor` protocol (`app/core/vending.py`) already mirrors Lakekeeper's per-backend `TableConfig` abstraction: `ModeBVendor` / `StaticPrefixVendor` / `StsVendor`, returning `{storage_options, expires_at_millis}`. The remaining vending work is metadata-shape parity (separate `credentials` from static `config`; always set `expires_at_millis` when vending an expiring token), not new backends.
 
@@ -247,6 +251,6 @@ Our `CredentialVendor` protocol (`app/core/vending.py`) already mirrors Lakekeep
 - **Role/warehouse/multi-format event sprawl and the full `EventListener` trait** (`publisher.rs`). We emit only table/namespace mutations; `project_*` events arrive only when GOVERNANCE_P1 adds those object types. A `Callable` list beats a trait hierarchy at our scale.
 - **Kafka events backend.** NATS JetStream is sufficient; the dispatcher stays pluggable so Kafka can be added if scale ever demands it.
 - **`unimplemented()` route-enum + feature gates** (`endpoints.rs`). Our backend raises `UnsupportedOperationError`→501 directly; a hand-maintained route enum earns nothing here.
-- **Unconditional / mandatory STS, KMS-on-write, Azure SAS, GCS bearer-token downscoping.** All S3/Azure/GCS-specific and irrelevant to HCP (Mode B/static). Add the corresponding vendor plug *only* if that backend is ever adopted; they are not on the HCP/MinIO roadmap.
+- **Mandatory/unconditional STS, KMS-on-write, Azure SAS, GCS bearer-token downscoping.** STS itself *is* adopted (the recommended vendor), but it stays **optional/pluggable** (Mode B is the default); KMS/SAS/GCS-bearer get a vendor plug *only* if that backend/feature is adopted — not on the current S3/MinIO roadmap.
 
 The throughline: Lakekeeper's patterns are correct *for a multi-warehouse Rust service*. We borrow the ones that make a small, secure FastAPI+pylance catalog evolve safely (migration/reconcile, fail-closed authz, maintenance windows, conformance gates, OpenBao secrets, post-commit events) and decline the ones whose cost is justified only by scale or untrusted multi-tenancy we do not have.

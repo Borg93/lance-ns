@@ -71,10 +71,11 @@ class Settings(BaseSettings):
     # retried rather than pinning a request worker. Wired into fga.make_client at startup.
     fga_timeout_seconds: float = Field(default=5.0, ge=0.1, alias="LANCE_FGA_TIMEOUT_SECONDS")
 
-    # Data-plane credential vending (pluggable; see app/core/vending.py). Default "mode_b":
-    # server-mediated — no credential leaves the catalog (correct for HCP, which has no STS).
-    # "static": pre-provisioned per-bucket keys. "sts": STS AssumeRole short-TTL scoped tokens
-    # (the gold standard, for S3-family stores: MinIO/Ceph/S3).
+    # Data-plane credential vending (pluggable; see app/core/vending.py). Target = S3-compatible
+    # storage (MinIO default, AWS S3, Ceph RGW, RustFS). Default "mode_b": server-mediated — no
+    # credential leaves the catalog (the simplest, backend-agnostic default). "sts": STS AssumeRole
+    # short-TTL per-table scoped tokens (the recommended path; MinIO/Ceph/AWS all implement STS).
+    # "static": pre-provisioned per-bucket keys (simple setups / GCS interop).
     vending_mode: Literal["mode_b", "static", "sts"] = Field(default="mode_b", alias="LANCE_VENDING_MODE")
     vending_ttl_seconds: int = Field(default=900, ge=60, alias="LANCE_VENDING_TTL_SECONDS")
     s3_assume_role_arn: str | None = Field(default=None, alias="LANCE_S3_ASSUME_ROLE_ARN")

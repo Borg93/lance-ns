@@ -156,12 +156,14 @@
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
 14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows · **OTel** traces/metrics.
-15. 🔶 **Live medallion demo + thin viz frontend** — a real docker-compose e2e that *executes* the
-    flow against real services (catalog + MinIO + lineage/AGE): write bronze (blob `payload`), add
-    `embedding` then `caption` to silver (Lance add-column → v1, v2), aggregate gold with the embedded
-    `lineage` JSONB — each step emitting OpenLineage — and a thin SSR/HTML page that polls `/graph` +
-    `/producers` so you *watch* the DAG appear and the versions evolve. Today only `lineage/seed.py`
-    (synthetic events) + gated graph e2e exist; no UI and no compute actually mutates Lance files yet.
+15. ✅ **Live medallion demo + thin viz frontend** — `scripts/medallion_demo.py` *executes* the flow
+    against the real stack (RustFS + lineage/AGE): writes bronze (blob `payload`), adds `embedding`
+    then `caption` to silver (Lance write + add-column → v1, v2), aggregates gold with the embedded
+    `lineage` JSONB — each step emitting **real** OpenLineage. `--step N` lets you be the producer
+    (trigger one OL event at a time). Thin self-contained `lineage/static/index.html` (served at
+    `/ui/`) polls `/graph` + `/producers` every 2s → watch the DAG build, silver evolve v1→v2, the
+    failed run in red. `scripts/medallion_demo.sh` brings it up (host ports overridable). *Follow-ups:
+    optional data-peek panel (gold rows + JSONB); route the demo through the catalog control plane.*
 
 ---
 

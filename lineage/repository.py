@@ -67,8 +67,13 @@ _LINK_READ: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE
 # The WROTE edge carries the Lance dataset version this run produced (from the OpenLineage
 # ``version`` facet), so two refinement passes over one table are distinguishable in producers().
 _LINK_WROTE: Final = (
-    "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) "
-    "MERGE (r)-[w:WROTE]->(d) SET w.version=$ver RETURN 1"
+    "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:WROTE]->(d) RETURN 1"
+)
+# AGE binds a ``$param`` in a standalone ``MATCH ... SET`` but silently drops one in a ``SET`` that
+# follows ``MERGE`` on an edge in the *same* statement (verified on AGE 1.5.0/PG16), so the version
+# is written in its own statement — mirroring how dataSource/tags are set on the Dataset node.
+_SET_WROTE_VERSION: Final = (
+    "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) SET w.version=$ver RETURN 1"
 )
 _DERIVED_FROM: Final = (
     "MATCH (o:Dataset {name:$on}), (i:Dataset {name:$inp}) MERGE (o)-[:DERIVED_FROM]->(i) RETURN 1"
@@ -160,13 +165,17 @@ class LineageRepository:
                 await self._merge_dataset(conn, ds)
                 # A failed run keeps a WROTE edge (so producers() shows the attempt) but no version —
                 # it produced no data, so it must not claim to have written a Lance version.
-                version = (event.output_version(ds.name) or "") if event.is_success else ""
                 await run_cypher(
-                    conn,
-                    self._graph,
-                    _LINK_WROTE,
-                    {"rid": event.run.run_id, "name": ds.name, "ver": version},
+                    conn, self._graph, _LINK_WROTE, {"rid": event.run.run_id, "name": ds.name}
                 )
+                version = event.output_version(ds.name) if event.is_success else None
+                if version:
+                    await run_cypher(
+                        conn,
+                        self._graph,
+                        _SET_WROTE_VERSION,
+                        {"rid": event.run.run_id, "name": ds.name, "ver": version},
+                    )
             # Only a successful run asserts lineage: a failed run derived nothing.
             if event.is_success:
                 for out in event.outputs:

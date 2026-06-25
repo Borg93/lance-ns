@@ -38,7 +38,8 @@ services:
       - rustfs-data:/data
     command: ["/data"]   # RustFS requires the data volume path as the final command arg
     ports:
-      - "9000:9000"
+      # Host port is overridable (DEMO_S3_PORT) to avoid clashing with a local MinIO on 9000.
+      - "${DEMO_S3_PORT:-9000}:9000"
 
   # Bucket bootstrap via the MinIO client (mc speaks plain S3, so it works against RustFS too).
   # Retries until RustFS answers, then creates the catalog bucket — readiness gate for the server.

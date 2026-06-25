@@ -216,6 +216,35 @@ silver, bronze, raw source; `producers(silver$features)` → the failed attempt 
 no version) **and** the two successful `data_eng` runs (v1, v2); `graph(silver$features)` carries
 each node's `source_uri` + `tags`.
 
+## Live demo — watch it work (real data + real lineage)
+
+`scripts/medallion_demo.py` is the **real** driver (vs `seed.py`, which only emits synthetic
+events): it **executes** the medallion flow against the real docker-compose stack — writing and
+evolving real Lance datasets on **RustFS** (S3-compatible; the driver is storage-agnostic, so
+MinIO/Ceph/AWS work by changing the creds) **and** emitting a real OpenLineage event after each
+step. A thin self-contained page (`lineage/static/index.html`, served by the lineage service at
+`/ui/`) polls `/datasets/{id}/graph` + `/producers` every 2s, so you watch the DAG build and silver
+evolve **v1 → v2**, the failed embed appear in red, and gold land with its embedded JSONB lineage.
+
+```bash
+# bring up RustFS + lineage, then auto-run the flow (host ports overridable to avoid clashes):
+DEMO_S3_PORT=9100 DEMO_LINEAGE_PORT=8001 ./scripts/medallion_demo.sh
+# open the live DAG view:
+open http://localhost:8001/ui/
+
+# …or be the producer yourself — trigger one event at a time, watching the UI between:
+S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
+  uv run python scripts/medallion_demo.py --list          # show the 5 steps
+  uv run python scripts/medallion_demo.py --step 1         # land bronze (+emit)
+  uv run python scripts/medallion_demo.py --step 2         # the FAILED embed (recorded, no data)
+  uv run python scripts/medallion_demo.py --step 3         # embed -> silver v1
+  uv run python scripts/medallion_demo.py --step 4         # caption -> silver v2 (in place)
+  uv run python scripts/medallion_demo.py --step 5         # aggregate -> gold (+lineage JSONB)
+```
+
+`--emit-only` skips the Lance write and just emits the OpenLineage event (pure producer
+simulation). The driver reuses `seed.build_events()`, so the live graph matches the tested fixture.
+
 ## Run / verify (dev)
 
 ```bash

@@ -9,10 +9,12 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from lance_namespace import LanceNamespaceError
 
 from app.core import fga
@@ -153,3 +155,10 @@ async def get_graph(name: str, repository: RepositoryDep, datasets: FilterDep) -
     result.nodes = [node for node in result.nodes if node.id in visible]
     result.edges = [e for e in result.edges if e.source in visible and e.target in visible]
     return result
+
+
+# Thin demo UI — a single self-contained page that polls the query endpoints to render the live
+# medallion DAG (see scripts/medallion_demo.py). Mounted last so it never shadows an API route.
+_STATIC = Path(__file__).resolve().parent / "static"
+if _STATIC.is_dir():
+    app.mount("/ui", StaticFiles(directory=str(_STATIC), html=True), name="ui")

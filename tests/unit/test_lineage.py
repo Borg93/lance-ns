@@ -176,8 +176,9 @@ def test_ingest_records_version_and_skips_self_derived_from(monkeypatch: pytest.
     """The in-place silver refinement records version=2 on WROTE and emits NO self-DERIVED_FROM."""
     calls = _capture_ingest(monkeypatch, 3)  # silver -> silver (add caption), v2
 
-    wrote = [p for q, p in calls if "WROTE" in q]
-    assert any(p.get("name") == "silver$features" and p.get("ver") == "2" for p in wrote)
+    # version is written in its own MATCH...SET statement (AGE param-binding quirk on MERGE+SET).
+    set_version = [p for q, p in calls if "SET w.version" in q]
+    assert any(p.get("name") == "silver$features" and p.get("ver") == "2" for p in set_version)
     # in-place transform: read + write the same table, but NO self-DERIVED_FROM edge.
     assert [p for q, p in calls if "DERIVED_FROM" in q] == []
     # the standard dataSource + tags facets are persisted onto the dataset node.
@@ -191,8 +192,8 @@ def test_failed_run_records_error_but_no_version_or_lineage(monkeypatch: pytest.
 
     run_merges = [p for q, p in calls if "MERGE (r:Run" in q]
     assert run_merges and run_merges[0].get("err")  # errorMessage stored on the run
-    wrote = [p for q, p in calls if "WROTE" in q]
-    assert wrote and all(p.get("ver") == "" for p in wrote)  # attempt recorded, but no version
+    assert any("MERGE (r)-[:WROTE]" in q for q, _ in calls)  # the attempt is recorded as a WROTE edge
+    assert [p for q, p in calls if "SET w.version" in q] == []  # but no produced version
     # a failed run produced no data, so it must not assert lineage.
     assert [p for q, p in calls if "DERIVED_FROM" in q] == []
 

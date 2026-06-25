@@ -47,4 +47,5 @@ services:
       timeout: 3s
       retries: 5
     ports:
-      - "8000:8000"
+      # Host port is overridable (DEMO_LINEAGE_PORT) to avoid clashing with a local service on 8000.
+      - "${DEMO_LINEAGE_PORT:-8000}:8000"

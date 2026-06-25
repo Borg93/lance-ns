@@ -88,6 +88,27 @@ RAY_DASHBOARD_AGGREGATOR_AGENT_EVENTS_EXPORT_ADDR=http://<receiver>/ray-events
   own `*.ready{version}` publish as the **authoritative pipeline trigger** (Event Export is alpha). The
   lineage service stitches Ray-lifecycle + job-output.
 
+## Is this faithful to the OpenLineage spec + Marquez? (grounding)
+Yes — with one honest caveat on *progress*.
+
+- **OpenLineage spec (`run-cycle`):** six run states `START`/`RUNNING`/`COMPLETE`/`ABORT`/`FAIL`/`OTHER`;
+  events for a run are **accumulative**; `COMPLETE`/`ABORT`/`FAIL` are terminal. The spec explicitly
+  describes a long-running job as "a `START` event followed by a series of `RUNNING` events that report
+  changes in the run or emit performance metrics." So the full lifecycle (progress via `RUNNING`,
+  failures via `FAIL`/`ABORT`, current state) is exactly the spec's design — **our terminal-only emit is
+  a demo simplification, not a spec limit.** (Also: the spec has 3 event types — `RunEvent`/`JobEvent`/
+  `DatasetEvent` — we only handle `RunEvent`.)
+- **Marquez (reference server):** ingests all run states and shows a **run-status view** — runs as
+  `NEW`/`RUNNING`/`COMPLETED`/`FAILED`/`ABORTED` + duration + the job's `latestRun.state` (its
+  `RunStatus`/`Runs` UI). A status board is Marquez-native; we simply hadn't modelled `RUNNING`/
+  current-state yet.
+- **Caveat — granular % progress is NOT a standard facet.** `RUNNING` reports "changes/metrics" and
+  Marquez shows *state + duration*, not a % bar. So the `progress:{done,total}` in flows 3/4 is a
+  **custom facet** (spec-legal: needs `_producer` + `_schemaURL`), not a built-in.
+- **Spec facets for "where/why" we don't yet capture** (Marquez surfaces them): `parent` (job hierarchy),
+  `jobDependencies` (control-flow: why a run waits on another), `processingEngine` (Ray/Spark version),
+  `test`/`dataQualityAssertions`. Tracked in todo #10b / #12b / #17.
+
 ## How this maps to the current demo
 Today `scripts/medallion_demo.py --step N` is the **synchronous** version: it does the Lance write *and*
 emits OpenLineage inline. The event-driven version keeps the exact same Lance ops and OpenLineage

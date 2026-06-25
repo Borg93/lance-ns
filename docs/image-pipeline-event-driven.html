@@ -11,6 +11,660 @@
 
   EDIT THESE THINGS (everything else stays untouched):
     1. <title> above and <h1> in <header>
+    2. The legend in .legend (one .item per role you use)
+    3. The .modepick buttons (mode toggle labels)
+    4. The .flowtabs (one .flowtab per scenario)
+    5. The .node divs inside .stage (one per service)
+    6. The `flows` JS object at the bottom (scenario definitions)
+    7. (Optional) Re-color CSS variables in :root
+  ============================================================
+-->
+<!-- Remove the three font <link> tags below for fully offline use; fonts fall back to system UI. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'">
+<noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap"></noscript>
+<style>
+  :root{
+    /* Dark base, tuned for didactic clarity */
+    --bg:        #0a0d12;
+    --bg-2:      #0f1419;
+    --panel:     #121821;
+    --panel-2:   #182030;
+    --border:    #1f2937;
+    --border-2:  #2a3650;
+    --text:      #e6edf7;
+    --muted:     #8492a8;
+    --dim:       #5a6679;
+
+    /* component colors — each role has its own */
+    --c-user:        #46f9b8;   /* mint */
+    --c-orch:        #6aa9ff;   /* sky */
+    --c-compute:      #ff6b8a;   /* magenta */
+    --c-embed:       #ffc14d;   /* amber */
+    --c-vector:      #b388ff;   /* violet */
+    --c-seed:        #ff9457;   /* orange */
+
+    /* Brand accents */
+    --brand-violet:  #a201ff;
+    --brand-mint:    #46f9b8;
+
+    --radius:        14px;
+    --radius-sm:     8px;
+
+    --shadow-soft:   0 10px 30px rgba(0,0,0,.45);
+    --shadow-pop:    0 0 0 1px rgba(255,255,255,.04), 0 18px 50px rgba(0,0,0,.55);
+
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+    --sans: "Space Grotesk", system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+
+  *{ box-sizing:border-box; }
+  html,body{ margin:0; padding:0; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    font-feature-settings: "ss01","ss02","cv11";
+    min-height:100vh;
+    overflow-x:hidden;
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, rgba(106,169,255,.07), transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(162,1,255,.06), transparent 60%),
+      radial-gradient(800px 600px at 50% 120%, rgba(70,249,184,.04), transparent 60%);
+  }
+
+  /* faint grid */
+  body::before{
+    content:"";
+    position:fixed; inset:0; pointer-events:none; z-index:0;
+    background-image:
+      linear-gradient(rgba(255,255,255,.018) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.018) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse at 50% 30%, #000 30%, transparent 75%);
+  }
+
+  /* ───────── header ───────── */
+  header{
+    position:relative; z-index:2;
+    padding: 36px 32px 12px;
+    max-width: 1480px; margin: 0 auto;
+  }
+  .eyebrow{
+    display:inline-flex; align-items:center; gap:8px;
+    font-family: var(--mono); font-size:11px; letter-spacing:.18em;
+    color: var(--muted); text-transform: uppercase;
+    padding: 6px 10px;
+    border:1px solid var(--border);
+    border-radius: 999px;
+    background: rgba(255,255,255,.015);
+  }
+  .eyebrow .dot{
+    width:6px; height:6px; border-radius:50%; background: var(--brand-mint);
+    box-shadow: 0 0 12px var(--brand-mint);
+  }
+  h1{
+    margin: 16px 0 6px;
+    font-size: clamp(28px, 3.6vw, 44px);
+    font-weight: 600; letter-spacing:-.02em;
+    line-height: 1.05;
+  }
+  h1 .accent{
+    background: linear-gradient(90deg, var(--brand-mint), var(--c-orch) 50%, var(--brand-violet));
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+  }
+  .sub{
+    color: var(--muted); font-size: 15px; max-width: 70ch;
+    margin: 0;
+  }
+
+  /* ───────── controls bar ───────── */
+  .controls{
+    position:relative; z-index:2;
+    max-width: 1480px; margin: 28px auto 0; padding: 0 32px;
+    display:flex; flex-wrap:wrap; gap:18px;
+    align-items:center; justify-content:space-between;
+  }
+
+  .modepick{
+    display:inline-flex; padding:4px;
+    background: var(--panel); border:1px solid var(--border);
+    border-radius: 12px;
+  }
+  .modepick button{
+    border:0; background:transparent; color: var(--muted);
+    font-family: var(--sans); font-weight:500; font-size:13px;
+    padding: 9px 16px; border-radius: 8px; cursor:pointer;
+    display:inline-flex; align-items:center; gap:8px;
+    transition: all .25s ease;
+  }
+  .modepick button .pill{
+    font-family: var(--mono); font-size:10px;
+    padding: 2px 6px; border-radius: 4px;
+    background: rgba(255,255,255,.05); color: var(--muted);
+  }
+  .modepick button[aria-pressed="true"]{
+    background: linear-gradient(180deg, rgba(255,255,255,.06), rgba(255,255,255,.02));
+    color: var(--text);
+    box-shadow: inset 0 0 0 1px var(--border-2);
+  }
+  /* generic accent — covers renamed / 3rd modes; offline/online below override it */
+  .modepick button[aria-pressed="true"] .pill{ background: rgba(70,249,184,.14); color: var(--c-user); }
+  .modepick button[aria-pressed="true"][data-mode="offline"] .pill{ background: rgba(106,169,255,.16); color: var(--c-orch); }
+  .modepick button[aria-pressed="true"][data-mode="online"] .pill{ background: rgba(162,1,255,.18); color: #d9a6ff; }
+
+  .legend{
+    display:flex; flex-wrap:wrap; gap:14px;
+    font-family: var(--mono); font-size:11px; color: var(--muted);
+  }
+  .legend .item{ display:inline-flex; align-items:center; gap:6px; }
+  .legend .swatch{ width:10px; height:10px; border-radius:3px; box-shadow: 0 0 0 1px rgba(255,255,255,.06); }
+
+  /* ───────── flow tabs ───────── */
+  .flowtabs{
+    position:relative; z-index:2;
+    max-width: 1480px; margin: 18px auto 0; padding: 0 32px;
+    display:flex; flex-wrap:wrap; gap:8px;
+  }
+  .flowtab{
+    appearance:none; border:1px solid var(--border);
+    background: var(--panel); color: var(--muted);
+    font-family: var(--mono); font-size: 12px; letter-spacing:.04em;
+    padding: 10px 14px; border-radius: 10px;
+    display:inline-flex; align-items:center; gap:10px;
+    cursor:pointer; transition: all .2s ease;
+  }
+  .flowtab .num{
+    font-size:10px;
+    background: rgba(255,255,255,.06); color: var(--muted);
+    padding: 2px 6px; border-radius: 4px;
+  }
+  .flowtab:hover{ color: var(--text); border-color: var(--border-2); }
+  .flowtab[aria-pressed="true"]{
+    border-color: var(--brand-mint);
+    color: var(--text);
+    background: linear-gradient(180deg, rgba(70,249,184,.10), rgba(70,249,184,.02));
+    box-shadow: 0 0 0 4px rgba(70,249,184,.06);
+  }
+  .flowtab[aria-pressed="true"] .num{
+    background: var(--brand-mint); color: #08120e;
+  }
+
+  /* ───────── main layout ───────── */
+  main{
+    position:relative; z-index:1;
+    max-width: 1480px; margin: 22px auto 80px; padding: 0 32px;
+    display:grid; grid-template-columns: minmax(0, 1fr) 400px; gap: 24px;
+    align-items: start;
+  }
+  @media (max-width: 1180px){
+    main{ grid-template-columns: 1fr; }
+  }
+
+  /* ───────── canvas (the diagram) ───────── */
+  .canvas{
+    position:relative;
+    background:
+      radial-gradient(800px 400px at 50% 20%, rgba(106,169,255,.06), transparent 60%),
+      linear-gradient(180deg, var(--panel) 0%, var(--bg-2) 100%);
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 36px 28px 28px;
+    min-height: 540px;
+    box-shadow: var(--shadow-soft);
+    overflow: hidden;
+  }
+  .canvas::before{
+    content:""; position:absolute; inset:0; pointer-events:none;
+    background-image:
+      linear-gradient(rgba(255,255,255,.02) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,.02) 1px, transparent 1px);
+    background-size: 48px 48px;  /* matches body grid + drag SNAP_PX so nodes snap onto visible lines */
+    mask-image: radial-gradient(circle at 50% 40%, #000 30%, transparent 80%);
+  }
+
+  .canvas-head{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom: 18px; position:relative; z-index:2;
+  }
+  .canvas-title{
+    font-family: var(--mono); font-size:11px; letter-spacing:.16em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .player{
+    display:flex; gap:6px; align-items:center;
+    font-family: var(--mono); font-size: 11px; color: var(--muted);
+  }
+  .player button{
+    appearance:none; border:1px solid var(--border); background: var(--panel-2);
+    color: var(--muted); cursor:pointer;
+    width: 30px; height: 30px; border-radius: 8px;
+    display:inline-flex; align-items:center; justify-content:center;
+    transition: all .15s ease;
+  }
+  .player button:hover{ color: var(--text); border-color: var(--border-2); }
+  .player button[aria-pressed="true"]{
+    background: rgba(70,249,184,.12); border-color: var(--brand-mint); color: var(--brand-mint);
+  }
+  .player .stepidx{
+    padding: 0 10px; min-width: 64px; text-align:center;
+  }
+
+  /* flow progress bar */
+  .progress-track{
+    width:100%; height: 3px; background: var(--border);
+    border-radius: 2px; margin-top: 4px;
+    grid-column: 1 / -1;
+  }
+  .progress-fill{
+    height:100%; border-radius: 2px;
+    background: var(--brand-mint);
+    transition: width .35s ease;
+    box-shadow: 0 0 8px rgba(70,249,184,.3);
+  }
+
+  /* ── stage where nodes & svg live ── */
+  .stage{
+    position:relative;
+    width: 100%;
+    height: 460px;
+  }
+
+  .stage svg.wires{
+    position:absolute; inset:0; width:100%; height:100%;
+    pointer-events:none;
+  }
+
+  /* node */
+  .node{
+    position:absolute;
+    width: 150px;
+    padding: 14px 14px 12px;
+    background: var(--panel-2);
+    border: 1px solid var(--border-2);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-soft);
+    transition: transform .35s cubic-bezier(.2,.8,.2,1), opacity .35s ease, border-color .25s ease, box-shadow .25s ease;
+    z-index: 2;
+    cursor: pointer;
+    user-select: none;
+    touch-action: none;
+  }
+  .node.dragging{
+    z-index: 100;
+    cursor: grabbing;
+    transition: none;
+    box-shadow: 0 0 0 2px var(--c), 0 20px 60px rgba(0,0,0,.5);
+    transform: scale(1.04);
+  }
+  /* Hover affordance — every node lifts and reveals its role color, so
+     viewers learn "these are clickable". Click = jump to first step where
+     this node appears in the current flow. */
+  .node:hover{
+    border-color: color-mix(in srgb, var(--c) 60%, var(--border-2));
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-soft), 0 0 0 1px color-mix(in srgb, var(--c) 30%, transparent);
+  }
+  .node:hover .label{ color: var(--c); }
+  .node:focus-visible{
+    outline: 2px solid var(--c);
+    outline-offset: 4px;
+  }
+  .node .label{
+    font-size: 13px; font-weight: 600; letter-spacing:-.01em;
+    margin: 0 0 4px;
+  }
+  .node .tech{
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+    line-height: 1.4;
+  }
+  .node .port{
+    margin-top: 8px;
+    font-family: var(--mono); font-size: 10.5px;
+    color: var(--c-orch);
+  }
+  .node .icon{
+    width: 28px; height: 28px; border-radius: 8px;
+    display:inline-flex; align-items:center; justify-content:center;
+    margin-bottom: 8px;
+    background: rgba(255,255,255,.04);
+    border: 1px solid var(--border-2);
+  }
+  .node[data-role="user"]   { --c: var(--c-user); }
+  .node[data-role="orch"]   { --c: var(--c-orch); }
+  .node[data-role="compute"] { --c: var(--c-compute); }
+  .node[data-role="embed"]  { --c: var(--c-embed); }
+  .node[data-role="vector"] { --c: var(--c-vector); }
+  .node[data-role="seed"]   { --c: var(--c-seed); }
+  .node .icon{ color: var(--c); }
+  .node::before{
+    content:""; position:absolute; left:0; top:14px; bottom:14px; width:3px;
+    background: var(--c); border-radius: 3px;
+    opacity:.7;
+  }
+
+  /* hidden nodes when mode mismatched */
+  .node.hidden{ opacity: 0; transform: scale(.92); pointer-events: none; }
+
+  /* shake feedback when a non-participating node is clicked */
+  @keyframes node-shake {
+    0%, 100%{ transform: translateX(0); }
+    20%{ transform: translateX(-4px); }
+    40%{ transform: translateX(4px); }
+    60%{ transform: translateX(-3px); }
+    80%{ transform: translateX(2px); }
+  }
+
+  /* active node = TARGET of the active step (full color, ring, badge) */
+  .node.active{
+    border-color: var(--c);
+    box-shadow:
+      0 0 0 1px var(--c),
+      0 0 0 6px color-mix(in srgb, var(--c) 18%, transparent),
+      var(--shadow-pop);
+    transform: translateY(-2px);
+  }
+  /* active-from node = SOURCE of the active step (full color, softer ring,
+     no badge). Lets the viewer see WHERE the data is coming from this step. */
+  .node.active-from{
+    border-color: var(--c);
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--c) 70%, transparent),
+      0 0 0 4px color-mix(in srgb, var(--c) 10%, transparent),
+      var(--shadow-soft);
+    opacity: .95;
+  }
+  /* participant = appears somewhere in this flow but not in this step.
+     Stays visible at near-full color so viewer can see the whole flow path
+     at a glance. Critical for didactic clarity — without this, only the
+     active node is visible and the rest look "dead". */
+  .node.participant{
+    opacity: .8;
+    filter: saturate(.85);
+  }
+  /* dimmed = NOT in this flow at all (e.g. Seed node during the ask flow) */
+  .node.dimmed{ opacity: .25; filter: saturate(.4); }
+
+  /* node small badge (step number sticker) */
+  .node .step-badge{
+    position:absolute; top:-10px; right:-10px;
+    width:24px; height:24px; border-radius:50%;
+    background: var(--c); color:#0a0d12;
+    font-family: var(--mono); font-weight:600; font-size: 11px;
+    display:flex; align-items:center; justify-content:center;
+    opacity: 0; transform: scale(.6);
+    transition: opacity .2s ease, transform .25s cubic-bezier(.2,1.2,.2,1);
+    box-shadow: 0 4px 14px rgba(0,0,0,.4), 0 0 0 2px var(--bg-2);
+  }
+  .node.has-badge .step-badge{ opacity:1; transform: scale(1); }
+
+  /* ── wire styles (SVG) ── */
+  .wire{
+    fill:none;
+    stroke: var(--border-2);
+    stroke-width: 1.5;
+    stroke-dasharray: 4 6;
+    opacity: .55;
+    transition: opacity .3s ease, stroke .3s ease;
+  }
+  /* active = current step's wire (full color, glow, packet animates) */
+  .wire.active{
+    stroke: var(--wire-color, var(--brand-mint));
+    stroke-width: 2.5;
+    stroke-dasharray: 0;
+    opacity: 1;
+    filter: drop-shadow(0 0 6px var(--wire-color, var(--brand-mint)));
+  }
+  /* preview = other steps of CURRENT flow — show the full path at once */
+  .wire.preview{
+    stroke: var(--wire-color, var(--border-2));
+    stroke-width: 1.5;
+    stroke-dasharray: 3 5;
+    opacity: .5;
+  }
+  /* muted = wires that don't belong to this flow at all */
+  .wire.muted{ opacity: .08; }
+
+  /* moving data packet */
+  .packet{
+    r: 5;
+    fill: var(--wire-color, var(--brand-mint));
+    filter: drop-shadow(0 0 8px var(--wire-color, var(--brand-mint)));
+    opacity: 0;
+  }
+  .packet.run{ opacity: 1; }
+
+  /* tiny wire label */
+  .wire-label{
+    font-family: var(--mono); font-size: 10px;
+    fill: var(--muted);
+    paint-order: stroke;
+    stroke: var(--bg-2); stroke-width: 4;
+    transition: fill .3s ease;
+  }
+  .wire-label.active{ fill: var(--wire-color, var(--brand-mint)); font-weight: 600; }
+  .wire-label.preview{ fill: var(--muted); opacity: .8; }
+
+  /* ───────── side panel ───────── */
+  aside{
+    position: sticky; top: 18px;
+    background:
+      linear-gradient(180deg, rgba(255,255,255,.025), rgba(255,255,255,.005));
+    border: 1px solid var(--border);
+    border-radius: 18px;
+    padding: 20px 20px 18px;
+    box-shadow: var(--shadow-soft);
+    min-height: 540px;
+    display:flex; flex-direction:column;
+  }
+  .panel-head{
+    display:flex; justify-content:space-between; align-items:flex-start;
+    gap: 12px;
+    padding-bottom: 14px;
+    border-bottom: 1px dashed var(--border);
+  }
+  .panel-step{
+    font-family: var(--mono); font-size: 11px; letter-spacing:.16em;
+    color: var(--muted); text-transform: uppercase;
+  }
+  .panel-step strong{
+    color: var(--text); font-weight: 600;
+  }
+  .panel-mode{
+    font-family: var(--mono); font-size: 10px;
+    padding: 4px 8px; border-radius: 6px;
+    background: rgba(255,255,255,.04); color: var(--muted);
+    border:1px solid var(--border);
+  }
+  .panel-mode[data-mode]{ color: var(--c-user); border-color: rgba(70,249,184,.3); }
+  .panel-mode[data-mode="offline"]{ color: var(--c-orch); border-color: rgba(106,169,255,.3); }
+  .panel-mode[data-mode="online"]{ color: #d9a6ff; border-color: rgba(162,1,255,.35); }
+
+  .panel-title{
+    font-size: 18px; font-weight: 600; margin: 14px 0 4px;
+    letter-spacing:-.01em;
+  }
+  .panel-route{
+    font-family: var(--mono); font-size: 12px;
+    color: var(--muted); margin-bottom: 12px;
+    display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;
+  }
+  .panel-route .from, .panel-route .to{
+    color: var(--text);
+    padding: 3px 7px; border-radius: 6px;
+    background: rgba(255,255,255,.04);
+    border:1px solid var(--border);
+  }
+  .panel-route .arrow{ color: var(--brand-mint); }
+
+  .panel-desc{
+    color: var(--muted); font-size: 13.5px; line-height: 1.55;
+    margin: 0 0 14px;
+  }
+  .panel-desc em{ color: var(--text); font-style: normal; }
+
+  .panel-payload{
+    font-family: var(--mono); font-size: 11.5px;
+    background: #08111c;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 14px;
+    color: #c9d6e8;
+    overflow:auto; max-height: 260px;
+    line-height: 1.6;
+    margin: 0 0 14px;
+    white-space: pre;
+    -webkit-overflow-scrolling: touch;
+  }
+  .panel-payload .k{ color: #ffc14d; }
+  .panel-payload .s{ color: #46f9b8; }
+  .panel-payload .n{ color: #b388ff; }
+  .panel-payload .c{ color: var(--muted); }
+
+  .panel-meta{
+    margin-top:auto; padding-top: 12px;
+    border-top: 1px dashed var(--border);
+    display:flex; gap: 8px; flex-wrap:wrap;
+  }
+  .chip{
+    font-family: var(--mono); font-size: 10.5px;
+    padding: 5px 9px; border-radius: 999px;
+    background: rgba(255,255,255,.035); border:1px solid var(--border);
+    color: var(--muted);
+  }
+  .chip.lat::before{ content:"⏱ "; color: var(--brand-mint); }
+  .chip.size::before{ content:"⛁ "; color: var(--c-vector); }
+
+  /* prev/next */
+  .step-nav{
+    display:flex; gap:8px; margin-top: 14px;
+  }
+  .step-nav button{
+    flex:1; padding: 9px 12px;
+    background: var(--panel-2); color: var(--text);
+    border:1px solid var(--border); border-radius: 9px;
+    font-family: var(--sans); font-size: 12.5px; cursor:pointer;
+    transition: all .15s ease;
+    display:inline-flex; align-items:center; justify-content:center; gap:6px;
+  }
+  .step-nav button:hover{ border-color: var(--brand-mint); color: var(--brand-mint); }
+  .step-nav button:disabled{ opacity:.4; cursor:not-allowed; }
+
+  /* footer / legend below */
+  .scenario-note{
+    position: relative; z-index: 2;
+    max-width: 1480px; margin: 14px auto 0; padding: 0 32px;
+    color: var(--dim); font-size: 12px;
+    font-family: var(--mono);
+  }
+  .scenario-note kbd{
+    font-family: var(--mono); font-size: 11px;
+    padding: 2px 6px; border-radius: 4px;
+    background: var(--panel-2); border:1px solid var(--border); color: var(--text);
+  }
+
+  /* mobile adjustments */
+  @media (max-width: 720px){
+    header{ padding: 24px 18px 8px; }
+    .controls, .flowtabs, main, .scenario-note{ padding-left: 18px; padding-right: 18px; }
+    main{ gap:18px; }
+    .canvas{ padding: 22px 14px 18px; }
+    .stage{ height: 420px; }
+    .node{ width: 132px; padding: 12px; }
+    .node .label{ font-size: 12px; }
+    .node .tech{ font-size: 10px; }
+    aside{ position: static; }
+  }
+
+  /* keyboard focus rings */
+  button:focus-visible, .flowtab:focus-visible{
+    outline: 2px solid var(--brand-mint); outline-offset: 2px;
+  }
+
+  /* ───────── light theme ───────── */
+  body.light{
+    --bg:        #f6f7fa;
+    --bg-2:      #ffffff;
+    --panel:     #ffffff;
+    --panel-2:   #f1f3f8;
+    --border:    #e2e6ee;
+    --border-2:  #c8d0dd;
+    --text:      #0f1419;
+    --muted:     #555f70;
+    --dim:       #8492a8;
+
+    --c-user:    #00b377;
+    --c-orch:    #2a6fdb;
+    --c-compute: #d63a5f;
+    --c-embed:   #c98a00;
+    --c-vector:  #7a4ed1;
+    --c-seed:    #d96e2c;
+
+    --brand-violet: #7a1cd9;
+    --brand-mint:   #00b377;
+
+    --shadow-soft: 0 4px 18px rgba(15,20,25,.06);
+    --shadow-pop:  0 0 0 1px rgba(15,20,25,.04), 0 8px 24px rgba(15,20,25,.08);
+
+    background-image:
+      radial-gradient(1200px 600px at 15% -10%, rgba(42,111,219,.05), transparent 60%),
+      radial-gradient(1000px 500px at 100% 0%, rgba(122,28,217,.04), transparent 60%),
+      radial-gradient(800px 600px at 50% 120%, rgba(0,179,119,.03), transparent 60%);
+  }
+  body.light::before{
+    background-image:
+      linear-gradient(rgba(0,0,0,.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,0,0,.03) 1px, transparent 1px);
+  }
+  body.light .panel-payload{
+    background: #f0f2f7;
+    color: #1e2838;
+    border-color: var(--border);
+  }
+  body.light .panel-payload .k{ color: #a16800; }
+  body.light .panel-payload .s{ color: #00855a; }
+  body.light .panel-payload .n{ color: #6b3faf; }
+  body.light .eyebrow{ background: rgba(0,0,0,.02); }
+  body.light .eyebrow .dot{ box-shadow: 0 0 8px var(--brand-mint); }
+  body.light .legend .swatch{ box-shadow: 0 0 0 1px rgba(0,0,0,.08); }
+  body.light .wire-label{ stroke: var(--panel); stroke-width: 5; }
+  body.light .node{ box-shadow: 0 2px 8px rgba(0,0,0,.06); }
+  body.light .node.active{ box-shadow: 0 0 0 1px var(--c), 0 0 0 6px color-mix(in srgb, var(--c) 12%, transparent), 0 4px 16px rgba(0,0,0,.08); }
+  body.light .wire.active{ filter: drop-shadow(0 0 4px var(--wire-color, var(--brand-mint))); }
+  body.light .chip{ background: rgba(0,0,0,.04); }
+  body.light aside{ background: linear-gradient(180deg, rgba(0,0,0,.01), rgba(0,0,0,.005)); }
+
+  /* theme toggle */
+  .theme-toggle, .layout-reset, .fullscreen-toggle{
+    appearance:none; border:1px solid var(--border); background: var(--panel);
+    color: var(--muted); cursor:pointer;
+    width: 34px; height: 34px; border-radius: 10px;
+    display:inline-flex; align-items:center; justify-content:center;
+    transition: all .2s ease;
+    flex-shrink: 0;
+  }
+  .theme-toggle:hover, .layout-reset:hover, .fullscreen-toggle:hover{ color: var(--text); border-color: var(--border-2); }
+  .layout-reset{ display:none; }
+  .layout-reset.has-custom{ display:inline-flex; }
+  .theme-toggle .icon-sun{ display:none; }
+  body.light .theme-toggle .icon-moon{ display:none; }
+  body.light .theme-toggle .icon-sun{ display:block; }
+
+  /* fullscreen canvas */
+  .canvas.is-fullscreen{
+    position:fixed; inset:0; z-index:9999;
+    border-radius:0; margin:0; max-width:none;
+    min-height:100vh;
+    overflow:auto;
+  }
+  .canvas.is-fullscreen .stage{ height: calc(100vh - 80px); }
+  .canvas.is-fullscreen ~ aside{ display:none; }
+</style>
+</head>
+<body>
+
+<header>
   <span class="eyebrow"><span class="dot"></span> lance-ns · event-driven · durable</span>
   <h1>Images: S3 → bronze → silver → <span class="accent">gold (QC gate)</span></h1>
   <p class="sub">An image lands in an external S3 bucket and an event-driven, durable medallion runs itself: S3 ObjectCreated → NATS JetStream → Ray batch → a Dapr-workflow QC gate before gold — OpenLineage at every hop. Click a flow, press Play.</p>

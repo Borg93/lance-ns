@@ -187,8 +187,14 @@ def build_events() -> list[RunEvent]:
     # silver drops the raw blob — the embed job keeps id + payload_src and adds the features.
     silver_v1_cols = (("id", "int"), ("payload_src", "string"), ("embedding", "array<float>"))
     silver_v2_cols = (*silver_v1_cols, ("caption", "string"))
-    # Gold carries the appended feature columns plus its own provenance as a JSONB column.
-    gold_cols = (("caption", "string"), ("embedding", "array<float>"), ("lineage", "json"))
+    # Gold carries the keys forward (id, payload_src) + the features, plus its own provenance JSONB.
+    gold_cols = (
+        ("id", "int"),
+        ("payload_src", "string"),
+        ("embedding", "array<float>"),
+        ("caption", "string"),
+        ("lineage", "json"),
+    )
     return [
         _event(
             run_id="11111111-1111-1111-1111-111111111111",

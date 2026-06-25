@@ -644,13 +644,23 @@
             "fields": [
               {
                 "fields": [],
-                "name": "caption",
+                "name": "id",
+                "type": "int"
+              },
+              {
+                "fields": [],
+                "name": "payload_src",
                 "type": "string"
               },
               {
                 "fields": [],
                 "name": "embedding",
                 "type": "array<float>"
+              },
+              {
+                "fields": [],
+                "name": "caption",
+                "type": "string"
               },
               {
                 "fields": [],

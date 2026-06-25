@@ -198,8 +198,16 @@ def write_gold() -> None:
         lineage_col = pa.array(lineage_json, type=pa.json_())
     except (pa.ArrowNotImplementedError, TypeError):  # pragma: no cover - older arrow/lance build
         lineage_col = pa.array(lineage_json, type=pa.string())
+    # Carry the keys forward (id, payload_src) so column lineage is visible through to gold; add the
+    # embedded provenance JSONB. Only the raw `payload` blob was dropped (at silver, becoming embedding).
     table = pa.table(
-        {"caption": sv.column("caption"), "embedding": sv.column("embedding"), "lineage": lineage_col}
+        {
+            "id": sv.column("id"),
+            "payload_src": sv.column("payload_src"),
+            "embedding": sv.column("embedding"),
+            "caption": sv.column("caption"),
+            "lineage": lineage_col,
+        }
     )
     lance.write_dataset(table, _GOLD, storage_options=opts, mode="overwrite")
     _say(f"gold$catalog v1 written ({sv.num_rows} rows, +lineage JSONB) -> {_GOLD}")

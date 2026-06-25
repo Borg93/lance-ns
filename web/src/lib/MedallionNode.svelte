@@ -18,21 +18,27 @@
 
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
+	import { pulse, pop } from './attachments';
 
 	let { data }: NodeProps<MedallionNodeType> = $props();
+
 	const color = $derived(COLORS[data.layer] ?? COLORS[4]);
+	// Derived *primitives* so the continuous pulse only re-inits when the value actually flips,
+	// not on every 2s poll (which reassigns `data`).
 	const running = $derived(/START|RUNNING/i.test(data.runState ?? ''));
 	const done = $derived(data.runState === 'COMPLETE');
 	const failedRun = $derived(/FAIL|ABORT/i.test(data.runState ?? ''));
+	const stateKey = $derived(data.runState ?? '');
+	const ring = $derived(failedRun ? 'var(--fail)' : done ? 'var(--ok)' : running ? 'var(--amber)' : color);
 </script>
 
 <div
 	class="node"
 	class:selected={data.selected}
-	class:running
-	class:done
-	class:failed={failedRun}
 	style:--accent={color}
+	style:--ring={ring}
+	{@attach pop(stateKey)}
+	{@attach pulse(running, '255, 193, 77')}
 >
 	<Handle type="target" position={Position.Left} />
 	<div class="bar"></div>
@@ -58,33 +64,17 @@
 	.node {
 		display: flex;
 		width: 220px;
-		border: 1.5px solid var(--accent);
-		border-radius: 10px;
-		background: #141b27;
+		border: 1.5px solid var(--ring, var(--accent));
+		border-radius: var(--radius);
+		background: linear-gradient(180deg, var(--panel-2), var(--panel));
 		overflow: hidden;
 		font-family: ui-sans-serif, system-ui, sans-serif;
+		box-shadow: var(--shadow);
+		transition: border-color 0.35s var(--ease);
 	}
 	.node.selected {
-		box-shadow: 0 0 0 2px #46f9b8;
-	}
-	.node.running {
-		border-color: #ffc14d;
-		animation: node-pulse 1.2s ease-in-out infinite;
-	}
-	.node.done {
-		box-shadow: 0 0 0 1.5px var(--ok);
-	}
-	.node.failed {
-		box-shadow: 0 0 0 1.5px var(--fail);
-	}
-	@keyframes node-pulse {
-		0%,
-		100% {
-			box-shadow: 0 0 0 2px rgba(255, 193, 77, 0.7);
-		}
-		50% {
-			box-shadow: 0 0 0 6px rgba(255, 193, 77, 0.15);
-		}
+		outline: 2px solid #46f9b8;
+		outline-offset: 2px;
 	}
 	.bar {
 		width: 6px;
@@ -97,11 +87,11 @@
 	.name {
 		font-weight: 600;
 		font-size: 13px;
-		color: #e6edf6;
+		color: var(--ink);
 	}
 	.uri {
 		font-size: 10.5px;
-		color: #8aa0bd;
+		color: var(--mut);
 		margin: 2px 0 6px;
 		word-break: break-all;
 	}
@@ -114,14 +104,14 @@
 		font-size: 10px;
 		font-weight: 700;
 		padding: 1px 7px;
-		border-radius: 7px;
+		border-radius: 999px;
 	}
 	.chip.ok {
-		background: #46f9b8;
+		background: var(--ok);
 		color: #06210f;
 	}
 	.chip.fail {
-		background: #ff5d6c;
+		background: var(--fail);
 		color: #2a0307;
 	}
 	.chip.tag {

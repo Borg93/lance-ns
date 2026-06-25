@@ -1,13 +1,15 @@
 <script lang="ts">
-	import gsap from 'gsap';
 	import type { RunStatus } from './types';
+	import { enter, bar, breathe } from './attachments';
 
 	let { runs }: { runs: RunStatus[] } = $props();
 
 	const isRunning = (s?: string | null) => /START|RUNNING/i.test(s ?? '');
 	const isFail = (s?: string | null) => /FAIL|ABORT/i.test(s ?? '');
 	const color = (s?: string | null) =>
-		isFail(s) ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : isRunning(s) ? '#ffc14d' : 'var(--mut)';
+		isFail(s) ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : isRunning(s) ? 'var(--amber)' : 'var(--mut)';
+
+	const shortJob = (j?: string | null) => (j ?? '').replace(/^ray-jobs\//, '');
 
 	function pct(r: RunStatus): number {
 		if (r.state === 'COMPLETE') return 100;
@@ -21,27 +23,6 @@
 		return r.state ?? '—';
 	}
 	const time = (s?: string | null) => (s ? new Date(s).toLocaleTimeString() : '');
-
-	// gsap: animate the progress fill width to the current % whenever it changes.
-	function fillWidth(node: HTMLElement, run: RunStatus) {
-		gsap.to(node, { width: pct(run) + '%', duration: 0.5, ease: 'power2.out', overwrite: 'auto' });
-	}
-	// gsap: breathe the bar while the run is RUNNING; stop on terminal.
-	function pulse(node: HTMLElement, run: RunStatus) {
-		if (!isRunning(run.state)) {
-			gsap.set(node, { opacity: 1 });
-			return;
-		}
-		const tween = gsap.to(node, { opacity: 0.5, duration: 0.7, repeat: -1, yoyo: true, ease: 'sine.inOut' });
-		return () => {
-			tween.kill();
-			gsap.set(node, { opacity: 1 });
-		};
-	}
-	// gsap: slide each row in once on mount (no reactive reads -> runs once).
-	function enter(node: HTMLElement) {
-		gsap.from(node, { opacity: 0, y: 10, duration: 0.45, ease: 'power2.out' });
-	}
 </script>
 
 <div class="board">
@@ -49,18 +30,19 @@
 		<p class="hint">No runs yet — trigger a step and watch them go <b>queued → running → done/failed</b>.</p>
 	{/if}
 	{#each runs as r (r.run_id)}
-		<div class="row" class:fail={isFail(r.state)} {@attach enter}>
+		<div
+			class="row"
+			class:fail={isFail(r.state)}
+			class:running={isRunning(r.state)}
+			style:--c={color(r.state)}
+			{@attach enter({ y: 8 })}
+		>
 			<div class="top">
-				<span class="job mono">{r.job}</span>
-				<span class="pill" style:color={color(r.state)} style:border-color={color(r.state)}>{label(r)}</span>
+				<span class="job mono" title={r.job}>{shortJob(r.job)}</span>
+				<span class="pill">{label(r)}</span>
 			</div>
 			<div class="track">
-				<div
-					class="fill"
-					style:background={color(r.state)}
-					{@attach (node) => fillWidth(node, r)}
-					{@attach (node) => pulse(node, r)}
-				></div>
+				<div class="fill" {@attach bar(pct(r))} {@attach breathe(isRunning(r.state))}></div>
 			</div>
 			<div class="meta">
 				<span class="who">{r.author ?? '—'}{#if r.outputs.length} · → {r.outputs.join(', ')}{/if}</span>
@@ -75,22 +57,27 @@
 	.board {
 		display: flex;
 		flex-direction: column;
-		gap: 8px;
+		gap: 9px;
 	}
 	.hint {
 		color: var(--mut);
 		font-size: 12px;
+		line-height: 1.5;
 	}
 	.hint b {
 		color: var(--ink);
 	}
 	.row {
+		position: relative;
 		border: 1px solid var(--line);
-		border-radius: 8px;
-		padding: 8px 10px;
+		border-left: 3px solid var(--c);
+		border-radius: var(--radius-sm);
+		padding: 9px 11px;
+		background: linear-gradient(180deg, var(--panel-2), var(--panel));
+		transition: border-color 0.3s var(--ease);
 	}
-	.row.fail {
-		border-color: var(--fail);
+	.row.running {
+		border-color: color-mix(in srgb, var(--amber) 35%, var(--line));
 	}
 	.top {
 		display: flex;
@@ -106,22 +93,27 @@
 	.pill {
 		font-size: 10px;
 		font-weight: 700;
-		padding: 1px 7px;
-		border-radius: 7px;
-		border: 1px solid;
+		letter-spacing: 0.3px;
+		padding: 2px 8px;
+		border-radius: 999px;
+		color: var(--c);
+		border: 1px solid color-mix(in srgb, var(--c) 50%, transparent);
+		background: color-mix(in srgb, var(--c) 12%, transparent);
 		white-space: nowrap;
 	}
 	.track {
 		height: 6px;
-		background: #0c1018;
-		border-radius: 4px;
+		background: #0b0f17;
+		border-radius: 999px;
 		overflow: hidden;
-		margin: 7px 0 5px;
+		margin: 8px 0 6px;
+		box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
 	}
 	.fill {
 		height: 100%;
 		width: 0;
-		border-radius: 4px;
+		border-radius: 999px;
+		background: linear-gradient(90deg, color-mix(in srgb, var(--c) 70%, #000), var(--c));
 	}
 	.meta {
 		display: flex;
@@ -135,6 +127,8 @@
 	.err {
 		color: var(--fail);
 		font-size: 11px;
-		margin-top: 4px;
+		margin-top: 5px;
+		padding-top: 5px;
+		border-top: 1px dashed color-mix(in srgb, var(--fail) 40%, transparent);
 	}
 </style>

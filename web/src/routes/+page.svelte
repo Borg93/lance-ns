@@ -4,11 +4,16 @@
 	import { Tabs } from 'bits-ui';
 	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
 	import StatusBoard from '$lib/StatusBoard.svelte';
+	import { enter, stagger, countUp } from '$lib/attachments';
 	import { LineageState } from '$lib/store.svelte';
 	import { LAYER, type DemoDataset } from '$lib/types';
 
 	const store = new LineageState();
 	const nodeTypes = { medallion: MedallionNode };
+
+	// Derived primitives so the count-up labels only re-animate when the number actually changes.
+	const datasetCount = $derived(store.nodes.length);
+	const eventCount = $derived(store.events.length);
 
 	let nodes = $state.raw<MedallionNodeType[]>([]);
 	let edges = $state.raw<{ id: string; source: string; target: string; animated: boolean; type: string }[]>([]);
@@ -89,7 +94,7 @@
 </script>
 
 <div class="app">
-	<header>
+	<header {@attach stagger({ each: 0.08 })}>
 		<h1>Lance Lineage <span class="sub">live medallion demo</span></h1>
 		<p class="explain">
 			You're the producer — trigger steps with
@@ -99,13 +104,17 @@
 		</p>
 		<div class="status">
 			<span class="dot" class:on={store.online}></span>
-			{store.online ? 'live' : 'waiting'} · {store.nodes.length} datasets · {store.events.length} events
-			{#if store.lastUpdated}· {store.lastUpdated}{/if}
+			<span class="state-word" class:live={store.online}>{store.online ? 'live' : 'waiting'}</span>
+			<span class="sep">·</span>
+			<span class="num mono" {@attach countUp(datasetCount)}>0</span> datasets
+			<span class="sep">·</span>
+			<span class="num mono" {@attach countUp(eventCount)}>0</span> events
+			{#if store.lastUpdated}<span class="sep">·</span> <span class="ts">{store.lastUpdated}</span>{/if}
 		</div>
 	</header>
 
 	<div class="top">
-		<section class="graph">
+		<section class="graph" {@attach enter({ delay: 0.05 })}>
 			<SvelteFlow bind:nodes bind:edges {nodeTypes} fitView onnodeclick={selectNode}>
 				<Background variant={BackgroundVariant.Dots} gap={16} />
 				<Controls />
@@ -121,7 +130,7 @@
 			{/if}
 		</section>
 
-		<aside>
+		<aside {@attach enter({ delay: 0.12 })}>
 			<Tabs.Root value="status">
 				<Tabs.List class="tablist">
 					<Tabs.Trigger value="status" class="tab">Status ({store.runs.length})</Tabs.Trigger>
@@ -142,7 +151,7 @@
 						<p class="hint">No OpenLineage events yet. Trigger a step.</p>
 					{/if}
 					{#each store.events as ev (ev.seq)}
-						<details class="event">
+						<details class="event" {@attach enter({ y: 6 })}>
 							<summary>
 								<span class="badge" style:background={stateColor(ev.event_type)}>{ev.event_type}</span>
 								<span class="mono job">{ev.job}</span>
@@ -161,7 +170,7 @@
 						<h2 class="mono">{store.selected}</h2>
 						<p class="hint">{selectedRuns.length} producing run(s)</p>
 						{#each selectedRuns as r (r.run_id)}
-							<div class="run" class:fail={/FAIL|ABORT/i.test(r.event_type ?? '')}>
+							<div class="run" class:fail={/FAIL|ABORT/i.test(r.event_type ?? '')} {@attach enter({ y: 6 })}>
 								<div class="run-top">
 									<span class="badge" style:background={stateColor(r.event_type)}>
 										{r.dataset_version ? `v${r.dataset_version}` : r.event_type}
@@ -178,13 +187,13 @@
 		</aside>
 	</div>
 
-	<section class="storage">
+	<section class="storage" {@attach enter({ delay: 0.18 })}>
 		<div class="storage-head">
 			Lance tables on RustFS <span class="hint">— real object storage; columns appear as you run steps</span>
 		</div>
 		<div class="cards">
 			{#each store.datasets as ds (ds.name)}
-				<div class="card" class:pending={!ds.exists}>
+				<div class="card" class:pending={!ds.exists} {@attach enter({ y: 10 })}>
 					<div class="card-head">
 						<span class="mono ds-name">{ds.name}</span>
 						{#if ds.exists}
@@ -245,8 +254,9 @@
 		align-items: baseline;
 		gap: 16px;
 		flex-wrap: wrap;
-		padding: 10px 18px;
+		padding: 11px 18px;
 		border-bottom: 1px solid var(--line);
+		background: linear-gradient(180deg, var(--panel-2), transparent);
 	}
 	h1 {
 		font-size: 16px;
@@ -275,21 +285,46 @@
 		color: var(--ink);
 	}
 	.status {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		margin-left: auto;
 		color: var(--mut);
 		font-size: 12px;
 		white-space: nowrap;
 	}
+	.sep {
+		color: var(--line-2);
+	}
+	.num {
+		color: var(--ink);
+		font-weight: 600;
+		font-variant-numeric: tabular-nums;
+	}
+	.state-word {
+		text-transform: uppercase;
+		letter-spacing: 0.4px;
+		font-size: 11px;
+		font-weight: 700;
+		color: var(--mut);
+	}
+	.state-word.live {
+		color: var(--ok);
+	}
+	.ts {
+		color: var(--faint);
+		font-variant-numeric: tabular-nums;
+	}
 	.dot {
-		display: inline-block;
 		width: 8px;
 		height: 8px;
 		border-radius: 50%;
 		background: var(--mut);
-		margin-right: 4px;
+		transition: background 0.3s var(--ease);
 	}
 	.dot.on {
 		background: var(--ok);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
 	}
 	.top {
 		display: grid;
@@ -311,7 +346,7 @@
 	}
 	aside {
 		border-left: 1px solid var(--line);
-		background: var(--panel);
+		background: linear-gradient(180deg, var(--panel-2), var(--panel));
 		overflow: hidden;
 		display: flex;
 		flex-direction: column;
@@ -322,17 +357,23 @@
 	}
 	:global(.tab) {
 		flex: 1;
-		padding: 9px;
+		padding: 10px 9px;
 		background: transparent;
 		border: none;
 		color: var(--mut);
 		font-size: 12px;
 		font-weight: 600;
 		cursor: pointer;
+		transition:
+			color 0.2s var(--ease),
+			box-shadow 0.2s var(--ease);
+	}
+	:global(.tab:hover) {
+		color: var(--ink);
 	}
 	:global(.tab[data-state='active']) {
 		color: var(--ink);
-		box-shadow: inset 0 -2px 0 var(--ok);
+		box-shadow: inset 0 -2px 0 var(--accent);
 	}
 	:global(.tabbody) {
 		padding: 12px;
@@ -351,8 +392,8 @@
 	}
 	.badge {
 		display: inline-block;
-		padding: 1px 7px;
-		border-radius: 7px;
+		padding: 1px 8px;
+		border-radius: 999px;
 		font-size: 11px;
 		font-weight: 700;
 		color: #06210f;
@@ -360,13 +401,19 @@
 	.event,
 	.run {
 		border: 1px solid var(--line);
-		border-radius: 8px;
+		border-radius: var(--radius-sm);
 		padding: 8px 10px;
 		margin-bottom: 8px;
 		font-size: 12px;
+		background: linear-gradient(180deg, var(--panel-2), var(--panel));
+		transition: border-color 0.2s var(--ease);
+	}
+	.event:hover,
+	.run:hover {
+		border-color: var(--line-2);
 	}
 	.run.fail {
-		border-color: var(--fail);
+		border-color: color-mix(in srgb, var(--fail) 55%, var(--line));
 	}
 	.event summary {
 		display: flex;
@@ -411,8 +458,8 @@
 		max-height: 40vh;
 		overflow: auto;
 		border-top: 1px solid var(--line);
-		padding: 10px 14px 16px;
-		background: #0e141d;
+		padding: 12px 14px 16px;
+		background: var(--bg-2);
 	}
 	.storage-head {
 		font-size: 13px;
@@ -426,13 +473,22 @@
 	}
 	.card {
 		border: 1px solid var(--line);
-		border-radius: 10px;
-		padding: 10px 12px;
-		background: var(--panel);
+		border-radius: var(--radius);
+		padding: 11px 13px;
+		background: linear-gradient(180deg, var(--panel-2), var(--panel));
+		box-shadow: var(--shadow);
+		transition:
+			border-color 0.2s var(--ease),
+			transform 0.2s var(--ease);
+	}
+	.card:hover {
+		border-color: var(--line-2);
+		transform: translateY(-2px);
 	}
 	.card.pending {
-		opacity: 0.6;
+		opacity: 0.55;
 		border-style: dashed;
+		box-shadow: none;
 	}
 	.card-head {
 		display: flex;

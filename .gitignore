@@ -6,6 +6,9 @@ dist/
 wheels/
 *.egg-info
 
+# Demo runtime endpoints (written by scripts/medallion_demo.sh; machine-specific)
+.medallion-demo.env
+
 # Virtual environments
 .venv
 lance-ns-impls/

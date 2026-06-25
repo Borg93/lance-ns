@@ -22,6 +22,16 @@ export DEMO_S3_PORT="${DEMO_S3_PORT:-9000}"
 export DEMO_LINEAGE_PORT="${DEMO_LINEAGE_PORT:-8000}"
 export DEMO_WEB_PORT="${DEMO_WEB_PORT:-5173}"
 
+# Record the actual endpoints so a bare `python scripts/medallion_demo.py --step N` finds the stack
+# (no env-var prefix needed). The driver auto-loads this file; real env vars still override it.
+cat > .medallion-demo.env <<EOF
+S3_ENDPOINT=http://localhost:${DEMO_S3_PORT}
+LINEAGE_URL=http://localhost:${DEMO_LINEAGE_PORT}
+S3_ACCESS_KEY=rustfsadmin
+S3_SECRET_KEY=rustfsadmin
+S3_BUCKET=lakehouse
+EOF
+
 compose() {
   docker compose \
     -f .docker/docker-compose.yml \

@@ -56,6 +56,23 @@ try:
 except ImportError:  # pragma: no cover - depends on the installed lance build
     _HAVE_BLOB = False
 
+
+def _load_demo_env() -> None:
+    """Load demo endpoints from ``<repo>/.medallion-demo.env`` (written when the stack starts), so a
+    bare ``--step N`` targets the *actual* ports without an env-var prefix. Real env vars win."""
+    path = Path(__file__).resolve().parent.parent / ".medallion-demo.env"
+    if not path.exists():
+        return
+    for raw in path.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        os.environ.setdefault(key.strip(), value.strip())
+
+
+_load_demo_env()
+
 S3_ENDPOINT = os.environ.get("S3_ENDPOINT", "http://localhost:9000")
 S3_KEY = os.environ.get("S3_ACCESS_KEY", "rustfsadmin")
 S3_SECRET = os.environ.get("S3_SECRET_KEY", "rustfsadmin")

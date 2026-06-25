@@ -9,6 +9,7 @@
 </script>
 
 <script lang="ts">
+	import { untrack } from 'svelte';
 	import { SvelteFlow, Background, BackgroundVariant, Controls, MiniMap, Panel } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { Tabs } from 'bits-ui';
@@ -53,7 +54,9 @@
 	// Rebuild the active graph plane whenever the polled data (or the chosen view) changes.
 	// Reconcile, don't rebuild: keep each node's identity + dragged position across the 2s poll.
 	$effect(() => {
-		const prev = new Map(nodes.map((node) => [node.id, node]));
+		// Read the current nodes UNTRACKED — we only want their last positions to carry forward; tracking
+		// `nodes` here (the var we reassign below) would make this effect retrigger itself → infinite loop.
+		const prev = new Map(untrack(() => nodes).map((node) => [node.id, node]));
 
 		if (graphView === 'jobs') {
 			// Jobs plane (like Marquez's job lineage): one node per job; an edge producing-job → consuming

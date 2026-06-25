@@ -166,6 +166,23 @@
     + `/demo/datasets` (reads real Lance on S3). `scripts/medallion_demo.sh` brings the whole stack up
     (RustFS + lineage + web; host ports overridable). Zero-dep fallback UI at `/ui/`. *Follow-ups:
     SSE/websocket push instead of polling; route the demo through the catalog control plane.*
+16. 🔶 **Demo → production auth/authz (it runs auth-OFF on purpose; here's all that's missing).**
+    The enforcement is **already implemented and just flag-gated OFF** (P0 #1/#2/#3 above), so turning
+    it on is mostly config:
+    - **[config, easy]** Catalog: `LANCE_OIDC_ENABLED`+`LANCE_FGA_ENABLED`. Lineage:
+      `LINEAGE_OIDC_ENABLED`+`LINEAGE_FGA_ENABLED` pinned to the **same** `*_FGA_STORE_ID`/`MODEL_ID`.
+      Dex + OpenFGA are already in the base compose; just seed the OpenFGA model + tuples.
+    - **[small new code] UI login flow** — the one genuinely-new piece: OIDC code-flow + session in the
+      SvelteKit app so its `/api/*` proxy forwards a real `Authorization` bearer (today it polls
+      unauthenticated). SvelteKit `hooks.server.ts` + a session cookie; lineage then verifies + filters.
+    - **[small, backend] Harden demo endpoints for prod** — `/demo/datasets` (reads raw S3) is
+      DEMO-ONLY → remove/keep flag-gated; `/events` is ungated in-memory → persist + gate like the
+      per-dataset reads.
+    - **[backend] Output-scoped ingest authz** — also check the producer may *write* the named output
+      tables (`can_write_data`), not just that it's authenticated (currently attributable but not scoped).
+    - **[data plane] Wire `StsVendor` into `describe_table?vend_credentials`** (P1 #5) — real per-table
+      short-TTL creds on MinIO/Ceph/AWS (RustFS: mode_b/static until it supports inline policy scoping).
+    Bottom line: **easy to add later** — enforcement code exists; the only build is the UI login flow.
 
 ---
 

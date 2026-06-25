@@ -1,0 +1,41 @@
+:root {
+	--bg: #0c1018;
+	--panel: #141b27;
+	--line: #243245;
+	--ink: #e6edf6;
+	--mut: #8aa0bd;
+	--ok: #46f9b8;
+	--fail: #ff5d6c;
+	color-scheme: dark;
+}
+
+* {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	margin: 0;
+	height: 100%;
+	background: var(--bg);
+	color: var(--ink);
+	font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+	font-size: 14px;
+}
+
+code,
+.mono {
+	font-family: 'Source Code Pro', ui-monospace, Menlo, monospace;
+}
+
+/* Svelte Flow dark surface */
+.svelte-flow {
+	background: var(--bg);
+}
+.svelte-flow__edge-path {
+	stroke: #3a4d68;
+	stroke-width: 2;
+}
+.svelte-flow__edge.animated .svelte-flow__edge-path {
+	stroke: var(--ok);
+}

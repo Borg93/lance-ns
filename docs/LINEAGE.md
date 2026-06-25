@@ -221,18 +221,22 @@ each node's `source_uri` + `tags`.
 `scripts/medallion_demo.py` is the **real** driver (vs `seed.py`, which only emits synthetic
 events): it **executes** the medallion flow against the real docker-compose stack — writing and
 evolving real Lance datasets on **RustFS** (S3-compatible; the driver is storage-agnostic, so
-MinIO/Ceph/AWS work by changing the creds) **and** emitting a real OpenLineage event after each
-step. A thin self-contained page (`lineage/static/index.html`, served by the lineage service at
-`/ui/`) polls `/datasets/{id}/graph` + `/producers` every 2s, so you watch the DAG build and silver
-evolve **v1 → v2**, the failed embed appear in red, and gold land with its embedded JSONB lineage.
+MinIO/Ceph/AWS work by changing the creds) **and** emitting a real OpenLineage event after each step.
+
+The UI is a **SvelteKit app** (`web/` — Svelte Flow + bits-ui on Bun) with three live views polled
+every 2s: the **Graph** (the medallion DAG — version chips silver v1→v2, the failed run in red, each
+node's S3 `source_uri` + tags), the **Events** feed (Marquez-style, full facets per event from
+`GET /events`), and **Storage (S3)** (`GET /demo/datasets` — each real Lance dataset's schema *at
+every version*, so you watch `embedding` then `caption` appear, plus gold's embedded JSONB lineage).
+A zero-dependency fallback (`lineage/static/index.html`) is also served at `/ui/`.
 
 ```bash
-# bring up RustFS + lineage, then auto-run the flow (host ports overridable to avoid clashes):
-DEMO_S3_PORT=9100 DEMO_LINEAGE_PORT=8001 ./scripts/medallion_demo.sh
-# open the live DAG view:
-open http://localhost:8001/ui/
+# bring up RustFS + lineage + the SvelteKit UI (host ports overridable to avoid clashes):
+DEMO_S3_PORT=9100 DEMO_LINEAGE_PORT=8001 DEMO_WEB_PORT=5173 ./scripts/medallion_demo.sh
+# open the live view:
+open http://localhost:5173/            # SvelteKit UI  (fallback: http://localhost:8001/ui/)
 
-# …or be the producer yourself — trigger one event at a time, watching the UI between:
+# …be the producer yourself — trigger one event at a time, watching the UI between:
 S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
   uv run python scripts/medallion_demo.py --list          # show the 5 steps
   uv run python scripts/medallion_demo.py --step 1         # land bronze (+emit)
@@ -244,6 +248,7 @@ S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
 
 `--emit-only` skips the Lance write and just emits the OpenLineage event (pure producer
 simulation). The driver reuses `seed.build_events()`, so the live graph matches the tested fixture.
+See `web/README.md` for developing the UI on the host (`bun run dev`).
 
 ## Run / verify (dev)
 

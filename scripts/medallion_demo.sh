@@ -20,6 +20,7 @@ cd "$ROOT"
 #   DEMO_S3_PORT=9100 DEMO_LINEAGE_PORT=8001 ./scripts/medallion_demo.sh
 export DEMO_S3_PORT="${DEMO_S3_PORT:-9000}"
 export DEMO_LINEAGE_PORT="${DEMO_LINEAGE_PORT:-8000}"
+export DEMO_WEB_PORT="${DEMO_WEB_PORT:-5173}"
 
 compose() {
   docker compose \
@@ -37,14 +38,15 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "== bring up RustFS + the lineage service =="
-compose up -d --build rustfs-perms rustfs lineage-postgres lineage-api
+echo "== bring up RustFS + the lineage service + the SvelteKit UI =="
+compose up -d --build rustfs-perms rustfs lineage-postgres lineage-api web
 
 echo "== wait for the lineage service (http://localhost:${DEMO_LINEAGE_PORT}/livez) =="
 until curl -fsS "http://localhost:${DEMO_LINEAGE_PORT}/livez" >/dev/null 2>&1; do sleep 2; done
 
-UI="http://localhost:${DEMO_LINEAGE_PORT}/ui/"
-echo "== open the live DAG view now, then watch it build: ${UI} =="
+UI="http://localhost:${DEMO_WEB_PORT}/"
+echo "== open the live view now, then watch it build: ${UI} =="
+echo "   (zero-dep fallback UI also at http://localhost:${DEMO_LINEAGE_PORT}/ui/)"
 echo "== run the driver: real Lance on RustFS + real OpenLineage (one step every few seconds) =="
 S3_ENDPOINT="http://localhost:${DEMO_S3_PORT}" S3_ACCESS_KEY=rustfsadmin S3_SECRET_KEY=rustfsadmin \
   S3_BUCKET=lakehouse LINEAGE_URL="http://localhost:${DEMO_LINEAGE_PORT}" STEP_DELAY="${STEP_DELAY:-2.5}" \

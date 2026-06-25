@@ -4,7 +4,7 @@
 	import { Tabs } from 'bits-ui';
 	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
 	import { LineageState } from '$lib/store.svelte';
-	import { LAYER } from '$lib/types';
+	import { LAYER, type DemoDataset } from '$lib/types';
 
 	const store = new LineageState();
 	const nodeTypes = { medallion: MedallionNode };
@@ -12,7 +12,6 @@
 	let nodes = $state.raw<MedallionNodeType[]>([]);
 	let edges = $state.raw<{ id: string; source: string; target: string; animated: boolean; type: string }[]>([]);
 
-	// Poll the lineage service every 2s.
 	$effect(() => {
 		store.poll();
 		const timer = setInterval(() => store.poll(), 2000);
@@ -59,17 +58,32 @@
 		/FAIL|ABORT/i.test(s ?? '') ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : 'var(--mut)';
 
 	const selectedRuns = $derived(store.selected ? (store.producers[store.selected] ?? []) : []);
+
+	// Per-version column evolution, marking columns added since the previous Lance version.
+	function evolution(ds: DemoDataset) {
+		const out: { version: number; cols: { name: string; type: string; added: boolean }[] }[] = [];
+		let prev = new Set<string>();
+		for (const v of ds.versions) {
+			out.push({
+				version: v.version,
+				cols: v.fields.map((f) => ({ name: f.name, type: f.type, added: !prev.has(f.name) }))
+			});
+			prev = new Set(v.fields.map((f) => f.name));
+		}
+		return out;
+	}
+	const currentCols = (ds: DemoDataset) => ds.versions.at(-1)?.fields ?? [];
 </script>
 
 <div class="app">
 	<header>
-		<h1>Lance Lineage <span class="sub">live medallion — OpenLineage → Apache AGE → real Lance on S3</span></h1>
-		<div class="legend">
-			<span><i style="background:#ff9457"></i>raw</span>
-			<span><i style="background:#cd7f32"></i>bronze</span>
-			<span><i style="background:#9fb6cf"></i>silver</span>
-			<span><i style="background:#ffc14d"></i>gold</span>
-		</div>
+		<h1>Lance Lineage <span class="sub">live medallion demo</span></h1>
+		<p class="explain">
+			You're the producer — trigger steps with
+			<code>medallion_demo.py --step 1</code> (then 2…5). Each step writes a real Lance table on RustFS
+			and emits one OpenLineage event. Watch the <b>graph</b> (who derived what), the <b>events</b>
+			(raw OpenLineage), and the <b>Lance tables</b> below evolve.
+		</p>
 		<div class="status">
 			<span class="dot" class:on={store.online}></span>
 			{store.online ? 'live' : 'waiting'} · {store.nodes.length} datasets · {store.events.length} events
@@ -77,7 +91,7 @@
 		</div>
 	</header>
 
-	<main>
+	<div class="top">
 		<section class="graph">
 			<SvelteFlow bind:nodes bind:edges {nodeTypes} fitView onnodeclick={selectNode}>
 				<Background variant={BackgroundVariant.Dots} gap={16} />
@@ -86,8 +100,10 @@
 			</SvelteFlow>
 			{#if store.nodes.length === 0}
 				<div class="empty">
-					No lineage yet. Trigger the producer:
-					<code>uv run python scripts/medallion_demo.py --step 1</code> (then 2…5).
+					<b>Nothing yet — you trigger it.</b><br />
+					<code>uv run python scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
+					Then <code>--step 2</code> (a failed run), <code>3</code> (silver v1), <code>4</code>
+					(silver v2), <code>5</code> (gold).
 				</div>
 			{/if}
 		</section>
@@ -95,14 +111,13 @@
 		<aside>
 			<Tabs.Root value="events">
 				<Tabs.List class="tablist">
-					<Tabs.Trigger value="events" class="tab">Events</Tabs.Trigger>
-					<Tabs.Trigger value="storage" class="tab">Storage (S3)</Tabs.Trigger>
+					<Tabs.Trigger value="events" class="tab">Events ({store.events.length})</Tabs.Trigger>
 					<Tabs.Trigger value="details" class="tab">Details</Tabs.Trigger>
 				</Tabs.List>
 
 				<Tabs.Content value="events" class="tabbody">
 					{#if store.events.length === 0}
-						<p class="hint">No events yet.</p>
+						<p class="hint">No OpenLineage events yet. Trigger a step.</p>
 					{/if}
 					{#each store.events as ev (ev.seq)}
 						<details class="event">
@@ -117,39 +132,9 @@
 					{/each}
 				</Tabs.Content>
 
-				<Tabs.Content value="storage" class="tabbody">
-					{#each store.datasets as ds (ds.name)}
-						<div class="ds">
-							<div class="ds-head">
-								<span class="mono ds-name">{ds.name}</span>
-								{#if ds.exists}
-									<span class="hint">v{ds.current_version} · {ds.row_count} rows</span>
-								{:else}
-									<span class="hint">pending</span>
-								{/if}
-							</div>
-							{#each ds.versions as v (v.version)}
-								<div class="ver">
-									<span class="chip ok">v{v.version}</span>
-									<span class="fields mono">{v.fields.map((f) => f.name).join(', ')}</span>
-								</div>
-							{/each}
-							{#if ds.lineage_jsonb}
-								<details class="jsonb">
-									<summary>embedded lineage JSONB</summary>
-									<pre class="mono json">{JSON.stringify(ds.lineage_jsonb, null, 2)}</pre>
-								</details>
-							{/if}
-						</div>
-					{/each}
-					{#if store.datasets.length === 0}
-						<p class="hint">Storage peek is off (set LINEAGE_DEMO_DATA_ENABLED) or no data yet.</p>
-					{/if}
-				</Tabs.Content>
-
 				<Tabs.Content value="details" class="tabbody">
 					{#if !store.selected}
-						<p class="hint">Click a dataset node to see the runs that produced it.</p>
+						<p class="hint">Click a dataset node in the graph to see the runs that produced it.</p>
 					{:else}
 						<h2 class="mono">{store.selected}</h2>
 						<p class="hint">{selectedRuns.length} producing run(s)</p>
@@ -169,7 +154,62 @@
 				</Tabs.Content>
 			</Tabs.Root>
 		</aside>
-	</main>
+	</div>
+
+	<section class="storage">
+		<div class="storage-head">
+			Lance tables on RustFS <span class="hint">— real object storage; columns appear as you run steps</span>
+		</div>
+		<div class="cards">
+			{#each store.datasets as ds (ds.name)}
+				<div class="card" class:pending={!ds.exists}>
+					<div class="card-head">
+						<span class="mono ds-name">{ds.name}</span>
+						{#if ds.exists}
+							<span class="hint">v{ds.current_version} · {ds.row_count} rows</span>
+						{:else}
+							<span class="hint pending-tag">not created yet</span>
+						{/if}
+					</div>
+					<div class="uri mono">{ds.uri}</div>
+					{#if ds.exists}
+						<table class="schema">
+							<thead><tr><th>column</th><th>type</th></tr></thead>
+							<tbody>
+								{#each currentCols(ds) as f (f.name)}
+									<tr><td class="mono">{f.name}</td><td class="mono ty">{f.type}</td></tr>
+								{/each}
+							</tbody>
+						</table>
+						<div class="evo">
+							<div class="evo-label">version history</div>
+							{#each evolution(ds) as v (v.version)}
+								<div class="evo-row">
+									<span class="chip ok">v{v.version}</span>
+									<span class="evo-cols">
+										{#each v.cols as c (c.name)}
+											<span class="col mono" class:added={c.added}>{c.name}</span>
+										{/each}
+									</span>
+								</div>
+							{/each}
+						</div>
+						{#if ds.lineage_jsonb}
+							<details class="jsonb">
+								<summary>embedded lineage JSONB</summary>
+								<pre class="mono json">{JSON.stringify(ds.lineage_jsonb, null, 2)}</pre>
+							</details>
+						{/if}
+					{:else}
+						<div class="hint pend">waiting for a step to write this table…</div>
+					{/if}
+				</div>
+			{/each}
+			{#if store.datasets.length === 0}
+				<p class="hint">Storage peek is off (LINEAGE_DEMO_DATA_ENABLED).</p>
+			{/if}
+		</div>
+	</section>
 </div>
 
 <style>
@@ -183,7 +223,7 @@
 		align-items: baseline;
 		gap: 16px;
 		flex-wrap: wrap;
-		padding: 12px 18px;
+		padding: 10px 18px;
 		border-bottom: 1px solid var(--line);
 	}
 	h1 {
@@ -196,24 +236,27 @@
 		font-size: 12px;
 		font-weight: 400;
 	}
-	.legend {
-		display: flex;
-		gap: 12px;
-		font-size: 11px;
+	.explain {
+		margin: 0;
+		font-size: 12px;
 		color: var(--mut);
+		max-width: 720px;
 	}
-	.legend i {
-		display: inline-block;
-		width: 10px;
-		height: 10px;
-		border-radius: 3px;
-		margin-right: 4px;
-		vertical-align: middle;
+	.explain code,
+	.empty code {
+		color: var(--ink);
+		background: #0c1018;
+		padding: 0 4px;
+		border-radius: 4px;
+	}
+	.explain b {
+		color: var(--ink);
 	}
 	.status {
 		margin-left: auto;
 		color: var(--mut);
 		font-size: 12px;
+		white-space: nowrap;
 	}
 	.dot {
 		display: inline-block;
@@ -226,10 +269,10 @@
 	.dot.on {
 		background: var(--ok);
 	}
-	main {
+	.top {
 		display: grid;
-		grid-template-columns: 1fr 360px;
-		flex: 1;
+		grid-template-columns: 1fr 340px;
+		flex: 1 1 0;
 		min-height: 0;
 	}
 	.graph {
@@ -238,18 +281,16 @@
 	}
 	.empty {
 		position: absolute;
-		top: 16px;
-		left: 16px;
+		top: 18px;
+		left: 18px;
 		color: var(--mut);
 		font-size: 13px;
-	}
-	.empty code {
-		color: var(--ink);
+		line-height: 1.7;
 	}
 	aside {
 		border-left: 1px solid var(--line);
 		background: var(--panel);
-		overflow: auto;
+		overflow: hidden;
 		display: flex;
 		flex-direction: column;
 	}
@@ -259,7 +300,7 @@
 	}
 	:global(.tab) {
 		flex: 1;
-		padding: 10px;
+		padding: 9px;
 		background: transparent;
 		border: none;
 		color: var(--mut);
@@ -288,7 +329,6 @@
 		color: #06210f;
 	}
 	.event,
-	.ds,
 	.run {
 		border: 1px solid var(--line);
 		border-radius: 8px;
@@ -329,25 +369,110 @@
 		padding: 8px;
 		margin: 6px 0 0;
 		overflow: auto;
-		max-height: 280px;
+		max-height: 220px;
 	}
-	.ds-head {
+	.run-top {
 		display: flex;
 		justify-content: space-between;
-		margin-bottom: 6px;
+	}
+
+	/* ---- Storage (Lance tables on RustFS) ---- */
+	.storage {
+		flex: 0 0 auto;
+		max-height: 40vh;
+		overflow: auto;
+		border-top: 1px solid var(--line);
+		padding: 10px 14px 16px;
+		background: #0e141d;
+	}
+	.storage-head {
+		font-size: 13px;
+		font-weight: 600;
+		margin-bottom: 10px;
+	}
+	.cards {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 12px;
+	}
+	.card {
+		border: 1px solid var(--line);
+		border-radius: 10px;
+		padding: 10px 12px;
+		background: var(--panel);
+	}
+	.card.pending {
+		opacity: 0.6;
+		border-style: dashed;
+	}
+	.card-head {
+		display: flex;
+		justify-content: space-between;
+		align-items: baseline;
 	}
 	.ds-name {
 		font-weight: 600;
+		font-size: 13px;
 	}
-	.ver {
+	.pending-tag {
+		font-style: italic;
+	}
+	.uri {
+		font-size: 11px;
+		color: #6f86a6;
+		margin: 2px 0 8px;
+		word-break: break-all;
+	}
+	table.schema {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 11.5px;
+		margin-bottom: 8px;
+	}
+	table.schema th {
+		text-align: left;
+		color: var(--mut);
+		font-weight: 600;
+		border-bottom: 1px solid var(--line);
+		padding: 2px 4px;
+		text-transform: uppercase;
+		font-size: 10px;
+	}
+	table.schema td {
+		padding: 2px 4px;
+		border-bottom: 1px solid #1b2532;
+	}
+	.ty {
+		color: var(--mut);
+	}
+	.evo-label {
+		font-size: 10px;
+		text-transform: uppercase;
+		color: var(--mut);
+		margin: 2px 0 4px;
+	}
+	.evo-row {
 		display: flex;
 		gap: 8px;
 		align-items: baseline;
 		margin: 3px 0;
 	}
-	.fields {
-		font-size: 11px;
+	.evo-cols {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 4px;
+	}
+	.col {
+		font-size: 10.5px;
 		color: var(--mut);
+		padding: 0 5px;
+		border-radius: 5px;
+		background: #1b2532;
+	}
+	.col.added {
+		color: #06210f;
+		background: var(--ok);
+		font-weight: 700;
 	}
 	.chip.ok {
 		background: var(--ok);
@@ -357,15 +482,15 @@
 		padding: 1px 7px;
 		border-radius: 7px;
 	}
-	.run-top {
-		display: flex;
-		justify-content: space-between;
-	}
 	.jsonb summary {
 		cursor: pointer;
 		color: var(--mut);
 		font-size: 11px;
-		margin-top: 6px;
+		margin-top: 8px;
+	}
+	.pend {
+		margin-top: 8px;
+		font-style: italic;
 	}
 	h2 {
 		font-size: 13px;

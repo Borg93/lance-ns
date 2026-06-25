@@ -85,10 +85,9 @@ def _storage_options() -> dict[str, str]:
     }
 
 
-def ensure_bucket() -> None:
-    """Create the demo bucket if it doesn't exist (object stores never auto-create buckets)."""
+def _s3_filesystem() -> pafs.S3FileSystem:
     scheme, _, host = S3_ENDPOINT.partition("://")
-    fs = pafs.S3FileSystem(
+    return pafs.S3FileSystem(
         access_key=S3_KEY,
         secret_key=S3_SECRET,
         endpoint_override=host or scheme,
@@ -96,11 +95,27 @@ def ensure_bucket() -> None:
         region=S3_REGION,
         allow_bucket_creation=True,
     )
+
+
+def ensure_bucket() -> None:
+    """Create the demo bucket if it doesn't exist (object stores never auto-create buckets)."""
     try:
-        fs.create_dir(S3_BUCKET)  # creates the bucket (allow_bucket_creation) if missing
+        _s3_filesystem().create_dir(S3_BUCKET)  # allow_bucket_creation makes this the bucket
         _say(f"bucket s3://{S3_BUCKET} ready")
     except Exception as exc:  # noqa: BLE001 - bucket may already exist; that's fine
         _say(f"bucket s3://{S3_BUCKET} (already present or: {exc})")
+
+
+def reset_data() -> None:
+    """Delete the demo's Lance datasets from S3 — a clean slate before re-running the flow."""
+    fs = _s3_filesystem()
+    for layer in ("bronze", "silver", "gold"):
+        path = f"{S3_BUCKET}/{layer}"
+        try:
+            fs.delete_dir(path)
+            _say(f"deleted s3://{path}")
+        except Exception:  # noqa: BLE001 - absent is fine (nothing written there yet)
+            _say(f"s3://{path} (nothing to delete)")
 
 
 def write_bronze() -> None:
@@ -203,6 +218,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Drive the live medallion flow (data + OpenLineage).")
     parser.add_argument("--step", type=int, metavar="N", help="emit ONLY step N (you are the producer)")
     parser.add_argument("--list", action="store_true", help="list the steps and exit (no side effects)")
+    parser.add_argument("--reset", action="store_true", help="delete the demo's Lance datasets from S3 and exit")
     parser.add_argument(
         "--emit-only", action="store_true", help="emit the OpenLineage event(s) only, skip the Lance data op"
     )
@@ -215,6 +231,11 @@ def main() -> None:
         for i, event in enumerate(events, start=1):
             print(f"  {i}. {_describe(event)}")
         print(f"\nWatch the graph build at {LINEAGE_URL}/ui/\n")
+        return
+
+    if args.reset:
+        print(f"\nReset → clearing the demo's Lance datasets under s3://{S3_BUCKET}\n")
+        reset_data()
         return
 
     do_data = not args.emit_only

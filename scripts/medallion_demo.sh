@@ -26,7 +26,8 @@ compose() {
     -f .docker/docker-compose.yml \
     -f .docker/docker-compose.rustfs.yml \
     -f .docker/docker-compose.lineage.yml \
-    -f .docker/docker-compose.governance.yml "$@"
+    -f .docker/docker-compose.governance.yml \
+    -f .docker/docker-compose.demo.yml "$@"
 }
 
 cleanup() {

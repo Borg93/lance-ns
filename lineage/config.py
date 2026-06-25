@@ -45,6 +45,15 @@ class LineageSettings(BaseSettings):
     # catalog ``table:<id>``, so a read is gated on ``can_get_metadata`` of ``table:<name>``.
     fga_object_type: str = Field(default="table", alias="LINEAGE_FGA_OBJECT_TYPE")
 
+    # --- Demo data peek (DEMO ONLY) — reads the real Lance datasets on S3 so the UI can show
+    # what is changing in storage (schema/versions/rows). Off by default; never enable in prod.
+    demo_data_enabled: bool = Field(default=False, alias="LINEAGE_DEMO_DATA_ENABLED")
+    s3_endpoint: str | None = Field(default=None, alias="LINEAGE_S3_ENDPOINT")
+    s3_access_key_id: str | None = Field(default=None, alias="LINEAGE_S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str | None = Field(default=None, alias="LINEAGE_S3_SECRET_ACCESS_KEY")
+    s3_region: str = Field(default="us-east-1", alias="LINEAGE_S3_REGION")
+    s3_bucket: str = Field(default="lakehouse", alias="LINEAGE_S3_BUCKET")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail closed: a half-configured auth layer is a startup error, not open access."""

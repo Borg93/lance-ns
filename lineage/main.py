@@ -7,6 +7,7 @@ it). Run: ``uvicorn lineage.main:app``. See ``docs/LINEAGE.md``.
 from __future__ import annotations
 
 import logging
+from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -20,12 +21,13 @@ from lance_namespace import LanceNamespaceError
 from app.core import fga
 from app.core.exceptions import problem_detail
 from app.core.oidc import OIDCVerifier
+from lineage import demo
 from lineage.age import make_pool
 from lineage.auth import CurrentToken, FilterDep, enforce_author, require_metadata_access
 from lineage.config import get_settings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import Creator, LineageGraph, Neighbors, Producers
+from lineage.schemas import Creator, EventRecord, Events, LineageGraph, Neighbors, Producers
 
 log = logging.getLogger(__name__)
 PROBLEM_JSON = "application/problem+json"
@@ -38,6 +40,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await pool.open()
     app.state.pool = pool
     app.state.repository = LineageRepository(pool, settings.graph)
+    # Recent-events ring buffer for the Marquez-style /events feed (in-memory, demo/observability).
+    app.state.events = deque(maxlen=500)
+    app.state.event_seq = 0
     # Auth is opt-in; when enabled, reuse the catalog's verifier + the shared OpenFGA store.
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(
@@ -92,7 +97,9 @@ async def livez() -> dict[str, str]:
 
 
 @app.post("/api/v1/lineage", status_code=201, tags=["ingest"])
-async def ingest_event(event: RunEvent, repository: RepositoryDep, token: CurrentToken) -> dict[str, str]:
+async def ingest_event(
+    event: RunEvent, repository: RepositoryDep, token: CurrentToken, request: Request
+) -> dict[str, str]:
     """Ingest one OpenLineage ``RunEvent`` into the lineage graph.
 
     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
@@ -105,7 +112,31 @@ async def ingest_event(event: RunEvent, repository: RepositoryDep, token: Curren
     """
     enforce_author(event, token)
     await repository.ingest_event(event)
+    request.app.state.event_seq += 1
+    request.app.state.events.append(
+        {
+            "seq": request.app.state.event_seq,
+            "event_type": event.event_type,
+            "event_time": event.event_time,
+            "job": f"{event.job.namespace}/{event.job.name}",
+            "author": event.author,
+            "inputs": [d.name for d in event.inputs],
+            "outputs": [d.name for d in event.outputs],
+            "event": event.model_dump(by_alias=True),
+        }
+    )
     return {"status": "ingested", "run": event.run.run_id}
+
+
+@app.get("/events", tags=["query"])
+async def get_events(request: Request) -> Events:
+    """The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
+
+    In-memory + ungated (demo/observability). In production this would be persisted and gated like
+    the per-dataset query endpoints.
+    """
+    buffer = list(getattr(request.app.state, "events", []))
+    return Events(events=[EventRecord(**record) for record in reversed(buffer)])
 
 
 @app.get("/datasets/{name}/upstream", tags=["query"], dependencies=[Depends(require_metadata_access)])
@@ -156,6 +187,10 @@ async def get_graph(name: str, repository: RepositoryDep, datasets: FilterDep) -
     result.edges = [e for e in result.edges if e.source in visible and e.target in visible]
     return result
 
+
+# Demo data peek (reads the real Lance datasets on S3) — mounted only when explicitly enabled.
+if get_settings().demo_data_enabled:
+    app.include_router(demo.router)
 
 # Thin demo UI — a single self-contained page that polls the query endpoints to render the live
 # medallion DAG (see scripts/medallion_demo.py). Mounted last so it never shadows an API route.

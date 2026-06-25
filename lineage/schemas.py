@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -81,3 +83,56 @@ class LineageGraph(BaseModel):
     root: str
     nodes: list[GraphNode]
     edges: list[GraphEdge]
+
+
+class EventRecord(BaseModel):
+    """One ingested OpenLineage event, Marquez-style (summary + the full event with facets)."""
+
+    seq: int
+    event_type: str | None = None
+    event_time: str | None = None
+    job: str | None = None
+    author: str | None = None
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    event: dict[str, Any]
+
+
+class Events(BaseModel):
+    """The most-recent ingested OpenLineage events (newest first)."""
+
+    events: list[EventRecord]
+
+
+class DemoField(BaseModel):
+    """A column of a Lance dataset version (name + Arrow type)."""
+
+    name: str
+    type: str
+
+
+class DemoVersion(BaseModel):
+    """One Lance version of a dataset — its number, time, and schema at that version."""
+
+    version: int
+    timestamp: str | None = None
+    fields: list[DemoField] = Field(default_factory=list)
+
+
+class DemoDataset(BaseModel):
+    """A peek at a real Lance dataset on S3 — what's actually in storage and how it evolved."""
+
+    name: str
+    uri: str
+    exists: bool
+    current_version: int | None = None
+    row_count: int | None = None
+    versions: list[DemoVersion] = Field(default_factory=list)
+    lineage_jsonb: dict[str, Any] | None = None
+    error: str | None = None
+
+
+class DemoDatasets(BaseModel):
+    """The medallion datasets as they currently exist on S3 (demo data peek)."""
+
+    datasets: list[DemoDataset]

@@ -1,22 +1,37 @@
+<script lang="ts" module>
+	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
+	import JobNode, { type JobNodeType } from '$lib/JobNode.svelte';
+	import type { NodeTypes } from '@xyflow/svelte';
+
+	// svelte-flow rule 5: register node components ONCE at module scope, not inline.
+	const nodeTypes: NodeTypes = { medallion: MedallionNode, job: JobNode };
+	type FlowNode = MedallionNodeType | JobNodeType;
+</script>
+
 <script lang="ts">
-	import { SvelteFlow, Background, BackgroundVariant, Controls, MiniMap } from '@xyflow/svelte';
+	import { SvelteFlow, Background, BackgroundVariant, Controls, MiniMap, Panel } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { Tabs } from 'bits-ui';
-	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
+	import { Radio, Boxes, Cpu } from '@lucide/svelte';
 	import StatusBoard from '$lib/StatusBoard.svelte';
+	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
 	import { enter, stagger, countUp } from '$lib/attachments';
 	import { LineageState } from '$lib/store.svelte';
 	import { LAYER, type DemoDataset } from '$lib/types';
 
 	const store = new LineageState();
-	const nodeTypes = { medallion: MedallionNode };
+
+	// Which graph plane is shown — like Marquez's Datasets vs Jobs lineage views.
+	let graphView = $state<'datasets' | 'jobs'>('datasets');
 
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
 	const eventCount = $derived(store.events.length);
 
-	let nodes = $state.raw<MedallionNodeType[]>([]);
+	let nodes = $state.raw<FlowNode[]>([]);
 	let edges = $state.raw<{ id: string; source: string; target: string; animated: boolean; type: string }[]>([]);
+	// Re-fit the viewport only when the node-set or the view changes (not on every data poll).
+	const fitKey = $derived(graphView + '|' + nodes.map((n) => n.id).join(','));
 
 	// Current run-state per dataset: the latest run (by updated_at) that lists it as an output.
 	const runStateByDataset = $derived.by(() => {
@@ -35,8 +50,60 @@
 		return () => clearInterval(timer);
 	});
 
-	// Rebuild the flow graph whenever the polled data changes (deterministic layer layout).
+	// Rebuild the active graph plane whenever the polled data (or the chosen view) changes.
+	// Reconcile, don't rebuild: keep each node's identity + dragged position across the 2s poll.
 	$effect(() => {
+		const prev = new Map(nodes.map((node) => [node.id, node]));
+
+		if (graphView === 'jobs') {
+			// Jobs plane (like Marquez's job lineage): one node per job; an edge producing-job → consuming
+			// job whenever a job's input dataset was written by another job.
+			const jobs = new Map<
+				string,
+				{ author?: string | null; state?: string | null; inputs: Set<string>; outputs: Set<string>; failed: boolean }
+			>();
+			const producedBy = new Map<string, Set<string>>();
+			for (const ev of [...store.events].reverse()) {
+				if (!ev.job) continue;
+				const j = jobs.get(ev.job) ?? { author: ev.author, state: ev.event_type, inputs: new Set(), outputs: new Set(), failed: false };
+				j.author = ev.author ?? j.author;
+				j.state = ev.event_type ?? j.state;
+				if (/FAIL|ABORT/i.test(ev.event_type ?? '')) j.failed = true;
+				for (const o of ev.outputs) {
+					j.outputs.add(o);
+					if (!producedBy.has(o)) producedBy.set(o, new Set());
+					producedBy.get(o)!.add(ev.job);
+				}
+				for (const i of ev.inputs) j.inputs.add(i);
+				jobs.set(ev.job, j);
+			}
+			const perCol: Record<number, number> = {};
+			nodes = [...jobs.entries()].map(([job, j]) => {
+				const layer = Math.max(0, ...[...j.outputs].map((o) => LAYER[o] ?? 4));
+				const row = (perCol[layer] = (perCol[layer] ?? 0) + 1) - 1;
+				return {
+					id: job,
+					type: 'job' as const,
+					position: prev.get(job)?.position ?? { x: 30 + layer * 280, y: 40 + row * 130 },
+					data: { id: job.replace(/^ray-jobs\//, ''), author: j.author, state: j.state, outputs: [...j.outputs], failed: j.failed, selected: store.selected === job }
+				};
+			});
+			const seen = new Set<string>();
+			const je: typeof edges = [];
+			for (const [job, j] of jobs) {
+				for (const inp of j.inputs) {
+					for (const pj of producedBy.get(inp) ?? []) {
+						if (pj === job || seen.has(`${pj}|${job}`)) continue;
+						seen.add(`${pj}|${job}`);
+						je.push({ id: `${pj}->${job}`, source: pj, target: job, animated: true, type: 'smoothstep' });
+					}
+				}
+			}
+			edges = je;
+			return;
+		}
+
+		// Datasets plane (default).
 		nodes = store.nodes.map((n) => {
 			const runs = store.producers[n.id] ?? [];
 			const versions = [...new Set(runs.map((r) => r.dataset_version).filter(Boolean) as string[])].sort();
@@ -45,7 +112,7 @@
 			return {
 				id: n.id,
 				type: 'medallion' as const,
-				position: { x: 30 + layer * 300, y: 150 },
+				position: prev.get(n.id)?.position ?? { x: 30 + layer * 300, y: 150 },
 				data: {
 					id: n.id,
 					layer,
@@ -103,7 +170,7 @@
 			(raw OpenLineage), and the <b>Lance tables</b> below evolve.
 		</p>
 		<div class="status">
-			<span class="dot" class:on={store.online}></span>
+			<Radio size={13} class={store.online ? 'live-ic on' : 'live-ic'} />
 			<span class="state-word" class:live={store.online}>{store.online ? 'live' : 'waiting'}</span>
 			<span class="sep">·</span>
 			<span class="num mono" {@attach countUp(datasetCount)}>0</span> datasets
@@ -119,6 +186,17 @@
 				<Background variant={BackgroundVariant.Dots} gap={16} />
 				<Controls />
 				<MiniMap pannable zoomable />
+				<FlowAutoFit trigger={fitKey} />
+				<Panel position="top-left">
+					<div class="viewtoggle" role="tablist" aria-label="Graph view">
+						<button class="vt" class:on={graphView === 'datasets'} role="tab" aria-selected={graphView === 'datasets'} onclick={() => (graphView = 'datasets')}>
+							<Boxes size={13} /> Datasets
+						</button>
+						<button class="vt" class:on={graphView === 'jobs'} role="tab" aria-selected={graphView === 'jobs'} onclick={() => (graphView = 'jobs')}>
+							<Cpu size={13} /> Jobs
+						</button>
+					</div>
+				</Panel>
 			</SvelteFlow>
 			{#if store.nodes.length === 0}
 				<div class="empty">
@@ -315,16 +393,12 @@
 		color: var(--faint);
 		font-variant-numeric: tabular-nums;
 	}
-	.dot {
-		width: 8px;
-		height: 8px;
-		border-radius: 50%;
-		background: var(--mut);
-		transition: background 0.3s var(--ease);
+	:global(.live-ic) {
+		color: var(--mut);
+		transition: color 0.3s var(--ease);
 	}
-	.dot.on {
-		background: var(--ok);
-		box-shadow: 0 0 0 3px color-mix(in srgb, var(--ok) 22%, transparent);
+	:global(.live-ic.on) {
+		color: var(--ok);
 	}
 	.top {
 		display: grid;
@@ -343,6 +417,38 @@
 		color: var(--mut);
 		font-size: 13px;
 		line-height: 1.7;
+	}
+	.viewtoggle {
+		display: flex;
+		gap: 2px;
+		padding: 3px;
+		background: var(--panel);
+		border: 1px solid var(--line);
+		border-radius: 999px;
+		box-shadow: var(--shadow);
+	}
+	.vt {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		padding: 4px 11px;
+		border: none;
+		background: transparent;
+		color: var(--mut);
+		font-size: 12px;
+		font-weight: 600;
+		border-radius: 999px;
+		cursor: pointer;
+		transition:
+			color 0.2s var(--ease),
+			background 0.2s var(--ease);
+	}
+	.vt:hover {
+		color: var(--ink);
+	}
+	.vt.on {
+		color: var(--ink);
+		background: color-mix(in srgb, var(--accent) 18%, transparent);
 	}
 	aside {
 		border-left: 1px solid var(--line);

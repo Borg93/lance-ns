@@ -18,10 +18,14 @@
 
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
+	import { Boxes, Database, Layers, Gem } from '@lucide/svelte';
 	import { pulse, pop } from './attachments';
 
 	let { data }: NodeProps<MedallionNodeType> = $props();
 
+	// Icon per medallion layer (raw → bronze → silver → gold).
+	const LAYER_ICONS = [Boxes, Database, Layers, Gem, Database];
+	const LayerIcon = $derived(LAYER_ICONS[data.layer] ?? Database);
 	const color = $derived(COLORS[data.layer] ?? COLORS[4]);
 	// Derived *primitives* so the continuous pulse only re-inits when the value actually flips,
 	// not on every 2s poll (which reassigns `data`).
@@ -43,7 +47,7 @@
 	<Handle type="target" position={Position.Left} />
 	<div class="bar"></div>
 	<div class="body">
-		<div class="name">{data.id}</div>
+		<div class="name"><LayerIcon size={13} {color} /> {data.id}</div>
 		<div class="uri">{data.source_uri ?? '(pending)'}</div>
 		<div class="chips">
 			{#each data.versions as v (v)}
@@ -85,6 +89,9 @@
 		min-width: 0;
 	}
 	.name {
+		display: flex;
+		align-items: center;
+		gap: 5px;
 		font-weight: 600;
 		font-size: 13px;
 		color: var(--ink);

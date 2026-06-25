@@ -1,11 +1,14 @@
 <script lang="ts">
 	import type { RunStatus } from './types';
+	import { CheckCircle2, LoaderCircle, XCircle, CircleDashed } from '@lucide/svelte';
 	import { enter, bar, breathe } from './attachments';
 
 	let { runs }: { runs: RunStatus[] } = $props();
 
 	const isRunning = (s?: string | null) => /START|RUNNING/i.test(s ?? '');
 	const isFail = (s?: string | null) => /FAIL|ABORT/i.test(s ?? '');
+	const stateIcon = (s?: string | null) =>
+		isFail(s) ? XCircle : s === 'COMPLETE' ? CheckCircle2 : isRunning(s) ? LoaderCircle : CircleDashed;
 	const color = (s?: string | null) =>
 		isFail(s) ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : isRunning(s) ? 'var(--amber)' : 'var(--mut)';
 
@@ -30,6 +33,7 @@
 		<p class="hint">No runs yet — trigger a step and watch them go <b>queued → running → done/failed</b>.</p>
 	{/if}
 	{#each runs as r (r.run_id)}
+		{@const StateIcon = stateIcon(r.state)}
 		<div
 			class="row"
 			class:fail={isFail(r.state)}
@@ -39,7 +43,10 @@
 		>
 			<div class="top">
 				<span class="job mono" title={r.job}>{shortJob(r.job)}</span>
-				<span class="pill">{label(r)}</span>
+				<span class="pill">
+					<StateIcon size={12} class={isRunning(r.state) ? 'spin' : ''} />
+					{label(r)}
+				</span>
 			</div>
 			<div class="track">
 				<div class="fill" {@attach bar(pct(r))} {@attach breathe(isRunning(r.state))}></div>
@@ -91,6 +98,9 @@
 		font-weight: 600;
 	}
 	.pill {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
 		font-size: 10px;
 		font-weight: 700;
 		letter-spacing: 0.3px;
@@ -100,6 +110,14 @@
 		border: 1px solid color-mix(in srgb, var(--c) 50%, transparent);
 		background: color-mix(in srgb, var(--c) 12%, transparent);
 		white-space: nowrap;
+	}
+	.pill :global(.spin) {
+		animation: spin 1s linear infinite;
+	}
+	@keyframes spin {
+		to {
+			transform: rotate(360deg);
+		}
 	}
 	.track {
 		height: 6px;

@@ -27,7 +27,16 @@ from lineage.auth import CurrentToken, FilterDep, enforce_author, require_metada
 from lineage.config import get_settings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import Creator, EventRecord, Events, LineageGraph, Neighbors, Producers
+from lineage.schemas import (
+    Creator,
+    EventRecord,
+    Events,
+    LineageGraph,
+    Neighbors,
+    Producers,
+    Runs,
+    RunStatus,
+)
 
 log = logging.getLogger(__name__)
 PROBLEM_JSON = "application/problem+json"
@@ -116,6 +125,7 @@ async def ingest_event(
     request.app.state.events.append(
         {
             "seq": request.app.state.event_seq,
+            "run_id": event.run.run_id,
             "event_type": event.event_type,
             "event_time": event.event_time,
             "job": f"{event.job.namespace}/{event.job.name}",
@@ -126,6 +136,40 @@ async def ingest_event(
         }
     )
     return {"status": "ingested", "run": event.run.run_id}
+
+
+@app.get("/runs", tags=["query"])
+async def get_runs(request: Request) -> Runs:
+    """Live run-status board — current state per run, folded from the lifecycle events (last-wins).
+
+    The provenance graph is terminal-only; this surfaces START/RUNNING/COMPLETE/FAIL so the UI can show
+    what's queued / running (with progress) / failed / done *right now*. In-memory (demo/observability).
+    """
+    folded: dict[str, RunStatus] = {}
+    for record in getattr(request.app.state, "events", []):
+        run_id = record.get("run_id")
+        if not run_id:
+            continue
+        status = folded.get(run_id)
+        if status is None:
+            status = RunStatus(run_id=run_id, started_at=record.get("event_time"))
+            folded[run_id] = status
+        status.events += 1
+        status.state = record.get("event_type")  # chronological buffer -> last event wins
+        status.updated_at = record.get("event_time")
+        status.job = record.get("job") or status.job
+        status.author = record.get("author") or status.author
+        if record.get("outputs"):
+            status.outputs = record["outputs"]
+        run_facets = ((record.get("event") or {}).get("run") or {}).get("facets") or {}
+        progress = run_facets.get("progress")
+        if isinstance(progress, dict):
+            status.progress_done = progress.get("done")
+            status.progress_total = progress.get("total")
+        error = run_facets.get("errorMessage")
+        if isinstance(error, dict):
+            status.error_message = error.get("message")
+    return Runs(runs=sorted(folded.values(), key=lambda r: r.updated_at or "", reverse=True))
 
 
 @app.get("/events", tags=["query"])

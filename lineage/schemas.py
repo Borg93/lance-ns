@@ -136,3 +136,29 @@ class DemoDatasets(BaseModel):
     """The medallion datasets as they currently exist on S3 (demo data peek)."""
 
     datasets: list[DemoDataset]
+
+
+class RunStatus(BaseModel):
+    """The *current* status of a run, folded from its OpenLineage lifecycle events.
+
+    Unlike the provenance graph (terminal-only), this is the live "where are we now" view:
+    ``state`` is the latest run state (START→RUNNING→COMPLETE/FAIL), with progress + error.
+    """
+
+    run_id: str
+    job: str | None = None
+    author: str | None = None
+    state: str | None = None
+    outputs: list[str] = Field(default_factory=list)
+    progress_done: int | None = None
+    progress_total: int | None = None
+    error_message: str | None = None
+    started_at: str | None = None
+    updated_at: str | None = None
+    events: int = 0
+
+
+class Runs(BaseModel):
+    """Live run-status board (most-recently-active first)."""
+
+    runs: list[RunStatus]

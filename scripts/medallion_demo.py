@@ -36,11 +36,13 @@ import sys
 import time
 from pathlib import Path
 
+import attr
 import lance
 import pyarrow as pa
 import pyarrow.fs as pafs
 from openlineage.client import OpenLineageClient
-from openlineage.client.event_v2 import RunEvent, RunState
+from openlineage.client.event_v2 import Run, RunEvent, RunState
+from openlineage.client.facet_v2 import RunFacet
 from openlineage.client.transport.http import HttpConfig, HttpTransport
 
 # Make the repo-root ``lineage`` package importable when run as a plain script
@@ -80,6 +82,21 @@ S3_REGION = os.environ.get("S3_REGION", "us-east-1")
 S3_BUCKET = os.environ.get("S3_BUCKET", "lakehouse")
 LINEAGE_URL = os.environ.get("LINEAGE_URL", "http://localhost:8000").rstrip("/")
 STEP_DELAY = float(os.environ.get("STEP_DELAY", "2.5"))
+# Pause between RUNNING heartbeats so the "running + progress" state is visible in the UI.
+PROGRESS_DELAY = float(os.environ.get("PROGRESS_DELAY", "0.6"))
+
+
+@attr.define
+class ProgressRunFacet(RunFacet):
+    """Custom run facet carrying batch progress on RUNNING events.
+
+    OpenLineage has no standard progress facet (RUNNING just "reports metrics"), so this is a custom
+    facet (spec-legal: it inherits ``_producer``/``_schemaURL`` from RunFacet). The lineage service's
+    ``/runs`` board reads ``run.facets.progress.{done,total}``.
+    """
+
+    done: int = attr.field(default=0)
+    total: int = attr.field(default=0)
 
 _BRONZE = f"s3://{S3_BUCKET}/bronze/events"
 _SILVER = f"s3://{S3_BUCKET}/silver/features"
@@ -233,14 +250,45 @@ def _describe(event: RunEvent) -> str:
     return f"{event.job.name:16} {state:8} {src} -> {out}"
 
 
+def _lifecycle_event(event: RunEvent, state: RunState, facets: dict) -> RunEvent:
+    """A non-terminal (START/RUNNING) event for ``event``'s run — same run/job/inputs, no output yet."""
+    return RunEvent(
+        eventTime=event.eventTime,
+        producer=event.producer,
+        eventType=state,
+        run=Run(runId=event.run.runId, facets=facets),
+        job=event.job,
+        inputs=event.inputs,
+        outputs=[],
+    )
+
+
 def _emit_step(client: OpenLineageClient, index: int, total: int, event: RunEvent, *, data: bool) -> None:
-    """Perform the real Lance op (unless ``data`` is False) and emit the OpenLineage event."""
-    state = "FAIL" if event.eventType == RunState.FAIL else "COMPLETE"
+    """Emit the full OpenLineage lifecycle (START -> RUNNING+progress -> COMPLETE/FAIL) for one step.
+
+    Real Lance op runs between RUNNING and the terminal event (unless ``data`` is False). The shared
+    runId ties the events into one run, so the lineage service's /runs board shows it go
+    queued -> running (with progress) -> done/failed live.
+    """
+    fail = event.eventType == RunState.FAIL
+    state = "FAIL" if fail else "COMPLETE"
+    base = dict(event.run.facets or {})
     print(f"\n[{index}/{total}] {_describe(event)}")
+
+    client.emit(_lifecycle_event(event, RunState.START, base))
+    _say("START -> RUNNING")
+    steps = 2 if fail else 3  # a failed run dies partway through
+    for i in range(1, steps + 1):
+        if PROGRESS_DELAY:
+            time.sleep(PROGRESS_DELAY)
+        facets = {**base, "progress": ProgressRunFacet(done=i, total=3)}
+        client.emit(_lifecycle_event(event, RunState.RUNNING, facets))
+        _say(f"RUNNING {i}/3")
+
     if data:
-        _perform(event)
-    client.emit(event)
-    _say(f"OpenLineage {state} emitted → {LINEAGE_URL}/api/v1/lineage")
+        _perform(event)  # the real Lance write (or the simulated-failure message)
+    client.emit(event)  # terminal COMPLETE (carries version) / FAIL (carries error)
+    _say(f"{state} emitted → {LINEAGE_URL}/api/v1/lineage")
 
 
 def main() -> None:

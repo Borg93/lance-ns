@@ -181,8 +181,11 @@ def build_events() -> list[RunEvent]:
     Run ids are fixed (idempotent re-ingest under AGE MERGE). Terminal-state events only (a real
     producer also emits START/RUNNING; omitted here for a compact history).
     """
-    bronze_cols = (("id", "int"), ("payload", "blob"), ("src", "string"))
-    silver_v1_cols = (*bronze_cols, ("embedding", "array<float>"))
+    # ``payload`` is the raw multimodal blob; ``payload_src`` is which camera/sensor it came from
+    # (the dataset's *source system* is the separate ``raw_events`` node upstream of bronze).
+    bronze_cols = (("id", "int"), ("payload", "blob"), ("payload_src", "string"))
+    # silver drops the raw blob — the embed job keeps id + payload_src and adds the features.
+    silver_v1_cols = (("id", "int"), ("payload_src", "string"), ("embedding", "array<float>"))
     silver_v2_cols = (*silver_v1_cols, ("caption", "string"))
     # Gold carries the appended feature columns plus its own provenance as a JSONB column.
     gold_cols = (("caption", "string"), ("embedding", "array<float>"), ("lineage", "json"))

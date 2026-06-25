@@ -60,10 +60,10 @@ echo "   (zero-dep fallback UI also at http://localhost:${DEMO_LINEAGE_PORT}/ui/
 echo "== run the driver: real Lance on RustFS + real OpenLineage (one step every few seconds) =="
 S3_ENDPOINT="http://localhost:${DEMO_S3_PORT}" S3_ACCESS_KEY=rustfsadmin S3_SECRET_KEY=rustfsadmin \
   S3_BUCKET=lakehouse LINEAGE_URL="http://localhost:${DEMO_LINEAGE_PORT}" STEP_DELAY="${STEP_DELAY:-2.5}" \
-  uv run --no-sync python scripts/medallion_demo.py "$@"
+  uv run --no-sync scripts/medallion_demo.py "$@"
 
 echo
 echo "== DONE — the medallion DAG is live at ${UI} =="
 echo "   trigger steps yourself (you are the producer):"
 echo "     S3_ENDPOINT=http://localhost:${DEMO_S3_PORT} LINEAGE_URL=http://localhost:${DEMO_LINEAGE_PORT} \\"
-echo "       uv run python scripts/medallion_demo.py --step 1   # then --step 2, 3, 4, 5"
+echo "       uv run scripts/medallion_demo.py --step 1   # then --step 2, 3, 4, 5"

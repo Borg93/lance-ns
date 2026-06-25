@@ -51,7 +51,7 @@ export CATALOG_URL="$SERVER" LINEAGE_URL="$LINEAGE_URL" DEX_URL="$DEX"
 
 if [ "${DEMO:-0}" = "1" ]; then
   echo "== run narrated governance demo =="
-  uv run --no-sync python scripts/governance_demo.py
+  uv run --no-sync scripts/governance_demo.py
 else
   echo "== run governance e2e =="
   uv run --no-sync pytest tests/e2e/test_governance_e2e.py -v

@@ -19,7 +19,7 @@ The object store is **RustFS** (Rust, S3-compatible) by default — the driver i
 
 Run (after ``scripts/medallion_demo.sh`` brings up RustFS + lineage)::
 
-    uv run python scripts/medallion_demo.py
+    uv run scripts/medallion_demo.py
 
 Env (defaults target the RustFS compose stack from the host)::
 
@@ -235,7 +235,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Drive the live medallion flow (data + OpenLineage).")
     parser.add_argument("--step", type=int, metavar="N", help="emit ONLY step N (you are the producer)")
     parser.add_argument("--list", action="store_true", help="list the steps and exit (no side effects)")
-    parser.add_argument("--reset", action="store_true", help="delete the demo's Lance datasets from S3 and exit")
+    parser.add_argument("--reset", action="store_true", help="delete the demo's Lance datasets and exit")
     parser.add_argument(
         "--emit-only", action="store_true", help="emit the OpenLineage event(s) only, skip the Lance data op"
     )

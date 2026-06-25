@@ -24,7 +24,7 @@ LINEAGE_URL="${LINEAGE_URL:-http://localhost:${DEMO_LINEAGE_PORT:-8000}}"
 echo "== 1) wipe the Lance tables on S3 (${S3_ENDPOINT}) =="
 S3_ENDPOINT="$S3_ENDPOINT" S3_ACCESS_KEY="${S3_ACCESS_KEY:-rustfsadmin}" \
 	S3_SECRET_KEY="${S3_SECRET_KEY:-rustfsadmin}" S3_BUCKET="${S3_BUCKET:-lakehouse}" \
-	uv run --no-sync python scripts/medallion_demo.py --reset
+	uv run --no-sync scripts/medallion_demo.py --reset
 
 echo "== 2) empty the lineage graph (Apache AGE) =="
 docker exec lance-lineage-postgres psql -U lineage -d lineage -tA \
@@ -36,4 +36,4 @@ until curl -fsS "${LINEAGE_URL}/livez" >/dev/null 2>&1; do sleep 2; done
 
 echo
 echo "== clean slate. Refresh the UI, then you are the producer: =="
-echo "   uv run python scripts/medallion_demo.py --step 1   # then --step 2, 3, 4, 5"
+echo "   uv run scripts/medallion_demo.py --step 1   # then --step 2, 3, 4, 5"

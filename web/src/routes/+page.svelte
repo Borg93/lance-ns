@@ -101,7 +101,7 @@
 			{#if store.nodes.length === 0}
 				<div class="empty">
 					<b>Nothing yet — you trigger it.</b><br />
-					<code>uv run python scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
+					<code>uv run scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
 					Then <code>--step 2</code> (a failed run), <code>3</code> (silver v1), <code>4</code>
 					(silver v2), <code>5</code> (gold).
 				</div>

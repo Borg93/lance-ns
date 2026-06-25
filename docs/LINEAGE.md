@@ -238,12 +238,12 @@ open http://localhost:5173/            # SvelteKit UI  (fallback: http://localho
 
 # …be the producer yourself — trigger one event at a time, watching the UI between:
 S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
-  uv run python scripts/medallion_demo.py --list          # show the 5 steps
-  uv run python scripts/medallion_demo.py --step 1         # land bronze (+emit)
-  uv run python scripts/medallion_demo.py --step 2         # the FAILED embed (recorded, no data)
-  uv run python scripts/medallion_demo.py --step 3         # embed -> silver v1
-  uv run python scripts/medallion_demo.py --step 4         # caption -> silver v2 (in place)
-  uv run python scripts/medallion_demo.py --step 5         # aggregate -> gold (+lineage JSONB)
+  uv run scripts/medallion_demo.py --list          # show the 5 steps
+  uv run scripts/medallion_demo.py --step 1         # land bronze (+emit)
+  uv run scripts/medallion_demo.py --step 2         # the FAILED embed (recorded, no data)
+  uv run scripts/medallion_demo.py --step 3         # embed -> silver v1
+  uv run scripts/medallion_demo.py --step 4         # caption -> silver v2 (in place)
+  uv run scripts/medallion_demo.py --step 5         # aggregate -> gold (+lineage JSONB)
 ```
 
 `--emit-only` skips the Lance write and just emits the OpenLineage event (pure producer

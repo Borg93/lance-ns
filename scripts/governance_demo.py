@@ -11,7 +11,7 @@ step by step, how the three axes meet on one identity (``table:<id>``):
 
 Run the stack first (see scripts/governance_e2e.sh), then:
 
-    uv run python scripts/governance_demo.py
+    uv run scripts/governance_demo.py
 
 Config via env (defaults target the local governance stack):
     CATALOG_URL   (default http://localhost:2333)

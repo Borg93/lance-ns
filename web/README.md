@@ -24,7 +24,7 @@ The UI needs the demo stack up (`scripts/medallion_demo.sh` brings up RustFS + l
 DEMO_S3_PORT=9100 DEMO_LINEAGE_PORT=8001 DEMO_WEB_PORT=5173 ./scripts/medallion_demo.sh
 # then be the producer (trigger one OpenLineage event at a time, watch the UI):
 S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
-  uv run python scripts/medallion_demo.py --step 1   # then --step 2, 3, 4, 5
+  uv run scripts/medallion_demo.py --step 1   # then --step 2, 3, 4, 5
 
 # …or develop the UI on the host against an already-running lineage service:
 cd web && bun install

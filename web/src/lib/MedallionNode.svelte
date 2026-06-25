@@ -9,6 +9,7 @@
 		versions: string[];
 		failed: boolean;
 		selected: boolean;
+		runState?: string | null;
 	};
 	export type MedallionNodeType = Node<MedallionData, 'medallion'>;
 
@@ -20,9 +21,19 @@
 
 	let { data }: NodeProps<MedallionNodeType> = $props();
 	const color = $derived(COLORS[data.layer] ?? COLORS[4]);
+	const running = $derived(/START|RUNNING/i.test(data.runState ?? ''));
+	const done = $derived(data.runState === 'COMPLETE');
+	const failedRun = $derived(/FAIL|ABORT/i.test(data.runState ?? ''));
 </script>
 
-<div class="node" class:selected={data.selected} style:--accent={color}>
+<div
+	class="node"
+	class:selected={data.selected}
+	class:running
+	class:done
+	class:failed={failedRun}
+	style:--accent={color}
+>
 	<Handle type="target" position={Position.Left} />
 	<div class="bar"></div>
 	<div class="body">
@@ -55,6 +66,25 @@
 	}
 	.node.selected {
 		box-shadow: 0 0 0 2px #46f9b8;
+	}
+	.node.running {
+		border-color: #ffc14d;
+		animation: node-pulse 1.2s ease-in-out infinite;
+	}
+	.node.done {
+		box-shadow: 0 0 0 1.5px var(--ok);
+	}
+	.node.failed {
+		box-shadow: 0 0 0 1.5px var(--fail);
+	}
+	@keyframes node-pulse {
+		0%,
+		100% {
+			box-shadow: 0 0 0 2px rgba(255, 193, 77, 0.7);
+		}
+		50% {
+			box-shadow: 0 0 0 6px rgba(255, 193, 77, 0.15);
+		}
 	}
 	.bar {
 		width: 6px;

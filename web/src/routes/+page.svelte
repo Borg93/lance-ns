@@ -3,6 +3,7 @@
 	import '@xyflow/svelte/dist/style.css';
 	import { Tabs } from 'bits-ui';
 	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
+	import StatusBoard from '$lib/StatusBoard.svelte';
 	import { LineageState } from '$lib/store.svelte';
 	import { LAYER, type DemoDataset } from '$lib/types';
 
@@ -11,6 +12,17 @@
 
 	let nodes = $state.raw<MedallionNodeType[]>([]);
 	let edges = $state.raw<{ id: string; source: string; target: string; animated: boolean; type: string }[]>([]);
+
+	// Current run-state per dataset: the latest run (by updated_at) that lists it as an output.
+	const runStateByDataset = $derived.by(() => {
+		const m: Record<string, string> = {};
+		const ordered = [...store.runs].sort((a, b) => (a.updated_at ?? '').localeCompare(b.updated_at ?? ''));
+		for (const r of ordered) {
+			if (!r.state) continue;
+			for (const out of r.outputs) m[out] = r.state;
+		}
+		return m;
+	});
 
 	$effect(() => {
 		store.poll();
@@ -36,7 +48,8 @@
 					tags: n.tags,
 					versions,
 					failed,
-					selected: store.selected === n.id
+					selected: store.selected === n.id,
+					runState: runStateByDataset[n.id] ?? null
 				}
 			};
 		});
@@ -109,11 +122,20 @@
 		</section>
 
 		<aside>
-			<Tabs.Root value="events">
+			<Tabs.Root value="status">
 				<Tabs.List class="tablist">
+					<Tabs.Trigger value="status" class="tab">Status ({store.runs.length})</Tabs.Trigger>
 					<Tabs.Trigger value="events" class="tab">Events ({store.events.length})</Tabs.Trigger>
 					<Tabs.Trigger value="details" class="tab">Details</Tabs.Trigger>
 				</Tabs.List>
+
+				<Tabs.Content value="status" class="tabbody">
+					<p class="hint board-intro">
+						Live run lifecycle — each step emits <b>START → RUNNING (progress) → COMPLETE/FAIL</b>.
+						The board folds those events to each run's current state (last-wins).
+					</p>
+					<StatusBoard runs={store.runs} />
+				</Tabs.Content>
 
 				<Tabs.Content value="events" class="tabbody">
 					{#if store.events.length === 0}
@@ -319,6 +341,13 @@
 	.hint {
 		color: var(--mut);
 		font-size: 12px;
+	}
+	.board-intro {
+		margin: 0 0 10px;
+		line-height: 1.5;
+	}
+	.board-intro b {
+		color: var(--ink);
 	}
 	.badge {
 		display: inline-block;

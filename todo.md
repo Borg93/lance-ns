@@ -183,16 +183,26 @@
     - **[data plane] Wire `StsVendor` into `describe_table?vend_credentials`** (P1 #5) — real per-table
       short-TTL creds on MinIO/Ceph/AWS (RustFS: mode_b/static until it supports inline policy scoping).
     Bottom line: **easy to add later** — enforcement code exists; the only build is the UI login flow.
-17. 🔶 **Run-status / lifecycle capture (provenance graph ≠ live status).** Today lineage records only
-    terminal `COMPLETE`/`FAIL`, so it can't show *progress*, *in-flight failures*, or *where the pipeline
-    is now*. Add: emit + store the full OpenLineage lifecycle (`START`→`RUNNING`+progress facet→terminal),
-    keep `run.state` (last-wins) + transition log, and surface a **live status board** (queued / running %
-    / failed+error / done+version) over the DAG, plus NATS queue depth (pending / redelivered / DLQ).
-    Natural feed = **Ray Event Export** (2.49+, alpha): the node aggregator POSTs `TASK_LIFECYCLE_EVENT`
-    (RUNNING/FINISHED/FAILED) → map to RunState — *no polling*. Caveat: Ray's FINISHED = compute returned,
-    not "Lance committed a version", so join Ray-lifecycle (timing) with the job's reported output (version)
-    by jobId; keep the job's `*.ready{version}` as the authoritative pipeline trigger. See
-    `docs/event-driven-pipeline.{html,md}` (flows 3 "Live status" + 4 "Ray Event Export").
+17. 🔶 **Run-status / lifecycle capture (provenance graph ≠ live status).** Lineage used to record only
+    terminal `COMPLETE`/`FAIL`, so it couldn't show *progress*, *in-flight failures*, or *where the
+    pipeline is now*.
+    - ✅ **Driver emits the full OpenLineage lifecycle** — `medallion_demo.py::_emit_step` now sends
+      `START → RUNNING (×3, progress 1/3→3/3) → terminal COMPLETE/FAIL`; a failed run dies mid-RUNNING.
+      Progress rides a **custom** `ProgressRunFacet{done,total}` (spec has no standard progress facet —
+      Marquez shows state+duration, not %), so the provenance graph stays strictly spec-true.
+    - ✅ **Lineage folds events → current state** — `GET /runs` folds the in-memory event buffer by
+      `run_id` (chronological, last-wins) into `RunStatus{state, progress, outputs, error, timing}`.
+      Two views: durable provenance graph (AGE, terminal-only) vs ephemeral live-status fold.
+    - ✅ **Live status board in the UI** — `StatusBoard.svelte` (GSAP-animated: width fill, running
+      pulse, row entrance) renders each run's state pill + progress bar + error; Svelte Flow nodes get a
+      run-state **ring** (running=amber pulse, complete=green, failed=red) via `runStateByDataset`.
+    - ⬜ **Real feed (still simulated by the driver).** Production feed = **Ray Event Export** (2.49+,
+      alpha): node aggregator POSTs `TASK_LIFECYCLE_EVENT` (RUNNING/FINISHED/FAILED) → map to RunState —
+      *no polling*. Caveat: Ray's FINISHED = compute returned, not "Lance committed a version", so join
+      Ray-lifecycle (timing) with the job's reported output (version) by jobId; keep the job's
+      `*.ready{version}` as the authoritative pipeline trigger. Plus NATS queue depth (pending /
+      redelivered / DLQ). See `docs/event-driven-pipeline.{html,md}` (flows 3 "Live status" + 4 "Ray
+      Event Export").
 
 ---
 

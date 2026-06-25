@@ -1,5 +1,5 @@
-import { fetchDemo, fetchEvents, fetchGraph, fetchProducers } from './api';
-import { KNOWN, type DemoDataset, type EventRecord, type GraphEdge, type GraphNode, type ProducerInfo } from './types';
+import { fetchDemo, fetchEvents, fetchGraph, fetchProducers, fetchRuns } from './api';
+import { KNOWN, type DemoDataset, type EventRecord, type GraphEdge, type GraphNode, type ProducerInfo, type RunStatus } from './types';
 
 /** Live medallion state, polled from the lineage service. Svelte 5 runes in a class. */
 export class LineageState {
@@ -8,6 +8,7 @@ export class LineageState {
 	producers = $state<Record<string, ProducerInfo[]>>({});
 	events = $state<EventRecord[]>([]);
 	datasets = $state<DemoDataset[]>([]);
+	runs = $state<RunStatus[]>([]);
 	lastUpdated = $state('');
 	online = $state(false);
 	selected = $state<string | null>(null);
@@ -32,7 +33,9 @@ export class LineageState {
 
 		const events = await fetchEvents();
 		const demo = await fetchDemo();
+		const runs = await fetchRuns();
 
+		this.runs = runs?.runs ?? [];
 		this.producers = producers;
 		this.nodes = [...nodeMap.values()];
 		this.edges = [...edgeSet].map((key) => {

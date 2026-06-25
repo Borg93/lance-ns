@@ -1,8 +1,14 @@
 # Lance Lineage — web UI
 
 A SvelteKit (Svelte 5 + Bun) dashboard for the medallion demo. It polls the lineage service every
-2s and shows three live views of what's happening:
+2s and shows four live views of what's happening:
 
+- **Status** — the live run board from `GET /runs`: each run's current state folded from its
+  OpenLineage lifecycle (`START → RUNNING → COMPLETE/FAIL`), with a state pill, a **GSAP**-animated
+  progress bar (the custom `progress{done,total}` facet), author/outputs, and the error on failures.
+  Runs in flight pulse; the Svelte Flow nodes get a matching run-state **ring** (running = amber
+  pulse, complete = green, failed = red). This is the *live* view — distinct from the durable
+  provenance graph.
 - **Graph** — the medallion DAG via [Svelte Flow](https://svelteflow.dev): nodes coloured by layer
   with their S3 `source_uri`, governance tags, Lance version chips (silver **v1 → v2**), and a red
   badge on the failed run. Edges animate in data-flow direction.
@@ -12,8 +18,9 @@ A SvelteKit (Svelte 5 + Bun) dashboard for the medallion demo. It polls the line
   every Lance version** (so you watch `embedding` then `caption` appear on silver), row counts, and
   gold's embedded JSONB lineage.
 
-UI chrome (tabs) uses [bits-ui](https://bits-ui.com); the server proxies `/api/*` to the lineage
-service so the browser stays same-origin (no CORS).
+UI chrome (tabs) uses [bits-ui](https://bits-ui.com); status-board animations use
+[GSAP](https://gsap.com); the server proxies `/api/*` to the lineage service so the browser stays
+same-origin (no CORS).
 
 ## Run
 
@@ -33,6 +40,6 @@ LINEAGE_API=http://localhost:8001 bun run dev        # http://localhost:5173 (vi
 
 ## Stack
 
-SvelteKit 2 · Svelte 5 (runes) · `@xyflow/svelte` (Svelte Flow) · `bits-ui` · `svelte-adapter-bun`.
+SvelteKit 2 · Svelte 5 (runes) · `@xyflow/svelte` (Svelte Flow) · `bits-ui` · `gsap` · `svelte-adapter-bun`.
 `bun run build` → `bun ./build/index.js`. `LINEAGE_API` selects the upstream lineage service
 (`http://lineage-api:8000` in compose, `http://localhost:8001` locally).

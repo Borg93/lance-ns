@@ -1,4 +1,4 @@
-import type { DemoDatasets, Events, LineageGraph, Producers } from './types';
+import type { DemoDatasets, Events, LineageGraph, Producers, Runs } from './types';
 
 async function getJSON<T>(path: string): Promise<T | null> {
 	try {
@@ -18,3 +18,4 @@ export const fetchProducers = (name: string) =>
 	getJSON<Producers>(`datasets/${enc(name)}/producers`);
 export const fetchEvents = () => getJSON<Events>('events');
 export const fetchDemo = () => getJSON<DemoDatasets>('demo/datasets');
+export const fetchRuns = () => getJSON<Runs>('runs');

@@ -76,6 +76,24 @@ export interface DemoDatasets {
 	datasets: DemoDataset[];
 }
 
+export interface RunStatus {
+	run_id: string;
+	job?: string | null;
+	author?: string | null;
+	state?: string | null;
+	outputs: string[];
+	progress_done?: number | null;
+	progress_total?: number | null;
+	error_message?: string | null;
+	started_at?: string | null;
+	updated_at?: string | null;
+	events: number;
+}
+
+export interface Runs {
+	runs: RunStatus[];
+}
+
 // The medallion datasets, in flow order (raw -> bronze -> silver -> gold).
 export const KNOWN = ['raw_events', 'bronze$events', 'silver$features', 'gold$catalog'] as const;
 export const LAYER: Record<string, number> = {

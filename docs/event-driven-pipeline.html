@@ -710,7 +710,8 @@
 <nav class="flowtabs" aria-label="Scenarios">
   <button class="flowtab" data-flow="handoff" aria-pressed="true"><span class="num">1</span> Job handoff (bronze->silver)</button>
   <button class="flowtab" data-flow="failure" aria-pressed="false"><span class="num">2</span> Failure -> redelivery -> DLQ</button>
-  <button class="flowtab" data-flow="lineage" aria-pressed="false"><span class="num">3</span> Lineage over NATS</button>
+  <button class="flowtab" data-flow="lineage" aria-pressed="false"><span class="num">3</span> Live status (progress + failures)</button>
+  <button class="flowtab" data-flow="rayexport" aria-pressed="false"><span class="num">4</span> Ray Event Export (push)</button>
 </nav>
 
 <p class="scenario-note">Shortcuts: <kbd>Space</kbd> play/pause · <kbd>&larr;</kbd>/<kbd>&rarr;</kbd> step · <kbd>1</kbd>&ndash;<kbd id="kbFlowMax">3</kbd> flow · <kbd>O</kbd> mode · <kbd>T</kbd> theme · <kbd>F</kbd> fullscreen · <kbd>R</kbd> reset layout · Drag nodes to reposition</p>
@@ -953,21 +954,52 @@ const flows = {
   },
 
   lineage: {
-    name: "Lineage rides the same bus",
-    note: "One NATS stream carries OpenLineage to the graph + UI (todo #14)",
+    name: "Live run status — progress + failures",
+    note: "Capture the WHOLE lifecycle (START/RUNNING/FAIL), not just terminal lineage",
     steps: [
-      { from:"worker", to:"nats", color:"--c-vector", title:"Worker emits OpenLineage", route:"PUB lineage.events",
-        desc:"Every worker publishes OpenLineage <em>START</em> on pickup and <em>COMPLETE/FAIL</em> on finish to a lineage subject — instead of POSTing HTTP to the lineage service.",
-        payload:`await js.publish("lineage.events", {\n  eventType:"COMPLETE", job:"embed_features",\n  outputs:[{ name:"silver$features", facets:{ version:1 }}] })`,
-        chips:["START/COMPLETE","no HTTP"] },
-      { from:"nats", to:"lineage", color:"--c-vector", title:"Lineage service consumes", route:"SUB lineage.events",
-        desc:"The lineage service is a durable JetStream consumer — decoupled, replayable (a new consumer can replay history), and it can't lose events across a restart.",
-        payload:`async for msg in lineage_consumer:\n    repository.ingest_event(json.loads(msg.data))\n    await msg.ack()`,
-        chips:["replayable","durable"] },
-      { from:"lineage", to:"person", color:"--c-orch", title:"UI sees the new node/version", route:"GET /graph",
-        desc:"The graph now has the new run + silver v1; the SvelteKit UI (polling /graph and /producers) renders it. Same graph you watch in the demo — fed by events instead of a CLI.",
-        payload:`GET /datasets/silver$features/producers\n-> [{ event_type:"COMPLETE", dataset_version:"1", author:"data_eng" }]`,
-        chips:["live UI","2s poll"] }
+      { from:"worker", to:"nats", color:"--c-vector", title:"START -> run is RUNNING", route:"PUB lineage.events",
+        desc:"On pickup the worker emits OpenLineage <em>START</em> -> the run's current state becomes RUNNING. Without this, the graph only ever shows <em>finished</em> work — you can't see what's in flight or where you are now.",
+        payload:`PUB lineage.events\n{ eventType:"START", run:{ runId }, job:"embed_features" }   # status: RUNNING`,
+        chips:["RUNNING","in-flight"] },
+      { from:"ray", to:"nats", color:"--c-compute", title:"RUNNING heartbeats = progress", route:"PUB · progress",
+        desc:"While the Ray job runs it emits <em>RUNNING</em> with a progress facet (batch 7/12). <em>Ray Event Export delivers these transitions automatically</em> — so progress is captured without the job hand-instrumenting anything.",
+        payload:`{ eventType:"RUNNING", run:{ facets:{ progress:{ done:7, total:12 }}}}\n# or: Ray TASK_LIFECYCLE_EVENT state=RUNNING (auto, alpha)`,
+        chips:["progress 7/12","auto via Ray"] },
+      { from:"ray", to:"nats", color:"--c-compute", title:"FAIL captured mid-flight", route:"PUB · FAIL",
+        desc:"If it dies, a <em>FAIL</em> event carries the error + the attempt number. The run's current state flips to FAILED — it does NOT silently vanish or sit 'pending' forever.",
+        payload:`{ eventType:"FAIL", run:{ facets:{ errorMessage:{ message:"CUDA OOM at 7/12" }}},\n  attempt: 2 }`,
+        chips:["FAILED","error + attempt"] },
+      { from:"nats", to:"lineage", color:"--c-vector", title:"Service tracks CURRENT state", route:"SUB · last-wins",
+        desc:"The lineage/status service keeps the <em>current</em> run state (last transition wins) + the transition log. Now it can answer queued / running / failed / done per stage — a live status board layered over the provenance DAG.",
+        payload:`SET run.state = latest(START -> RUNNING -> COMPLETE | FAIL)\nSET run.progress, run.attempt, run.error, run.version`,
+        chips:["current state","not just terminal"] },
+      { from:"lineage", to:"person", color:"--c-orch", title:"UI shows a live status board", route:"GET /runs/active",
+        desc:"Each stage node is coloured by its CURRENT state (queued / running+% / failed+error / done+version) — plus <em>NATS queue depth</em> (pending / redelivered / DLQ) for what's backed up or stuck.",
+        payload:`GET /runs/active\n-> [{ job:"embed_features", state:"RUNNING", progress:"7/12" },\n    { job:"caption", state:"QUEUED" }]   # + dlq_depth, redelivered`,
+        chips:["live board","queue depth"] }
+    ]
+  },
+
+  rayexport: {
+    name: "Ray Event Export (push) — no polling",
+    note: "Ray 2.49+ POSTs task/job lifecycle events to an HTTP endpoint (alpha)",
+    steps: [
+      { from:"worker", to:"ray", color:"--c-compute", title:"Submit, then move on", route:"submit_job",
+        desc:"With <em>push</em>, the worker need not poll or stay alive holding the message — it submits and can ack. Ray reports the outcome itself.",
+        payload:`ray.submit_job(entrypoint="python embed.py ...", submission_id="embed-j-91f3")\n# env: RAY_enable_core_worker_ray_event_to_aggregator=1`,
+        chips:["fire-and-forget","alpha"] },
+      { from:"ray", to:"lineage", color:"--c-compute", title:"Ray exports lifecycle events", route:"POST /ray-events",
+        desc:"Each node's <em>aggregator agent</em> collects task/job lifecycle events and POSTs them to the configured endpoint — same webhook shape as OpenLineage's HTTP transport.",
+        payload:`# RAY_DASHBOARD_AGGREGATOR_AGENT_EVENTS_EXPORT_ADDR=http://lineage:8000/ray-events\nPOST /ray-events\n{ eventType:"TASK_LIFECYCLE_EVENT",\n  taskLifecycleEvent:{ stateTransitions:[{ state:"FINISHED", timestamp:"..." }] }}`,
+        chips:["push","TASK_LIFECYCLE"] },
+      { from:"lineage", to:"nats", color:"--c-vector", title:"Map -> OpenLineage (join the output)", route:"states -> RunState",
+        desc:"The receiver maps Ray states to OpenLineage RunState with real timestamps. Ray gives the <em>compute lifecycle</em> for free — but NOT the Lance version, so it's joined by jobId with the output the job reported.",
+        payload:`# Ray state  ->  OpenLineage RunState\nCREATED/SUBMITTED -> START\nRUNNING           -> RUNNING\nFINISHED          -> COMPLETE   (+ outputs/version from the job result)\nFAILED            -> FAIL (+ errorMessage)`,
+        chips:["auto-lineage","join by jobId"] },
+      { from:"worker", to:"ray", color:"--c-seed", title:"State API = the pull fallback", route:"list_tasks / get_task",
+        desc:"If a pushed event is missed (alpha, no strong delivery guarantee), the State API is the reconcile path — query authoritative task/job state on demand.",
+        payload:`from ray.util.state import get_task, list_tasks\nget_task(task_id)                              # SUCCEEDED / FAILED\nlist_tasks(filters=[("state","=","FAILED")])`,
+        chips:["pull","reconcile"] }
     ]
   }
 
@@ -1378,7 +1410,7 @@ const CONFIG = {
   // Default fallback flow used when an `onlyMode` flow becomes invalid.
   fallbackFlow: "handoff",
   // Maps keyboard digits 1..N to flow keys. Order matches the tab order above.
-  keyboardFlowOrder: ["handoff", "failure", "lineage"],
+  keyboardFlowOrder: ["handoff", "failure", "lineage", "rayexport"],
   // Two-mode toggle for the "O" shortcut. List exactly 2 modes.
   toggleModes: ["run", "run"]
 };

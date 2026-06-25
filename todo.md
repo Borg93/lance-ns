@@ -183,6 +183,16 @@
     - **[data plane] Wire `StsVendor` into `describe_table?vend_credentials`** (P1 #5) — real per-table
       short-TTL creds on MinIO/Ceph/AWS (RustFS: mode_b/static until it supports inline policy scoping).
     Bottom line: **easy to add later** — enforcement code exists; the only build is the UI login flow.
+17. 🔶 **Run-status / lifecycle capture (provenance graph ≠ live status).** Today lineage records only
+    terminal `COMPLETE`/`FAIL`, so it can't show *progress*, *in-flight failures*, or *where the pipeline
+    is now*. Add: emit + store the full OpenLineage lifecycle (`START`→`RUNNING`+progress facet→terminal),
+    keep `run.state` (last-wins) + transition log, and surface a **live status board** (queued / running %
+    / failed+error / done+version) over the DAG, plus NATS queue depth (pending / redelivered / DLQ).
+    Natural feed = **Ray Event Export** (2.49+, alpha): the node aggregator POSTs `TASK_LIFECYCLE_EVENT`
+    (RUNNING/FINISHED/FAILED) → map to RunState — *no polling*. Caveat: Ray's FINISHED = compute returned,
+    not "Lance committed a version", so join Ray-lifecycle (timing) with the job's reported output (version)
+    by jobId; keep the job's `*.ready{version}` as the authoritative pipeline trigger. See
+    `docs/event-driven-pipeline.{html,md}` (flows 3 "Live status" + 4 "Ray Event Export").
 
 ---
 

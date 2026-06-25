@@ -47,10 +47,46 @@ last good version). 4. `status = FAILED`. 5. Worker **NAK** + `PUB lineage.event
 whole idempotent job re-runs), up to `max_deliver`. 7. Exhausted → **TERM** + publish to `medallion.dlq`
 for an operator. Nothing is silently dropped; nothing downstream sees a partial write.
 
-## Flow 3 — Lineage rides the same bus (todo P2 #14)
-Workers publish OpenLineage `START`/`COMPLETE`/`FAIL` to `lineage.events` instead of POSTing HTTP. The
-lineage service is a durable JetStream consumer (decoupled, replayable, crash-safe), MERGEs into Apache
-AGE, and the SvelteKit UI renders it — the same graph you watch in the live demo, just fed by events.
+## Two different views (don't conflate them)
+What we built in the demo is a **provenance graph**: who derived what, from where, final versions —
+append-only, terminal. It deliberately does **not** show *progress*, *in-flight failures*, or *where the
+pipeline is right now*. Those are a **live run-status** view, and the event-driven design needs both:
+
+| View | Question | Source |
+|---|---|---|
+| **Provenance** (AGE graph) | who derived what, final versions, by whom | terminal `COMPLETE`/`FAIL` OpenLineage |
+| **Live status** | what's queued / running (%) / failed / done — *now* | full `START`→`RUNNING`→`COMPLETE`/`FAIL` lifecycle + NATS queue depth |
+
+The fix is to capture the **whole run lifecycle**, not just the terminal event, and keep the **current
+state per run** (last transition wins) plus a transition log.
+
+## Flow 3 — Live run status (progress + failures)
+1. **START** on pickup → run state = `RUNNING` (otherwise the graph only shows finished work).
+2. **RUNNING** heartbeats carry a progress facet (`batch 7/12`).
+3. **FAIL** mid-flight carries the error + attempt → state flips to `FAILED` (doesn't vanish or hang
+   "pending").
+4. The service stores `run.state` (last-wins) + `progress`/`attempt`/`error`/`version`.
+5. UI = a **status board**: each stage coloured by current state (queued / running+% / failed+error /
+   done+version) + **NATS queue depth** (pending / redelivered / DLQ) for what's backed up or stuck.
+
+## Flow 4 — Ray Event Export (push) — Ray 2.49+, alpha
+Instead of the worker *polling* `get_job_status`, each Ray node's **aggregator agent** POSTs
+`TASK_LIFECYCLE_EVENT` / `DRIVER_JOB_LIFECYCLE_EVENT` (state transitions + timestamps + retries) to a
+configured HTTP endpoint — same webhook shape as OpenLineage's HTTP transport.
+```
+RAY_enable_core_worker_ray_event_to_aggregator=1
+RAY_DASHBOARD_AGGREGATOR_AGENT_EVENTS_EXPORT_ADDR=http://<receiver>/ray-events
+```
+- **Push (Event Export)** → auto-feeds the lifecycle (`RUNNING`/`FINISHED`/`FAILED`) → OpenLineage
+  RunState, **no polling, the worker can fire-and-forget**. *This is what gives you progress + failures
+  + current-state for free.*
+- **Pull (State API)** → `ray.util.state.get_task` / `list_tasks` / `summarize_tasks` is the reconcile
+  path (recover a missed push; UI on-demand).
+- **Caveat:** Ray's `FINISHED` means the *compute task returned* — it does **not** know about the Lance
+  write or its version. So Ray events = the **lifecycle/timing** source; the **dataset facets (which
+  table, which version)** still come from the job's reported output, joined by `jobId`. Keep the job's
+  own `*.ready{version}` publish as the **authoritative pipeline trigger** (Event Export is alpha). The
+  lineage service stitches Ray-lifecycle + job-output.
 
 ## How this maps to the current demo
 Today `scripts/medallion_demo.py --step N` is the **synchronous** version: it does the Lance write *and*

@@ -209,6 +209,74 @@
 
 ---
 
+## Marquez parity → production viability (2026-06-25 session — verified findings)
+
+**Verdict (4-agent adversarial review, source-grounded — workflow `marquez-verdict`):** NOT a Marquez
+replacement — a **governance-first** lineage service genuinely ahead on **access control + provenance
+integrity *by design***, but behind on **durability, granularity, product surface**, and its
+access-control edge **ships OFF by default** (as shipped it's as open as Marquez).
+
+**Real edges Marquez structurally lacks (keep these):** in-service OIDC+OpenFGA read gating; unified
+cross-axis identity (`Dataset.name == catalog table:<id> == OpenFGA object == Lance table` via one
+`fga.canonical_object_id`); Lance **version on the WROTE edge**; gold's whole-history embedded JSONB;
+in-service author-binding (`enforce_author`); failed-run fidelity (no fabricated lineage); single AGE
+property graph (one `*1..` Cypher vs Marquez recursive SQL).
+
+**✅ Done this session:** durable `/runs` (lifecycle folded onto the AGE `(:Run)` node, survives restart —
+see #17) · gold embeds the WHOLE upstream lineage as JSONB pulled live from the graph (was a hand-typed
+stub) · UI: live status board (GSAP) + **Datasets/Jobs view planes** + lucide icons + auto-fit, and fixed
+an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read) · docs
+`image-pipeline-event-driven.{html,md}` (event-driven durable image medallion w/ Dapr QC gate).
+
+### Production-viability checklist (most is "finish the wiring", not hard)
+18. ⬜ **Turn auth ON in prod** (`LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED` + store/model ids). The
+    capability is wired (5 gated routes, 3-layer fail-closed, 23 unit tests) but DEFAULT OFF → flip it on.
+19. ⬜ **Real catalog emits the full lifecycle, not just `create_table` (M).** `app/core/lineage_emit.py`
+    has only `emit_create`; `data.py:79` calls it only on create — insert/merge/update/delete emit
+    NOTHING (the rich flow exists only in `seed.py` / `medallion_demo.py`). Add `emit_insert/merge/delete`
+    + wire the 4 call sites; each needs the resulting Lance version. (supersedes P2 #11)
+20. ⬜ **version-on-WROTE in prod (S, decisive).** `build_create_event` puts version in a CUSTOM `lance`
+    facet; `repository.output_version` reads the STANDARD per-output `DatasetVersionDatasetFacet` (only the
+    demo emits it) → a real `create_table` persists `WROTE.version = NULL`. Fix: attach the standard
+    version facet to each output in `build_create_event` (~3 lines, revives the storage-version edge).
+21. ⬜ **Lineage ↔ data KEY embedded in the Lance file (self-describing data) — user request.** Today the
+    only link is a *convention*: the canonical id (`Dataset.name`) + the version on WROTE. NOTHING is
+    written into the Lance file at create (verified — `create_table` writes no table metadata); only gold's
+    JSONB column, demo-only. **Build:** at `create_table`, write into Lance `schema.metadata` (± a column)
+    `{lineage.dataset_id, lineage.namespace, lineage.create_run_id, lineage.created_by}` so the data
+    carries its own OpenLineage coordinates and is reconcilable to the graph WITHOUT the catalog. Slots into
+    `create_table` + `build_create_event` next to #20. NB: OpenLineage is per-`(namespace,name)`; we use the
+    single canonical `name` as identity, so carry `namespace` as **annotation-in-file, not a 2nd id axis**.
+22. ⬜ **Persist + gate `/events`.** `/runs` is now durable (#17); `/events` is still `deque(500)`,
+    in-memory + UNGATED. Move to a durable store + reuse the `can_get_metadata` filter; add retention once
+    it's a real log. (overlaps P2 #16)
+23. ⬜ **Storage-version reconciliation.** `/demo/datasets` reads real Lance versions/schema off S3 but is
+    demo-gated, hardcoded to 3 datasets, NEVER reconciled vs the AGE `WROTE.version`. Promote to a
+    first-class gated capability that cross-checks emitted vs on-disk version + flags drift; then layer
+    **version diffing** (schema + row delta between two Lance versions, and which run caused it).
+24. ⬜ **Column-level lineage (L — the one real feature).** `SchemaDatasetFacet` is emitted but DISCARDED
+    on ingest; AGE stores ZERO schema, no `(:Column)` nodes. Needs: the transform to DECLARE column→column
+    mappings (`columnLineage` facet — not free), `(:Column)` nodes + field-to-field edges, ingest storage,
+    query + UI. Persist schema-per-version first (prerequisite). (supersedes P2 #12b)
+25. ⬜ **Event-driven runtime is designed, not built.** The medallion is a synchronous driver; the
+    NATS JetStream + Ray bridge + Dapr-Workflow gold QC gate is the design in
+    `docs/image-pipeline-event-driven.{html,md}` + `docs/event-driven-pipeline.{html,md}` (P2 #14). Build:
+    S3 ObjectCreated → NATS → Ray bridge → Dapr gold gate, OpenLineage at every hop.
+
+**Cheap spec-fidelity facets (Marquez-ingestable, low effort):** `outputStatistics` (rows/bytes on WROTE)
+and `lifecycleStateChange` (the carrier for #19's write events) are near-term load-bearing; `dataQuality`
+assertions (the gold QC gate), `nominalTime`, `parent-run`, `processing_engine` are informational.
+
+**Deliberately NOT doing (thesis-aligned rejections, not gaps):** namespace CRUD / multi-tenancy switcher
+(we have unified id + FGA grants); imperative PUT seeding (breaks anti-forgery); symlinks/aliasing (breaks
+one-identity); mutable description/tag CRUD (body-trusted). Full 25-gap matrix lives in the
+`marquez-verdict` workflow transcript.
+
+**Suggested next order:** #20 (version facet, tiny) → #21 (lineage↔data key, pairs with #20) → #19 (emit
+on all writes) → #22 (`/events` durable+gated, same move as `/runs`) → then #23/#24/#25.
+
+---
+
 ## Security & consistency backlog (verified — audit `w8u4rc2tg`, 5/9 high-criticals confirmed)
 Severity in brackets; "latent" = real but not live today (lineage svc undeployed).
 - ✅ **[high]** Lineage **read** endpoints unauthenticated → data-estate disclosure. **FIXED** —

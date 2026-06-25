@@ -156,14 +156,25 @@ medallion layers.
 
 ## Closing the loop: gold embeds its lineage as JSONB
 
-The final `aggregate_gold` job writes the upstream provenance **into the gold Lance file itself** as
-a JSONB `lineage` column (Lance's `pa.json_()` / `lance.json` extension type — stored as binary
-JSONB). So the lineage travels *with* the data: a consumer reading `gold$catalog` can query its own
-provenance in place via Lance's JSON functions (`json_extract(lineage, '$.upstream[*].name')`,
+The final `aggregate_gold` job writes the **whole upstream provenance** **into the gold Lance file
+itself** as a JSONB `lineage` column (Lance's `pa.json_()` / `lance.json` extension type — stored as
+binary JSONB). Crucially this is **pulled live from the AGE graph at write time** (the driver GETs
+`/runs` + `silver$features`'s `/graph` + each node's `/producers`), not a hand-typed snapshot — so it
+is a faithful, co-located copy of the source-of-truth. The embedded record carries the full history:
+
+- `graph`: the complete `gold → silver → bronze → raw_events` DAG (`nodes` with `source_uri`, `edges`);
+- `history`: **every** producing run in chronological order — `{dataset, job, author, state, version,
+  event_time, error}` — including the **failed** embed attempt (`state: FAIL`, the `CUDA OOM` error,
+  no version), so the provenance shows what was *attempted*, not just what succeeded;
+- `produced_by`: the gold step itself (`aggregate_gold` / analyst).
+
+So the lineage travels *with* the data: a consumer reading `gold$catalog` can query its own
+provenance in place via Lance's JSON functions (`json_extract(lineage, '$.history[*].job')`,
 `json_get_string`, `json_array_contains`, and a JSON scalar/INVERTED index on hot paths) through
 DataFusion — no round-trip to the lineage service required. The external AGE graph remains the
 queryable, cross-dataset source of truth; the embedded JSONB is the self-describing, co-located copy
-"where the data exists". gold's schema is therefore `caption`, `embedding`, **`lineage` (JSONB)**.
+"where the data exists". gold's schema is therefore `id`, `payload_src`, `embedding`, `caption`,
+**`lineage` (JSONB)**.
 
 ## Code shape (FastAPI house style)
 

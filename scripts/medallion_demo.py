@@ -34,6 +34,9 @@ import json
 import os
 import sys
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 
 import attr
@@ -49,6 +52,7 @@ from openlineage.client.transport.http import HttpConfig, HttpTransport
 # (python puts scripts/ on sys.path, not the repo root).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from lineage.schemas import LineageGraph, Producers, Runs  # noqa: E402  (after sys.path bootstrap)
 from lineage.seed import build_events  # noqa: E402  (intentional: after the sys.path bootstrap)
 
 try:
@@ -97,6 +101,7 @@ class ProgressRunFacet(RunFacet):
 
     done: int = attr.field(default=0)
     total: int = attr.field(default=0)
+
 
 _BRONZE = f"s3://{S3_BUCKET}/bronze/events"
 _SILVER = f"s3://{S3_BUCKET}/silver/features"
@@ -164,7 +169,9 @@ def write_bronze() -> None:
         schema = pa.schema(
             [pa.field("id", pa.int64()), blob_field("payload"), pa.field("payload_src", pa.string())]
         )
-        table = pa.table({"id": ids, "payload": blob_array(payloads), "payload_src": payload_src}, schema=schema)
+        table = pa.table(
+            {"id": ids, "payload": blob_array(payloads), "payload_src": payload_src}, schema=schema
+        )
         lance.write_dataset(
             table, _BRONZE, storage_options=opts, mode="overwrite", data_storage_version="2.2"
         )
@@ -196,20 +203,73 @@ def add_caption() -> None:
     _say("silver$features v2 written (+caption, in-place add-column)")
 
 
+def _lineage_get(path: str) -> str:
+    """GET a JSON body from the lineage service (the AGE graph is the provenance SoT)."""
+    with urllib.request.urlopen(f"{LINEAGE_URL}/{path}", timeout=10) as resp:  # noqa: S310 - trusted local URL
+        return resp.read().decode()
+
+
+def _gold_provenance() -> dict[str, object]:
+    """Assemble gold's **whole** upstream lineage from the lineage graph — the full
+    ``gold -> silver -> bronze -> raw_events`` DAG plus every producing run (job / author / state /
+    version / error, including the failed embed attempt), chronologically ordered.
+
+    This co-locates a live copy of the cross-dataset source-of-truth into the gold table instead of a
+    hand-typed snapshot. Best-effort: if the lineage service can't be reached the gold write still
+    succeeds with a minimal record, since enrichment must never fail the primary write.
+    """
+    produced_by = {"job": "aggregate_gold", "author": "analyst"}
+    try:
+        jobs = {r.run_id: r.job for r in Runs.model_validate_json(_lineage_get("runs")).runs}
+        graph = LineageGraph.model_validate_json(
+            _lineage_get(f"datasets/{urllib.parse.quote('silver$features')}/graph")
+        )
+        history: list[dict[str, object]] = []
+        for node in graph.nodes:
+            producers = Producers.model_validate_json(
+                _lineage_get(f"datasets/{urllib.parse.quote(node.id)}/producers")
+            )
+            for p in producers.producers:
+                history.append(
+                    {
+                        "dataset": node.id,
+                        "job": jobs.get(p.run_id),
+                        "author": p.author,
+                        "state": p.event_type,
+                        "version": p.dataset_version,
+                        "event_time": p.event_time,
+                        "error": p.error_message,
+                    }
+                )
+        history.sort(key=lambda h: str(h.get("event_time") or ""))
+        # gold isn't in the graph yet (its COMPLETE event is emitted *after* this write), so add its
+        # node + the gold->silver edge so the embedded DAG is complete through gold itself.
+        nodes = [{"name": n.id, "source_uri": n.source_uri} for n in graph.nodes]
+        nodes.append({"name": "gold$catalog", "source_uri": _GOLD})
+        edges = [{"from": e.source, "to": e.target} for e in graph.edges]
+        edges.append({"from": "gold$catalog", "to": "silver$features"})
+        return {
+            "dataset": "gold$catalog",
+            "produced_by": produced_by,
+            "graph": {"nodes": nodes, "edges": edges},
+            "history": history,
+        }
+    except (urllib.error.URLError, OSError, ValueError) as exc:  # ValueError covers JSON + Pydantic
+        _say(f"⚠ lineage service unreachable ({exc}) — embedding minimal provenance")
+        return {
+            "dataset": "gold$catalog",
+            "produced_by": produced_by,
+            "graph": {"nodes": [], "edges": []},
+            "history": [],
+        }
+
+
 def write_gold() -> None:
-    """analyst's aggregate: write gold and embed the upstream provenance as a JSONB ``lineage`` column."""
+    """analyst's aggregate: write gold and embed the **whole** upstream lineage (the full DAG + every
+    producing run, pulled live from the lineage graph) as a JSONB ``lineage`` column."""
     opts = _storage_options()
     sv = lance.dataset(_SILVER, storage_options=opts).to_table()
-    provenance = {
-        "dataset": "gold$catalog",
-        "produced_by": "aggregate_gold",
-        "author": "analyst",
-        "upstream": [
-            {"name": "silver$features", "version": 2},
-            {"name": "bronze$events", "version": 1},
-            {"name": "raw_events"},
-        ],
-    }
+    provenance = _gold_provenance()
     lineage_json = [json.dumps(provenance)] * sv.num_rows
     try:
         lineage_col = pa.array(lineage_json, type=pa.json_())

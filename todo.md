@@ -190,9 +190,12 @@
       `START → RUNNING (×3, progress 1/3→3/3) → terminal COMPLETE/FAIL`; a failed run dies mid-RUNNING.
       Progress rides a **custom** `ProgressRunFacet{done,total}` (spec has no standard progress facet —
       Marquez shows state+duration, not %), so the provenance graph stays strictly spec-true.
-    - ✅ **Lineage folds events → current state** — `GET /runs` folds the in-memory event buffer by
-      `run_id` (chronological, last-wins) into `RunStatus{state, progress, outputs, error, timing}`.
-      Two views: durable provenance graph (AGE, terminal-only) vs ephemeral live-status fold.
+    - ✅ **Durable run-state in AGE** — `GET /runs` → `repository.list_runs()` reads `RunStatus{state,
+      progress, outputs, error, timing}` folded **onto the `(:Run)` node in Apache AGE** (not an
+      in-memory buffer). **Survives `lineage-api` restart + replica-shared** (verified by restart test):
+      ingest SETs `event_type`(=state)/`event_time`(=updated_at, last-wins)/`started_at`(coalesce
+      first)/`events_count`/`job` on `(:Run)`, with progress + outputs in their own conditional
+      statements. `/events` is the one feed still in-memory (`deque(500)`, ungated) → persist + gate next.
     - ✅ **Live status board in the UI** — `StatusBoard.svelte` (GSAP-animated: width fill, running
       pulse, row entrance) renders each run's state pill + progress bar + error; Svelte Flow nodes get a
       run-state **ring** (running=amber pulse, complete=green, failed=red) via `runStateByDataset`.

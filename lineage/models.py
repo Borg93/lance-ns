@@ -118,6 +118,18 @@ class RunEvent(BaseModel):
         return None
 
     @property
+    def progress(self) -> tuple[int, int] | None:
+        """Batch progress ``(done, total)`` from our custom ``progress`` run facet, if present.
+
+        The facet rides RUNNING events (OpenLineage has no standard progress facet); the live
+        run-status board reads it to render a % bar. Returns ``None`` when the event omits it.
+        """
+        facet = (self.run.facets or {}).get("progress")
+        if isinstance(facet, dict) and facet.get("done") is not None and facet.get("total") is not None:
+            return int(facet["done"]), int(facet["total"])
+        return None
+
+    @property
     def is_success(self) -> bool:
         """A terminal *successful* run — only these assert produced data / lineage."""
         return self.event_type.upper() == "COMPLETE"

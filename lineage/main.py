@@ -35,7 +35,6 @@ from lineage.schemas import (
     Neighbors,
     Producers,
     Runs,
-    RunStatus,
 )
 
 log = logging.getLogger(__name__)
@@ -139,37 +138,14 @@ async def ingest_event(
 
 
 @app.get("/runs", tags=["query"])
-async def get_runs(request: Request) -> Runs:
-    """Live run-status board — current state per run, folded from the lifecycle events (last-wins).
+async def get_runs(repository: RepositoryDep) -> Runs:
+    """Live run-status board — each run's current state folded onto its ``(:Run)`` node in Apache AGE.
 
-    The provenance graph is terminal-only; this surfaces START/RUNNING/COMPLETE/FAIL so the UI can show
-    what's queued / running (with progress) / failed / done *right now*. In-memory (demo/observability).
+    **Durable**: survives a service restart and is shared across replicas (the provenance graph and the
+    run lifecycle live in the same AGE store, not an in-memory buffer). Surfaces START/RUNNING/
+    COMPLETE/FAIL + progress + error so the UI shows what's queued / running / failed / done right now.
     """
-    folded: dict[str, RunStatus] = {}
-    for record in getattr(request.app.state, "events", []):
-        run_id = record.get("run_id")
-        if not run_id:
-            continue
-        status = folded.get(run_id)
-        if status is None:
-            status = RunStatus(run_id=run_id, started_at=record.get("event_time"))
-            folded[run_id] = status
-        status.events += 1
-        status.state = record.get("event_type")  # chronological buffer -> last event wins
-        status.updated_at = record.get("event_time")
-        status.job = record.get("job") or status.job
-        status.author = record.get("author") or status.author
-        if record.get("outputs"):
-            status.outputs = record["outputs"]
-        run_facets = ((record.get("event") or {}).get("run") or {}).get("facets") or {}
-        progress = run_facets.get("progress")
-        if isinstance(progress, dict):
-            status.progress_done = progress.get("done")
-            status.progress_total = progress.get("total")
-        error = run_facets.get("errorMessage")
-        if isinstance(error, dict):
-            status.error_message = error.get("message")
-    return Runs(runs=sorted(folded.values(), key=lambda r: r.updated_at or "", reverse=True))
+    return await repository.list_runs()
 
 
 @app.get("/events", tags=["query"])

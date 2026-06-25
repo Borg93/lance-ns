@@ -292,7 +292,8 @@ def test_ingest_handler_binds_verified_author() -> None:
 
     repo = _FakeRepo()
     event = _event(claimed_author="attacker")
-    asyncio.run(ingest_event(event, cast(LineageRepository, repo), _token("real-user")))
+    req = _request(events=[], event_seq=0)
+    asyncio.run(ingest_event(event, cast(LineageRepository, repo), _token("real-user"), req))
     assert repo.ingested is not None and repo.ingested.author == "real-user"  # body claim overridden
 
 
@@ -301,5 +302,6 @@ def test_ingest_handler_keeps_body_author_when_oidc_off() -> None:
 
     repo = _FakeRepo()
     event = _event(claimed_author="claimed")
-    asyncio.run(ingest_event(event, cast(LineageRepository, repo), None))
+    req = _request(events=[], event_seq=0)
+    asyncio.run(ingest_event(event, cast(LineageRepository, repo), None, req))
     assert repo.ingested is not None and repo.ingested.author == "claimed"

@@ -44,6 +44,8 @@ from lineage.schemas import (
     Neighbors,
     ProducerInfo,
     Producers,
+    Runs,
+    RunStatus,
 )
 
 # Must match app.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
@@ -51,9 +53,25 @@ from lineage.schemas import (
 _CREATE_TABLE_OP: Final = "create_table"
 
 _MERGE_JOB: Final = "MERGE (j:Job {namespace:$ns, name:$nm}) RETURN 1"
+# The (:Run) node folds the whole lifecycle so /runs is durable (survives restart, replica-shared)
+# instead of folding an in-memory buffer: event_type IS the current state and event_time IS
+# updated_at (both last-event-wins via the repeated SET); started_at keeps the first event's time;
+# events_count counts the lifecycle events seen. job is denormalised so /runs needs no OF_JOB join.
 _MERGE_RUN: Final = (
     "MERGE (r:Run {run_id:$rid}) "
-    "SET r.event_type=$et, r.event_time=$tm, r.author=$au, r.producer=$pr, r.error_message=$err RETURN 1"
+    "SET r.event_type=$et, r.event_time=$tm, r.author=$au, r.producer=$pr, r.error_message=$err, "
+    "r.job=$job, r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 "
+    "RETURN 1"
+)
+# Progress + outputs ride only some events (RUNNING carries progress; only the terminal event names
+# the outputs), so they are SET in their own conditional statements — never clobbered back to null.
+_SET_RUN_PROGRESS: Final = (
+    "MATCH (r:Run {run_id:$rid}) SET r.progress_done=$pd, r.progress_total=$pt RETURN 1"
+)
+_SET_RUN_OUTPUTS: Final = "MATCH (r:Run {run_id:$rid}) SET r.outputs=$outs RETURN 1"
+_LIST_RUNS: Final = (
+    "MATCH (r:Run) RETURN r.run_id, r.job, r.author, r.event_type, r.progress_done, r.progress_total, "
+    "r.error_message, r.started_at, r.event_time, r.events_count, r.outputs"
 )
 _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
@@ -66,9 +84,7 @@ _SET_DATASET_TAGS: Final = "MATCH (d:Dataset {name:$name}) SET d.tags=$tags RETU
 _LINK_READ: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:READ]->(d) RETURN 1"
 # The WROTE edge carries the Lance dataset version this run produced (from the OpenLineage
 # ``version`` facet), so two refinement passes over one table are distinguishable in producers().
-_LINK_WROTE: Final = (
-    "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:WROTE]->(d) RETURN 1"
-)
+_LINK_WROTE: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:WROTE]->(d) RETURN 1"
 # AGE binds a ``$param`` in a standalone ``MATCH ... SET`` but silently drops one in a ``SET`` that
 # follows ``MERGE`` on an edge in the *same* statement (verified on AGE 1.5.0/PG16), so the version
 # is written in its own statement — mirroring how dataSource/tags are set on the Dataset node.
@@ -145,8 +161,25 @@ class LineageRepository:
                     "au": event.author or "",
                     "pr": event.producer or "",
                     "err": event.error_message or "",
+                    "job": f"{event.job.namespace}/{event.job.name}",
                 },
             )
+            progress = event.progress
+            if progress is not None:
+                await run_cypher(
+                    conn,
+                    self._graph,
+                    _SET_RUN_PROGRESS,
+                    {"rid": event.run.run_id, "pd": progress[0], "pt": progress[1]},
+                )
+            output_names = [ds.name for ds in event.outputs]
+            if output_names:
+                await run_cypher(
+                    conn,
+                    self._graph,
+                    _SET_RUN_OUTPUTS,
+                    {"rid": event.run.run_id, "outs": ",".join(output_names)},
+                )
             await run_cypher(
                 conn,
                 self._graph,
@@ -165,9 +198,7 @@ class LineageRepository:
                 await self._merge_dataset(conn, ds)
                 # A failed run keeps a WROTE edge (so producers() shows the attempt) but no version —
                 # it produced no data, so it must not claim to have written a Lance version.
-                await run_cypher(
-                    conn, self._graph, _LINK_WROTE, {"rid": event.run.run_id, "name": ds.name}
-                )
+                await run_cypher(conn, self._graph, _LINK_WROTE, {"rid": event.run.run_id, "name": ds.name})
                 version = event.output_version(ds.name) if event.is_success else None
                 if version:
                     await run_cypher(
@@ -210,9 +241,7 @@ class LineageRepository:
             {"name": ds.name, "ns": ds.namespace},
         )
         if ds.source_uri:
-            await run_cypher(
-                conn, self._graph, _SET_DATASET_SRC, {"name": ds.name, "src": ds.source_uri}
-            )
+            await run_cypher(conn, self._graph, _SET_DATASET_SRC, {"name": ds.name, "src": ds.source_uri})
         if ds.tags:
             await run_cypher(
                 conn, self._graph, _SET_DATASET_TAGS, {"name": ds.name, "tags": ",".join(ds.tags)}
@@ -246,6 +275,32 @@ class LineageRepository:
                 for r in rows
             ],
         )
+
+    async def list_runs(self) -> Runs:
+        """Every run's current lifecycle state, folded onto its ``(:Run)`` node in AGE.
+
+        Durable replacement for the in-memory fold: survives a restart and is shared across replicas.
+        ``event_type``/``event_time`` are the last-event-wins state/updated_at; ``""`` maps back to None.
+        """
+        rows = await fetch(self._pool, self._graph, _LIST_RUNS, columns=11)
+        runs = [
+            RunStatus(
+                run_id=r[0],
+                job=(r[1] or None),
+                author=(r[2] or None),
+                state=(r[3] or None),
+                progress_done=r[4],
+                progress_total=r[5],
+                error_message=(r[6] or None),
+                started_at=(r[7] or None),
+                updated_at=(r[8] or None),
+                events=int(r[9] or 0),
+                outputs=_tags_from(r[10]),
+            )
+            for r in rows
+        ]
+        runs.sort(key=lambda run: run.updated_at or "", reverse=True)
+        return Runs(runs=runs)
 
     async def creator(self, name: str) -> Creator:
         """Who created ``name`` — the verified principal on the catalog create event."""

@@ -9,6 +9,7 @@ operation string is shared by both sides).
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any, cast
 
 import httpx
@@ -17,6 +18,7 @@ from app.core.lineage_emit import (
     CREATE_TABLE,
     INSERT,
     MERGE_INSERT,
+    DaprEmitter,
     HttpLineageEmitter,
     NoopEmitter,
     build_create_event,
@@ -174,14 +176,73 @@ def test_http_emitter_swallows_failures() -> None:
 
 def test_make_emitter_selects_implementation() -> None:
     client = cast(httpx.AsyncClient, object())
-    assert isinstance(
-        make_emitter(enabled=True, url="http://lineage", client=client, job_namespace="lance-catalog"),
-        HttpLineageEmitter,
+
+    def _make(**over: object) -> object:
+        kw: dict[str, object] = {
+            "enabled": True,
+            "transport": "http",
+            "url": "http://lineage",
+            "client": client,
+            "dapr": None,
+            "pubsub": "lineage-pubsub",
+            "topic": "lineage.events.v1",
+            "job_namespace": "lance-catalog",
+        }
+        kw.update(over)
+        return make_emitter(**kw)  # type: ignore[arg-type]
+
+    assert isinstance(_make(), HttpLineageEmitter)
+    assert isinstance(_make(enabled=False), NoopEmitter)  # disabled → no-op
+    assert isinstance(_make(url=None), NoopEmitter)  # http transport unwired → no-op
+    assert isinstance(_make(transport="dapr", dapr=object()), DaprEmitter)  # durable Dapr transport
+    assert isinstance(_make(transport="dapr", dapr=None), NoopEmitter)  # dapr unwired → no-op
+
+
+class _FakeDapr:
+    """Just enough of the async DaprClient to capture a publish_event (or fail one)."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.published: list[dict[str, Any]] = []
+        self._fail = fail
+
+    async def publish_event(
+        self, *, pubsub_name: str, topic_name: str, data: str, data_content_type: str
+    ) -> None:
+        if self._fail:
+            raise RuntimeError("sidecar down")
+        self.published.append(
+            {
+                "pubsub": pubsub_name,
+                "topic": topic_name,
+                "content_type": data_content_type,
+                "event": json.loads(data),
+            }
+        )
+
+
+def test_dapr_emitter_publishes_event_to_topic() -> None:
+    dapr = _FakeDapr()
+    emitter = DaprEmitter(
+        cast(Any, dapr), "lineage-pubsub", "lineage.events.v1", job_namespace="lance-catalog"
     )
-    assert isinstance(
-        make_emitter(enabled=False, url="http://lineage", client=client, job_namespace="x"), NoopEmitter
+    asyncio.run(emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=1, run_id="r-1"))
+    assert len(dapr.published) == 1
+    pub = dapr.published[0]
+    assert pub["pubsub"] == "lineage-pubsub" and pub["topic"] == "lineage.events.v1"
+    assert pub["content_type"] == "application/json"
+    assert pub["event"]["outputs"][0]["name"] == "a$b"  # the spec-correct OpenLineage event is the data
+    assert pub["event"]["run"]["facets"]["author"]["sub"] == "alice"  # the verified catalog author
+    assert pub["event"]["run"]["runId"] == "r-1"
+
+
+def test_dapr_emitter_swallows_publish_failure() -> None:
+    # A sidecar/broker outage at publish must never break the catalog write (best-effort, like HTTP).
+    emitter = DaprEmitter(
+        cast(Any, _FakeDapr(fail=True)), "lineage-pubsub", "lineage.events.v1", job_namespace="x"
     )
-    assert isinstance(make_emitter(enabled=True, url=None, client=client, job_namespace="x"), NoopEmitter)
+    asyncio.run(
+        emitter.emit_write(table_id="a$b", namespace="a", author=None, version=2, operation=INSERT)
+    )  # no raise
 
 
 # --- #19: lineage on every write (not just create) ---

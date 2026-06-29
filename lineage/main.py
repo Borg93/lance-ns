@@ -12,6 +12,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated, Any
 
+from dapr.ext.fastapi import DaprApp
 from fastapi import Depends, FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
@@ -32,6 +33,7 @@ from lineage.auth import (
     require_metadata_access,
 )
 from lineage.config import get_settings, storage_options
+from lineage.consumer import handle_cloud_event, record_event_best_effort
 from lineage.models import RunEvent
 from lineage.reconcile import read_storage_version, reconcile
 from lineage.repository import LineageRepository
@@ -79,6 +81,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.fga_model_id,
             timeout_seconds=settings.fga_timeout_seconds,
         )
+    # Durable ingest (#25) is the Dapr subscription wired below (declarative — the sidecar drives it);
+    # there is no consumer task to manage here. The HTTP /api/v1/lineage path stays for external producers.
     try:
         yield
     finally:
@@ -89,6 +93,20 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="Lance Lineage Service", version="0.1.0", lifespan=lifespan)
+
+# Dapr pub/sub subscription (#25): the sidecar delivers each catalog→lineage event to this route. The
+# DaprApp wrapper also serves GET /dapr/subscribe (the registration the sidecar reads at startup). The
+# route exists unconditionally — harmless without a sidecar; only a running Dapr sidecar calls it.
+_dapr_app = DaprApp(app)
+_dapr_settings = get_settings()
+
+
+@_dapr_app.subscribe(
+    pubsub=_dapr_settings.dapr_pubsub, topic=_dapr_settings.dapr_topic, route="/lineage-events"
+)
+async def on_lineage_event(event: dict[str, Any], request: Request) -> dict[str, str]:
+    """Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status."""
+    return await handle_cloud_event(request.app.state.repository, event)
 
 
 @app.exception_handler(LanceNamespaceError)
@@ -157,22 +175,9 @@ async def ingest_event(event: RunEvent, repository: RepositoryDep, token: Curren
     """
     enforce_author(event, token)
     await repository.ingest_event(event)
-    # The durable events feed is a *secondary* projection of the authoritative AGE graph (already
-    # committed above). Best-effort: a feed-write failure must never 500 an ingest the graph accepted
-    # — mirroring the catalog's "lineage must never break a write" stance. (#22 audit)
-    try:
-        await repository.record_event(
-            run_id=event.run.run_id,
-            event_type=event.event_type,
-            event_time=event.event_time,
-            job=f"{event.job.namespace}/{event.job.name}",
-            author=event.author,
-            inputs=[d.name for d in event.inputs],
-            outputs=[d.name for d in event.outputs],
-            event=event.model_dump(by_alias=True),
-        )
-    except Exception as exc:  # noqa: BLE001 — feed is secondary; the graph write already succeeded
-        log.warning("record_event_failed", extra={"run": event.run.run_id, "error": str(exc)})
+    # The durable events feed is a secondary projection of the authoritative AGE graph (committed above);
+    # the feed write is best-effort and shared with the JetStream consumer so both paths project alike.
+    await record_event_best_effort(repository, event)
     return {"status": "ingested", "run": event.run.run_id}
 
 

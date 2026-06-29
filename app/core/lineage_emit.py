@@ -7,19 +7,28 @@ facet naming the operation + version) to the lineage service's ingest endpoint.
 
 Emission is **fire-and-forget + best-effort**: it runs in a FastAPI background task (after the
 response) and swallows every error, so the lineage service being down/slow can never block or
-fail a catalog write. This is the direct-HTTP OpenLineage producer transport; the durable path
-(publish to NATS JetStream, lineage consumes) is future work and slots in behind the same
-:class:`LineageEmitter` interface.
+fail a catalog write. Two transports sit behind the same :class:`LineageEmitter` interface:
+
+* :class:`HttpLineageEmitter` — direct HTTP POST (the OpenLineage default transport; simple, but the
+  event is lost if the lineage service is down when we POST). Good for dev / external producers.
+* :class:`DaprEmitter` — publish to the **Dapr** ``pubsub.jetstream`` component (the production
+  transport, ``LANCE_LINEAGE_TRANSPORT=dapr``). We publish to our local Dapr sidecar; the sidecar
+  persists to NATS JetStream and owns retry/backoff/DLQ/trace-propagation as **component config** (no
+  broker client in app code) — the decoupled microservice path. The lineage service subscribes via its
+  own sidecar. The outbox gap (crash between the Lance write and publish) remains: the catalog has no
+  DB for a transactional outbox; the durable producer is the Ray job (future), per microservices.md.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
+from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
 
@@ -239,10 +248,96 @@ class HttpLineageEmitter:
             )
 
 
+class DaprEmitter:
+    """Publishes OpenLineage events to a **Dapr** ``pubsub.jetstream`` component.
+
+    We publish to the local Dapr **sidecar** (``DaprClient.publish_event``); the sidecar persists to NATS
+    JetStream and owns retry/backoff/DLQ + W3C trace-context propagation as *component config*, so the
+    app holds no broker client (the decoupled microservice path — microservices.md). The topic is
+    versioned (``lineage.events.v1``). Publish stays best-effort: a sidecar/broker outage logs + drops
+    rather than failing the catalog write. ``authorization`` is unused — the pub/sub topic is an internal
+    catalog-only channel, so the subscriber trusts the verified ``author`` the catalog stamped (the
+    anti-forgery ``enforce_author`` guard is only for the open HTTP endpoint).
+    """
+
+    def __init__(self, client: DaprClient, pubsub: str, topic: str, *, job_namespace: str) -> None:
+        self._client = client
+        self._pubsub = pubsub
+        self._topic = topic
+        self._job_namespace = job_namespace
+
+    async def emit_create(
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int,
+        run_id: str | None = None,
+        authorization: str | None = None,
+    ) -> None:
+        await self.emit_write(
+            table_id=table_id,
+            namespace=namespace,
+            author=author,
+            version=version,
+            operation=CREATE_TABLE,
+            run_id=run_id,
+            authorization=authorization,
+        )
+
+    async def emit_write(  # noqa: ARG002 — authorization is unused on the trusted internal channel
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int | None,
+        operation: str,
+        run_id: str | None = None,
+        authorization: str | None = None,
+    ) -> None:
+        event = build_write_event(
+            table_id=table_id,
+            namespace=namespace,
+            author=author,
+            version=version,
+            operation=operation,
+            run_id=run_id or str(uuid.uuid4()),
+            event_time=datetime.now(UTC).isoformat(),
+            job_namespace=self._job_namespace,
+        )
+        try:
+            await self._client.publish_event(
+                pubsub_name=self._pubsub,
+                topic_name=self._topic,
+                data=json.dumps(event),
+                data_content_type="application/json",
+            )
+        except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
+            log.warning(
+                "lineage_publish_failed",
+                extra={"operation": operation, "table": table_id, "error": str(exc)},
+            )
+
+
 def make_emitter(
-    *, enabled: bool, url: str | None, client: httpx.AsyncClient | None, job_namespace: str
+    *,
+    enabled: bool,
+    transport: str,
+    url: str | None,
+    client: httpx.AsyncClient | None,
+    dapr: DaprClient | None,
+    pubsub: str,
+    topic: str,
+    job_namespace: str,
 ) -> LineageEmitter:
-    """Return the HTTP emitter when enabled + wired, else a no-op."""
-    if enabled and url and client is not None:
+    """Select the lineage transport: ``dapr`` (durable pub/sub via the sidecar) or ``http`` (direct POST);
+    no-op when disabled or unwired (a half-configured transport must never silently become the other)."""
+    if not enabled:
+        return NoopEmitter()
+    if transport == "dapr" and dapr is not None:
+        return DaprEmitter(dapr, pubsub, topic, job_namespace=job_namespace)
+    if transport == "http" and url and client is not None:
         return HttpLineageEmitter(client, url, job_namespace=job_namespace)
     return NoopEmitter()

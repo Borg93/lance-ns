@@ -85,18 +85,23 @@ class Settings(BaseSettings):
     # zero-downtime model/schema migration windows. Default off (no-op).
     maintenance_read_only: bool = Field(default=False, alias="LANCE_MAINTENANCE_READ_ONLY")
 
-    # Lineage emission (opt-in). When enabled, the catalog emits an OpenLineage event to the
-    # lineage service on a table write (create today) — fire-and-forget + best-effort, so the
-    # lineage service being down can never block or fail a catalog write. The catalog is the only
-    # component that knows the verified principal, so it is the authoritative source of "who
-    # created/changed a table" (author = token.sub). This is the direct-HTTP producer transport;
-    # the durable path (publish to NATS, lineage consumes) is future work behind the same emitter.
+    # Lineage emission (opt-in). When enabled, the catalog emits an OpenLineage event to the lineage
+    # service on a table write — fire-and-forget + best-effort, so the lineage service being down can
+    # never block or fail a catalog write. The catalog is the only component that knows the verified
+    # principal, so it is the authoritative source of "who created/changed a table" (author = token.sub).
+    # Transport: ``http`` (direct POST — dev / external producers) or ``dapr`` (publish to the Dapr
+    # ``pubsub.jetstream`` component via the local sidecar — durable, decoupled, the production path).
     lineage_emit_enabled: bool = Field(default=False, alias="LANCE_LINEAGE_EMIT_ENABLED")
+    lineage_transport: str = Field(default="http", alias="LANCE_LINEAGE_TRANSPORT")
     lineage_url: str | None = Field(default=None, alias="LANCE_LINEAGE_URL")
     lineage_emit_timeout_seconds: float = Field(
         default=5.0, ge=0.1, alias="LANCE_LINEAGE_EMIT_TIMEOUT_SECONDS"
     )
     lineage_job_namespace: str = Field(default="lance-catalog", alias="LANCE_LINEAGE_JOB_NAMESPACE")
+    # Dapr pub/sub transport (used when lineage_transport == "dapr"). The component name is what the
+    # sidecar resolves to NATS JetStream; the topic is versioned (a breaking schema change → a new .vN).
+    dapr_pubsub: str = Field(default="lineage-pubsub", alias="LANCE_DAPR_PUBSUB")
+    dapr_topic: str = Field(default="lineage.events.v1", alias="LANCE_DAPR_TOPIC")
 
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
@@ -107,8 +112,10 @@ class Settings(BaseSettings):
             raise ValueError(
                 "LANCE_OIDC_ENABLED is required when LANCE_FGA_ENABLED is set (authz needs a user)"
             )
-        if self.lineage_emit_enabled and not self.lineage_url:
-            raise ValueError("LANCE_LINEAGE_URL is required when LANCE_LINEAGE_EMIT_ENABLED is set")
+        if self.lineage_transport not in ("http", "dapr"):
+            raise ValueError("LANCE_LINEAGE_TRANSPORT must be 'http' or 'dapr'")
+        if self.lineage_emit_enabled and self.lineage_transport == "http" and not self.lineage_url:
+            raise ValueError("LANCE_LINEAGE_URL is required for the http lineage transport")
         return self
 
     def namespace_properties(self) -> dict[str, str]:

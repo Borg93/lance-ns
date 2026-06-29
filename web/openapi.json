@@ -5,6 +5,73 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/dapr/subscribe": {
+      "get": {
+        "tags": [
+          "PubSub"
+        ],
+        "summary": " Get Subscriptions",
+        "operationId": "_get_subscriptions_dapr_subscribe_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/lineage-events": {
+      "post": {
+        "tags": [
+          "PubSub"
+        ],
+        "summary": "On Lineage Event",
+        "description": "Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status.",
+        "operationId": "on_lineage_event_lineage_events_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "additionalProperties": true,
+                "type": "object",
+                "title": "Event"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response On Lineage Event Lineage Events Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/livez": {
       "get": {
         "tags": [

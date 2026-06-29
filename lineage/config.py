@@ -45,6 +45,14 @@ class LineageSettings(BaseSettings):
     # catalog ``table:<id>``, so a read is gated on ``can_get_metadata`` of ``table:<name>``.
     fga_object_type: str = Field(default="table", alias="LINEAGE_FGA_OBJECT_TYPE")
 
+    # --- Dapr pub/sub durable ingest (opt-in) — the catalog publishes to the Dapr pubsub.jetstream
+    # component and the sidecar delivers each event to this service's subscription handler over HTTP, so
+    # a lineage outage never loses provenance (the sidecar persists to NATS + redelivers per backOff).
+    # The HTTP /api/v1/lineage endpoint stays for external producers. Off by default (HTTP is dev default).
+    dapr_enabled: bool = Field(default=False, alias="LINEAGE_DAPR_ENABLED")
+    dapr_pubsub: str = Field(default="lineage-pubsub", alias="LINEAGE_DAPR_PUBSUB")
+    dapr_topic: str = Field(default="lineage.events.v1", alias="LINEAGE_DAPR_TOPIC")
+
     # --- Demo data peek (DEMO ONLY) — reads the real Lance datasets on S3 so the UI can show
     # what is changing in storage (schema/versions/rows). Off by default; never enable in prod.
     demo_data_enabled: bool = Field(default=False, alias="LINEAGE_DEMO_DATA_ENABLED")

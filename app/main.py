@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 import httpx
+from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -54,17 +55,25 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.fga = fga.make_client(
             settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
         )
-    # Lineage emission (opt-in, best-effort). Build a shared httpx client only when enabled.
-    lineage_http = (
-        httpx.AsyncClient(timeout=settings.lineage_emit_timeout_seconds)
-        if settings.lineage_emit_enabled and settings.lineage_url
-        else None
-    )
+    # Lineage emission (opt-in, best-effort). Build the chosen transport: a Dapr pub/sub publisher (the
+    # sidecar persists to NATS) or a direct-HTTP client. The Dapr client targets the local sidecar, so
+    # it's cheap to construct and needs no broker reachability at boot.
+    lineage_http = None
+    dapr_client = None
+    if settings.lineage_emit_enabled and settings.lineage_transport == "dapr":
+        dapr_client = DaprClient()
+    elif settings.lineage_emit_enabled and settings.lineage_url:
+        lineage_http = httpx.AsyncClient(timeout=settings.lineage_emit_timeout_seconds)
     app.state.lineage_http = lineage_http
+    app.state.lineage_dapr = dapr_client
     app.state.lineage_emitter = make_emitter(
         enabled=settings.lineage_emit_enabled,
+        transport=settings.lineage_transport,
         url=settings.lineage_url,
         client=lineage_http,
+        dapr=dapr_client,
+        pubsub=settings.dapr_pubsub,
+        topic=settings.dapr_topic,
         job_namespace=settings.lineage_job_namespace,
     )
     app.state.startup_complete = True
@@ -80,6 +89,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if lineage_http is not None:
             with suppress(Exception):
                 await lineage_http.aclose()
+        if dapr_client is not None:
+            with suppress(Exception):
+                await dapr_client.close()
 
 
 _settings = get_settings()

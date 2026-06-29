@@ -25,6 +25,7 @@ into `.localbin/` (gitignored).
 | **catalog** | app (FastAPI) + daprd sidecar | **producer** — creates Lance tables on S3; publishes OpenLineage events via Dapr |
 | **lineage** | app (FastAPI) + daprd sidecar | **consumer** — Dapr subscription ingests events into Apache AGE; serves the lineage API |
 | **web** | app (SvelteKit) | the UI (datasets / jobs / columns DAG) |
+| **medallion** | 4 apps + sidecars | event-driven pipeline: `lance-ray` producer + raw→bronze→silver→gold movers (see [MEDALLION.md](MEDALLION.md)) |
 | **Dapr** | subchart | control plane + sidecar injection + pub/sub + secret-store + tracing config |
 | **NATS** | subchart | JetStream — the durable event bus behind Dapr pub/sub |
 | **Apache AGE Postgres** | StatefulSet | the lineage graph (`lineage`) **and** OpenFGA's datastore (`openfga` db) |
@@ -95,6 +96,8 @@ Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `
 ✅ Verified: the event-driven catalog→lineage flow, all components healthy (`helm STATUS: deployed`),
 Dapr sidecar injection, the full 3-signal observability (`make e2e-obs` green — AGE data + PromQL metric
 + distributed trace + logs in GreptimeDB), `tilt ci` brings the whole stack up green.
+✅ Verified: the event-driven **medallion** cascade — one `lance-ray` `/produce` cascades
+raw→bronze→silver→gold via Dapr pub/sub, building the lineage DAG, as **one distributed trace** across
+all 5 services, with the `medallion_stage_transitions_total` metric in PromQL (`make e2e-medallion`).
 ⚠️ Deployed-not-wired: auth (`auth.enabled=false`); OpenBao secret read via Dapr (kv-v2 path nuance).
-❌ Not built: the medallion stage movers (raw→bronze / bronze→silver / silver→gold) as event-driven
-services + a dummy Ray producer; a compaction/GC microservice; an API gateway; RustFS STS.
+❌ Not built: a compaction/GC microservice (Dapr cron binding); an API gateway; RustFS STS.

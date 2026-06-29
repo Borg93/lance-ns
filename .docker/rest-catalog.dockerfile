@@ -52,6 +52,9 @@ COPY --link app ./app
 # The lineage service ships in the same image; run it with a different command:
 #   command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000
 COPY --link lineage ./lineage
+# The medallion services (lance-ray producer + the 3 stage movers) also share this image — each runs a
+# different entrypoint: `uvicorn medallion.producer:app` / `uvicorn medallion.mover:app` (env-configured).
+COPY --link medallion ./medallion
 
 USER app
 # 2333 = catalog (app.main:app); 8000 = lineage service (lineage.main:app) — same image, run with

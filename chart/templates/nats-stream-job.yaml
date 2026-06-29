@@ -24,13 +24,19 @@ spec:
             - |
               S="nats://{{ include "lance.natsHost" . }}:4222"
               until nats --server "$S" stream ls >/dev/null 2>&1; do echo wait-nats; sleep 3; done
-              if nats --server "$S" stream info LINEAGE >/dev/null 2>&1; then
-                echo "stream LINEAGE already exists"
-              else
-                nats --server "$S" stream add LINEAGE \
-                  --subjects "lineage.events.>" --storage file --retention limits \
-                  --max-age=168h --max-bytes=-1 --max-msgs=-1 --max-msgs-per-subject=-1 \
-                  --max-msg-size=-1 --discard old --dupe-window=2m --replicas 1 \
-                  --no-allow-rollup --deny-delete --deny-purge
-              fi
+              # LINEAGE carries OpenLineage events; MEDALLION carries the stage triggers that cascade the
+              # event-driven pipeline (medallion.raw/bronze/silver). Each created once (idempotent skip).
+              add_if_missing() {
+                if nats --server "$S" stream info "$1" >/dev/null 2>&1; then
+                  echo "stream $1 already exists"
+                else
+                  nats --server "$S" stream add "$1" \
+                    --subjects "$2" --storage file --retention limits \
+                    --max-age=168h --max-bytes=-1 --max-msgs=-1 --max-msgs-per-subject=-1 \
+                    --max-msg-size=-1 --discard old --dupe-window=2m --replicas 1 \
+                    --no-allow-rollup --deny-delete --deny-purge
+                fi
+              }
+              add_if_missing LINEAGE "lineage.events.>"
+              add_if_missing MEDALLION "medallion.>"
 {{- end }}

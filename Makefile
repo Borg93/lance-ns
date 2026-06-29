@@ -22,6 +22,7 @@ K9S_V       := v0.32.7
 TILT_V      := 0.33.21
 CATALOG_IMG := lance-rest-catalog:dev
 WEB_IMG     := lance-lineage-web:dev
+MEDALLION_PORT := 8000
 # OCI label provenance — supplied to every image build (BUILD_DATE rfc3339, VCS_REF full SHA, VERSION).
 BUILD_DATE  := $(shell date -u +%FT%TZ)
 VCS_REF     := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
@@ -78,6 +79,13 @@ verify: ## Prove the event-driven flow: catalog publishes via Dapr, lineage inge
 	@kubectl exec deploy/$(RELEASE)-lineage -c lineage -- python -c "import httpx; \
 	  print('AGE creator of bronze\$$mk:', httpx.get('http://localhost:8000/datasets/bronze\$$mk/creator', timeout=8).json())"
 
+medallion: ## Fire the event-driven pipeline: lance-ray POST /produce → raw→bronze→silver→gold cascade
+	@echo "lance-ray /produce → cascades raw → bronze → silver → gold via Dapr pub/sub …"
+	@kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- python -c "import httpx; print('produce:', httpx.post('http://localhost:$(MEDALLION_PORT)/produce', timeout=8).json())"
+	@sleep 6
+	@echo "resulting lineage DAG (gold's provenance):"
+	@kubectl exec deploy/$(RELEASE)-lineage -c lineage -- python -c "import httpx; print(httpx.get('http://localhost:8000/datasets/gold\$$catalog/upstream', timeout=8).json())"
+
 dashboards: ## Port-forward all the UIs (Ctrl-C to stop)
 	@echo "web        → http://localhost:5173"
 	@echo "lineage    → http://localhost:8000"
@@ -100,6 +108,15 @@ e2e-obs: ## Run the e2e observability test against the deployed stack (auto-forw
 	   LANCE_E2E_GREPTIME_URL=http://localhost:4000 \
 	   uv run pytest tests/e2e/test_observability_e2e.py -v -m observability; rc=$$?; \
 	 kill $$C $$L $$G 2>/dev/null; exit $$rc
+
+e2e-medallion: ## Run the e2e medallion-cascade test against the deployed stack (auto-forwards lance-ray/lineage)
+	@echo "port-forwarding lance-ray/lineage …"
+	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & R=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
+	   uv run pytest tests/e2e/test_medallion_e2e.py -v -m medallion; rc=$$?; \
+	 kill $$R $$L 2>/dev/null; exit $$rc
 
 status: ## Show all pods
 	@kubectl get pods

@@ -1,0 +1,124 @@
+{{- if .Values.medallion.enabled }}
+{{- $root := . }}
+{{- $port := .Values.medallion.port }}
+{{- $img := printf "%s:%s" .Values.image.catalog.repository .Values.image.catalog.tag }}
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# lance-ray — the dummy producer / HEAD of the medallion pipeline. POST /produce emits the raw_events
+# OpenLineage event + publishes the first trigger (medallion.raw) that the raw→bronze mover consumes.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" . }}-lance-ray
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: lance-ray, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: lance-ray
+      {{- if .Values.dapr.sidecars }}
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.medallion.producer.daprAppId | quote }}
+        dapr.io/app-port: {{ $port | quote }}
+        dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        {{- if .Values.observability.enabled }}
+        dapr.io/config: "lance-tracing"
+        {{- end }}
+      {{- end }}
+    spec:
+      containers:
+        - name: lance-ray
+          image: {{ $img | quote }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.observability.enabled }}
+          command: ["opentelemetry-instrument", "uvicorn", "medallion.producer:app", "--host=0.0.0.0", "--port={{ $port }}"]
+          {{- else }}
+          command: ["uvicorn", "medallion.producer:app", "--host=0.0.0.0", "--port={{ $port }}"]
+          {{- end }}
+          ports: [{ name: http, containerPort: {{ $port }} }]
+          env:
+            {{- if .Values.observability.enabled }}
+            {{- include "lance.otelEnv" (list $root .Values.medallion.producer.daprAppId) | nindent 12 }}
+            {{- end }}
+            - { name: MEDALLION_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
+            - { name: MEDALLION_LINEAGE_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            - { name: MEDALLION_RAW_DATASET, value: {{ .Values.medallion.producer.rawDataset | quote }} }
+            - { name: MEDALLION_RAW_NAMESPACE, value: {{ .Values.medallion.producer.rawNamespace | quote }} }
+            - { name: MEDALLION_PRODUCER_OPERATION, value: {{ .Values.medallion.producer.operation | quote }} }
+            - { name: MEDALLION_PRODUCER_AUTHOR, value: {{ .Values.medallion.producer.author | quote }} }
+            - { name: MEDALLION_RAW_TOPIC, value: {{ .Values.medallion.producer.rawTopic | quote }} }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" . }}-lance-ray
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports: [{ name: http, port: {{ $port }}, targetPort: http }]
+  selector: { app.kubernetes.io/component: lance-ray, app.kubernetes.io/instance: {{ .Release.Name }} }
+{{- range .Values.medallion.movers }}
+---
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+# mover {{ .name }} ({{ .fromNamespace }} → {{ .toNamespace }}) — subscribes {{ .subTopic }}, emits the
+# transform's lineage{{ if .pubTopic }}, then triggers {{ .pubTopic }}{{ else }} (terminal — no downstream){{ end }}.
+# ─────────────────────────────────────────────────────────────────────────────────────────────────
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" $root }}-{{ .name }}
+  labels: {{- include "lance.labels" $root | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: {{ .name }}, app.kubernetes.io/instance: {{ $root.Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ .name }}
+      {{- if $root.Values.dapr.sidecars }}
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .daprAppId | quote }}
+        dapr.io/app-port: {{ $port | quote }}
+        dapr.io/log-level: {{ $root.Values.dapr.logLevel | quote }}
+        {{- if $root.Values.observability.enabled }}
+        dapr.io/config: "lance-tracing"
+        {{- end }}
+      {{- end }}
+    spec:
+      containers:
+        - name: mover
+          image: {{ $img | quote }}
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          {{- if $root.Values.observability.enabled }}
+          command: ["opentelemetry-instrument", "uvicorn", "medallion.mover:app", "--host=0.0.0.0", "--port={{ $port }}"]
+          {{- else }}
+          command: ["uvicorn", "medallion.mover:app", "--host=0.0.0.0", "--port={{ $port }}"]
+          {{- end }}
+          ports: [{ name: http, containerPort: {{ $port }} }]
+          env:
+            {{- if $root.Values.observability.enabled }}
+            {{- include "lance.otelEnv" (list $root .daprAppId) | nindent 12 }}
+            {{- end }}
+            - { name: MEDALLION_PUBSUB, value: {{ $root.Values.pubsub.name | quote }} }
+            - { name: MEDALLION_LINEAGE_TOPIC, value: {{ $root.Values.pubsub.topic | quote }} }
+            - { name: MEDALLION_FROM_NAMESPACE, value: {{ .fromNamespace | quote }} }
+            - { name: MEDALLION_FROM_DATASET, value: {{ .fromDataset | quote }} }
+            - { name: MEDALLION_TO_NAMESPACE, value: {{ .toNamespace | quote }} }
+            - { name: MEDALLION_TO_DATASET, value: {{ .toDataset | quote }} }
+            - { name: MEDALLION_OPERATION, value: {{ .operation | quote }} }
+            - { name: MEDALLION_AUTHOR, value: {{ .author | quote }} }
+            - { name: MEDALLION_SUB_TOPIC, value: {{ .subTopic | quote }} }
+            - { name: MEDALLION_PUB_TOPIC, value: {{ .pubTopic | quote }} }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml $root.Values.resources.default | nindent 12 }}
+{{- end }}
+{{- end }}

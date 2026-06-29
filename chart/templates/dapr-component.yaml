@@ -21,10 +21,17 @@ spec:
     - { name: ackWait, value: "30s" }
     - { name: maxDeliver, value: "5" }
     - { name: backOff, value: "1s,5s,10s,30s,60s" }
-# Only the catalog (publisher) + lineage (subscriber) app-ids use this component.
+# The catalog (publisher) + lineage (subscriber) + the medallion services (producer + movers) all
+# publish/subscribe through this component — each app-id must be in scope or its sidecar can't see it.
 scopes:
   - {{ .Values.services.catalog.daprAppId }}
   - {{ .Values.services.lineage.daprAppId }}
+{{- if .Values.medallion.enabled }}
+  - {{ .Values.medallion.producer.daprAppId }}
+{{- range .Values.medallion.movers }}
+  - {{ .daprAppId }}
+{{- end }}
+{{- end }}
 {{- if .Values.openbao.enabled }}
 ---
 # Dapr secret store fronting OpenBao (Vault-API compatible). Apps read secrets via their sidecar

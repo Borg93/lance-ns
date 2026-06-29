@@ -61,6 +61,7 @@ pythonpath = ["."]
 markers = [
     "e2e: end-to-end tests against a running server (set LANCE_REST_E2E_URL)",
     "observability: e2e tests against the deployed kind stack — catalog + lineage + GreptimeDB (set LANCE_E2E_*_URL)",
+    "medallion: e2e tests for the event-driven medallion cascade — lance-ray + lineage (set LANCE_E2E_*_URL)",
 ]
 
 [tool.ty.environment]

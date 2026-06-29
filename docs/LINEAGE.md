@@ -198,6 +198,7 @@ Layered, no raw Cypher in the endpoints:
 | `GET /datasets/{name}/creator` | **Who created** `name` (the verified catalog principal) |
 | `GET /datasets/{name}/graph` | Connected lineage subgraph (`nodes` + `edges`) for a DAG view |
 | `GET /datasets/{name}/reconcile` | **Graph vs storage** — cross-checks the `WROTE`-edge version against the *actual on-disk Lance version* and flags drift (`in_sync` / `storage_ahead` / `graph_ahead` / `untracked` / `missing_on_storage` / `absent`). Format-aware; Marquez/Lakekeeper can't do this |
+| `GET /datasets/{name}/schema` | The persisted **column schema** for `name` (at `?version=N`, else latest) — captured from the standard `SchemaDatasetFacet` per-version on the `WROTE` edge. Prerequisite for column-level lineage |
 | `GET /runs` | Live run-status board (state folded onto each `(:Run)` node; durable, governed) |
 | `GET /events` | Recent ingested OpenLineage events, newest first (durable, governed) |
 | `GET /livez` | Liveness |

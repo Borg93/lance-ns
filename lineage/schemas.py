@@ -73,6 +73,26 @@ class Creator(BaseModel):
     creator: str | None = None
 
 
+class SchemaField(BaseModel):
+    """One column in a dataset's persisted per-version schema (from the standard ``schema`` facet)."""
+
+    name: str
+    type: str = ""
+    description: str | None = None
+
+
+class DatasetSchema(BaseModel):
+    """The column schema recorded for ``dataset`` at ``version`` (the ``WROTE`` edge's schema). (#24)
+
+    ``version`` is the Lance version this schema belongs to; ``None`` with empty ``fields`` means no
+    schema has been persisted for the dataset (or the requested version) yet.
+    """
+
+    dataset: str
+    version: int | None = None
+    fields: list[SchemaField] = Field(default_factory=list)
+
+
 class GraphNode(BaseModel):
     """A dataset node in the lineage graph (``id`` is the catalog table id).
 

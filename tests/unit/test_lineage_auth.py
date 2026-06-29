@@ -32,7 +32,7 @@ from lineage import auth
 from lineage.config import LineageSettings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import DatasetRef, EventRecord, Neighbors, Runs, RunStatus
+from lineage.schemas import DatasetRef, DatasetSchema, EventRecord, Neighbors, Runs, RunStatus, SchemaField
 
 _ISSUER = "https://idp.example.com"
 
@@ -216,6 +216,7 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         "/datasets/{name}/graph",
         "/datasets/{name}/creator",
         "/datasets/{name}/reconcile",
+        "/datasets/{name}/schema",
     }
     seen = set()
     for route in app.routes:
@@ -294,6 +295,9 @@ class _FakeRepo:
     async def source_uri(self, name: str) -> str | None:  # noqa: ARG002
         return self.uri
 
+    async def dataset_schema(self, name: str, version: int | None = None) -> DatasetSchema:
+        return DatasetSchema(dataset=name, version=version or 2, fields=[SchemaField(name="id", type="int")])
+
     async def upstream(self, name: str) -> Neighbors:
         return Neighbors(dataset=name, related=[DatasetRef(name="a"), DatasetRef(name="b")])
 
@@ -370,6 +374,16 @@ def test_get_reconcile_skips_storage_read_without_uri(monkeypatch: pytest.Monkey
     result = asyncio.run(get_reconcile("g$x", cast(LineageRepository, repo), _settings()))
     assert result.status is ReconcileState.MISSING_ON_STORAGE
     assert result.storage_version is None
+
+
+def test_get_schema_returns_persisted_fields() -> None:
+    # #24: the gated /schema endpoint returns the per-version column schema captured at ingest.
+    from lineage.main import get_schema
+
+    result = asyncio.run(get_schema("silver$features", cast(LineageRepository, _FakeRepo()), version=2))
+    assert result.dataset == "silver$features"
+    assert result.version == 2
+    assert [f.name for f in result.fields] == ["id"]
 
 
 def test_get_runs_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:

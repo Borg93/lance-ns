@@ -37,6 +37,27 @@ class Dataset(BaseModel):
         return uri if isinstance(uri, str) and uri else None
 
     @property
+    def fields(self) -> list[dict[str, str]]:
+        """Column schema from the standard ``schema`` facet — ``[{name, type[, description]}]``.
+
+        This is the per-version schema the lineage service persists onto the ``WROTE`` edge (#24
+        prerequisite); previously the ``SchemaDatasetFacet`` was received and discarded.
+        """
+        facet = (self.facets or {}).get("schema")
+        items = facet.get("fields") if isinstance(facet, dict) else None
+        if not isinstance(items, list):
+            return []
+        out: list[dict[str, str]] = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("name"):
+                continue
+            entry = {"name": str(item["name"]), "type": str(item.get("type") or "")}
+            if item.get("description"):
+                entry["description"] = str(item["description"])
+            out.append(entry)
+        return out
+
+    @property
     def tags(self) -> list[str]:
         """Governance labels from the standard ``tags`` facet, as ``key=value`` strings."""
         facet = (self.facets or {}).get("tags")

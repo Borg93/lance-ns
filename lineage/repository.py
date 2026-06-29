@@ -40,6 +40,7 @@ from lineage.models import Dataset, RunEvent
 from lineage.schemas import (
     Creator,
     DatasetRef,
+    DatasetSchema,
     EventRecord,
     GraphEdge,
     GraphNode,
@@ -49,6 +50,7 @@ from lineage.schemas import (
     Producers,
     Runs,
     RunStatus,
+    SchemaField,
 )
 
 # Must match app.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
@@ -112,6 +114,13 @@ _LINK_WROTE: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERG
 _SET_WROTE_VERSION: Final = (
     "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) SET w.version=$ver RETURN 1"
 )
+# The per-version column schema rides the same WROTE edge as the version (#24 prerequisite). Stored as
+# a JSON **string** scalar — params are JSON-encoded and ``_parse`` json.loads each cell, so a scalar
+# round-trips cleanly; an array-in-SET is the risky path AGE 1.5.0 mishandles (same reason tags are a
+# comma-joined string). Own statement, like the version (AGE drops a $param in a post-MERGE SET).
+_SET_WROTE_SCHEMA: Final = (
+    "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) SET w.schema=$schema RETURN 1"
+)
 _DERIVED_FROM: Final = (
     "MATCH (o:Dataset {name:$on}), (i:Dataset {name:$inp}) MERGE (o)-[:DERIVED_FROM]->(i) RETURN 1"
 )
@@ -134,6 +143,16 @@ _LATEST_WRITE_VERSION: Final = (
     "RETURN w.version ORDER BY r.event_time DESC LIMIT 1"
 )
 _SOURCE_URI: Final = "MATCH (d:Dataset {name:$name}) RETURN d.source_uri LIMIT 1"
+# Per-version schema lookup (#24). Latest = the most-recent successful WROTE edge that carries a schema;
+# at-version pins the edge whose version matches. Both return the schema JSON string + its version.
+_SCHEMA_LATEST: Final = (
+    "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) WHERE w.schema IS NOT NULL "
+    "RETURN w.schema, w.version ORDER BY r.event_time DESC LIMIT 1"
+)
+_SCHEMA_AT_VERSION: Final = (
+    "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) WHERE w.version=$ver AND w.schema IS NOT NULL "
+    "RETURN w.schema, w.version ORDER BY r.event_time DESC LIMIT 1"
+)
 _MERGE_USER: Final = "MERGE (u:User {name:$name}) RETURN 1"
 # Latest-create-wins: the CREATED edge carries the create event_time so creator() is deterministic
 # even when a table name is dropped+recreated by a different principal (the most recent create is
@@ -236,6 +255,15 @@ class LineageRepository:
                         _SET_WROTE_VERSION,
                         {"rid": event.run.run_id, "name": ds.name, "ver": version},
                     )
+                    # Persist the column schema AT this version onto the same edge (#24 prerequisite):
+                    # a successful versioned write's schema is the dataset's schema at that Lance version.
+                    if ds.fields:
+                        await run_cypher(
+                            conn,
+                            self._graph,
+                            _SET_WROTE_SCHEMA,
+                            {"rid": event.run.run_id, "name": ds.name, "schema": json.dumps(ds.fields)},
+                        )
             # Only a successful run asserts lineage: a failed run derived nothing.
             if event.is_success:
                 for out in event.outputs:
@@ -315,6 +343,28 @@ class LineageRepository:
         """The storage location (``dataSource`` URI) recorded for ``name``, or ``None`` if unknown. (#23)"""
         rows = await fetch(self._pool, self._graph, _SOURCE_URI, {"name": name}, columns=1)
         return rows[0][0] if rows and rows[0][0] is not None else None
+
+    async def dataset_schema(self, name: str, version: int | None = None) -> DatasetSchema:
+        """The persisted column schema for ``name`` — at ``version`` if given, else the latest. (#24)
+
+        Empty ``fields`` (and ``version=None``) means no schema has been persisted for that dataset/
+        version yet. The schema is stored as a JSON string on the ``WROTE`` edge, so ``_parse`` returns
+        the string and we ``json.loads`` it back into the field list.
+        """
+        # WROTE.version is stored as the OpenLineage datasetVersion *string* ("1"), so the at-version
+        # match must compare strings — an int $ver silently matches nothing (the bug #23's int() coercion
+        # on read papered over). The version we return is still coerced back to int below.
+        query, params = (
+            (_SCHEMA_AT_VERSION, {"name": name, "ver": str(version)})
+            if version is not None
+            else (_SCHEMA_LATEST, {"name": name})
+        )
+        rows = await fetch(self._pool, self._graph, query, params, columns=2)
+        if not rows or rows[0][0] is None:
+            return DatasetSchema(dataset=name, version=version, fields=[])
+        raw, ver = rows[0]
+        fields = [SchemaField.model_validate(f) for f in json.loads(raw)] if isinstance(raw, str) else []
+        return DatasetSchema(dataset=name, version=int(ver) if ver is not None else None, fields=fields)
 
     async def list_runs(self) -> Runs:
         """Every run's current lifecycle state, folded onto its ``(:Run)`` node in AGE.

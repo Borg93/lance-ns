@@ -273,10 +273,18 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     parametrized core test + the endpoint-wiring test. Marquez/Lakekeeper are format-unaware and cannot
     do this. **Fast-follow:** version diffing (schema + row delta between two Lance versions, and which
     run caused it) + persist-schema-per-version (the #24 prerequisite).
-24. ⬜ **Column-level lineage (L — the one real feature).** `SchemaDatasetFacet` is emitted but DISCARDED
-    on ingest; AGE stores ZERO schema, no `(:Column)` nodes. Needs: the transform to DECLARE column→column
+24. 🟡 **Column-level lineage (L — the one real feature).** **Prerequisite DONE — schema-per-version is
+    now persisted + queryable.** Ingest no longer discards the standard `SchemaDatasetFacet`: a successful
+    versioned write stores its column schema (JSON-string scalar) on the same `WROTE` edge as the version
+    (`Dataset.fields` surfaces the facet; `_SET_WROTE_SCHEMA` persists; `repository.dataset_schema(name,
+    version)` reads it back). New gated `GET /datasets/{name}/schema?version=N` (latest if omitted).
+    **Proven live**: ingest a schema event → `/schema` returns the columns at v1, at-version + latest +
+    absent all correct (caught + fixed a string-vs-int version-match bug the read-coercion had masked).
+    Unit: `Dataset.fields` parse + ingest issues `SET w.schema` + endpoint passthrough; `/schema` in the
+    route-gate set. **Still pending (the feature proper):** the transform must DECLARE column→column
     mappings (`columnLineage` facet — not free), `(:Column)` nodes + field-to-field edges, ingest storage,
-    query + UI. Persist schema-per-version first (prerequisite). (supersedes P2 #12b)
+    query + UI. Now also unblocks **schema-diffing between Lance versions** (the #23 fast-follow).
+    (supersedes P2 #12b)
 25. ⬜ **Event-driven runtime is designed, not built.** The medallion is a synchronous driver; the
     NATS JetStream + Ray bridge + Dapr-Workflow gold QC gate is the design in
     `docs/image-pipeline-event-driven.{html,md}` + `docs/event-driven-pipeline.{html,md}` (P2 #14). Build:
@@ -292,9 +300,9 @@ one-identity); mutable description/tag CRUD (body-trusted). Full 25-gap matrix l
 `marquez-verdict` workflow transcript.
 
 **Suggested next order:** ✅ #20 (version facet) → ✅ #21 (lineage↔data key) → ✅ #19 (emit on all
-writes) → ✅ #22 (`/events` durable+gated) → ✅ #23 (storage-version reconciliation) → **next: #24**
-(column-level lineage — persist schema-per-version first) then **#25** (the Dapr/NATS event-driven
-runtime — the stated end goal).
+writes) → ✅ #22 (`/events` durable+gated) → ✅ #23 (storage-version reconciliation) → 🟡 #24
+(column-level lineage — **schema-per-version prerequisite shipped**; column→column edges + UI remain)
+then **#25** (the Dapr/NATS event-driven runtime — the stated end goal).
 
 ---
 

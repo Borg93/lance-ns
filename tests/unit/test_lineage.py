@@ -96,6 +96,20 @@ def test_failed_run_exposes_producer_error_and_standard_dataset_facets() -> None
     assert "layer=silver" in out.tags  # standard tags facet
 
 
+def test_dataset_exposes_schema_fields_from_standard_facet() -> None:
+    """#24: the standard SchemaDatasetFacet is now surfaced (was discarded) for per-version persistence."""
+    from lineage.seed import events_as_dicts
+
+    out = RunEvent.model_validate(events_as_dicts()[3]).outputs[0]  # silver v2: 4 columns
+    by_name = {f["name"]: f["type"] for f in out.fields}
+    assert by_name == {
+        "id": "int",
+        "payload_src": "string",
+        "embedding": "array<float>",
+        "caption": "string",
+    }
+
+
 def test_author_falls_back_to_standard_ownership_facet() -> None:
     """With no custom author facet, the run author comes from the standard ownership job facet."""
     event = RunEvent.model_validate(
@@ -179,6 +193,15 @@ def test_ingest_records_version_and_skips_self_derived_from(monkeypatch: pytest.
     # version is written in its own MATCH...SET statement (AGE param-binding quirk on MERGE+SET).
     set_version = [p for q, p in calls if "SET w.version" in q]
     assert any(p.get("name") == "silver$features" and p.get("ver") == "2" for p in set_version)
+    # #24: the per-version column schema is persisted onto the same WROTE edge, as a JSON string.
+    set_schema = [p for q, p in calls if "SET w.schema" in q]
+    assert set_schema and set_schema[0]["name"] == "silver$features"
+    assert {f["name"] for f in json.loads(cast(str, set_schema[0]["schema"]))} == {
+        "id",
+        "payload_src",
+        "embedding",
+        "caption",
+    }
     # in-place transform: read + write the same table, but NO self-DERIVED_FROM edge.
     assert [p for q, p in calls if "DERIVED_FROM" in q] == []
     # the standard dataSource + tags facets are persisted onto the dataset node.

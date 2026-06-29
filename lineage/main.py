@@ -37,6 +37,7 @@ from lineage.reconcile import read_storage_version, reconcile
 from lineage.repository import LineageRepository
 from lineage.schemas import (
     Creator,
+    DatasetSchema,
     Events,
     LineageGraph,
     Neighbors,
@@ -234,6 +235,17 @@ async def get_producers(name: str, repository: RepositoryDep) -> Producers:
 async def get_creator(name: str, repository: RepositoryDep) -> Creator:
     """Who created ``name`` (the verified catalog principal). Gated on ``can_get_metadata``."""
     return await repository.creator(name)
+
+
+@app.get("/datasets/{name}/schema", tags=["query"], dependencies=[Depends(require_metadata_access)])
+async def get_schema(name: str, repository: RepositoryDep, version: int | None = None) -> DatasetSchema:
+    """The persisted column schema for ``name`` — at ``?version=N`` if given, else the latest. (#24)
+
+    Captured from the standard ``SchemaDatasetFacet`` at ingest and stored per-version on the ``WROTE``
+    edge (previously the facet was received and discarded). Gated on ``can_get_metadata`` for ``name``;
+    this is the prerequisite for column-level lineage and powers schema-diffing between Lance versions.
+    """
+    return await repository.dataset_schema(name, version)
 
 
 @app.get("/datasets/{name}/reconcile", tags=["query"], dependencies=[Depends(require_metadata_access)])

@@ -102,9 +102,11 @@ openbao:
 observability:
   enabled: true
   jaegerImage: jaegertracing/all-in-one:1.62.0
-  samplingRate: "1" # trace everything in the demo (prod: 0.1 via the Collector)
+  collectorImage: otel/opentelemetry-collector:0.115.0
+  samplingRate: "1" # trace everything in the demo (prod: 0.1)
   otlpPort: 4317
   uiPort: 16686
+  collectorPort: 4317
 
 # --- The three app services ------------------------------------------------------------------------
 services:

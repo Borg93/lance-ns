@@ -57,7 +57,7 @@ spec:
   tracing:
     samplingRate: {{ .Values.observability.samplingRate | quote }}
     otel:
-      endpointAddress: "{{ include "lance.jaegerHost" . }}:{{ .Values.observability.otlpPort }}"
+      endpointAddress: "{{ include "lance.otelHost" . }}:{{ .Values.observability.collectorPort }}"
       isSecure: false
       protocol: grpc
 {{- end }}

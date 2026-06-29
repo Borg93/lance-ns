@@ -1,0 +1,74 @@
+{{- if .Values.observability.enabled }}
+# OpenTelemetry Collector — the OTLP fan-out the conventions call for: receives all three signals
+# (traces/metrics/logs) from the app SDKs AND the Dapr sidecars, exports traces to Jaeger; metrics/logs
+# go to the debug exporter for now (a metrics/logs backend is the next layer).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lance.otelHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    receivers:
+      otlp:
+        protocols:
+          grpc: { endpoint: 0.0.0.0:4317 }
+          http: { endpoint: 0.0.0.0:4318 }
+    processors:
+      batch: {}
+    exporters:
+      otlp/jaeger:
+        endpoint: {{ include "lance.jaegerHost" . }}:{{ .Values.observability.otlpPort }}
+        tls: { insecure: true }
+      debug:
+        verbosity: basic
+    service:
+      pipelines:
+        traces:  { receivers: [otlp], processors: [batch], exporters: [otlp/jaeger] }
+        metrics: { receivers: [otlp], processors: [batch], exporters: [debug] }
+        logs:    { receivers: [otlp], processors: [batch], exporters: [debug] }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.otelHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: otlp-grpc, port: 4317, targetPort: 4317 }
+    - { name: otlp-http, port: 4318, targetPort: 4318 }
+  selector:
+    app.kubernetes.io/component: otel-collector
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.otelHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: otel-collector
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: otel-collector
+    spec:
+      containers:
+        - name: collector
+          image: {{ .Values.observability.collectorImage }}
+          args: ["--config=/etc/otel/config.yaml"]
+          ports:
+            - { name: otlp-grpc, containerPort: 4317 }
+            - { name: otlp-http, containerPort: 4318 }
+          volumeMounts:
+            - { name: config, mountPath: /etc/otel }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "lance.otelHost" . }} }
+{{- end }}

@@ -32,9 +32,16 @@ spec:
         - name: catalog
           image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.observability.enabled }}
+          command: ["opentelemetry-instrument", "uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
+          {{- else }}
           command: ["uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
+          {{- end }}
           ports: [{ name: http, containerPort: {{ .Values.services.catalog.port }} }]
           env:
+            {{- if .Values.observability.enabled }}
+            {{- include "lance.otelEnv" (list $root "catalog") | nindent 12 }}
+            {{- end }}
             - { name: LANCE_REST_IMPL, value: "dir" }
             - { name: LANCE_REST_ROOT, value: "s3://{{ .Values.rustfs.bucket }}" }
             - { name: LANCE_NS_DELIMITER, value: "$" }
@@ -102,9 +109,16 @@ spec:
         - name: lineage
           image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.observability.enabled }}
+          command: ["opentelemetry-instrument", "uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
+          {{- else }}
           command: ["uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
+          {{- end }}
           ports: [{ name: http, containerPort: {{ .Values.services.lineage.port }} }]
           env:
+            {{- if .Values.observability.enabled }}
+            {{- include "lance.otelEnv" (list $root "lineage") | nindent 12 }}
+            {{- end }}
             - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
             - { name: LINEAGE_GRAPH, value: {{ .Values.age.lineageDb | quote }} }
             - { name: LINEAGE_DAPR_ENABLED, value: "true" }

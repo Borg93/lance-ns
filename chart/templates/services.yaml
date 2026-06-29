@@ -49,6 +49,9 @@ spec:
             - { name: LANCE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            # Consume the S3 secret from the OpenBao/Dapr secret store at boot (env above is the fallback)
+            # — the audit's 'wired but never read' fix. Needs the lance-secrets component (scoped to catalog).
+            - { name: LANCE_SECRETS_FROM_DAPR, value: {{ .Values.openbao.enabled | ternary "true" "false" | quote }} }
             - { name: LANCE_S3_REGION, value: "us-east-1" }
             - { name: LANCE_S3_ALLOW_HTTP, value: "true" }
             - { name: LANCE_S3_VIRTUAL_HOSTED, value: "false" }

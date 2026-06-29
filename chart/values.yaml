@@ -98,7 +98,12 @@ openbao:
   enabled: true
   image: openbao/openbao:2.2.0
   port: 8200
-  devToken: root # dev-mode root token (demo only; prod uses real auth + unseal)
+  # devMode=true → in-memory, auto-unsealed, fixed root token (demo ONLY — anyone in-cluster can read
+  # everything with `root`). Set devMode=false for the prod path: a sealed, file-backed server on a PVC
+  # that an operator must `bao operator init` + unseal, with real auth — no fixed root token, no auto-seed.
+  devMode: true
+  devToken: root # dev-mode root token (devMode=true only)
+  storage: 1Gi # PVC size for the prod (devMode=false) file backend
 
 # --- Observability — the rask stack: GreptimeDB + Vector + Perses (standard OTLP, NOT OTel-Arrow) ----
 # GreptimeDB is ONE unified store for metrics+logs+traces (tables: metrics → PromQL series, lance_logs,

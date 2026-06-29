@@ -17,6 +17,7 @@ from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from lance_namespace import LanceNamespaceError
+from pydantic import SecretStr
 
 from app.api.maintenance import maintenance_middleware
 from app.api.v1.router import api_router
@@ -26,6 +27,7 @@ from app.core.exceptions import problem_detail
 from app.core.lineage_emit import make_emitter
 from app.core.namespace import build_namespace
 from app.core.oidc import OIDCVerifier
+from app.core.secrets import fetch_dapr_secret
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +40,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.shutting_down = False
     app.state.startup_complete = False
+    # Consume the sensitive S3 secret from the Dapr secret store (OpenBao) rather than plaintext env, so
+    # the secret store is actually the source of truth (the audit's 'wired but never read' fix).
+    if settings.secrets_from_dapr:
+        bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
+        s3_secret = bundle.get(settings.dapr_secret_s3_field)
+        if s3_secret:
+            settings.s3_secret_access_key = SecretStr(s3_secret)
+            log.info("secret_from_dapr_store", extra={"field": settings.dapr_secret_s3_field})
+        else:
+            log.warning("secret_from_dapr_missing", extra={"store": settings.dapr_secret_store})
     app.state.namespace = build_namespace(settings)  # fail fast if storage misconfigured
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(

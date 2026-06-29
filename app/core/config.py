@@ -37,6 +37,14 @@ class Settings(BaseSettings):
     s3_allow_http: bool = Field(default=True, alias="LANCE_S3_ALLOW_HTTP")
     s3_virtual_hosted: bool = Field(default=False, alias="LANCE_S3_VIRTUAL_HOSTED")
 
+    # Secret consumption — when on, read the sensitive S3 secret from the Dapr secret store (OpenBao) at
+    # boot instead of trusting plaintext env (the audit's 'wired but never read' fix). Env stays a
+    # boot-time fallback so a store hiccup can't hard-fail startup.
+    secrets_from_dapr: bool = Field(default=False, alias="LANCE_SECRETS_FROM_DAPR")
+    dapr_secret_store: str = Field(default="lance-secrets", alias="LANCE_DAPR_SECRET_STORE")
+    dapr_secret_key: str = Field(default="lance", alias="LANCE_DAPR_SECRET_KEY")
+    dapr_secret_s3_field: str = Field(default="rustfs-secret-key", alias="LANCE_DAPR_SECRET_S3_FIELD")
+
     # OIDC authentication (opt-in). When disabled, all routes are open. When
     # enabled, every /v1 route requires a valid bearer token from the issuer.
     oidc_enabled: bool = Field(default=False, alias="LANCE_OIDC_ENABLED")

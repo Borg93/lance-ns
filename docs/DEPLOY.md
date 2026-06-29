@@ -27,6 +27,7 @@ into `.localbin/` (gitignored).
 | **web** | app (SvelteKit) | the UI (datasets / jobs / columns DAG) |
 | **medallion** | 4 apps + sidecars | event-driven pipeline: `lance-ray` producer + raw→bronze→silver→gold movers (see [MEDALLION.md](MEDALLION.md)) |
 | **compaction** | app + sidecar | compaction/GC service triggered by a Dapr **cron binding** (`bindings.cron`) — compacts Lance fragments + GCs old versions |
+| **gateway** | nginx + sidecar | single entry point — clean-URL edge that routes app traffic via **Dapr service invocation** (`/v1.0/invoke/...`); `/`→web, `/lineage/`,`/catalog/`,`/produce`,`/perses/`,`/greptime/` |
 | **Dapr** | subchart | control plane + sidecar injection + pub/sub + secret-store + tracing config |
 | **NATS** | subchart | JetStream — the durable event bus behind Dapr pub/sub |
 | **Apache AGE Postgres** | StatefulSet | the lineage graph (`lineage`) **and** OpenFGA's datastore (`openfga` db) |
@@ -103,5 +104,8 @@ all 5 services, with the `medallion_stage_transitions_total` metric in PromQL (`
 ✅ Verified: the **compaction/GC** service — a Dapr `bindings.cron` component POSTs `/compaction-cron`
 on its schedule (and `make compaction` on demand); each sweep discovers every Lance dataset in the bucket
 and runs `compact_files()` + `cleanup_old_versions()`, with `compaction_*` metrics in PromQL.
+✅ Verified: the **API gateway** — one nginx front routes `/lineage/*` and `/catalog/*` through its own
+Dapr sidecar via **service invocation** (mTLS + retries + tracing on the hop), `/`→web UI; one
+port-forward fronts the whole platform (`/lineage/livez` → 200 through the gateway).
 ⚠️ Deployed-not-wired: auth (`auth.enabled=false`); OpenBao secret read via Dapr (kv-v2 path nuance).
-❌ Not built: an API gateway; RustFS STS.
+❌ Not built: RustFS STS.

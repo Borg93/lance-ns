@@ -1,0 +1,104 @@
+{{- if .Values.gateway.enabled }}
+{{- $port := .Values.gateway.port }}
+# API gateway — a single nginx reverse proxy that path-routes to every in-cluster service, so one
+# port-forward fronts the whole platform. Prefixes are stripped (trailing slash on proxy_pass), so e.g.
+# GET /lineage/runs → lineage:8000/runs. In prod this Service sits behind a k8s Ingress (same routes).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lance.fullname" . }}-gateway
+  labels: {{- include "lance.labels" . | nindent 4 }}
+data:
+  nginx.conf: |
+    worker_processes 1;
+    # nginx-unprivileged runs as non-root → /run isn't writable. Pin the pid + temp paths to /tmp
+    # (also keeps the image read-only-rootfs ready). Per the dockerfile skill's static-nginx note.
+    pid /tmp/nginx.pid;
+    events { worker_connections 1024; }
+    http {
+      client_body_temp_path /tmp/client_body;
+      proxy_temp_path /tmp/proxy;
+      fastcgi_temp_path /tmp/fastcgi;
+      uwsgi_temp_path /tmp/uwsgi;
+      scgi_temp_path /tmp/scgi;
+      access_log /dev/stdout;
+      error_log  /dev/stderr;
+      proxy_http_version 1.1;
+      proxy_set_header Host $host;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+      proxy_set_header X-Forwarded-Proto $scheme;
+      server {
+        listen {{ $port }};
+
+        # The SvelteKit UI at the root (incl. websockets for HMR/live data).
+        location / {
+          proxy_pass http://{{ include "lance.fullname" . }}-web:3000;
+          proxy_set_header Upgrade $http_upgrade;
+          proxy_set_header Connection "upgrade";
+        }
+
+        # App APIs are routed via Dapr SERVICE INVOCATION through the gateway's OWN sidecar (:3500):
+        #   /lineage/runs → http://127.0.0.1:3500/v1.0/invoke/lineage/method/runs
+        # so the gateway→service hop rides Dapr (mTLS + retries + distributed tracing), not a raw nginx
+        # upstream. This is the "Dapr-native gateway": nginx is just the clean-URL north-south edge.
+        location /catalog/  { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.services.catalog.daprAppId }}/method/; }
+        location /lineage/  { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.services.lineage.daprAppId }}/method/; }
+        {{- if .Values.medallion.enabled }}
+        location /produce   { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.medallion.producer.daprAppId }}/method/produce; }
+        {{- end }}
+        {{- if .Values.observability.enabled }}
+        location /perses/   { proxy_pass http://{{ include "lance.fullname" . }}-perses:8080/; }
+        location /greptime/ { proxy_pass http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/; }
+        {{- end }}
+
+        # Gateway's own liveness (doesn't depend on any upstream).
+        location = /healthz { return 200 "ok\n"; }
+      }
+    }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" . }}-gateway
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+      {{- if .Values.dapr.sidecars }}
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.gateway.daprAppId | quote }}
+        dapr.io/app-port: {{ $port | quote }}
+        dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        {{- if .Values.observability.enabled }}
+        dapr.io/config: "lance-tracing"
+        {{- end }}
+      {{- end }}
+    spec:
+      containers:
+        - name: gateway
+          image: {{ .Values.gateway.image }}
+          ports: [{ name: http, containerPort: {{ $port }} }]
+          volumeMounts:
+            - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+          readinessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+      volumes:
+        - name: conf
+          configMap: { name: {{ include "lance.fullname" . }}-gateway }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" . }}-gateway
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports: [{ name: http, port: {{ $port }}, targetPort: http }]
+  selector: { app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }} }
+{{- end }}

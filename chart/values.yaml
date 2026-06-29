@@ -241,6 +241,16 @@ compaction:
   schedule: "@every 120s" # demo cadence (prod: e.g. "0 */30 * * * *")
   olderThanDays: 7 # version GC keeps this much history
 
+# --- API gateway — single entry point (reverse proxy) ---------------------------------------------
+# One nginx that path-routes to the in-cluster services, so a single `kubectl port-forward` fronts the
+# whole platform (kind has no host ports). Non-root nginx-unprivileged (listens on 8080). In prod this
+# Service sits behind a real k8s Ingress; the routing table is the same.
+gateway:
+  enabled: true
+  image: nginxinc/nginx-unprivileged:1.27-alpine
+  port: 8080
+  daprAppId: gateway # app traffic is routed via this sidecar's Dapr service-invocation API (:3500)
+
 resources:
   default:
     requests: { cpu: 50m, memory: 128Mi }

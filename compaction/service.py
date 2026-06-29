@@ -48,6 +48,7 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
     record_reclaimed(
         fragments_removed=sum(r.fragments_removed for r in results),
         versions_removed=sum(r.old_versions_removed for r in results),
+        indices_optimized=sum(r.indices_optimized for r in results),
     )
     return results
 
@@ -58,6 +59,7 @@ def summarize(results: list[DatasetResult]) -> dict[str, Any]:
     return {
         "datasets": len(results),
         "fragments_removed": sum(r.fragments_removed for r in results),
+        "indices_optimized": sum(r.indices_optimized for r in results),
         "versions_removed": sum(r.old_versions_removed for r in results),
         "errors": {r.uri: r.error for r in results if r.error},
     }

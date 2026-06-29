@@ -21,15 +21,22 @@ _versions_removed = _meter.create_counter(
     unit="{version}",
     description="Superseded Lance manifest versions GC'd.",
 )
+_indices_optimized = _meter.create_counter(
+    "compaction.indices.optimized",
+    unit="{index}",
+    description="Secondary indices (vector/scalar/FTS) re-optimized to cover new fragments.",
+)
 
 
 def record_run() -> None:
     _runs.add(1)
 
 
-def record_reclaimed(fragments_removed: int, versions_removed: int) -> None:
-    """Record what one sweep reclaimed across all datasets."""
+def record_reclaimed(fragments_removed: int, versions_removed: int, indices_optimized: int = 0) -> None:
+    """Record what one sweep reclaimed + re-optimized across all datasets."""
     if fragments_removed:
         _fragments_removed.add(fragments_removed)
     if versions_removed:
         _versions_removed.add(versions_removed)
+    if indices_optimized:
+        _indices_optimized.add(indices_optimized)

@@ -1,8 +1,15 @@
-"""Compaction + version-GC microservice, triggered by a Dapr cron binding.
+"""Lance table-maintenance microservice, triggered by a Dapr cron binding.
 
-Lance accumulates small fragments (one per append/insert) and old manifest versions over time. This
-service runs on a schedule — a Dapr ``bindings.cron`` component POSTs to its route every interval — and
-for each Lance dataset in the lakehouse bucket runs ``compact_files()`` (merge small fragments) and
-``cleanup_old_versions()`` (GC superseded manifests). Both are idempotent, so a missed/retried tick is
-safe. Run: ``uvicorn compaction.service:app``.
+Lance datasets degrade over time: appends/inserts accumulate small fragments, writes leave old manifest
+versions, and new rows aren't covered by existing secondary indices. This service runs on a schedule — a
+Dapr ``bindings.cron`` component POSTs to its route every interval — and for each Lance dataset in the
+lakehouse bucket runs the three idempotent maintenance ops:
+
+* ``optimize.compact_files()``   — merge small fragments (scan/query performance)
+* ``optimize.optimize_indices()`` — keep vector/scalar/FTS indices covering new fragments (else queries
+  miss recent rows or fall back to a flat scan)
+* ``cleanup_old_versions()``     — GC superseded manifests
+
+All idempotent, so a missed/retried tick is safe. (At scale these run distributed via lance-ray's
+``compact_database`` + distributed index build; here single-process.) Run: ``uvicorn compaction.service:app``.
 """

@@ -6,12 +6,15 @@ blocking Lance maintenance calls. Both keep IO at the edges so the orchestration
 
 from __future__ import annotations
 
+import logging
 from datetime import timedelta
 from typing import Any
 
 import lance
 import pyarrow.fs as pafs
 from pydantic import BaseModel
+
+log = logging.getLogger(__name__)
 
 
 class DatasetResult(BaseModel):
@@ -20,6 +23,7 @@ class DatasetResult(BaseModel):
     uri: str
     fragments_removed: int = 0
     fragments_added: int = 0
+    indices_optimized: int = 0
     old_versions_removed: int = 0
     bytes_removed: int = 0
     error: str | None = None
@@ -51,6 +55,15 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
         metrics: Any = ds.optimize.compact_files()
         result.fragments_removed = int(getattr(metrics, "fragments_removed", 0))
         result.fragments_added = int(getattr(metrics, "fragments_added", 0))
+        # Keep secondary indices (vector ANN / scalar / FTS) covering the new fragments. WITHOUT this a
+        # freshly-written row isn't in the index → vector/filter queries either miss it or fall back to a
+        # flat scan. Index optimize is a maintenance op exactly like compaction (Lance does it distributed
+        # via lance-ray; here single-process). Idempotent. Own guard so a no-index dataset can't fail it.
+        try:
+            ds.optimize.optimize_indices()
+            result.indices_optimized = len(ds.list_indices())
+        except Exception as exc:  # noqa: BLE001 — no indices / transient → don't fail the whole sweep
+            log.warning("optimize_indices skipped for %s: %s", uri, exc)
         stats: Any = ds.cleanup_old_versions(older_than=older_than)
         result.old_versions_removed = int(getattr(stats, "old_versions", 0))
         result.bytes_removed = int(getattr(stats, "bytes_removed", 0))

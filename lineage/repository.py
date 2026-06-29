@@ -32,6 +32,7 @@ from __future__ import annotations
 import json
 from typing import Any, Final
 
+import psycopg
 from psycopg_pool import AsyncConnectionPool
 
 from lineage.age import fetch, run_cypher
@@ -323,9 +324,17 @@ class LineageRepository:
         return Runs(runs=runs)
 
     async def ensure_events_table(self) -> None:
-        """Create the durable events-feed table if absent (idempotent; called once at startup)."""
-        async with self._pool.connection() as conn:
-            await conn.execute(_CREATE_EVENTS_TABLE)
+        """Create the durable events-feed table if absent (idempotent; called once at startup).
+
+        ``CREATE TABLE IF NOT EXISTS`` is not atomic against itself: two replicas booting at once can
+        both pass the existence check and then race the create, so the loser raises ``DuplicateTable``.
+        That's the success case — the table exists — so we swallow it. (#22 audit)
+        """
+        try:
+            async with self._pool.connection() as conn:
+                await conn.execute(_CREATE_EVENTS_TABLE)
+        except psycopg.errors.DuplicateTable:
+            pass
 
     async def record_event(
         self,

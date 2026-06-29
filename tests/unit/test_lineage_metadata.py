@@ -26,23 +26,23 @@ def _schema_meta(stream: bytes) -> dict[str, str]:
 
 
 def test_build_lineage_metadata() -> None:
-    md = build_lineage_metadata(table_id="a$b$c", namespace="a$b", run_id="r-1", created_by="alice")
+    md = build_lineage_metadata(table_id="a$b$c", namespace="a$b", run_id="r-1")
     assert md == {
         "lineage.dataset_id": "a$b$c",
         "lineage.namespace": "a$b",
         "lineage.create_run_id": "r-1",
-        "lineage.created_by": "alice",
     }
 
 
-def test_build_lineage_metadata_none_author_becomes_empty() -> None:
-    md = build_lineage_metadata(table_id="t", namespace="", run_id="r", created_by=None)
-    assert md["lineage.created_by"] == ""
+def test_build_lineage_metadata_carries_no_pii() -> None:
+    # #22 audit: the creator's OIDC sub must not be embedded — the file lives outside the FGA boundary.
+    md = build_lineage_metadata(table_id="t", namespace="", run_id="r")
+    assert not any("created_by" in key or "author" in key for key in md)
 
 
 def test_inject_into_arrow_stream_roundtrip() -> None:
     table = pa.table({"id": [1, 2, 3], "payload_src": ["a", "b", "a"]})
-    md = build_lineage_metadata(table_id="a$b$c", namespace="a$b", run_id="r-1", created_by="alice")
+    md = build_lineage_metadata(table_id="a$b$c", namespace="a$b", run_id="r-1")
     out = inject_into_arrow_stream(_stream(table), md)
     got = pa.ipc.open_stream(out).read_all()
     assert got.column("id").to_pylist() == [1, 2, 3]  # data preserved
@@ -50,14 +50,13 @@ def test_inject_into_arrow_stream_roundtrip() -> None:
     meta = _schema_meta(out)
     assert meta["lineage.dataset_id"] == "a$b$c"
     assert meta["lineage.create_run_id"] == "r-1"
-    assert meta["lineage.created_by"] == "alice"
 
 
 def test_inject_preserves_existing_schema_metadata() -> None:
     schema = pa.schema([("id", pa.int64())], metadata={"existing": "keep"})
     table = pa.table({"id": [1]}, schema=schema)
     out = inject_into_arrow_stream(
-        _stream(table), build_lineage_metadata(table_id="t", namespace="", run_id="r", created_by=None)
+        _stream(table), build_lineage_metadata(table_id="t", namespace="", run_id="r")
     )
     meta = _schema_meta(out)
     assert meta["existing"] == "keep"  # pre-existing schema metadata is preserved
@@ -69,7 +68,7 @@ def test_injected_metadata_persists_in_lance_file(tmp_path: Path) -> None:
     import lance
 
     table = pa.table({"id": [1, 2]})
-    md = build_lineage_metadata(table_id="a$b$c", namespace="a$b", run_id="r-9", created_by="alice")
+    md = build_lineage_metadata(table_id="a$b$c", namespace="a$b", run_id="r-9")
     got = pa.ipc.open_stream(inject_into_arrow_stream(_stream(table), md)).read_all()
 
     uri = str(tmp_path / "t.lance")
@@ -78,4 +77,3 @@ def test_injected_metadata_persists_in_lance_file(tmp_path: Path) -> None:
     meta = {k.decode(): v.decode() for k, v in (schema.metadata or {}).items()}
     assert meta["lineage.dataset_id"] == "a$b$c"
     assert meta["lineage.create_run_id"] == "r-9"
-    assert meta["lineage.created_by"] == "alice"

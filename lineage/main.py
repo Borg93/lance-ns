@@ -7,10 +7,10 @@ it). Run: ``uvicorn lineage.main:app``. See ``docs/LINEAGE.md``.
 from __future__ import annotations
 
 import logging
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -22,7 +22,14 @@ from app.core.exceptions import problem_detail
 from app.core.oidc import OIDCVerifier
 from lineage import demo
 from lineage.age import make_pool
-from lineage.auth import CurrentToken, FilterDep, enforce_author, require_metadata_access
+from lineage.auth import (
+    CurrentToken,
+    DatasetFilter,
+    FilterDep,
+    SettingsDep,
+    enforce_author,
+    require_metadata_access,
+)
 from lineage.config import get_settings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
@@ -97,6 +104,33 @@ def get_repository(request: Request) -> LineageRepository:
 
 RepositoryDep = Annotated[LineageRepository, Depends(get_repository)]
 
+# /events fetches a wider window than it returns so the visibility filter (which can drop rows) still
+# yields up to _RETURN newest *visible* events, not "the visible subset of the newest _RETURN". (#22 audit)
+_EVENTS_FETCH = 2000
+_EVENTS_RETURN = 500
+
+
+async def _governed(
+    datasets: DatasetFilter,
+    fga_enabled: bool,
+    items: list[Any],
+    refs: Callable[[Any], set[str]],
+) -> list[Any]:
+    """Drop items the caller may not see: any referencing a non-visible dataset, and — when FGA is on —
+    any dataset-less item (it would otherwise pass vacuously, leaking run/author/error to a caller with
+    no grants). Auth off → ``visible`` is pass-through, so nothing is dropped. (#22 audit)
+    """
+    referenced = {name for item in items for name in refs(item)}
+    visible = await datasets.visible(list(referenced))
+    kept: list[Any] = []
+    for item in items:
+        names = refs(item)
+        if fga_enabled and not names:
+            continue
+        if names <= visible:
+            kept.append(item)
+    return kept
+
 
 @app.get("/livez", tags=["health"])
 async def livez() -> dict[str, str]:
@@ -117,44 +151,52 @@ async def ingest_event(event: RunEvent, repository: RepositoryDep, token: Curren
     """
     enforce_author(event, token)
     await repository.ingest_event(event)
-    await repository.record_event(
-        run_id=event.run.run_id,
-        event_type=event.event_type,
-        event_time=event.event_time,
-        job=f"{event.job.namespace}/{event.job.name}",
-        author=event.author,
-        inputs=[d.name for d in event.inputs],
-        outputs=[d.name for d in event.outputs],
-        event=event.model_dump(by_alias=True),
-    )
+    # The durable events feed is a *secondary* projection of the authoritative AGE graph (already
+    # committed above). Best-effort: a feed-write failure must never 500 an ingest the graph accepted
+    # — mirroring the catalog's "lineage must never break a write" stance. (#22 audit)
+    try:
+        await repository.record_event(
+            run_id=event.run.run_id,
+            event_type=event.event_type,
+            event_time=event.event_time,
+            job=f"{event.job.namespace}/{event.job.name}",
+            author=event.author,
+            inputs=[d.name for d in event.inputs],
+            outputs=[d.name for d in event.outputs],
+            event=event.model_dump(by_alias=True),
+        )
+    except Exception as exc:  # noqa: BLE001 — feed is secondary; the graph write already succeeded
+        log.warning("record_event_failed", extra={"run": event.run.run_id, "error": str(exc)})
     return {"status": "ingested", "run": event.run.run_id}
 
 
 @app.get("/runs", tags=["query"])
-async def get_runs(repository: RepositoryDep) -> Runs:
+async def get_runs(repository: RepositoryDep, datasets: FilterDep, settings: SettingsDep) -> Runs:
     """Live run-status board — each run's current state folded onto its ``(:Run)`` node in Apache AGE.
 
-    **Durable**: survives a service restart and is shared across replicas (the provenance graph and the
-    run lifecycle live in the same AGE store, not an in-memory buffer). Surfaces START/RUNNING/
-    COMPLETE/FAIL + progress + error so the UI shows what's queued / running / failed / done right now.
+    **Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset
+    reads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board
+    can't enumerate dataset names / creators / errors outside the caller's reach. Auth off → pass-through.
     """
-    return await repository.list_runs()
+    result = await repository.list_runs()
+    result.runs = await _governed(datasets, settings.fga_enabled, result.runs, lambda r: set(r.outputs))
+    return result
 
 
 @app.get("/events", tags=["query"])
-async def get_events(repository: RepositoryDep, datasets: FilterDep) -> Events:
+async def get_events(repository: RepositoryDep, datasets: FilterDep, settings: SettingsDep) -> Events:
     """The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
 
     **Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is
     on the feed is filtered like the per-dataset reads — an event is shown only if the caller
-    ``can_get_metadata`` on *every* dataset it references (inputs + outputs), so the audit feed never
-    discloses a table outside the caller's reach. Auth off → pass-through (dev/observability). (#22)
+    ``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the
+    audit feed never discloses a table outside the caller's reach. Auth off → pass-through. (#22)
     """
-    records = await repository.list_events()
-    referenced = {name for record in records for name in (*record.inputs, *record.outputs)}
-    visible = await datasets.visible(list(referenced))
-    events = [r for r in records if set(r.inputs) <= visible and set(r.outputs) <= visible]
-    return Events(events=events)
+    records = await repository.list_events(limit=_EVENTS_FETCH)
+    visible = await _governed(
+        datasets, settings.fga_enabled, records, lambda r: set(r.inputs) | set(r.outputs)
+    )
+    return Events(events=visible[:_EVENTS_RETURN])
 
 
 @app.get("/datasets/{name}/upstream", tags=["query"], dependencies=[Depends(require_metadata_access)])

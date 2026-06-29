@@ -106,9 +106,7 @@ def _out(namespace: str, name: str, version: int | None, *fields: tuple[str, str
     """
     facets = _ds_facets(name, fields)
     if version is not None:
-        facets["version"] = dataset_version_dataset.DatasetVersionDatasetFacet(
-            datasetVersion=str(version)
-        )
+        facets["version"] = dataset_version_dataset.DatasetVersionDatasetFacet(datasetVersion=str(version))
     return OutputDataset(namespace=namespace, name=name, facets=facets)
 
 

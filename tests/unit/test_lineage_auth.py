@@ -32,7 +32,7 @@ from lineage import auth
 from lineage.config import LineageSettings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import DatasetRef, EventRecord, Neighbors
+from lineage.schemas import DatasetRef, EventRecord, Neighbors, Runs, RunStatus
 
 _ISSUER = "https://idp.example.com"
 
@@ -271,6 +271,7 @@ class _FakeRepo:
     def __init__(self) -> None:
         self.ingested: RunEvent | None = None
         self.events: list[EventRecord] = []
+        self.runs: list[RunStatus] = []
 
     async def ingest_event(self, event: RunEvent) -> None:
         self.ingested = event
@@ -280,6 +281,9 @@ class _FakeRepo:
 
     async def list_events(self, limit: int = 500) -> list[EventRecord]:  # noqa: ARG002
         return self.events
+
+    async def list_runs(self) -> Runs:
+        return Runs(runs=self.runs)
 
     async def upstream(self, name: str) -> Neighbors:
         return Neighbors(dataset=name, related=[DatasetRef(name="a"), DatasetRef(name="b")])
@@ -299,14 +303,42 @@ def test_get_events_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch)
     from lineage.main import get_events
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    settings = _settings(**_FULL_AUTH)
     repo = _FakeRepo()
     repo.events = [
         EventRecord(seq=2, outputs=["a"], inputs=[], event={}),
         EventRecord(seq=1, outputs=["b"], inputs=[], event={}),  # "b" not visible → dropped
     ]
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), _settings(**_FULL_AUTH), _token())
-    result = asyncio.run(get_events(cast(LineageRepository, repo), flt))
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
     assert [e.outputs for e in result.events] == [["a"]]  # the "b" event is filtered out
+
+
+def test_get_events_hides_dataset_less_events_when_governed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #22 audit: a dataset-less event (empty inputs+outputs) must NOT pass the gate vacuously when FGA is
+    # on — it would otherwise leak the run/author/full event JSON to a caller with zero grants.
+    from lineage.main import get_events
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.events = [EventRecord(seq=1, outputs=[], inputs=[], event={"run": {"runId": "secret"}})]
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
+    assert result.events == []  # dataset-less event is hidden under governance
+
+
+def test_get_runs_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #22 audit: /runs is governed like /events — a run is shown only if its output datasets are visible.
+    from lineage.main import get_runs
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.runs = [RunStatus(run_id="r-a", outputs=["a"]), RunStatus(run_id="r-b", outputs=["b"])]
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_runs(cast(LineageRepository, repo), flt, settings))
+    assert [r.run_id for r in result.runs] == ["r-a"]  # the run that wrote unseen "b" is dropped
 
 
 def test_ingest_handler_binds_verified_author() -> None:

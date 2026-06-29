@@ -8,29 +8,29 @@ onto the Arrow **schema metadata** of the create payload, so the Lance file is *
 be read straight off the table and reconciled to the lineage graph without the catalog.
 
 ``create_run_id`` is the *same* run id the catalog emits in the OpenLineage create event, so the file
-points at its exact creating run in the graph.
+points at its exact creating run in the graph — and the **creator stays recoverable** from that run via
+the lineage service's FGA-gated ``/creator`` endpoint. We deliberately do **not** stamp the creator's
+OIDC ``sub`` into the file: it is identity/PII and the Lance file lives on object storage *outside* the
+OpenFGA boundary, so embedding it would leak the principal to anyone with raw bucket access. (#22 audit)
 """
 
 from __future__ import annotations
 
 import pyarrow as pa
 
-#: Schema-metadata key prefix; the lineage service / a consumer reads these straight off the Lance table.
+#: Schema-metadata keys; the lineage service / a consumer reads these straight off the Lance table. Only
+#: opaque coordinates — no identity/PII (the creator is resolved via the gated /creator endpoint).
 _KEY_DATASET_ID = "lineage.dataset_id"
 _KEY_NAMESPACE = "lineage.namespace"
 _KEY_CREATE_RUN_ID = "lineage.create_run_id"
-_KEY_CREATED_BY = "lineage.created_by"
 
 
-def build_lineage_metadata(
-    *, table_id: str, namespace: str, run_id: str, created_by: str | None
-) -> dict[str, str]:
-    """The lineage coordinates to stamp into the Lance file's schema metadata at create."""
+def build_lineage_metadata(*, table_id: str, namespace: str, run_id: str) -> dict[str, str]:
+    """The lineage coordinates to stamp into the Lance file's schema metadata at create (no PII)."""
     return {
         _KEY_DATASET_ID: table_id,
         _KEY_NAMESPACE: namespace,
         _KEY_CREATE_RUN_ID: run_id,
-        _KEY_CREATED_BY: created_by or "",
     }
 
 

@@ -77,6 +77,11 @@ def _queue_write_event(
 ARROW_STREAM = "application/vnd.apache.arrow.stream"
 ARROW_FILE = "application/vnd.apache.arrow.file"
 
+# Cap on the create payload we'll decode→re-encode in-process to stamp lineage metadata (#21). Above
+# this we skip the stamp (the graph still gets the create run); keeps a large create off a ~3x-memory
+# re-encode on the request path. (#22 audit)
+_MAX_INJECT_BYTES = 64 * 1024 * 1024
+
 router = APIRouter(prefix="/v1/table", tags=["data"])
 
 
@@ -108,16 +113,18 @@ async def create_table(
     # #21: stamp the lineage coordinates into the Lance file's schema metadata so the data is
     # self-describing (reconcilable to the graph without the catalog). Best-effort — a payload we
     # can't re-encode must never fail the create over metadata; fall back to the original bytes.
-    try:
-        data = await run_in_threadpool(
-            inject_into_arrow_stream,
-            data,
-            build_lineage_metadata(
-                table_id=table_id, namespace=namespace, run_id=run_id, created_by=created_by
-            ),
-        )
-    except Exception as exc:  # noqa: BLE001 — lineage metadata is an enhancement, not a gate
-        log.warning("lineage_metadata_inject_failed", extra={"table": table_id, "error": str(exc)})
+    # Gated on lineage being enabled (the inject is a full Arrow decode→re-encode, ~3x the payload
+    # in memory) and a size ceiling (don't re-encode an arbitrarily large body in-process); when off
+    # or oversized we don't stamp a create_run_id the graph never receives. (#22 audit)
+    if settings.lineage_emit_enabled and len(data) <= _MAX_INJECT_BYTES:
+        try:
+            data = await run_in_threadpool(
+                inject_into_arrow_stream,
+                data,
+                build_lineage_metadata(table_id=table_id, namespace=namespace, run_id=run_id),
+            )
+        except Exception as exc:  # noqa: BLE001 — lineage metadata is an enhancement, not a gate
+            log.warning("lineage_metadata_inject_failed", extra={"table": table_id, "error": str(exc)})
     req = CreateTableRequest(id=segments, mode=mode, properties=properties)
     response: CreateTableResponse = await run_in_threadpool(native.call, ns, "create_table", req, data)
     # Make the caller owner + link the new table to its parent so it inherits the cascade.

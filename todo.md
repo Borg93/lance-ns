@@ -277,6 +277,67 @@ on all writes) → #22 (`/events` durable+gated, same move as `/runs`) → then 
 
 ---
 
+## Lakekeeper code-audit (2026-06-25 — read the real Rust at `~/Desktop/lakekeeper-ref`)
+
+**Lakekeeper = our closest peer** (Iceberg REST catalog; *same* stack we chose: OpenFGA + OIDC + Postgres
++ Vault + CloudEvents→NATS/Kafka). **Lineage is ABSENT in its code** (`grep lineage|openlineage|provenance`
+over all crates = 0 hits; docs position lineage as something you build *on its change-event stream*). So
+**lineage + Lance-native is our moat**, confirmed at the code level. But its **catalog plane is far deeper
+than our todo tracks** — most of the following is NOT in our list:
+
+26. ⬜ **Soft-delete + deletion-protection + undrop/recover.** Lakekeeper: `TabularDeleteProfile{Hard,
+    Soft{expiration_seconds}}`; `protected` flag on warehouse/namespace/table (drop refused without
+    `force`); `GET …/deleted-tabulars` + `POST …/undrop`; expiration + purge worker queues. We have NONE.
+27. ⬜ **Contract-verification hook.** A trait that BLOCKS a catalog write (table/view update/drop/rename)
+    violating a data contract/SLO → 409 `ContractViolation`, enforced *after authz, before the mutation*.
+    Distinct from our pipeline gold-QC gate (which is a *job* gate, not a *catalog-write* hook).
+28. ⬜ **User / role / permission management plane.** Provision + **fuzzy-search** users; roles + membership
+    (assign/transitive); per-object grant/revoke **assignment API**; batch-check; whoami; bootstrap. We have
+    OIDC *auth* + per-read FGA checks but **no management plane** to administer principals/grants.
+29. ⬜ **Catalog change-event stream** (CloudEvents v1.0 per-table → NATS subject / Kafka topic keyed by
+    `tabular-id`), `EventListener` + `CloudEventBackend` traits. Distinct from #25 (pipeline events): this is
+    "the catalog emits a change event for every table op." **This is the integration point our lineage
+    service should *consume*** (exactly how Lakekeeper says to build lineage). High-leverage.
+30. ⬜ **Warehouse/dataset lifecycle + statistics.** deactivate/activate, format-version policy, managed-by;
+    warehouse stats + per-endpoint API stats. Not tracked.
+31. ⬜ **Generic durable task queue** (Postgres-backed: retries/heartbeat/status, built-in expiration/purge/
+    log-cleanup). Generalises #6 (which is only specific Ray jobs).
+32. 🔭 **STRATEGIC — Lance as a "generic table" on a Lakekeeper-style catalog?** Lakekeeper has a first-class
+    `generic_table` FGA type + a `/lakekeeper/v1` data API *for non-Iceberg formats* (`CreateGenericTable`
+    carries `format` + `base_location` — exactly Lance's shape). So the build-vs-reuse question sharpens:
+    **register Lance as generic-tables → inherit its authz / credential-vending / soft-delete / events for
+    free, and spend our effort on the lineage + Lance-native layer (which it lacks), consuming its CloudEvents
+    stream** — vs reinventing #5/#6/#7/#13/#25 + #26–31. Decide this BEFORE sinking weeks into the catalog plane.
+
+**Coverage of the shallow overlaps:** #5 (credential vending — ours is 1 line; theirs is STS AssumeRole +
+downscoped session policy + external_id + session-tags + remote-signing + R2 + Azure-SAS + GCS-downscope,
+prefix-scoped & verified at create) · #7 (Vault/kv2 — genuinely covered) · #13 (hierarchical FGA + role
+model — ours is flat table-level; theirs is a 9-type server→project→warehouse→ns→table hierarchy + admin/
+security_admin/data_admin roles + managed-access) · #6 (maintenance — partial; compaction is Enterprise even
+in Lakekeeper) · #25 (events — ours is *pipeline*, theirs is *catalog change* = #29).
+
+### Dapr lens — which of the above become *config, not code*
+Dapr building-block **components** (sidecar) replace several hand-rolled infra layers Lakekeeper codes by
+hand, so adopting Dapr **shrinks** these items to "declare a component + use the Dapr API":
+- **#7 secrets** → Dapr `secretstores.hashicorp.vault` (or azure.keyvault/aws) — read via the Secrets API;
+  swap backend by config. (Lakekeeper hand-codes a `kv2` crate; Dapr makes it pluggable.)
+- **#25 transport + #29 catalog events** → Dapr `pubsub.jetstream` (or pubsub.kafka) — publish/subscribe
+  via the Dapr pub/sub API; swap NATS↔Kafka by config; CloudEvents is Dapr's *native* envelope. (Lakekeeper
+  hand-codes NATS + Kafka `CloudEventBackend`s; Dapr gives both + dead-letter + at-least-once for free.)
+- **#25 gold QC gate** → **Dapr Workflow** (already planned) — activity-checkpointed durable promotion.
+- **#25 S3 ObjectCreated trigger** → Dapr **input binding** (`bindings.aws.s3`/blob) or a Cron binding — no
+  poller code.
+- **#31 task queue** → Dapr **Jobs API** + Workflow — durable scheduled/queued tasks without a hand-rolled
+  Postgres queue.
+- **resilience / #-cross-cutting** → Dapr **resiliency policies** (retry/timeout/circuit-breaker) at the
+  sidecar replace per-call `tenacity`; **mTLS** service-to-service; **OTel** traces/metrics auto-emitted.
+Net: Dapr is a **meta-decision** that collapses #7/#25/#29/#31 (+ resilience/observability) into declarative
+components — at the cost of a sidecar-per-pod. It does NOT touch the *core* logic (Lance ops, the AGE graph,
+OpenFGA model, STS-vending app-logic in #5) — those stay app-level. Decide Dapr at the same time as #32
+(both are "lean on a runtime vs hand-roll").
+
+---
+
 ## Security & consistency backlog (verified — audit `w8u4rc2tg`, 5/9 high-criticals confirmed)
 Severity in brackets; "latent" = real but not live today (lineage svc undeployed).
 - ✅ **[high]** Lineage **read** endpoints unauthenticated → data-estate disclosure. **FIXED** —

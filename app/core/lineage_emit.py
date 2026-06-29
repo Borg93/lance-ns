@@ -54,6 +54,15 @@ _VERSION_FACET_SCHEMA = (
     "#/$defs/DatasetVersionDatasetFacet"
 )
 
+#: OpenLineage standard ``DatasourceDatasetFacet`` schema URL. The output dataset carries this facet with
+#: the **physical storage URI** so the lineage service can find the real Lance file on object storage and
+#: cross-check the on-disk version (#23 reconcile — ``lineage.models.Dataset.source_uri`` reads
+#: ``facets.dataSource.uri``). Without it, reconcile has no URI to read → every real table looks
+#: ``missing_on_storage`` (the moat was broken).
+_DATASOURCE_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
+)
+
 
 def build_write_event(
     *,
@@ -65,6 +74,7 @@ def build_write_event(
     run_id: str,
     event_time: str,
     job_namespace: str,
+    source_uri: str | None = None,
 ) -> dict[str, Any]:
     """Build the OpenLineage ``RunEvent`` (wire JSON) for any catalog write to a table.
 
@@ -83,15 +93,24 @@ def build_write_event(
     if author is not None:
         run_facets["author"] = {"name": author, "sub": author}
     output: dict[str, Any] = {"namespace": namespace, "name": table_id}
+    facets: dict[str, Any] = {}
     if version is not None:
         # Standard version facet → the lineage WROTE edge carries the Lance version (#20).
-        output["facets"] = {
-            "version": {
-                "_producer": _PRODUCER,
-                "_schemaURL": _VERSION_FACET_SCHEMA,
-                "datasetVersion": str(version),
-            }
+        facets["version"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _VERSION_FACET_SCHEMA,
+            "datasetVersion": str(version),
         }
+    if source_uri:
+        # Standard dataSource facet → the physical Lance URI, so #23 reconcile can read the on-disk file.
+        facets["dataSource"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _DATASOURCE_FACET_SCHEMA,
+            "name": source_uri,
+            "uri": source_uri,
+        }
+    if facets:
+        output["facets"] = facets
     return {
         "eventType": "COMPLETE",
         "eventTime": event_time,
@@ -112,6 +131,7 @@ def build_create_event(
     run_id: str,
     event_time: str,
     job_namespace: str,
+    source_uri: str | None = None,
 ) -> dict[str, Any]:
     """The ``RunEvent`` for a table creation — :func:`build_write_event` with ``operation=create_table``."""
     return build_write_event(
@@ -123,6 +143,7 @@ def build_create_event(
         run_id=run_id,
         event_time=event_time,
         job_namespace=job_namespace,
+        source_uri=source_uri,
     )
 
 
@@ -139,6 +160,7 @@ class LineageEmitter(Protocol):
         version: int,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None: ...
 
     async def emit_write(
@@ -151,6 +173,7 @@ class LineageEmitter(Protocol):
         operation: str,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None: ...
 
 
@@ -166,6 +189,7 @@ class NoopEmitter:
         version: int,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         return None
 
@@ -179,6 +203,7 @@ class NoopEmitter:
         operation: str,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         return None
 
@@ -200,6 +225,7 @@ class HttpLineageEmitter:
         version: int,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         await self.emit_write(
             table_id=table_id,
@@ -209,6 +235,7 @@ class HttpLineageEmitter:
             operation=CREATE_TABLE,
             run_id=run_id,
             authorization=authorization,
+            source_uri=source_uri,
         )
 
     async def emit_write(
@@ -221,6 +248,7 @@ class HttpLineageEmitter:
         operation: str,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         event = build_write_event(
             table_id=table_id,
@@ -233,6 +261,7 @@ class HttpLineageEmitter:
             run_id=run_id or str(uuid.uuid4()),
             event_time=datetime.now(UTC).isoformat(),
             job_namespace=self._job_namespace,
+            source_uri=source_uri,
         )
         # Forward the caller's bearer so ingest accepts the event when the lineage service has OIDC
         # on (else the event 401s and is silently dropped). The lineage side then binds the author to
@@ -275,6 +304,7 @@ class DaprEmitter:
         version: int,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         await self.emit_write(
             table_id=table_id,
@@ -284,6 +314,7 @@ class DaprEmitter:
             operation=CREATE_TABLE,
             run_id=run_id,
             authorization=authorization,
+            source_uri=source_uri,
         )
 
     async def emit_write(  # noqa: ARG002 — authorization is unused on the trusted internal channel
@@ -296,6 +327,7 @@ class DaprEmitter:
         operation: str,
         run_id: str | None = None,
         authorization: str | None = None,
+        source_uri: str | None = None,
     ) -> None:
         event = build_write_event(
             table_id=table_id,
@@ -306,6 +338,7 @@ class DaprEmitter:
             run_id=run_id or str(uuid.uuid4()),
             event_time=datetime.now(UTC).isoformat(),
             job_namespace=self._job_namespace,
+            source_uri=source_uri,
         )
         try:
             await self._client.publish_event(

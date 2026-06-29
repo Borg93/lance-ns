@@ -142,6 +142,7 @@ async def create_table(
         version=response.version or 1,
         run_id=run_id,
         authorization=authorization,
+        source_uri=response.location,  # the real Lance URI → #23 reconcile can read the on-disk file
     )
     return response
 

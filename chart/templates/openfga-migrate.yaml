@@ -26,7 +26,7 @@ spec:
           # Same tag as the server (values.openfga.image.tag) so the migrated schema matches.
           image: "openfga/openfga:{{ .Values.openfga.image.tag | default "v1.8.0" }}"
           # The datastore DSN (carrying the AGE password) comes from a k8s Secret env, NOT a plaintext Job
-          # arg — `openfga migrate` honours OPENFGA_DATASTORE_URI. The audit's 'postgres://lance:lance@…
+          # arg — `openfga migrate` honours OPENFGA_DATASTORE_URI. The audit's 'password-bearing DSN
           # plaintext in the migrate Job args' fix.
           env:
             - name: OPENFGA_DATASTORE_URI

@@ -52,7 +52,7 @@
 				<div class="fill" {@attach bar(pct(r))} {@attach breathe(isRunning(r.state))}></div>
 			</div>
 			<div class="meta">
-				<span class="who">{r.author ?? '—'}{#if r.outputs.length} · → {r.outputs.join(', ')}{/if}</span>
+				<span class="who">{r.author ?? '—'}{#if (r.outputs ?? []).length} · → {(r.outputs ?? []).join(', ')}{/if}</span>
 				<span class="who">{time(r.updated_at)}</span>
 			</div>
 			{#if r.error_message}<div class="err">{r.error_message}</div>{/if}

@@ -1,100 +1,29 @@
-// Mirrors the lineage service response schemas (lineage/schemas.py).
+// Frontend types are DERIVED from the backend OpenAPI contract — never hand-mirror the Pydantic models
+// (that silently drifts). `api.generated.ts` is generated from `openapi.json` (itself produced from the
+// FastAPI app); regenerate both with `bun run gen:types`. Only domain constants live here by hand.
+import type { components } from './api.generated';
 
-export interface GraphNode {
-	id: string;
-	namespace?: string | null;
-	kind: string;
-	source_uri?: string | null;
-	tags: string[];
-}
+type S = components['schemas'];
 
-export interface GraphEdge {
-	source: string;
-	target: string;
-	kind: string;
-}
+export type GraphNode = S['GraphNode'];
+export type GraphEdge = S['GraphEdge'];
+export type LineageGraph = S['LineageGraph'];
+export type ProducerInfo = S['ProducerInfo'];
+export type Producers = S['Producers'];
+export type EventRecord = S['EventRecord'];
+export type Events = S['Events'];
+export type DemoField = S['DemoField'];
+export type DemoVersion = S['DemoVersion'];
+export type DemoDataset = S['DemoDataset'];
+export type DemoDatasets = S['DemoDatasets'];
+export type RunStatus = S['RunStatus'];
+export type Runs = S['Runs'];
+export type ColumnRef = S['ColumnRef'];
+export type ColumnNode = S['ColumnNode'];
+export type ColumnEdge = S['ColumnEdge'];
+export type ColumnGraph = S['ColumnGraph'];
 
-export interface LineageGraph {
-	root: string;
-	nodes: GraphNode[];
-	edges: GraphEdge[];
-}
-
-export interface ProducerInfo {
-	run_id: string;
-	author?: string | null;
-	event_time?: string | null;
-	event_type?: string | null;
-	dataset_version?: string | null;
-	producer?: string | null;
-	error_message?: string | null;
-}
-
-export interface Producers {
-	dataset: string;
-	producers: ProducerInfo[];
-}
-
-export interface EventRecord {
-	seq: number;
-	event_type?: string | null;
-	event_time?: string | null;
-	job?: string | null;
-	author?: string | null;
-	inputs: string[];
-	outputs: string[];
-	event: Record<string, unknown>;
-}
-
-export interface Events {
-	events: EventRecord[];
-}
-
-export interface DemoField {
-	name: string;
-	type: string;
-}
-
-export interface DemoVersion {
-	version: number;
-	timestamp?: string | null;
-	fields: DemoField[];
-}
-
-export interface DemoDataset {
-	name: string;
-	uri: string;
-	exists: boolean;
-	current_version?: number | null;
-	row_count?: number | null;
-	versions: DemoVersion[];
-	lineage_jsonb?: Record<string, unknown> | null;
-	error?: string | null;
-}
-
-export interface DemoDatasets {
-	datasets: DemoDataset[];
-}
-
-export interface RunStatus {
-	run_id: string;
-	job?: string | null;
-	author?: string | null;
-	state?: string | null;
-	outputs: string[];
-	progress_done?: number | null;
-	progress_total?: number | null;
-	error_message?: string | null;
-	started_at?: string | null;
-	updated_at?: string | null;
-	events: number;
-}
-
-export interface Runs {
-	runs: RunStatus[];
-}
-
-// The medallion datasets, in flow order (raw -> bronze -> silver -> gold).
+// The medallion datasets, in flow order (raw -> bronze -> silver -> gold). Domain knowledge, not schema.
 export const KNOWN = ['raw_events', 'bronze$events', 'silver$features', 'gold$catalog'] as const;
 export const LAYER: Record<string, number> = {
 	raw_events: 0,

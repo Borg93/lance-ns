@@ -8,12 +8,15 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "gen:openapi": "cd .. && uv run --no-sync python -c \"import json; from lineage.main import app; json.dump(app.openapi(), open('web/openapi.json','w'), indent=2)\"",
+    "gen:types": "openapi-typescript openapi.json -o src/lib/api.generated.ts",
     "prepare": "svelte-kit sync"
   },
   "devDependencies": {
     "@sveltejs/kit": "^2.8.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@types/node": "^22.0.0",
+    "openapi-typescript": "^7.13.0",
     "svelte": "^5.15.0",
     "svelte-adapter-bun": "^0.5.2",
     "svelte-check": "^4.1.0",

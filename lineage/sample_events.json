@@ -190,6 +190,58 @@
     "outputs": [
       {
         "facets": {
+          "columnLineage": {
+            "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
+            "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+            "dataset": [],
+            "fields": {
+              "embedding": {
+                "inputFields": [
+                  {
+                    "field": "payload",
+                    "name": "bronze$events",
+                    "namespace": "bronze",
+                    "transformations": [
+                      {
+                        "subtype": "TRANSFORMATION",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "id": {
+                "inputFields": [
+                  {
+                    "field": "id",
+                    "name": "bronze$events",
+                    "namespace": "bronze",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "payload_src": {
+                "inputFields": [
+                  {
+                    "field": "payload_src",
+                    "name": "bronze$events",
+                    "namespace": "bronze",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "dataSource": {
             "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
             "_schemaURL": "https://openlineage.io/spec/facets/1-0-1/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet",
@@ -332,6 +384,58 @@
     "outputs": [
       {
         "facets": {
+          "columnLineage": {
+            "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
+            "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+            "dataset": [],
+            "fields": {
+              "embedding": {
+                "inputFields": [
+                  {
+                    "field": "payload",
+                    "name": "bronze$events",
+                    "namespace": "bronze",
+                    "transformations": [
+                      {
+                        "subtype": "TRANSFORMATION",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "id": {
+                "inputFields": [
+                  {
+                    "field": "id",
+                    "name": "bronze$events",
+                    "namespace": "bronze",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "payload_src": {
+                "inputFields": [
+                  {
+                    "field": "payload_src",
+                    "name": "bronze$events",
+                    "namespace": "bronze",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "dataSource": {
             "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
             "_schemaURL": "https://openlineage.io/spec/facets/1-0-1/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet",
@@ -477,6 +581,28 @@
     "outputs": [
       {
         "facets": {
+          "columnLineage": {
+            "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
+            "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+            "dataset": [],
+            "fields": {
+              "caption": {
+                "inputFields": [
+                  {
+                    "field": "embedding",
+                    "name": "silver$features",
+                    "namespace": "silver",
+                    "transformations": [
+                      {
+                        "subtype": "TRANSFORMATION",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "dataSource": {
             "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
             "_schemaURL": "https://openlineage.io/spec/facets/1-0-1/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet",
@@ -632,6 +758,73 @@
     "outputs": [
       {
         "facets": {
+          "columnLineage": {
+            "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
+            "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet",
+            "dataset": [],
+            "fields": {
+              "caption": {
+                "inputFields": [
+                  {
+                    "field": "caption",
+                    "name": "silver$features",
+                    "namespace": "silver",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "embedding": {
+                "inputFields": [
+                  {
+                    "field": "embedding",
+                    "name": "silver$features",
+                    "namespace": "silver",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "id": {
+                "inputFields": [
+                  {
+                    "field": "id",
+                    "name": "silver$features",
+                    "namespace": "silver",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              },
+              "payload_src": {
+                "inputFields": [
+                  {
+                    "field": "payload_src",
+                    "name": "silver$features",
+                    "namespace": "silver",
+                    "transformations": [
+                      {
+                        "subtype": "IDENTITY",
+                        "type": "DIRECT"
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          },
           "dataSource": {
             "_producer": "https://github.com/OpenLineage/OpenLineage/tree/1.50.0/client/python",
             "_schemaURL": "https://openlineage.io/spec/facets/1-0-1/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet",

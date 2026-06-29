@@ -110,6 +110,22 @@ def test_dataset_exposes_schema_fields_from_standard_facet() -> None:
     }
 
 
+def test_dataset_exposes_column_edges_from_columnlineage_facet() -> None:
+    """#24: the standard columnLineage facet is surfaced as flattened input→output column edges."""
+    from lineage.seed import events_as_dicts
+
+    out = RunEvent.model_validate(events_as_dicts()[2]).outputs[0]  # embed success: silver <- bronze
+    by_out = {e["out_field"]: (e["name"], e["field"], e["type"], e["subtype"]) for e in out.column_edges}
+    assert by_out["embedding"] == ("bronze$events", "payload", "DIRECT", "TRANSFORMATION")  # real change
+    assert by_out["id"] == ("bronze$events", "id", "DIRECT", "IDENTITY")  # pass-through
+    # event 3 = caption: a SAME-dataset column edge (caption <- embedding), the in-place-refinement flow.
+    cap = RunEvent.model_validate(events_as_dicts()[3]).outputs[0]
+    assert any(
+        e["out_field"] == "caption" and e["name"] == "silver$features" and e["field"] == "embedding"
+        for e in cap.column_edges
+    )
+
+
 def test_author_falls_back_to_standard_ownership_facet() -> None:
     """With no custom author facet, the run author comes from the standard ownership job facet."""
     event = RunEvent.model_validate(
@@ -202,8 +218,9 @@ def test_ingest_records_version_and_skips_self_derived_from(monkeypatch: pytest.
         "embedding",
         "caption",
     }
-    # in-place transform: read + write the same table, but NO self-DERIVED_FROM edge.
-    assert [p for q, p in calls if "DERIVED_FROM" in q] == []
+    # in-place transform: read + write the same table, but NO dataset self-DERIVED_FROM edge. (The column
+    # layer DOES keep the same-dataset caption<-embedding edge — asserted in test_ingest_keeps_same_*.)
+    assert [p for q, p in calls if "[:DERIVED_FROM]" in q] == []
     # the standard dataSource + tags facets are persisted onto the dataset node.
     assert any("source_uri" in q for q, _ in calls)
     assert any("d.tags" in q for q, _ in calls)
@@ -219,6 +236,134 @@ def test_failed_run_records_error_but_no_version_or_lineage(monkeypatch: pytest.
     assert [p for q, p in calls if "SET w.version" in q] == []  # but no produced version
     # a failed run produced no data, so it must not assert lineage.
     assert [p for q, p in calls if "DERIVED_FROM" in q] == []
+    # #24: nor any column lineage (the columnLineage facet is present on the failed output but ignored).
+    assert [p for q, p in calls if "DERIVED_FROM_COLUMN" in q] == []
+
+
+def test_ingest_records_column_lineage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#24: a successful run seeds typed Column nodes + DERIVED_FROM_COLUMN edges from columnLineage."""
+    calls = _capture_ingest(monkeypatch, 2)  # embed success: silver <- bronze
+
+    # the full column set is seeded with Arrow types from the schema facet
+    typed = [p for q, p in calls if "SET c.namespace=$ns, c.type=$type" in q]
+    assert {p["fld"] for p in typed} >= {"id", "payload_src", "embedding"}
+    # a field-to-field edge embedding <- bronze.payload (MERGE) ...
+    col_merges = [p for q, p in calls if "MERGE (o)-[:DERIVED_FROM_COLUMN]" in q]
+    assert any(
+        p["ofld"] == "embedding" and p["ids"] == "bronze$events" and p["ifld"] == "payload"
+        for p in col_merges
+    )
+    # ... with its transformation kind persisted in a SEPARATE SET (the AGE post-MERGE-edge quirk)
+    emb = next(p for q, p in calls if "SET e.transformation_type" in q and p["ofld"] == "embedding")
+    assert emb["tt"] == "DIRECT" and emb["st"] == "TRANSFORMATION"
+    # the INPUT-column stub uses the namespace-only MERGE (never sets type) — the type-clobber guard.
+    # The discriminating substring excludes _MERGE_COLUMN_TYPED, which has ", c.type=$type" before RETURN.
+    stub = [p for q, p in calls if "SET c.namespace=$ns RETURN" in q]
+    assert any(p["fld"] == "payload" for p in stub)  # bronze.payload was stubbed (not yet typed)
+    assert all("type" not in p for p in stub)  # the stub never carries a type to clobber with
+
+
+def _masked_event() -> dict[str, Any]:
+    """A run that derives a hashed column from a sensitive one — a masking column edge (#24 governance)."""
+    return {
+        "eventType": "COMPLETE",
+        "eventTime": "t",
+        "run": {"runId": "mask-run-1"},
+        "job": {"namespace": "ray-jobs", "name": "redact"},
+        "inputs": [{"namespace": "bronze", "name": "bronze$pii"}],
+        "outputs": [
+            {
+                "namespace": "silver",
+                "name": "silver$pii",
+                "facets": {
+                    "version": {"datasetVersion": "1"},
+                    "schema": {"fields": [{"name": "ssn_hash", "type": "string"}]},
+                    "columnLineage": {
+                        "fields": {
+                            "ssn_hash": {
+                                "inputFields": [
+                                    {
+                                        "namespace": "bronze",
+                                        "name": "bronze$pii",
+                                        "field": "ssn",
+                                        # masking rides a NON-FIRST transformation — must not be lost.
+                                        "transformations": [
+                                            {"type": "DIRECT", "subtype": "TRANSFORMATION"},
+                                            {"type": "MASKED", "masking": True},
+                                        ],
+                                    }
+                                ]
+                            }
+                        }
+                    },
+                },
+            }
+        ],
+    }
+
+
+def test_column_edges_masking_uses_any_across_transformations() -> None:
+    """#24 audit: masking is true if ANY transformation masks (not just the first); kind from the first."""
+    out = RunEvent.model_validate(_masked_event()).outputs[0]
+    edge = next(e for e in out.column_edges if e["out_field"] == "ssn_hash")
+    assert edge["masking"] is True  # the masking bit on the non-first transformation is preserved
+    assert (edge["type"], edge["subtype"]) == ("DIRECT", "TRANSFORMATION")  # kind still from transforms[0]
+
+
+def test_column_edges_deprecated_fields_level_fallback() -> None:
+    """#24: an older/Marquez-style producer using the deprecated Fields-level transformation still parses,
+    and a deprecated MASKED type maps to the masking governance bit."""
+    from lineage.models import Dataset
+
+    ds = Dataset(
+        namespace="silver",
+        name="silver$x",
+        facets={
+            "columnLineage": {
+                "fields": {
+                    "x": {
+                        "transformationType": "MASKED",
+                        "transformationDescription": "redacted",
+                        "inputFields": [
+                            {"namespace": "n", "name": "src$t", "field": "y"}
+                        ],  # no transformations[]
+                    }
+                }
+            }
+        },
+    )
+    edge = ds.column_edges[0]
+    assert edge["type"] == "MASKED" and edge["description"] == "redacted" and edge["masking"] is True
+
+
+def test_ingest_persists_masking_bit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#24: the masking bit reaches the DERIVED_FROM_COLUMN edge's SET (the per-edge governance signal)."""
+    import lineage.repository as repo_mod
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+        calls.append((query, params))
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _capture)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    asyncio.run(repo.ingest_event(RunEvent.model_validate(_masked_event())))
+    set_edge = next(p for q, p in calls if "SET e.transformation_type" in q)
+    assert set_edge["mask"] is True  # masking is written, not dropped
+
+
+def test_ingest_keeps_same_dataset_column_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """#24: caption <- embedding WITHIN silver (in-place refinement) IS recorded — the column layer keeps
+    same-dataset cross-field edges, unlike the dataset-level self-derivation skip."""
+    calls = _capture_ingest(monkeypatch, 3)  # the caption pass: silver -> silver
+    col_merges = [p for q, p in calls if "MERGE (o)-[:DERIVED_FROM_COLUMN]" in q]
+    assert any(
+        p["ods"] == "silver$features"
+        and p["ofld"] == "caption"
+        and p["ids"] == "silver$features"
+        and p["ifld"] == "embedding"
+        for p in col_merges
+    )
 
 
 def test_parse_handles_scalars_vertices_and_null() -> None:

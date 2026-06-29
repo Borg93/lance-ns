@@ -32,7 +32,20 @@ from lineage import auth
 from lineage.config import LineageSettings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import DatasetRef, DatasetSchema, EventRecord, Neighbors, Runs, RunStatus, SchemaField
+from lineage.schemas import (
+    ColumnEdge,
+    ColumnGraph,
+    ColumnNeighbors,
+    ColumnNode,
+    ColumnRef,
+    DatasetRef,
+    DatasetSchema,
+    EventRecord,
+    Neighbors,
+    Runs,
+    RunStatus,
+    SchemaField,
+)
 
 _ISSUER = "https://idp.example.com"
 
@@ -217,6 +230,9 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         "/datasets/{name}/creator",
         "/datasets/{name}/reconcile",
         "/datasets/{name}/schema",
+        "/datasets/{name}/columns/{field}/upstream",
+        "/datasets/{name}/columns/{field}/downstream",
+        "/datasets/{name}/columns",
     }
     seen = set()
     for route in app.routes:
@@ -276,6 +292,8 @@ class _FakeRepo:
         self.runs: list[RunStatus] = []
         self.write_version: int | None = None
         self.uri: str | None = None
+        self.col_related: list[ColumnRef] = []
+        self.col_graph: ColumnGraph | None = None
 
     async def ingest_event(self, event: RunEvent) -> None:
         self.ingested = event
@@ -297,6 +315,15 @@ class _FakeRepo:
 
     async def dataset_schema(self, name: str, version: int | None = None) -> DatasetSchema:
         return DatasetSchema(dataset=name, version=version or 2, fields=[SchemaField(name="id", type="int")])
+
+    async def column_upstream(self, dataset: str, field: str) -> ColumnNeighbors:
+        return ColumnNeighbors(dataset=dataset, field=field, related=self.col_related)
+
+    async def column_downstream(self, dataset: str, field: str) -> ColumnNeighbors:
+        return ColumnNeighbors(dataset=dataset, field=field, related=self.col_related)
+
+    async def dataset_column_graph(self, name: str) -> ColumnGraph:
+        return self.col_graph or ColumnGraph(root=name)
 
     async def upstream(self, name: str) -> Neighbors:
         return Neighbors(dataset=name, related=[DatasetRef(name="a"), DatasetRef(name="b")])
@@ -339,6 +366,68 @@ def test_get_events_hides_dataset_less_events_when_governed(monkeypatch: pytest.
     flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
     assert result.events == []  # dataset-less event is hidden under governance
+
+
+def test_get_column_upstream_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #24: column provenance is governed — a related column in a dataset the caller can't see is dropped
+    # (a column has no ACL of its own; it inherits its owning table's visibility).
+    from lineage.main import get_column_upstream
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.col_related = [ColumnRef(dataset="a", field="x"), ColumnRef(dataset="b", field="y")]
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_column_upstream("a", "root", cast(LineageRepository, repo), flt, settings))
+    assert [(r.dataset, r.field) for r in result.related] == [("a", "x")]  # b's column is hidden
+
+
+def test_get_column_downstream_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #24: column IMPACT is governed identically to provenance — a related column in a hidden dataset drops.
+    from lineage.main import get_column_downstream
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.col_related = [ColumnRef(dataset="a", field="x"), ColumnRef(dataset="b", field="y")]
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_column_downstream("a", "root", cast(LineageRepository, repo), flt, settings))
+    assert [(r.dataset, r.field) for r in result.related] == [("a", "x")]  # b's column is hidden
+
+
+def test_get_dataset_columns_drops_edges_touching_hidden_datasets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # #24: the column-graph view drops nodes/edges touching a dataset the caller can't see. An edge needs
+    # BOTH endpoints visible — a 3-edge fixture proves selectivity in BOTH leak directions (source-hidden
+    # AND target-hidden), not just one — same transitive-disclosure guarantee as /graph, at column res.
+    from lineage.main import get_dataset_columns
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.col_graph = ColumnGraph(
+        root="a",
+        columns=[
+            ColumnNode(dataset="a", field="x"),
+            ColumnNode(dataset="a", field="z"),
+            ColumnNode(dataset="b", field="y"),
+        ],
+        edges=[
+            ColumnEdge(source_dataset="a", source_field="x", target_dataset="a", target_field="z"),  # KEEP
+            ColumnEdge(
+                source_dataset="b", source_field="y", target_dataset="a", target_field="x"
+            ),  # source hidden
+            ColumnEdge(
+                source_dataset="a", source_field="x", target_dataset="b", target_field="y"
+            ),  # target hidden
+        ],
+    )
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_dataset_columns("a", cast(LineageRepository, repo), flt))
+    assert [n.dataset for n in result.columns] == ["a", "a"]  # b's column dropped, a's two kept
+    # only the both-endpoints-visible edge survives; both leak directions are dropped.
+    assert [(e.source_field, e.target_field) for e in result.edges] == [("x", "z")]
 
 
 def test_get_reconcile_flags_storage_drift(monkeypatch: pytest.MonkeyPatch) -> None:

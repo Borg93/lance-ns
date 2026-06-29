@@ -58,6 +58,58 @@ class Dataset(BaseModel):
         return out
 
     @property
+    def column_edges(self) -> list[dict[str, Any]]:
+        """Flattened column-lineage edges from the standard ``columnLineage`` facet (#24).
+
+        Each entry is one *input→output* column dependency on THIS (output) dataset:
+        ``{out_field, namespace, name, field, type, subtype, masking}`` where ``(name, field)`` identify
+        the SOURCE column and ``out_field`` the produced column. The first transformation (modern
+        ``inputFields[].transformations``) carries the kind (``DIRECT``/``IDENTITY`` vs a real change)
+        and the ``masking`` governance flag. Previously this facet was received and discarded on ingest.
+        """
+        facet = (self.facets or {}).get("columnLineage")
+        fields = facet.get("fields") if isinstance(facet, dict) else None
+        if not isinstance(fields, dict):
+            return []
+        edges: list[dict[str, Any]] = []
+        for out_field, spec in fields.items():
+            # Guard the output key too (symmetric with the input name/field + schema-name guards): a
+            # malformed facet with an empty key must not materialise a junk ``(:Column {field:""})``.
+            if not isinstance(out_field, str) or not out_field:
+                continue
+            inputs = spec.get("inputFields") if isinstance(spec, dict) else None
+            if not isinstance(inputs, list):
+                continue
+            # Deprecated Fields-level transformation (older / Marquez-style producers that don't emit the
+            # modern per-InputField ``transformations[]``); used as a fallback so their info isn't lost.
+            dep_type = str(spec.get("transformationType") or "") if isinstance(spec, dict) else ""
+            dep_desc = str(spec.get("transformationDescription") or "") if isinstance(spec, dict) else ""
+            for inp in inputs:
+                if not isinstance(inp, dict) or not inp.get("name") or not inp.get("field"):
+                    continue
+                transforms = inp.get("transformations")
+                transforms = (
+                    [t for t in transforms if isinstance(t, dict)] if isinstance(transforms, list) else []
+                )
+                first = transforms[0] if transforms else {}
+                # masking is a governance bit — true if ANY transformation masks (never lost to a non-first
+                # one), with a fallback for the deprecated facet's MASKED transformation type.
+                masking = any(t.get("masking") for t in transforms) or dep_type.upper().startswith("MASK")
+                edges.append(
+                    {
+                        "out_field": str(out_field),
+                        "namespace": str(inp.get("namespace") or ""),
+                        "name": str(inp["name"]),
+                        "field": str(inp["field"]),
+                        "type": str(first.get("type") or "") or dep_type,
+                        "subtype": str(first.get("subtype") or ""),
+                        "description": str(first.get("description") or "") or dep_desc,
+                        "masking": bool(masking),
+                    }
+                )
+        return edges
+
+    @property
     def tags(self) -> list[str]:
         """Governance labels from the standard ``tags`` facet, as ``key=value`` strings."""
         facet = (self.facets or {}).get("tags")

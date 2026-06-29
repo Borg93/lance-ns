@@ -36,6 +36,8 @@ from lineage.models import RunEvent
 from lineage.reconcile import read_storage_version, reconcile
 from lineage.repository import LineageRepository
 from lineage.schemas import (
+    ColumnGraph,
+    ColumnNeighbors,
     Creator,
     DatasetSchema,
     Events,
@@ -280,6 +282,58 @@ async def get_graph(name: str, repository: RepositoryDep, datasets: FilterDep) -
     visible.add(name)
     result.nodes = [node for node in result.nodes if node.id in visible]
     result.edges = [e for e in result.edges if e.source in visible and e.target in visible]
+    return result
+
+
+@app.get(
+    "/datasets/{name}/columns/{field}/upstream",
+    tags=["query"],
+    dependencies=[Depends(require_metadata_access)],
+)
+async def get_column_upstream(
+    name: str, field: str, repository: RepositoryDep, datasets: FilterDep, settings: SettingsDep
+) -> ColumnNeighbors:
+    """Column-level provenance (#24): the columns ``name.field`` was (transitively) derived from.
+
+    Our deepest moat — field-to-field lineage neither Marquez nor Lakekeeper derives. Gated on
+    ``can_get_metadata`` for the owning ``name``; related columns whose *owning dataset* the caller can't
+    see are dropped (a column has no ACL of its own — it inherits its table's), closing the same
+    transitive-disclosure hole at column resolution. Auth off → pass-through.
+    """
+    result = await repository.column_upstream(name, field)
+    result.related = await _governed(datasets, settings.fga_enabled, result.related, lambda r: {r.dataset})
+    return result
+
+
+@app.get(
+    "/datasets/{name}/columns/{field}/downstream",
+    tags=["query"],
+    dependencies=[Depends(require_metadata_access)],
+)
+async def get_column_downstream(
+    name: str, field: str, repository: RepositoryDep, datasets: FilterDep, settings: SettingsDep
+) -> ColumnNeighbors:
+    """Column-level impact (#24): the columns (transitively) derived from ``name.field``. Gated +
+    governed exactly like the column upstream view — related columns in datasets the caller can't see
+    are dropped."""
+    result = await repository.column_downstream(name, field)
+    result.related = await _governed(datasets, settings.fga_enabled, result.related, lambda r: {r.dataset})
+    return result
+
+
+@app.get("/datasets/{name}/columns", tags=["query"], dependencies=[Depends(require_metadata_access)])
+async def get_dataset_columns(name: str, repository: RepositoryDep, datasets: FilterDep) -> ColumnGraph:
+    """The column-level lineage subgraph around ``name`` (#24) — the field-to-field analogue of
+    ``/graph``, for a DAG view of how each column was produced.
+
+    Nodes/edges touching a dataset the caller can't see are dropped (an edge needs BOTH endpoints'
+    datasets visible); ``name``'s own columns are always shown (the route gate authorized it).
+    """
+    result = await repository.dataset_column_graph(name)
+    visible = await datasets.visible([n.dataset for n in result.columns if n.dataset != name])
+    visible.add(name)
+    result.columns = [n for n in result.columns if n.dataset in visible]
+    result.edges = [e for e in result.edges if e.source_dataset in visible and e.target_dataset in visible]
     return result
 
 

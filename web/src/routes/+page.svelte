@@ -1,11 +1,12 @@
 <script lang="ts" module>
 	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
 	import JobNode, { type JobNodeType } from '$lib/JobNode.svelte';
+	import ColumnNode, { type ColumnNodeType } from '$lib/ColumnNode.svelte';
 	import type { NodeTypes } from '@xyflow/svelte';
 
 	// svelte-flow rule 5: register node components ONCE at module scope, not inline.
-	const nodeTypes: NodeTypes = { medallion: MedallionNode, job: JobNode };
-	type FlowNode = MedallionNodeType | JobNodeType;
+	const nodeTypes: NodeTypes = { medallion: MedallionNode, job: JobNode, column: ColumnNode };
+	type FlowNode = MedallionNodeType | JobNodeType | ColumnNodeType;
 </script>
 
 <script lang="ts">
@@ -13,7 +14,7 @@
 	import { SvelteFlow, Background, BackgroundVariant, Controls, MiniMap, Panel } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { Tabs } from 'bits-ui';
-	import { Radio, Boxes, Cpu } from '@lucide/svelte';
+	import { Radio, Boxes, Cpu, Columns3 } from '@lucide/svelte';
 	import StatusBoard from '$lib/StatusBoard.svelte';
 	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
 	import { enter, stagger, countUp } from '$lib/attachments';
@@ -22,15 +23,17 @@
 
 	const store = new LineageState();
 
-	// Which graph plane is shown — like Marquez's Datasets vs Jobs lineage views.
-	let graphView = $state<'datasets' | 'jobs'>('datasets');
+	// Which graph plane is shown — Datasets / Jobs (like Marquez) + Columns (field-to-field, #24).
+	let graphView = $state<'datasets' | 'jobs' | 'columns'>('datasets');
 
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
 	const eventCount = $derived(store.events.length);
 
 	let nodes = $state.raw<FlowNode[]>([]);
-	let edges = $state.raw<{ id: string; source: string; target: string; animated: boolean; type: string }[]>([]);
+	let edges = $state.raw<
+		{ id: string; source: string; target: string; animated: boolean; type: string; label?: string; class?: string }[]
+	>([]);
 	// Re-fit the viewport only when the node-set or the view changes (not on every data poll).
 	const fitKey = $derived(graphView + '|' + nodes.map((n) => n.id).join(','));
 
@@ -40,7 +43,7 @@
 		const ordered = [...store.runs].sort((a, b) => (a.updated_at ?? '').localeCompare(b.updated_at ?? ''));
 		for (const r of ordered) {
 			if (!r.state) continue;
-			for (const out of r.outputs) m[out] = r.state;
+			for (const out of r.outputs ?? []) m[out] = r.state;
 		}
 		return m;
 	});
@@ -51,12 +54,62 @@
 		return () => clearInterval(timer);
 	});
 
+	// In Columns view, keep the selected dataset's field-to-field graph fresh on its own poll.
+	$effect(() => {
+		if (graphView !== 'columns' || !store.selected) return;
+		const name = store.selected;
+		store.loadColumns(name);
+		const t = setInterval(() => store.loadColumns(name), 2000);
+		return () => clearInterval(t);
+	});
+
 	// Rebuild the active graph plane whenever the polled data (or the chosen view) changes.
 	// Reconcile, don't rebuild: keep each node's identity + dragged position across the 2s poll.
 	$effect(() => {
 		// Read the current nodes UNTRACKED — we only want their last positions to carry forward; tracking
 		// `nodes` here (the var we reassign below) would make this effect retrigger itself → infinite loop.
 		const prev = new Map(untrack(() => nodes).map((node) => [node.id, node]));
+
+		if (graphView === 'columns') {
+			// Columns plane (#24): the selected dataset's field-to-field lineage. Columns are laid out by
+			// their owning dataset's medallion layer (x) and stacked (y); edges carry the transformation kind.
+			const cg = store.columnGraph;
+			const root = store.selected;
+			if (!cg || !root) {
+				nodes = [];
+				edges = [];
+				return;
+			}
+			const masked = new Set(
+				(cg.edges ?? []).filter((e) => e.masking).map((e) => `${e.target_dataset}::${e.target_field}`)
+			);
+			const perLayer: Record<number, number> = {};
+			nodes = (cg.columns ?? []).map((c) => {
+				const layer = LAYER[c.dataset] ?? 4;
+				const row = (perLayer[layer] = (perLayer[layer] ?? 0) + 1) - 1;
+				const id = `${c.dataset}::${c.field}`;
+				return {
+					id,
+					type: 'column' as const,
+					position: prev.get(id)?.position ?? { x: 20 + layer * 230, y: 24 + row * 76 },
+					data: { dataset: c.dataset, field: c.field, type: c.type, layer, masked: masked.has(id), isRoot: c.dataset === root }
+				};
+			});
+			edges = (cg.edges ?? []).map((e) => {
+				const s = `${e.source_dataset}::${e.source_field}`;
+				const t = `${e.target_dataset}::${e.target_field}`;
+				return {
+					id: `${s}->${t}`,
+					source: s,
+					target: t,
+					animated: true,
+					type: 'smoothstep',
+					label: e.transformation_subtype || e.transformation_type || '',
+					class: e.masking ? 'masked-edge' : ''
+				};
+			});
+			return;
+		}
 
 		if (graphView === 'jobs') {
 			// Jobs plane (like Marquez's job lineage): one node per job; an edge producing-job → consuming
@@ -72,12 +125,12 @@
 				j.author = ev.author ?? j.author;
 				j.state = ev.event_type ?? j.state;
 				if (/FAIL|ABORT/i.test(ev.event_type ?? '')) j.failed = true;
-				for (const o of ev.outputs) {
+				for (const o of ev.outputs ?? []) {
 					j.outputs.add(o);
 					if (!producedBy.has(o)) producedBy.set(o, new Set());
 					producedBy.get(o)!.add(ev.job);
 				}
-				for (const i of ev.inputs) j.inputs.add(i);
+				for (const i of ev.inputs ?? []) j.inputs.add(i);
 				jobs.set(ev.job, j);
 			}
 			const perCol: Record<number, number> = {};
@@ -120,7 +173,7 @@
 					id: n.id,
 					layer,
 					source_uri: n.source_uri,
-					tags: n.tags,
+					tags: n.tags ?? [],
 					versions,
 					failed,
 					selected: store.selected === n.id,
@@ -138,6 +191,8 @@
 	});
 
 	function selectNode(e: unknown) {
+		// Column nodes aren't datasets; in Columns view keep the dataset selection intact.
+		if (graphView === 'columns') return;
 		const ev = e as { node?: { id: string }; targetNode?: { id: string } };
 		store.selected = ev.node?.id ?? ev.targetNode?.id ?? null;
 	}
@@ -151,16 +206,17 @@
 	function evolution(ds: DemoDataset) {
 		const out: { version: number; cols: { name: string; type: string; added: boolean }[] }[] = [];
 		let prev = new Set<string>();
-		for (const v of ds.versions) {
+		for (const v of ds.versions ?? []) {
+			const fields = v.fields ?? [];
 			out.push({
 				version: v.version,
-				cols: v.fields.map((f) => ({ name: f.name, type: f.type, added: !prev.has(f.name) }))
+				cols: fields.map((f) => ({ name: f.name, type: f.type, added: !prev.has(f.name) }))
 			});
-			prev = new Set(v.fields.map((f) => f.name));
+			prev = new Set(fields.map((f) => f.name));
 		}
 		return out;
 	}
-	const currentCols = (ds: DemoDataset) => ds.versions.at(-1)?.fields ?? [];
+	const currentCols = (ds: DemoDataset) => (ds.versions ?? []).at(-1)?.fields ?? [];
 </script>
 
 <div class="app">
@@ -198,10 +254,24 @@
 						<button class="vt" class:on={graphView === 'jobs'} role="tab" aria-selected={graphView === 'jobs'} onclick={() => (graphView = 'jobs')}>
 							<Cpu size={13} /> Jobs
 						</button>
+						<button class="vt" class:on={graphView === 'columns'} role="tab" aria-selected={graphView === 'columns'} onclick={() => (graphView = 'columns')}>
+							<Columns3 size={13} /> Columns
+						</button>
 					</div>
 				</Panel>
 			</SvelteFlow>
-			{#if store.nodes.length === 0}
+			{#if graphView === 'columns' && !store.selected}
+				<div class="empty">
+					<b>Pick a dataset first.</b><br />
+					Select a node in <b>Datasets</b>, then switch back to <b>Columns</b> to see its
+					field-to-field lineage.
+				</div>
+			{:else if graphView === 'columns' && (store.columnGraph?.columns?.length ?? 0) === 0}
+				<div class="empty">
+					<b>No column lineage for {store.selected} yet.</b><br />
+					Producers must emit the <code>columnLineage</code> facet (the medallion does).
+				</div>
+			{:else if graphView !== 'columns' && store.nodes.length === 0}
 				<div class="empty">
 					<b>Nothing yet — you trigger it.</b><br />
 					<code>uv run scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
@@ -236,7 +306,7 @@
 							<summary>
 								<span class="badge" style:background={stateColor(ev.event_type)}>{ev.event_type}</span>
 								<span class="mono job">{ev.job}</span>
-								<span class="out mono">{ev.outputs.join(', ')}</span>
+								<span class="out mono">{(ev.outputs ?? []).join(', ')}</span>
 							</summary>
 							<div class="who">{ev.author ?? '—'} · {ev.event_time}</div>
 							<pre class="mono json">{JSON.stringify(ev.event, null, 2)}</pre>
@@ -412,6 +482,11 @@
 	.graph {
 		position: relative;
 		min-width: 0;
+	}
+	/* A masking column derivation (e.g. a PII hash) reads as a red dashed edge. */
+	:global(.masked-edge .svelte-flow__edge-path) {
+		stroke: var(--fail);
+		stroke-dasharray: 5 3;
 	}
 	.empty {
 		position: absolute;

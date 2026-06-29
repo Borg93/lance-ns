@@ -1,5 +1,14 @@
-import { fetchDemo, fetchEvents, fetchGraph, fetchProducers, fetchRuns } from './api';
-import { KNOWN, type DemoDataset, type EventRecord, type GraphEdge, type GraphNode, type ProducerInfo, type RunStatus } from './types';
+import { fetchColumnGraph, fetchDemo, fetchEvents, fetchGraph, fetchProducers, fetchRuns } from './api';
+import {
+	KNOWN,
+	type ColumnGraph,
+	type DemoDataset,
+	type EventRecord,
+	type GraphEdge,
+	type GraphNode,
+	type ProducerInfo,
+	type RunStatus
+} from './types';
 
 /** Live medallion state, polled from the lineage service. Svelte 5 runes in a class. */
 export class LineageState {
@@ -12,6 +21,12 @@ export class LineageState {
 	lastUpdated = $state('');
 	online = $state(false);
 	selected = $state<string | null>(null);
+	columnGraph = $state<ColumnGraph | null>(null);
+
+	/** Load the column-level lineage subgraph for one dataset (the field-to-field view). */
+	async loadColumns(name: string): Promise<void> {
+		this.columnGraph = await fetchColumnGraph(name);
+	}
 
 	async poll(): Promise<void> {
 		const producers: Record<string, ProducerInfo[]> = {};

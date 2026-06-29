@@ -93,6 +93,59 @@ class DatasetSchema(BaseModel):
     fields: list[SchemaField] = Field(default_factory=list)
 
 
+class ColumnRef(BaseModel):
+    """A column identified by its owning dataset + field name (#24).
+
+    ``dataset`` is REQUIRED and is the governance handle: a column is visible iff the caller can read
+    its owning ``table:<dataset>``, so column queries filter on it (never on the field).
+    """
+
+    dataset: str
+    field: str
+    namespace: str | None = None
+    type: str | None = None
+
+
+class ColumnNeighbors(BaseModel):
+    """Columns related to ``(dataset, field)`` — its column-level provenance (upstream) or impact."""
+
+    dataset: str
+    field: str
+    related: list[ColumnRef] = Field(default_factory=list)
+
+
+class ColumnNode(BaseModel):
+    """A column node in the column-lineage subgraph."""
+
+    dataset: str
+    field: str
+    type: str | None = None
+
+
+class ColumnEdge(BaseModel):
+    """A field-to-field derivation edge (data flows ``source`` → ``target``); the transformation kind +
+    the ``masking`` governance bit ride the edge."""
+
+    source_dataset: str
+    source_field: str
+    target_dataset: str
+    target_field: str
+    transformation_type: str = ""
+    transformation_subtype: str = ""
+    masking: bool = False
+    description: str = ""
+    kind: str = "derived_from_column"
+
+
+class ColumnGraph(BaseModel):
+    """The column-level lineage subgraph around ``root`` (nodes + edges) — the column analogue of the
+    dataset ``LineageGraph``, for a field-to-field DAG view."""
+
+    root: str
+    columns: list[ColumnNode] = Field(default_factory=list)
+    edges: list[ColumnEdge] = Field(default_factory=list)
+
+
 class GraphNode(BaseModel):
     """A dataset node in the lineage graph (``id`` is the catalog table id).
 

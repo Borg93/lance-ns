@@ -27,6 +27,7 @@ from openlineage.client import OpenLineageClient
 from openlineage.client.event_v2 import InputDataset, Job, OutputDataset, Run, RunEvent, RunState
 from openlineage.client.facet_v2 import (
     RunFacet,
+    column_lineage_dataset,
     dataset_version_dataset,
     datasource_dataset,
     error_message_run,
@@ -81,6 +82,34 @@ def _schema(fields: tuple[tuple[str, str], ...]) -> dict[str, Any]:
     return {"schema": facet}
 
 
+# out_field -> [(input_namespace, input_dataset, input_field, transformation_type, transformation_subtype)].
+# The standard ``columnLineage`` facet (#24): which input column(s) each output column was derived from,
+# with the transformation kind (DIRECT/IDENTITY for pass-through, DIRECT/TRANSFORMATION for a real change).
+ColumnMap = dict[str, tuple[tuple[str, str, str, str, str], ...]]
+
+
+def _column_lineage(mapping: ColumnMap) -> dict[str, Any]:
+    if not mapping:
+        return {}
+    facet = column_lineage_dataset.ColumnLineageDatasetFacet(
+        fields={
+            out_field: column_lineage_dataset.Fields(
+                inputFields=[
+                    column_lineage_dataset.InputField(
+                        namespace=ns,
+                        name=name,
+                        field=field,
+                        transformations=[column_lineage_dataset.Transformation(type=ttype, subtype=subtype)],
+                    )
+                    for ns, name, field, ttype, subtype in inputs
+                ]
+            )
+            for out_field, inputs in mapping.items()
+        }
+    )
+    return {"columnLineage": facet}
+
+
 def _ds_facets(name: str, fields: tuple[tuple[str, str], ...]) -> dict[str, Any]:
     """Standard dataset facets for ``name``: ``schema`` + ``dataSource`` (where it lives) + ``tags``."""
     facets: dict[str, Any] = dict(_schema(fields))
@@ -99,14 +128,22 @@ def _in(namespace: str, name: str, *fields: tuple[str, str]) -> InputDataset:
     return InputDataset(namespace=namespace, name=name, facets=_ds_facets(name, fields))
 
 
-def _out(namespace: str, name: str, version: int | None, *fields: tuple[str, str]) -> OutputDataset:
+def _out(
+    namespace: str,
+    name: str,
+    version: int | None,
+    *fields: tuple[str, str],
+    columns: ColumnMap | None = None,
+) -> OutputDataset:
     """An output dataset with its standard facets + the Lance ``version`` this run produced.
 
-    ``version=None`` (a failed run produced no version) omits the ``version`` facet.
+    ``version=None`` (a failed run produced no version) omits the ``version`` facet. ``columns`` adds the
+    standard ``columnLineage`` facet (which input column each output column came from). (#24)
     """
     facets = _ds_facets(name, fields)
     if version is not None:
         facets["version"] = dataset_version_dataset.DatasetVersionDatasetFacet(datasetVersion=str(version))
+    facets.update(_column_lineage(columns or {}))
     return OutputDataset(namespace=namespace, name=name, facets=facets)
 
 
@@ -193,6 +230,23 @@ def build_events() -> list[RunEvent]:
         ("caption", "string"),
         ("lineage", "json"),
     )
+    # Column-level provenance (#24): which input column each output column came from. The embed turns the
+    # raw blob into a vector (a real TRANSFORMATION); keys pass through (IDENTITY); the caption model reads
+    # the embedding (a same-dataset column edge — in-place refinement adds a column from another).
+    silver_from_bronze: ColumnMap = {
+        "id": (("bronze", "bronze$events", "id", "DIRECT", "IDENTITY"),),
+        "payload_src": (("bronze", "bronze$events", "payload_src", "DIRECT", "IDENTITY"),),
+        "embedding": (("bronze", "bronze$events", "payload", "DIRECT", "TRANSFORMATION"),),
+    }
+    caption_from_silver: ColumnMap = {
+        "caption": (("silver", "silver$features", "embedding", "DIRECT", "TRANSFORMATION"),),
+    }
+    gold_from_silver: ColumnMap = {
+        "id": (("silver", "silver$features", "id", "DIRECT", "IDENTITY"),),
+        "payload_src": (("silver", "silver$features", "payload_src", "DIRECT", "IDENTITY"),),
+        "embedding": (("silver", "silver$features", "embedding", "DIRECT", "IDENTITY"),),
+        "caption": (("silver", "silver$features", "caption", "DIRECT", "IDENTITY"),),
+    }
     return [
         _event(
             run_id="11111111-1111-1111-1111-111111111111",
@@ -210,7 +264,7 @@ def build_events() -> list[RunEvent]:
             author="data_eng",
             kind="TRANSFORMATION",
             inputs=[_in("bronze", "bronze$events", *bronze_cols)],
-            outputs=[_out("silver", "silver$features", None, *silver_v1_cols)],
+            outputs=[_out("silver", "silver$features", None, *silver_v1_cols, columns=silver_from_bronze)],
             state=RunState.FAIL,
             error="CUDA OOM while embedding batch 7/12",
         ),
@@ -221,7 +275,7 @@ def build_events() -> list[RunEvent]:
             author="data_eng",
             kind="TRANSFORMATION",
             inputs=[_in("bronze", "bronze$events", *bronze_cols)],
-            outputs=[_out("silver", "silver$features", 1, *silver_v1_cols)],
+            outputs=[_out("silver", "silver$features", 1, *silver_v1_cols, columns=silver_from_bronze)],
         ),
         _event(
             run_id="33333333-3333-3333-3333-333333333333",
@@ -230,7 +284,7 @@ def build_events() -> list[RunEvent]:
             author="data_eng",
             kind="TRANSFORMATION",
             inputs=[_in("silver", "silver$features", *silver_v1_cols)],
-            outputs=[_out("silver", "silver$features", 2, *silver_v2_cols)],
+            outputs=[_out("silver", "silver$features", 2, *silver_v2_cols, columns=caption_from_silver)],
         ),
         _event(
             run_id="44444444-4444-4444-4444-444444444444",
@@ -239,7 +293,7 @@ def build_events() -> list[RunEvent]:
             author="analyst",
             kind="TRANSFORMATION",
             inputs=[_in("silver", "silver$features", *silver_v2_cols)],
-            outputs=[_out("gold", "gold$catalog", 1, *gold_cols)],
+            outputs=[_out("gold", "gold$catalog", 1, *gold_cols, columns=gold_from_silver)],
         ),
     ]
 

@@ -76,3 +76,59 @@ def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
     assert ("silver$features", "bronze$events") in edges
     assert ("gold$catalog", "silver$features") in edges
     assert ("silver$features", "silver$features") not in edges
+
+
+def test_medallion_column_lineage(dsn: str) -> None:
+    """#24: field-to-field lineage ingested into real AGE then traversed (the high-risk cypher path).
+
+    Exercises the bits unit tests can't: the ``DERIVED_FROM_COLUMN*1..`` transitive walk across datasets
+    AND within one (the same-dataset caption←embedding edge), the typed HAS_COLUMN inventory, and the
+    bool/scalar edge props round-tripping through AGE.
+    """
+    from lineage.age import make_pool
+    from lineage.models import RunEvent
+    from lineage.repository import LineageRepository
+    from lineage.schemas import ColumnGraph, ColumnNeighbors
+
+    events = [RunEvent.model_validate(e) for e in json.loads(_SAMPLE.read_text())]
+
+    async def run() -> tuple[ColumnNeighbors, ColumnNeighbors, ColumnGraph]:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            for event in events:
+                await repo.ingest_event(event)
+            up = await repo.column_upstream("gold$catalog", "caption")
+            down = await repo.column_downstream("bronze$events", "payload")
+            cg = await repo.dataset_column_graph("silver$features")
+            return up, down, cg
+        finally:
+            await pool.close()
+
+    up, down, cg = asyncio.run(run())
+
+    # gold.caption traces back through silver.caption -> silver.embedding -> bronze.payload
+    # (a cross-dataset AND a same-dataset column hop in one transitive walk).
+    up_cols = {(c.dataset, c.field) for c in up.related}
+    assert {
+        ("silver$features", "caption"),
+        ("silver$features", "embedding"),
+        ("bronze$events", "payload"),
+    } <= up_cols
+    # bronze.payload flows downstream into silver.embedding and onward to gold.caption.
+    down_cols = {(c.dataset, c.field) for c in down.related}
+    assert {("silver$features", "embedding"), ("gold$catalog", "caption")} <= down_cols
+    # the silver column graph carries its full typed inventory + the in-place caption<-embedding edge.
+    typed = {c.field: c.type for c in cg.columns if c.dataset == "silver$features"}
+    assert {"id", "payload_src", "embedding", "caption"} <= set(typed)
+    assert typed["embedding"] == "array<float>"  # the Arrow type seeded from the schema facet
+    same_ds = {
+        (e.source_field, e.target_field)
+        for e in cg.edges
+        if e.source_dataset == "silver$features" and e.target_dataset == "silver$features"
+    }
+    assert ("embedding", "caption") in same_ds  # the in-place-refinement column edge
+    # the embed transformation kind rode the edge as a scalar prop.
+    emb = next(e for e in cg.edges if e.target_dataset == "silver$features" and e.target_field == "embedding")
+    assert emb.transformation_subtype == "TRANSFORMATION"

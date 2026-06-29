@@ -1,0 +1,1807 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Lance Lineage Service",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/livez": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Livez",
+        "operationId": "livez_livez_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Livez Livez Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/lineage": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest Event",
+        "description": "Ingest one OpenLineage ``RunEvent`` into the lineage graph.\n\nThis is the OpenLineage HTTP-transport default path, so any OpenLineage producer\n(our emitter, Airflow, Spark, dbt, \u2026) configured with ``OPENLINEAGE_URL`` pointed\nhere ingests with no glue \u2014 the lightweight-Marquez contract.\n\nWhen OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token\n(401 otherwise) and :func:`~lineage.auth.enforce_author` binds the run author to that\ntoken's subject \u2014 a producer cannot self-assert someone else's identity.",
+        "operationId": "ingest_event_api_v1_lineage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Ingest Event Api V1 Lineage Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/runs": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Runs",
+        "description": "Live run-status board \u2014 each run's current state folded onto its ``(:Run)`` node in Apache AGE.\n\n**Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset\nreads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board\ncan't enumerate dataset names / creators / errors outside the caller's reach. Auth off \u2192 pass-through.",
+        "operationId": "get_runs_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runs"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Events",
+        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)",
+        "operationId": "get_events_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Events"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/datasets/{name}/upstream": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Upstream",
+        "description": "What ``name`` was derived from (provenance).\n\nGated on ``can_get_metadata`` for ``name``; related datasets the caller may not see are\ndropped so the graph can't disclose tables outside its reach.",
+        "operationId": "get_upstream_datasets__name__upstream_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Neighbors"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/downstream": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Downstream",
+        "description": "What derives from ``name`` (impact). Gated; non-visible related datasets are dropped.",
+        "operationId": "get_downstream_datasets__name__downstream_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Neighbors"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/producers": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Producers",
+        "description": "The runs that wrote ``name`` \u2014 who / when / how. Gated on ``can_get_metadata``.",
+        "operationId": "get_producers_datasets__name__producers_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Producers"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/creator": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Creator",
+        "description": "Who created ``name`` (the verified catalog principal). Gated on ``can_get_metadata``.",
+        "operationId": "get_creator_datasets__name__creator_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Creator"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/schema": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Schema",
+        "description": "The persisted column schema for ``name`` \u2014 at ``?version=N`` if given, else the latest. (#24)\n\nCaptured from the standard ``SchemaDatasetFacet`` at ingest and stored per-version on the ``WROTE``\nedge (previously the facet was received and discarded). Gated on ``can_get_metadata`` for ``name``;\nthis is the prerequisite for column-level lineage and powers schema-diffing between Lance versions.",
+        "operationId": "get_schema_datasets__name__schema_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Version"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetSchema"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/reconcile": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Reconcile",
+        "description": "Does the lineage graph agree with the **actual Lance file on storage**? (#23)\n\nOur moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we\nread the real on-disk version and cross-check it against the version the graph recorded on the\n``WROTE`` edge \u2014 surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim\nwith no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the\nLance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.",
+        "operationId": "get_reconcile_datasets__name__reconcile_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcileStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/graph": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Graph",
+        "description": "The connected lineage subgraph around ``name`` (nodes + edges) for a DAG view.\n\nNodes the caller may not see (and edges touching them) are dropped; the requested ``name``\nis already authorized by the route gate.",
+        "operationId": "get_graph_datasets__name__graph_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LineageGraph"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/columns/{field}/upstream": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Column Upstream",
+        "description": "Column-level provenance (#24): the columns ``name.field`` was (transitively) derived from.\n\nOur deepest moat \u2014 field-to-field lineage neither Marquez nor Lakekeeper derives. Gated on\n``can_get_metadata`` for the owning ``name``; related columns whose *owning dataset* the caller can't\nsee are dropped (a column has no ACL of its own \u2014 it inherits its table's), closing the same\ntransitive-disclosure hole at column resolution. Auth off \u2192 pass-through.",
+        "operationId": "get_column_upstream_datasets__name__columns__field__upstream_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "field",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnNeighbors"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/columns/{field}/downstream": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Column Downstream",
+        "description": "Column-level impact (#24): the columns (transitively) derived from ``name.field``. Gated +\ngoverned exactly like the column upstream view \u2014 related columns in datasets the caller can't see\nare dropped.",
+        "operationId": "get_column_downstream_datasets__name__columns__field__downstream_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "field",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Field"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnNeighbors"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/columns": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Dataset Columns",
+        "description": "The column-level lineage subgraph around ``name`` (#24) \u2014 the field-to-field analogue of\n``/graph``, for a DAG view of how each column was produced.\n\nNodes/edges touching a dataset the caller can't see are dropped (an edge needs BOTH endpoints'\ndatasets visible); ``name``'s own columns are always shown (the route gate authorized it).",
+        "operationId": "get_dataset_columns_datasets__name__columns_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ColumnGraph"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/demo/datasets": {
+      "get": {
+        "tags": [
+          "demo"
+        ],
+        "summary": "Demo Datasets",
+        "description": "The medallion datasets as they currently exist on S3 \u2014 schema per Lance version + rows.",
+        "operationId": "demo_datasets_demo_datasets_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoDatasets"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ColumnEdge": {
+        "properties": {
+          "source_dataset": {
+            "type": "string",
+            "title": "Source Dataset"
+          },
+          "source_field": {
+            "type": "string",
+            "title": "Source Field"
+          },
+          "target_dataset": {
+            "type": "string",
+            "title": "Target Dataset"
+          },
+          "target_field": {
+            "type": "string",
+            "title": "Target Field"
+          },
+          "transformation_type": {
+            "type": "string",
+            "title": "Transformation Type",
+            "default": ""
+          },
+          "transformation_subtype": {
+            "type": "string",
+            "title": "Transformation Subtype",
+            "default": ""
+          },
+          "masking": {
+            "type": "boolean",
+            "title": "Masking",
+            "default": false
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "derived_from_column"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source_dataset",
+          "source_field",
+          "target_dataset",
+          "target_field"
+        ],
+        "title": "ColumnEdge",
+        "description": "A field-to-field derivation edge (data flows ``source`` \u2192 ``target``); the transformation kind +\nthe ``masking`` governance bit ride the edge."
+      },
+      "ColumnGraph": {
+        "properties": {
+          "root": {
+            "type": "string",
+            "title": "Root"
+          },
+          "columns": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnNode"
+            },
+            "type": "array",
+            "title": "Columns"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "root"
+        ],
+        "title": "ColumnGraph",
+        "description": "The column-level lineage subgraph around ``root`` (nodes + edges) \u2014 the column analogue of the\ndataset ``LineageGraph``, for a field-to-field DAG view."
+      },
+      "ColumnNeighbors": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "related": {
+            "items": {
+              "$ref": "#/components/schemas/ColumnRef"
+            },
+            "type": "array",
+            "title": "Related"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "field"
+        ],
+        "title": "ColumnNeighbors",
+        "description": "Columns related to ``(dataset, field)`` \u2014 its column-level provenance (upstream) or impact."
+      },
+      "ColumnNode": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "field"
+        ],
+        "title": "ColumnNode",
+        "description": "A column node in the column-lineage subgraph."
+      },
+      "ColumnRef": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "field": {
+            "type": "string",
+            "title": "Field"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "field"
+        ],
+        "title": "ColumnRef",
+        "description": "A column identified by its owning dataset + field name (#24).\n\n``dataset`` is REQUIRED and is the governance handle: a column is visible iff the caller can read\nits owning ``table:<dataset>``, so column queries filter on it (never on the field)."
+      },
+      "Creator": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "creator": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Creator"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset"
+        ],
+        "title": "Creator",
+        "description": "Who created ``dataset`` \u2014 the verified catalog principal at create time (or ``None``)."
+      },
+      "Dataset": {
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "facets": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Facets"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "namespace",
+          "name"
+        ],
+        "title": "Dataset",
+        "description": "An OpenLineage dataset (a Lance table / source); ``name`` is the catalog id.\n\n``facets`` carries the standard OpenLineage dataset facets; we read several:\n``version`` (which Lance version a run produced), ``dataSource`` (where the table\nphysically lives \u2014 the S3-compatible location), and ``tags`` (governance labels)."
+      },
+      "DatasetRef": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DatasetRef",
+        "description": "A dataset node returned from a graph traversal."
+      },
+      "DatasetSchema": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/SchemaField"
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset"
+        ],
+        "title": "DatasetSchema",
+        "description": "The column schema recorded for ``dataset`` at ``version`` (the ``WROTE`` edge's schema). (#24)\n\n``version`` is the Lance version this schema belongs to; ``None`` with empty ``fields`` means no\nschema has been persisted for the dataset (or the requested version) yet."
+      },
+      "DemoDataset": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "uri": {
+            "type": "string",
+            "title": "Uri"
+          },
+          "exists": {
+            "type": "boolean",
+            "title": "Exists"
+          },
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/DemoVersion"
+            },
+            "type": "array",
+            "title": "Versions"
+          },
+          "lineage_jsonb": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Jsonb"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "uri",
+          "exists"
+        ],
+        "title": "DemoDataset",
+        "description": "A peek at a real Lance dataset on S3 \u2014 what's actually in storage and how it evolved."
+      },
+      "DemoDatasets": {
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DemoDataset"
+            },
+            "type": "array",
+            "title": "Datasets"
+          }
+        },
+        "type": "object",
+        "required": [
+          "datasets"
+        ],
+        "title": "DemoDatasets",
+        "description": "The medallion datasets as they currently exist on S3 (demo data peek)."
+      },
+      "DemoField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "DemoField",
+        "description": "A column of a Lance dataset version (name + Arrow type)."
+      },
+      "DemoVersion": {
+        "properties": {
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DemoField"
+            },
+            "type": "array",
+            "title": "Fields"
+          }
+        },
+        "type": "object",
+        "required": [
+          "version"
+        ],
+        "title": "DemoVersion",
+        "description": "One Lance version of a dataset \u2014 its number, time, and schema at that version."
+      },
+      "EventRecord": {
+        "properties": {
+          "seq": {
+            "type": "integer",
+            "title": "Seq"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inputs"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Outputs"
+          },
+          "event": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Event"
+          }
+        },
+        "type": "object",
+        "required": [
+          "seq",
+          "event"
+        ],
+        "title": "EventRecord",
+        "description": "One ingested OpenLineage event, Marquez-style (summary + the full event with facets)."
+      },
+      "Events": {
+        "properties": {
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/EventRecord"
+            },
+            "type": "array",
+            "title": "Events"
+          }
+        },
+        "type": "object",
+        "required": [
+          "events"
+        ],
+        "title": "Events",
+        "description": "The most-recent ingested OpenLineage events (newest first)."
+      },
+      "GraphEdge": {
+        "properties": {
+          "source": {
+            "type": "string",
+            "title": "Source"
+          },
+          "target": {
+            "type": "string",
+            "title": "Target"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "derived_from"
+          }
+        },
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "title": "GraphEdge",
+        "description": "A dataset-level lineage edge: ``source`` is derived from ``target``."
+      },
+      "GraphNode": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "kind": {
+            "type": "string",
+            "title": "Kind",
+            "default": "dataset"
+          },
+          "source_uri": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Uri"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "title": "GraphNode",
+        "description": "A dataset node in the lineage graph (``id`` is the catalog table id).\n\n``source_uri`` is where the table physically lives (the S3-compatible location, from\nthe ``dataSource`` facet) and ``tags`` are its governance labels (from the ``tags`` facet)."
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Job": {
+        "properties": {
+          "namespace": {
+            "type": "string",
+            "title": "Namespace"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "facets": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Facets"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "namespace",
+          "name"
+        ],
+        "title": "Job",
+        "description": "The compute job that produced a run \u2014 for us a Ray job (Ray is the compute engine).\n\n``facets`` carries the standard ``ownership`` (who owns the job) and ``jobType``\n(``processingType`` BATCH/STREAMING, ``integration`` = RAY, ``jobType`` = ETL /\nTRANSFORMATION) facets."
+      },
+      "LineageGraph": {
+        "properties": {
+          "root": {
+            "type": "string",
+            "title": "Root"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "type": "array",
+            "title": "Nodes"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "type": "array",
+            "title": "Edges"
+          }
+        },
+        "type": "object",
+        "required": [
+          "root",
+          "nodes",
+          "edges"
+        ],
+        "title": "LineageGraph",
+        "description": "The connected lineage subgraph around ``root`` \u2014 nodes + edges for a DAG view.\n\nMirrors what Marquez's graph endpoint feeds its UI, trimmed to the dataset-level\n``DERIVED_FROM`` lineage we model."
+      },
+      "Neighbors": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "related": {
+            "items": {
+              "$ref": "#/components/schemas/DatasetRef"
+            },
+            "type": "array",
+            "title": "Related"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "related"
+        ],
+        "title": "Neighbors",
+        "description": "Datasets related to ``dataset`` (upstream provenance or downstream impact)."
+      },
+      "ProducerInfo": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "dataset_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Version"
+          },
+          "producer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "ProducerInfo",
+        "description": "A run that wrote (or attempted to write) a dataset \u2014 who / when / how / version.\n\nA **failed** run (``event_type`` FAIL/ABORT) appears here too, with no\n``dataset_version`` and an ``error_message`` \u2014 it tried but produced no data."
+      },
+      "Producers": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "producers": {
+            "items": {
+              "$ref": "#/components/schemas/ProducerInfo"
+            },
+            "type": "array",
+            "title": "Producers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "producers"
+        ],
+        "title": "Producers",
+        "description": "The runs that produced ``dataset``."
+      },
+      "ReconcileState": {
+        "type": "string",
+        "enum": [
+          "in_sync",
+          "storage_ahead",
+          "graph_ahead",
+          "untracked",
+          "missing_on_storage",
+          "absent"
+        ],
+        "title": "ReconcileState",
+        "description": "Result of reconciling the lineage graph's recorded version against the on-disk Lance version."
+      },
+      "ReconcileStatus": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "graph_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Graph Version"
+          },
+          "storage_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Storage Version"
+          },
+          "in_sync": {
+            "type": "boolean",
+            "title": "In Sync"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReconcileState"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset",
+          "in_sync",
+          "status"
+        ],
+        "title": "ReconcileStatus",
+        "description": "Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23)."
+      },
+      "Run": {
+        "properties": {
+          "runId": {
+            "type": "string",
+            "title": "Runid"
+          },
+          "facets": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Facets"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "runId"
+        ],
+        "title": "Run",
+        "description": "A single run of a job. ``facets.author`` carries the OIDC sub when present."
+      },
+      "RunEvent": {
+        "properties": {
+          "eventType": {
+            "type": "string",
+            "title": "Eventtype"
+          },
+          "eventTime": {
+            "type": "string",
+            "title": "Eventtime"
+          },
+          "producer": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Producer"
+          },
+          "run": {
+            "$ref": "#/components/schemas/Run"
+          },
+          "job": {
+            "$ref": "#/components/schemas/Job"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/Dataset"
+            },
+            "type": "array",
+            "title": "Inputs"
+          },
+          "outputs": {
+            "items": {
+              "$ref": "#/components/schemas/Dataset"
+            },
+            "type": "array",
+            "title": "Outputs"
+          }
+        },
+        "additionalProperties": true,
+        "type": "object",
+        "required": [
+          "eventType",
+          "eventTime",
+          "run",
+          "job"
+        ],
+        "title": "RunEvent",
+        "description": "An OpenLineage run event (START/RUNNING/COMPLETE/FAIL/ABORT) with its inputs and outputs."
+      },
+      "RunStatus": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          },
+          "author": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Author"
+          },
+          "state": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "State"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Outputs"
+          },
+          "progress_done": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Done"
+          },
+          "progress_total": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Progress Total"
+          },
+          "error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Message"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "events": {
+            "type": "integer",
+            "title": "Events",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "RunStatus",
+        "description": "The *current* status of a run, folded from its OpenLineage lifecycle events.\n\nUnlike the provenance graph (terminal-only), this is the live \"where are we now\" view:\n``state`` is the latest run state (START\u2192RUNNING\u2192COMPLETE/FAIL), with progress + error."
+      },
+      "Runs": {
+        "properties": {
+          "runs": {
+            "items": {
+              "$ref": "#/components/schemas/RunStatus"
+            },
+            "type": "array",
+            "title": "Runs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "runs"
+        ],
+        "title": "Runs",
+        "description": "Live run-status board (most-recently-active first)."
+      },
+      "SchemaField": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "type": {
+            "type": "string",
+            "title": "Type",
+            "default": ""
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "SchemaField",
+        "description": "One column in a dataset's persisted per-version schema (from the standard ``schema`` facet)."
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          },
+          "input": {
+            "title": "Input"
+          },
+          "ctx": {
+            "type": "object",
+            "title": "Context"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      }
+    },
+    "securitySchemes": {
+      "HTTPBearer": {
+        "type": "http",
+        "description": "OIDC bearer token",
+        "scheme": "bearer"
+      }
+    }
+  }
+}

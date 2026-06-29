@@ -273,17 +273,31 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     parametrized core test + the endpoint-wiring test. Marquez/Lakekeeper are format-unaware and cannot
     do this. **Fast-follow:** version diffing (schema + row delta between two Lance versions, and which
     run caused it) + persist-schema-per-version (the #24 prerequisite).
-24. 🟡 **Column-level lineage (L — the one real feature).** **Prerequisite DONE — schema-per-version is
-    now persisted + queryable.** Ingest no longer discards the standard `SchemaDatasetFacet`: a successful
-    versioned write stores its column schema (JSON-string scalar) on the same `WROTE` edge as the version
-    (`Dataset.fields` surfaces the facet; `_SET_WROTE_SCHEMA` persists; `repository.dataset_schema(name,
-    version)` reads it back). New gated `GET /datasets/{name}/schema?version=N` (latest if omitted).
-    **Proven live**: ingest a schema event → `/schema` returns the columns at v1, at-version + latest +
-    absent all correct (caught + fixed a string-vs-int version-match bug the read-coercion had masked).
-    Unit: `Dataset.fields` parse + ingest issues `SET w.schema` + endpoint passthrough; `/schema` in the
-    route-gate set. **Still pending (the feature proper):** the transform must DECLARE column→column
-    mappings (`columnLineage` facet — not free), `(:Column)` nodes + field-to-field edges, ingest storage,
-    query + UI. Now also unblocks **schema-diffing between Lance versions** (the #23 fast-follow).
+24. ✅ **Column-level lineage (L — the one real feature) — DONE (backend; UI is the one remaining sub-task).**
+    The deepest moat: field-to-field provenance neither Marquez nor Lakekeeper derives. Built end to end,
+    design locked by a judge-panel workflow + an adversarial review workflow:
+    - **Prerequisite (schema-per-version)** ✅ — ingest persists each output's column schema (JSON-string
+      scalar) on the `WROTE` edge; `GET /datasets/{name}/schema?version=N`. (caught+fixed a string-vs-int
+      version-match bug the read-coercion had masked.)
+    - **Emit** — `lineage/seed.py` declares the standard `columnLineage` facet across the medallion
+      (embedding←payload TRANSFORMATION, caption←embedding *same-dataset*, identity pass-throughs).
+    - **Model** — `Dataset.column_edges` parses the facet (modern `transformations[]` + deprecated
+      fallback; `masking = any()`).
+    - **Graph** — `(:Column {dataset, field, namespace, type})` MERGEd on the 2-tuple (no concat id),
+      `(:Dataset)-[:HAS_COLUMN]->(:Column)`, **distinct** `(:Column)-[:DERIVED_FROM_COLUMN]->(:Column)`
+      (output→input). Ingest is success-only, seeds the full typed column set, stubs input columns
+      (namespace only — never clobbers type), KEEPS same-dataset cross-field edges, skips only the true
+      identity self-loop, all AGE-1.5.0-safe (separate edge-prop SET, scalar props incl. `masking` bool).
+    - **Query + API** — `GET /datasets/{name}/columns/{field}/upstream|downstream` (transitive field
+      provenance/impact) + `GET /datasets/{name}/columns` (the column DAG: typed nodes + edges with
+      transformation kind + masking). Gated via `require_metadata_access`; **governed** — a column inherits
+      its owning `table:<dataset>` visibility; related columns/nodes/edges touching a hidden dataset are
+      dropped (edge needs BOTH endpoints visible), reusing the audited `_governed()`.
+    - **Proven live**: `gold$catalog.caption` upstream → bronze.payload(blob)/silver.embedding/silver.caption
+      with types; `bronze$events.payload` downstream → silver+gold columns; the `/columns` DAG shows the
+      same-dataset `embedding→caption` edge. 163 unit + **2 e2e against live AGE** + 3 curl checks green.
+    - **Remaining sub-task**: the column-lineage **UI** (Svelte Flow field-to-field view) — backend is
+      complete. Also still unblocks **schema-diffing between Lance versions** (#23 fast-follow).
     (supersedes P2 #12b)
 25. ⬜ **Event-driven runtime is designed, not built.** The medallion is a synchronous driver; the
     NATS JetStream + Ray bridge + Dapr-Workflow gold QC gate is the design in
@@ -300,9 +314,9 @@ one-identity); mutable description/tag CRUD (body-trusted). Full 25-gap matrix l
 `marquez-verdict` workflow transcript.
 
 **Suggested next order:** ✅ #20 (version facet) → ✅ #21 (lineage↔data key) → ✅ #19 (emit on all
-writes) → ✅ #22 (`/events` durable+gated) → ✅ #23 (storage-version reconciliation) → 🟡 #24
-(column-level lineage — **schema-per-version prerequisite shipped**; column→column edges + UI remain)
-then **#25** (the Dapr/NATS event-driven runtime — the stated end goal).
+writes) → ✅ #22 (`/events` durable+gated) → ✅ #23 (storage-version reconciliation) → ✅ #24
+(column-level lineage backend — field-to-field `(:Column)-[:DERIVED_FROM_COLUMN]->` + gated/governed
+queries; only the Svelte UI remains) then **#25** (the Dapr/NATS event-driven runtime — the stated end goal).
 
 ---
 

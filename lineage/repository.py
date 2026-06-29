@@ -13,9 +13,12 @@ Graph shape::
     (:User {name})                            # an OIDC sub (the verified principal)
     (:Run)-[:OF_JOB]->(:Job)
     (:Run)-[:READ]->(:Dataset)                # inputs
-    (:Run)-[:WROTE {version}]->(:Dataset)     # outputs (version = the Lance version produced)
+    (:Run)-[:WROTE {version, schema}]->(:Dataset)  # outputs (version = Lance version; schema per version)
     (:Dataset)-[:DERIVED_FROM]->(:Dataset)    # output <- input (dataset lineage)
     (:User)-[:CREATED]->(:Dataset)            # who created the table (catalog create event)
+    (:Column {dataset, field, namespace, type})    # a column; dataset = owning :Dataset.name (#24)
+    (:Dataset)-[:HAS_COLUMN]->(:Column)            # the dataset's columns (complete typed inventory)
+    (:Column)-[:DERIVED_FROM_COLUMN {...}]->(:Column)  # output_col <- input_col (field-to-field lineage)
 
 A **successful** run (``COMPLETE``) asserts data: it gets a versioned ``WROTE`` edge plus
 ``DERIVED_FROM`` (and ``CREATED`` on a catalog create). A **failed** run (``FAIL``/``ABORT``)
@@ -38,6 +41,11 @@ from psycopg_pool import AsyncConnectionPool
 from lineage.age import fetch, run_cypher
 from lineage.models import Dataset, RunEvent
 from lineage.schemas import (
+    ColumnEdge,
+    ColumnGraph,
+    ColumnNeighbors,
+    ColumnNode,
+    ColumnRef,
     Creator,
     DatasetRef,
     DatasetSchema,
@@ -176,6 +184,53 @@ _GRAPH_EDGES: Final = (
     "WHERE a.name IN $names AND b.name IN $names RETURN DISTINCT a.name, b.name"
 )
 
+# Column-level lineage (#24). A (:Column {dataset, field}) is MERGEd on the 2-tuple of SCALAR props
+# (no concatenated id — dataset names contain '$', so any delimiter could collide). ``dataset`` is the
+# owning :Dataset.name (also the governance handle, denormalised so a query never joins via HAS_COLUMN).
+# The typed seed sets ``type`` from the schema facet; the stub (for an input column whose dataset isn't
+# ingested yet) sets ONLY namespace — never ``type`` — so it can't clobber a real type with null.
+_MERGE_COLUMN: Final = "MERGE (c:Column {dataset:$ds, field:$fld}) SET c.namespace=$ns RETURN 1"
+_MERGE_COLUMN_TYPED: Final = (
+    "MERGE (c:Column {dataset:$ds, field:$fld}) SET c.namespace=$ns, c.type=$type RETURN 1"
+)
+_LINK_HAS_COLUMN: Final = (
+    "MATCH (d:Dataset {name:$ds}),(c:Column {dataset:$ds, field:$fld}) MERGE (d)-[:HAS_COLUMN]->(c) RETURN 1"
+)
+# DISTINCT label (NOT the dataset-level DERIVED_FROM): AGE's *1.. constrains only path ENDPOINTS, not
+# intermediate edge labels, so reusing DERIVED_FROM would let a column traversal silently cross onto the
+# dataset plane if the two ever connect. Direction output→input, mirroring dataset DERIVED_FROM.
+_COL_DERIVED_FROM: Final = (
+    "MATCH (o:Column {dataset:$ods, field:$ofld}),(i:Column {dataset:$ids, field:$ifld}) "
+    "MERGE (o)-[:DERIVED_FROM_COLUMN]->(i) RETURN 1"
+)
+# Edge props are SET in their own statement (AGE 1.5.0 drops a $param in a SET fused to a MERGE-on-edge).
+# All scalars — masking is a plain bool; the multi-valued transformations[] is collapsed to type/subtype
+# at parse time precisely to avoid an array-in-SET (the path AGE mishandles).
+_SET_COL_EDGE: Final = (
+    "MATCH (o:Column {dataset:$ods, field:$ofld})-[e:DERIVED_FROM_COLUMN]->"
+    "(i:Column {dataset:$ids, field:$ifld}) "
+    "SET e.transformation_type=$tt, e.transformation_subtype=$st, e.masking=$mask, e.description=$desc, "
+    "e.run_id=$rid, e.output_version=$ver RETURN 1"
+)
+_COL_UPSTREAM: Final = (
+    "MATCH (c:Column {dataset:$ds, field:$fld})-[:DERIVED_FROM_COLUMN*1..]->(u:Column) "
+    "RETURN DISTINCT u.dataset, u.field, u.namespace, u.type"
+)
+_COL_DOWNSTREAM: Final = (
+    "MATCH (c:Column {dataset:$ds, field:$fld})<-[:DERIVED_FROM_COLUMN*1..]-(x:Column) "
+    "RETURN DISTINCT x.dataset, x.field, x.namespace, x.type"
+)
+# Per-dataset column view: the dataset's OWN columns (complete typed inventory via HAS_COLUMN, incl.
+# columns with no declared lineage) + every column edge touching the dataset (either endpoint).
+_DATASET_COLUMN_NODES: Final = (
+    "MATCH (d:Dataset {name:$ds})-[:HAS_COLUMN]->(c:Column) RETURN c.field, c.type ORDER BY c.field"
+)
+_DATASET_COLUMN_EDGES: Final = (
+    "MATCH (o:Column)-[e:DERIVED_FROM_COLUMN]->(i:Column) WHERE o.dataset=$ds OR i.dataset=$ds "
+    "RETURN DISTINCT o.dataset, o.field, i.dataset, i.field, "
+    "e.transformation_type, e.transformation_subtype, e.masking, e.description"
+)
+
 
 def _tags_from(value: object) -> list[str]:
     """Split the comma-joined ``tags`` node property back into a list (``None``/"" → [])."""
@@ -278,6 +333,7 @@ class LineageRepository:
                             _DERIVED_FROM,
                             {"on": out.name, "inp": inp.name},
                         )
+                await self._ingest_columns(conn, event)
             # A successful catalog "create_table" event carries the verified author → record who
             # created the table as a first-class (:User)-[:CREATED]->(:Dataset) edge.
             if event.is_success and event.operation == _CREATE_TABLE_OP and event.author:
@@ -304,6 +360,67 @@ class LineageRepository:
                 conn, self._graph, _SET_DATASET_TAGS, {"name": ds.name, "tags": ",".join(ds.tags)}
             )
 
+    async def _ingest_columns(self, conn, event: RunEvent) -> None:
+        """Materialise column nodes + field-to-field edges from each output's schema/columnLineage (#24).
+
+        Caller guarantees ``event.is_success`` (a failed run asserts no data). Per output dataset: (1) seed
+        the FULL typed column set from the ``schema`` facet so even columns with no declared lineage exist
+        with their Arrow type; (2) for each declared ``out_field ← input`` dependency, create the column
+        edge — defensively ensuring the input's dataset + columns exist (its type stays null until that
+        dataset is itself ingested as an output, so the stub never clobbers a real type).
+        """
+        for out in event.outputs:
+            for col in out.fields:
+                await run_cypher(
+                    conn,
+                    self._graph,
+                    _MERGE_COLUMN_TYPED,
+                    {"ds": out.name, "fld": col["name"], "ns": out.namespace, "type": col.get("type", "")},
+                )
+                await run_cypher(conn, self._graph, _LINK_HAS_COLUMN, {"ds": out.name, "fld": col["name"]})
+            version = event.output_version(out.name) or ""
+            for edge in out.column_edges:
+                in_ds, in_fld, out_fld = edge["name"], edge["field"], edge["out_field"]
+                # Skip ONLY a true identity self-loop (same dataset AND same field — a no-op carry-forward).
+                # Same-dataset *different*-field edges (caption ← embedding) are the in-place-refinement
+                # column flow that is the core value here, so they are KEPT (unlike the dataset self-skip).
+                if in_ds == out.name and in_fld == out_fld:
+                    continue
+                # The input dataset may not appear in event.inputs (facet-only reference) — ensure its node
+                # exists so HAS_COLUMN can attach, else the input column is orphaned from its Dataset.
+                await run_cypher(conn, self._graph, _MERGE_DATASET, {"name": in_ds, "ns": edge["namespace"]})
+                await run_cypher(
+                    conn, self._graph, _MERGE_COLUMN, {"ds": in_ds, "fld": in_fld, "ns": edge["namespace"]}
+                )
+                await run_cypher(conn, self._graph, _LINK_HAS_COLUMN, {"ds": in_ds, "fld": in_fld})
+                await run_cypher(
+                    conn, self._graph, _MERGE_COLUMN, {"ds": out.name, "fld": out_fld, "ns": out.namespace}
+                )
+                await run_cypher(conn, self._graph, _LINK_HAS_COLUMN, {"ds": out.name, "fld": out_fld})
+                await run_cypher(
+                    conn,
+                    self._graph,
+                    _COL_DERIVED_FROM,
+                    {"ods": out.name, "ofld": out_fld, "ids": in_ds, "ifld": in_fld},
+                )
+                await run_cypher(
+                    conn,
+                    self._graph,
+                    _SET_COL_EDGE,
+                    {
+                        "ods": out.name,
+                        "ofld": out_fld,
+                        "ids": in_ds,
+                        "ifld": in_fld,
+                        "tt": edge["type"],
+                        "st": edge["subtype"],
+                        "mask": edge["masking"],
+                        "desc": edge.get("description", ""),
+                        "rid": event.run.run_id,
+                        "ver": version,
+                    },
+                )
+
     async def upstream(self, name: str) -> Neighbors:
         """Datasets ``name`` is (transitively) derived from — its provenance."""
         rows = await fetch(self._pool, self._graph, _UPSTREAM, {"name": name}, columns=2)
@@ -313,6 +430,59 @@ class LineageRepository:
         """Datasets that are (transitively) derived from ``name`` — its impact."""
         rows = await fetch(self._pool, self._graph, _DOWNSTREAM, {"name": name}, columns=2)
         return Neighbors(dataset=name, related=[DatasetRef(name=r[0], namespace=r[1]) for r in rows])
+
+    async def column_upstream(self, dataset: str, field: str) -> ColumnNeighbors:
+        """The columns ``(dataset, field)`` was (transitively) derived from — field-level provenance. (#24)
+
+        Every related column carries its owning ``dataset`` so the endpoint can drop columns the caller
+        may not see. The distinct ``DERIVED_FROM_COLUMN`` label keeps the walk on the column plane.
+        """
+        rows = await fetch(self._pool, self._graph, _COL_UPSTREAM, {"ds": dataset, "fld": field}, columns=4)
+        return ColumnNeighbors(
+            dataset=dataset,
+            field=field,
+            related=[ColumnRef(dataset=r[0], field=r[1], namespace=r[2], type=r[3]) for r in rows],
+        )
+
+    async def column_downstream(self, dataset: str, field: str) -> ColumnNeighbors:
+        """The columns (transitively) derived from ``(dataset, field)`` — field-level impact. (#24)"""
+        rows = await fetch(self._pool, self._graph, _COL_DOWNSTREAM, {"ds": dataset, "fld": field}, columns=4)
+        return ColumnNeighbors(
+            dataset=dataset,
+            field=field,
+            related=[ColumnRef(dataset=r[0], field=r[1], namespace=r[2], type=r[3]) for r in rows],
+        )
+
+    async def dataset_column_graph(self, name: str) -> ColumnGraph:
+        """The column-level subgraph around ``name``: its own columns + every edge touching them. (#24)
+
+        Nodes = ``name``'s complete typed column inventory (via HAS_COLUMN) plus the neighbour columns on
+        the far end of each edge (untyped — they belong to other datasets). Edges flow source→target where
+        ``target`` is the derived column. Owning ``dataset`` rides every node/edge for the visibility drop.
+        """
+        node_rows = await fetch(self._pool, self._graph, _DATASET_COLUMN_NODES, {"ds": name}, columns=2)
+        edge_rows = await fetch(self._pool, self._graph, _DATASET_COLUMN_EDGES, {"ds": name}, columns=8)
+        nodes = [ColumnNode(dataset=name, field=r[0], type=r[1]) for r in node_rows]
+        seen = {(name, r[0]) for r in node_rows}
+        edges: list[ColumnEdge] = []
+        for o_ds, o_fld, i_ds, i_fld, tt, st, mask, desc in edge_rows:
+            edges.append(
+                ColumnEdge(
+                    source_dataset=i_ds,
+                    source_field=i_fld,
+                    target_dataset=o_ds,
+                    target_field=o_fld,
+                    transformation_type=tt or "",
+                    transformation_subtype=st or "",
+                    masking=bool(mask),
+                    description=desc or "",
+                )
+            )
+            for ds, fld in ((o_ds, o_fld), (i_ds, i_fld)):
+                if (ds, fld) not in seen:
+                    seen.add((ds, fld))
+                    nodes.append(ColumnNode(dataset=ds, field=fld))
+        return ColumnGraph(root=name, columns=nodes, edges=edges)
 
     async def producers(self, name: str) -> Producers:
         """The runs that wrote (or failed to write) ``name`` — who / when / how / version / error."""

@@ -1,78 +1,83 @@
-# Deploying lance-ns on kind (event-driven, Dapr + Helm)
+# lance-ns — how it all works (event-driven on kind)
 
-One umbrella Helm chart (`chart/`) deploys the whole event-driven stack on a local **kind** cluster:
-the catalog (producer) + lineage (consumer) + web, plus Dapr, NATS JetStream, Apache-AGE Postgres,
-OpenFGA, Dex, and MinIO. Modeled on the `rask/` chart pattern. See the topology diagram:
-[`k8s-event-driven-architecture.html`](k8s-event-driven-architecture.html).
+A Lance lakehouse REST catalog + in-service lineage (OpenLineage → Apache AGE) + governance, running as
+**event-driven microservices on a local kind cluster**, deployed by one umbrella Helm chart and
+iterated with Tilt. Diagram: [`k8s-event-driven-architecture.html`](k8s-event-driven-architecture.html).
 
-## Toolchain
-
-`helm` + `docker` are required. `kind`, `kubectl`, `k9s`, `tilt` are downloaded into `./.localbin/`
-(gitignored) — add it to PATH: `export PATH="$PWD/.localbin:$PATH"`.
-
-## Bring it up
+## One command
 
 ```bash
-export PATH="$PWD/.localbin:$PATH" KUBECONFIG="$HOME/.kube/config"
-
-kind create cluster --config deploy/kind/kind-config.yaml          # 1. cluster
-helm repo add dapr https://dapr.github.io/helm-charts/             # 2. subchart repos
-helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-helm repo add openfga https://openfga.github.io/helm-charts
-helm dependency build ./chart
-
-docker build -f .docker/rest-catalog.dockerfile -t lance-rest-catalog:dev .   # 3. build images
-docker build -f .docker/web.dockerfile -t lance-lineage-web:dev .
-kind load docker-image lance-rest-catalog:dev lance-lineage-web:dev --name lance
-
-helm upgrade --install lance-ns ./chart                            # 4. deploy
-kubectl rollout restart deploy/lance-ns-catalog deploy/lance-ns-lineage  # ensure sidecar injection
-
-k9s                                                                # 5. watch it (or: kubectl get pods)
+make up        # bootstrap toolchain + kind cluster + build images + deploy everything
+make verify    # prove the event-driven flow end-to-end
+make dashboards# port-forward the UIs (web / lineage / Jaeger / Dapr dashboard)
+make k9s       # inspect the cluster
+make tilt-up   # dev loop: hot-reload the FastAPI services
+make down      # tear down
 ```
 
-Reach the services (kind has no host ports — port-forward):
+`make up` is idempotent. It needs only **docker** + **helm** on PATH; it downloads kind/kubectl/k9s/tilt
+into `.localbin/` (gitignored).
 
-```bash
-kubectl port-forward svc/lance-ns-web     5173:3000   # the UI
-kubectl port-forward svc/lance-ns-lineage 8000:8000   # the lineage API
-kubectl port-forward svc/lance-ns-catalog 2333:2333   # the catalog
+## The components (one `helm install`, all gated by `<key>.enabled`)
+
+| Component | Kind | Role |
+| --------- | ---- | ---- |
+| **catalog** | app (FastAPI) + daprd sidecar | **producer** — creates Lance tables on S3; publishes OpenLineage events via Dapr |
+| **lineage** | app (FastAPI) + daprd sidecar | **consumer** — Dapr subscription ingests events into Apache AGE; serves the lineage API |
+| **web** | app (SvelteKit) | the UI (datasets / jobs / columns DAG) |
+| **Dapr** | subchart | control plane + sidecar injection + pub/sub + secret-store + tracing config |
+| **NATS** | subchart | JetStream — the durable event bus behind Dapr pub/sub |
+| **Apache AGE Postgres** | StatefulSet | the lineage graph (`lineage`) **and** OpenFGA's datastore (`openfga` db) |
+| **OpenFGA** | subchart | Zanzibar authz (datastore = the AGE Postgres) |
+| **Dex** | Deployment | OIDC issuer (authn) |
+| **RustFS** | Deployment | S3-compatible object store for the Lance lakehouse |
+| **OpenBao** | Deployment | secret store (Vault fork), fronted by a Dapr `secretstores.hashicorp.vault` component |
+| **Jaeger** | Deployment | tracing backend + UI — Dapr sidecars export spans here (OTLP) |
+| **Dapr dashboard** | Deployment | web UI for the Dapr stuff (components, subscriptions, configurations) |
+
+## The event-driven path (verified)
+
+```
+catalog --DaprClient.publish_event--> [daprd sidecar] --pubsub.jetstream--> NATS JetStream (stream LINEAGE)
+                                                                                   │
+   Apache AGE  <--cypher-- lineage  <--POST /lineage-events-- [daprd sidecar] <-----┘
+   (:User)-[:CREATED]->(:Dataset)        (Dapr subscription)
 ```
 
-## Verify the event-driven path
+- The catalog publishes to its **local** sidecar; the sidecar owns retry/backoff/DLQ + **W3C
+  trace-context propagation** as component config (no broker client in app code).
+- The lineage service subscribes via `dapr-ext-fastapi` (`/dapr/subscribe` → `/lineage-events`),
+  ingests into AGE, and returns the Dapr ack status (`SUCCESS`/`RETRY`/`DROP`). Ingest is idempotent
+  (MERGE on `run_id`).
+- `make verify` publishes a `create_table` event and asserts AGE recorded the creator.
 
-Publish an OpenLineage event **through the catalog's Dapr sidecar** and watch it reach Apache AGE via
-the lineage subscription (this is exactly what a real `create_table` does):
+## Observability (OTel for Dapr)
 
-```bash
-kubectl exec deploy/lance-ns-catalog -c catalog -- python -c "
-import httpx
-event = {'eventType':'COMPLETE','eventTime':'t','producer':'x',
-  'run':{'runId':'demo-1','facets':{'author':{'name':'alice','sub':'alice'},'lance':{'operation':'create_table','version':1}}},
-  'job':{'namespace':'lance-catalog','name':'create_table'},'inputs':[],
-  'outputs':[{'namespace':'kind','name':'kind\$demo','facets':{'version':{'datasetVersion':'1'}}}]}
-print(httpx.post('http://localhost:3500/v1.0/publish/lineage-pubsub/lineage.events.v1', json=event).status_code)"
-# → 204
+A Dapr `Configuration` (`lance-tracing`) makes the catalog + lineage sidecars export **distributed
+traces** over OTLP to **Jaeger** — no app code needed. The `/v1.0/publish/lineage-pubsub/...` span and
+the lineage delivery span show up in the Jaeger UI. (App-level OTel SDK metrics/logs, and a standalone
+OTel Collector fan-out, are the next layer.)
 
-curl -s 'localhost:8000/datasets/kind$demo/creator'   # → {"dataset":"kind$demo","creator":"alice"}
-```
+## Governance (Dex + OpenFGA)
+
+Deployed; `auth.enabled=false` by default. Set `auth.enabled=true` to wire OIDC (Dex) verification +
+OpenFGA `can_get_metadata` checks into the catalog + lineage. OpenFGA's schema migrates against the AGE
+Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `ag_catalog`).
+
+## Notable engineering notes
+
+- **Dapr JetStream consumer** uses an **ephemeral** consumer (no `durableName`): a durable PUSH
+  consumer orphans on every pod redeploy ("consumer name already in use") and silently halts ingestion.
+  Ephemeral is auto-cleaned + recreated cleanly; idempotent ingest makes any replay a no-op. Durable
+  redelivery across a redeploy gap (a durable PULL consumer) is the production-hardening follow-up.
+- **AGE + OpenFGA share one Postgres**: AGE's `ag_catalog` search-path would break OpenFGA migrations,
+  so the openfga db is pinned to `search_path = public` in the AGE initdb.
+- **kind has no host ports** — reach services via `make dashboards` (port-forwards).
 
 ## Status (audited)
 
-| | |
-|---|---|
-| Event-driven catalog→lineage (Dapr pub/sub over NATS JetStream) | ✅ verified end-to-end |
-| Apache AGE graph, NATS JetStream, web, Dex, MinIO, Dapr control plane | ✅ running |
-| Dapr sidecars injected into catalog + lineage | ✅ 2/2 each |
-| Auth (Dex OIDC + OpenFGA) | ⚠️ deployed, `auth.enabled=false`; OpenFGA datastore migrates but the server init-container races Postgres on first install (re-run `helm upgrade` once Postgres is ready) |
-| S3 | ⚠️ MinIO (not RustFS) |
-| Medallion as event-driven services (raw→bronze landing, bronze→silver, silver→gold movers) + Ray dummy | ❌ not built — only the catalog producer + lineage consumer exist; the medallion is still the synchronous seed |
-
-## Known follow-ups
-
-- Fix the OpenFGA migrate/server ordering (init-container wait-for-postgres) and flip `auth.enabled=true`
-  for the governed multi-user demo (Dex token → catalog → OpenFGA check).
-- Build the medallion stage movers as event-driven services (S3 ObjectCreated → NATS → Ray bridge →
-  Dapr-Workflow gold QC gate), with a **dummy** producer standing in for real Ray.
-- **OpenBao** as the Dapr secret store (replace plaintext demo secrets).
-- A Tiltfile (`helm_resource` + `live_update`) for hot-reload, and Makefile `kind-*`/`tilt-*` targets.
+✅ Verified: the event-driven catalog→lineage flow, all components healthy (`helm STATUS: deployed`),
+Dapr sidecar injection, Jaeger traces, `tilt ci` brings the whole stack up green.
+⚠️ Deployed-not-wired: auth (`auth.enabled=false`); OpenBao secret read via Dapr (kv-v2 path nuance).
+❌ Not built: the medallion stage movers (raw→bronze / bronze→silver / silver→gold) as event-driven
+services + a dummy Ray producer; a compaction/GC microservice; an API gateway; RustFS STS.

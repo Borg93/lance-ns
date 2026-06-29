@@ -17,6 +17,11 @@ dapr:
   enabled: true
   sidecars: true # add dapr.io/* annotations to catalog + lineage
   logLevel: info
+  # The Dapr dashboard — a web UI for the Dapr stuff (components, subscriptions, configurations,
+  # control plane). These are first-party keys (the dapr subchart ignores them).
+  dashboard:
+    enabled: true
+    image: daprio/dashboard:0.15.0
   global:
     ha:
       enabled: false # single-node kind

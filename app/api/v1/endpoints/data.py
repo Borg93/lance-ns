@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import logging
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, BackgroundTasks, Body, Header
@@ -37,8 +39,11 @@ from app.api.dependencies import (
 from app.api.security import CurrentToken
 from app.core import fga
 from app.core.identifiers import parse_identifier
+from app.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
 from app.core.serialization import dump
 from app.services import dataplane, native
+
+log = logging.getLogger(__name__)
 
 ARROW_STREAM = "application/vnd.apache.arrow.stream"
 ARROW_FILE = "application/vnd.apache.arrow.file"
@@ -67,6 +72,23 @@ async def create_table(
         except json.JSONDecodeError as exc:
             raise InvalidInputError(f"x-lance-table-properties is not valid JSON: {exc}") from exc
     segments = parse_identifier(id, settings.delimiter)
+    table_id = fga.canonical_object_id(segments, delimiter=settings.delimiter)
+    namespace = fga.parent_namespace_id(segments, delimiter=settings.delimiter) or ""
+    created_by = token.sub if token is not None else None
+    run_id = str(uuid.uuid4())
+    # #21: stamp the lineage coordinates into the Lance file's schema metadata so the data is
+    # self-describing (reconcilable to the graph without the catalog). Best-effort — a payload we
+    # can't re-encode must never fail the create over metadata; fall back to the original bytes.
+    try:
+        data = await run_in_threadpool(
+            inject_into_arrow_stream,
+            data,
+            build_lineage_metadata(
+                table_id=table_id, namespace=namespace, run_id=run_id, created_by=created_by
+            ),
+        )
+    except Exception as exc:  # noqa: BLE001 — lineage metadata is an enhancement, not a gate
+        log.warning("lineage_metadata_inject_failed", extra={"table": table_id, "error": str(exc)})
     req = CreateTableRequest(id=segments, mode=mode, properties=properties)
     response: CreateTableResponse = await run_in_threadpool(native.call, ns, "create_table", req, data)
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
@@ -74,13 +96,15 @@ async def create_table(
     # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget
     # (after the response, best-effort) so the lineage service can never block/fail a create. The
     # canonical id keeps the lineage Dataset == the OpenFGA object id == the catalog table id; the
-    # caller's bearer is forwarded so ingest accepts it when the lineage service has OIDC on.
+    # caller's bearer is forwarded so ingest accepts it when the lineage service has OIDC on; the
+    # ``run_id`` is the same one stamped into the Lance file above (#21).
     background_tasks.add_task(
         emitter.emit_create,
-        table_id=fga.canonical_object_id(segments, delimiter=settings.delimiter),
-        namespace=fga.parent_namespace_id(segments, delimiter=settings.delimiter) or "",
-        author=token.sub if token is not None else None,
+        table_id=table_id,
+        namespace=namespace,
+        author=created_by,
         version=response.version or 1,
+        run_id=run_id,
         authorization=authorization,
     )
     return response

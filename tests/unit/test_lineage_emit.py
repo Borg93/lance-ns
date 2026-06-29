@@ -124,6 +124,20 @@ def test_http_emitter_posts_the_event() -> None:
     assert client.posted["run"]["facets"]["author"]["sub"] == "alice"
 
 
+def test_http_emitter_uses_shared_run_id() -> None:
+    # #21: the catalog passes the same run id it stamped into the Lance file, so the file points at
+    # its exact creating run in the lineage graph.
+    client = _CapturingClient()
+    emitter = HttpLineageEmitter(
+        cast(httpx.AsyncClient, client), "http://lineage/api/v1/lineage", job_namespace="lance-catalog"
+    )
+    asyncio.run(
+        emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=1, run_id="r-shared")
+    )
+    assert client.posted is not None
+    assert client.posted["run"]["runId"] == "r-shared"
+
+
 def test_http_emitter_forwards_authorization() -> None:
     # So ingest accepts the event when the lineage service has OIDC on (else 401 + silent drop).
     client = _CapturingClient()

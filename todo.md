@@ -243,14 +243,13 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     `DatasetVersionDatasetFacet` (`outputs[].facets.version.datasetVersion`) so a real `create_table`
     persists the Lance version on the `WROTE` edge (was `NULL` — only the demo emitted it). Proven by the
     round-trip unit test (`RunEvent.output_version == "1"`). Revives the storage-version differentiator.
-21. ⬜ **Lineage ↔ data KEY embedded in the Lance file (self-describing data) — user request.** Today the
-    only link is a *convention*: the canonical id (`Dataset.name`) + the version on WROTE. NOTHING is
-    written into the Lance file at create (verified — `create_table` writes no table metadata); only gold's
-    JSONB column, demo-only. **Build:** at `create_table`, write into Lance `schema.metadata` (± a column)
-    `{lineage.dataset_id, lineage.namespace, lineage.create_run_id, lineage.created_by}` so the data
-    carries its own OpenLineage coordinates and is reconcilable to the graph WITHOUT the catalog. Slots into
-    `create_table` + `build_create_event` next to #20. NB: OpenLineage is per-`(namespace,name)`; we use the
-    single canonical `name` as identity, so carry `namespace` as **annotation-in-file, not a 2nd id axis**.
+21. ✅ **Lineage ↔ data KEY embedded in the Lance file — DONE (self-describing data).** `create_table`
+    now stamps `{lineage.dataset_id, lineage.namespace, lineage.create_run_id, lineage.created_by}` into
+    the Lance **schema metadata** (`app/core/lineage_metadata.py` injects them into the Arrow stream
+    before the write; `create_run_id` = the same run id the create event emits, so the file points at its
+    creating run in the graph). **Proven in real Lance** by a write→read test (the keys survive
+    `write_dataset`). Best-effort (never fails a create); the re-encode runs in the threadpool. The data
+    is now reconcilable to the graph WITHOUT the catalog — nobody else (Marquez/Lakekeeper) does this.
 22. ⬜ **Persist + gate `/events`.** `/runs` is now durable (#17); `/events` is still `deque(500)`,
     in-memory + UNGATED. Move to a durable store + reuse the `can_get_metadata` filter; add retention once
     it's a real log. (overlaps P2 #16)

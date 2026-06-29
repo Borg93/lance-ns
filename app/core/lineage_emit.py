@@ -97,6 +97,7 @@ class LineageEmitter(Protocol):
         namespace: str,
         author: str | None,
         version: int,
+        run_id: str | None = None,
         authorization: str | None = None,
     ) -> None: ...
 
@@ -111,6 +112,7 @@ class NoopEmitter:
         namespace: str,
         author: str | None,
         version: int,
+        run_id: str | None = None,
         authorization: str | None = None,
     ) -> None:
         return None
@@ -131,6 +133,7 @@ class HttpLineageEmitter:
         namespace: str,
         author: str | None,
         version: int,
+        run_id: str | None = None,
         authorization: str | None = None,
     ) -> None:
         event = build_create_event(
@@ -138,7 +141,9 @@ class HttpLineageEmitter:
             namespace=namespace,
             author=author,
             version=version,
-            run_id=str(uuid.uuid4()),
+            # Same run id the catalog stamped into the Lance file (#21), so the file points at its
+            # creating run in the graph. Generate one only when the caller didn't supply it.
+            run_id=run_id or str(uuid.uuid4()),
             event_time=datetime.now(UTC).isoformat(),
             job_namespace=self._job_namespace,
         )

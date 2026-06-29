@@ -20,7 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from lance_namespace import LanceNamespaceError
 
 from app.core import fga
-from app.core.dapr_auth import require_dapr_token
+from app.core.dapr_auth import assert_app_token_configured, require_dapr_token
 from app.core.exceptions import problem_detail
 from app.core.oidc import OIDCVerifier
 from lineage import demo
@@ -33,7 +33,7 @@ from lineage.auth import (
     enforce_author,
     require_metadata_access,
 )
-from lineage.config import get_settings, storage_options
+from lineage.config import apply_dapr_secrets, get_settings, storage_options
 from lineage.consumer import handle_cloud_event, record_event_best_effort
 from lineage.models import RunEvent
 from lineage.reconcile import read_storage_version, reconcile
@@ -58,6 +58,13 @@ PROBLEM_JSON = "application/problem+json"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    # Fail closed if Dapr ingest is on but the app-api-token is unset — the ingest route would otherwise be
+    # an unauthenticated forgery path (the audit's 'blanked token' residual). No-op in dev (Dapr off).
+    assert_app_token_configured(dapr_enabled=settings.dapr_enabled)
+    # Consume the S3 secret + AGE DB password from the Dapr secret store (OpenBao) before opening the pool,
+    # so neither lives in plaintext pod env — the audit's secret-consumption fix, symmetric with the
+    # catalog. No-op (and no Dapr dependency) when secrets_from_dapr is off; fails closed on the S3 secret.
+    apply_dapr_secrets(settings)
     pool = make_pool(settings.database_url)
     await pool.open()
     app.state.pool = pool

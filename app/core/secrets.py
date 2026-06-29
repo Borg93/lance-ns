@@ -1,15 +1,19 @@
 """Read sensitive secrets from the Dapr secret store at boot — so the store is actually CONSUMED.
 
 The security audit flagged that the OpenBao/Dapr secret store was wired but never read: services still
-took their secrets from plaintext pod env, making the integration decorative. When ``secrets_from_dapr``
-is on, a service fetches its secret bundle from the local sidecar's secret store
-(``GET /v1.0/secrets/<store>/<key>``) at startup and uses those values, with the plaintext env only as a
-boot-time fallback (logged loudly) so a store outage can't hard-fail boot.
+took their secrets from plaintext pod env, making the integration decorative — AND that the plaintext
+secret still shipped in env, so reading it from the store on top was redundant, not protective. The fix:
+when ``secrets_from_dapr`` is on, the chart omits the sensitive value from pod env entirely and the
+service fetches its secret bundle from the local sidecar's secret store
+(``GET /v1.0/secrets/<store>/<key>``) at startup as the SOLE source — retrying while the store seeds, and
+failing closed (not silently booting on an empty key) if it never arrives. So the store is genuinely the
+source of truth and the plaintext secret no longer lives in the environment.
 """
 
 from __future__ import annotations
 
 import logging
+import time
 
 import httpx
 
@@ -17,19 +21,32 @@ log = logging.getLogger(__name__)
 
 
 def fetch_dapr_secret(
-    store: str, key: str, *, dapr_http_port: int = 3500, timeout: float = 5.0
+    store: str,
+    key: str,
+    *,
+    dapr_http_port: int = 3500,
+    timeout: float = 5.0,
+    retries: int = 10,
+    backoff: float = 3.0,
 ) -> dict[str, str]:
-    """Fetch a secret bundle ``{name: value}`` from the local Dapr secret store. Best-effort: returns
-    ``{}`` (and logs) on any failure so the caller can fall back to env rather than crash at boot."""
+    """Fetch a secret bundle ``{name: value}`` from the local Dapr secret store, retrying so a service
+    that boots before the sidecar/store/seed are ready still gets it. Returns ``{}`` (and logs) only after
+    exhausting retries — the caller decides whether that is fatal (fail-closed) or a fallback."""
     url = f"http://localhost:{dapr_http_port}/v1.0/secrets/{store}/{key}"
-    try:
-        resp = httpx.get(url, timeout=timeout)
-        resp.raise_for_status()
-        data = resp.json()
-        if isinstance(data, dict):
-            return {k: str(v) for k, v in data.items()}
-        log.warning("dapr_secret_unexpected_shape", extra={"store": store, "key": key})
-        return {}
-    except Exception as exc:  # noqa: BLE001 — boot must not hard-fail on a secret-store hiccup
-        log.warning("dapr_secret_fetch_failed", extra={"store": store, "key": key, "error": str(exc)})
-        return {}
+    for attempt in range(1, retries + 1):
+        try:
+            resp = httpx.get(url, timeout=timeout)
+            resp.raise_for_status()
+            data = resp.json()
+            if isinstance(data, dict):
+                return {k: str(v) for k, v in data.items()}
+            log.warning("dapr_secret_unexpected_shape", extra={"store": store, "key": key})
+            return {}
+        except Exception as exc:  # noqa: BLE001 — store may not be ready yet; retry
+            if attempt == retries:
+                log.warning(
+                    "dapr_secret_fetch_failed", extra={"store": store, "key": key, "error": str(exc)}
+                )
+                return {}
+            time.sleep(backoff)
+    return {}

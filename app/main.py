@@ -40,16 +40,26 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.shutting_down = False
     app.state.startup_complete = False
-    # Consume the sensitive S3 secret from the Dapr secret store (OpenBao) rather than plaintext env, so
-    # the secret store is actually the source of truth (the audit's 'wired but never read' fix).
+    # Consume the sensitive S3 secret from the Dapr secret store (OpenBao) — the store is the SOLE source
+    # of truth, NOT a fallback (the audit's 'wired but never read' / 'plaintext still ships' fix). With
+    # secrets_from_dapr on, the chart does not put the secret in pod env, so reading the env would yield
+    # nothing — we fetch from the store (retrying while it seeds) and FAIL CLOSED if it never arrives,
+    # rather than booting with an empty/plaintext key.
     if settings.secrets_from_dapr:
         bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
         s3_secret = bundle.get(settings.dapr_secret_s3_field)
         if s3_secret:
             settings.s3_secret_access_key = SecretStr(s3_secret)
             log.info("secret_from_dapr_store", extra={"field": settings.dapr_secret_s3_field})
+        elif settings.s3_secret_access_key.get_secret_value():
+            log.warning("secret_from_dapr_missing_env_fallback", extra={"store": settings.dapr_secret_store})
         else:
-            log.warning("secret_from_dapr_missing", extra={"store": settings.dapr_secret_store})
+            raise RuntimeError(
+                f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
+                f"{settings.dapr_secret_key!r} and no env fallback — failing closed"
+            )
+    elif not settings.s3_secret_access_key.get_secret_value():
+        raise RuntimeError("LANCE_S3_SECRET_ACCESS_KEY is required when secrets_from_dapr is off")
     app.state.namespace = build_namespace(settings)  # fail fast if storage misconfigured
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(

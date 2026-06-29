@@ -32,7 +32,9 @@ class Settings(BaseSettings):
     # missing secret fails loudly at startup instead of silently using a default.
     s3_endpoint: str = Field(default="http://minio:9000", alias="LANCE_S3_ENDPOINT")
     s3_access_key_id: str = Field(alias="LANCE_S3_ACCESS_KEY_ID")
-    s3_secret_access_key: SecretStr = Field(alias="LANCE_S3_SECRET_ACCESS_KEY")
+    # Optional default: with secrets_from_dapr on, the secret comes from the store (no plaintext env), and
+    # the lifespan fails closed if neither the store nor env provides it.
+    s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="LANCE_S3_SECRET_ACCESS_KEY")
     s3_region: str = Field(default="us-east-1", alias="LANCE_S3_REGION")
     s3_allow_http: bool = Field(default=True, alias="LANCE_S3_ALLOW_HTTP")
     s3_virtual_hosted: bool = Field(default=False, alias="LANCE_S3_VIRTUAL_HOSTED")

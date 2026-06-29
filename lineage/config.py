@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Self
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -62,6 +63,16 @@ class LineageSettings(BaseSettings):
     s3_region: str = Field(default="us-east-1", alias="LINEAGE_S3_REGION")
     s3_bucket: str = Field(default="lakehouse", alias="LINEAGE_S3_BUCKET")
 
+    # --- Secret consumption from the Dapr secret store (OpenBao) — the audit's 'wired but never read' /
+    # 'plaintext still ships' fix, symmetric with the catalog. When on, the S3 secret (reconcile reads the
+    # real Lance file with it) and the AGE DB password come from the store at boot, NOT plaintext env: the
+    # chart omits both from pod env. apply_dapr_secrets() splices them in and fails closed on the S3 secret.
+    secrets_from_dapr: bool = Field(default=False, alias="LINEAGE_SECRETS_FROM_DAPR")
+    dapr_secret_store: str = Field(default="lance-secrets", alias="LINEAGE_DAPR_SECRET_STORE")
+    dapr_secret_key: str = Field(default="lance", alias="LINEAGE_DAPR_SECRET_KEY")
+    dapr_secret_s3_field: str = Field(default="rustfs-secret-key", alias="LINEAGE_DAPR_SECRET_S3_FIELD")
+    dapr_secret_db_field: str = Field(default="postgres-password", alias="LINEAGE_DAPR_SECRET_DB_FIELD")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail closed: a half-configured auth layer is a startup error, not open access."""
@@ -81,6 +92,39 @@ class LineageSettings(BaseSettings):
 def get_settings() -> LineageSettings:
     """Return the process-wide cached lineage settings."""
     return LineageSettings()
+
+
+def _with_db_password(url: str, password: str) -> str:
+    """Return ``url`` with its userinfo password set to ``password`` — so the AGE password comes from the
+    secret store, not a plaintext connection string in pod env (the chart ships the URL password-less)."""
+    parts = urlsplit(url)
+    userinfo = f"{parts.username or ''}:{quote(password, safe='')}"
+    host = parts.hostname or ""
+    netloc = f"{userinfo}@{host}{f':{parts.port}' if parts.port else ''}"
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment))
+
+
+def apply_dapr_secrets(settings: LineageSettings) -> None:
+    """Consume sensitive values (S3 secret, AGE DB password) from the Dapr secret store and splice them
+    into ``settings`` in place. Fails closed on the S3 secret (no plaintext fallback when the store is the
+    source); the DB password is spliced only when present (the URL keeps its env value otherwise). No-op
+    when ``secrets_from_dapr`` is off. Imported lazily so the catalog dep isn't pulled in dev/tests."""
+    if not settings.secrets_from_dapr:
+        return
+    from app.core.secrets import fetch_dapr_secret
+
+    bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
+    s3_secret = bundle.get(settings.dapr_secret_s3_field)
+    if s3_secret:
+        settings.s3_secret_access_key = s3_secret
+    elif not settings.s3_secret_access_key:
+        raise RuntimeError(
+            f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
+            f"{settings.dapr_secret_key!r} and no env fallback — failing closed"
+        )
+    db_password = bundle.get(settings.dapr_secret_db_field)
+    if db_password:
+        settings.database_url = _with_db_password(settings.database_url, db_password)
 
 
 def storage_options(settings: LineageSettings) -> dict[str, str]:

@@ -23,7 +23,20 @@ from fastapi import Header, HTTPException
 def require_dapr_token(dapr_api_token: str | None = Header(default=None)) -> None:
     """FastAPI dependency: reject a sidecar-delivered request whose ``dapr-api-token`` header doesn't
     match the app's ``APP_API_TOKEN`` (set by Dapr from ``dapr.io/app-token-secret``). No-op when the
-    token is unset — the open dev default."""
+    token is unset — the open dev default; ``assert_app_token_configured`` makes that a startup error
+    once Dapr ingest is actually enabled, so the no-op can only apply in dev."""
     expected = os.environ.get("APP_API_TOKEN")
     if expected and dapr_api_token != expected:
         raise HTTPException(status_code=403, detail="invalid or missing Dapr app-api-token")
+
+
+def assert_app_token_configured(*, dapr_enabled: bool) -> None:
+    """Fail closed at startup: when Dapr ingest is enabled the delivery route is live and MUST be
+    authenticated, so an unset/blank ``APP_API_TOKEN`` is a misconfiguration — not the dev default — and
+    the pod must refuse to start rather than silently expose an unauthenticated ingest path (the security
+    audit's 'blanked token silently reopens the route' residual). No-op when Dapr ingest is off."""
+    if dapr_enabled and not os.environ.get("APP_API_TOKEN"):
+        raise RuntimeError(
+            "APP_API_TOKEN must be set when Dapr ingest is enabled — the delivery route would otherwise be "
+            "unauthenticated. Wire dapr.io/app-token-secret + the APP_API_TOKEN env, or disable Dapr ingest."
+        )

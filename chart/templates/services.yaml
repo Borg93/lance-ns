@@ -48,10 +48,14 @@ spec:
             - { name: LANCE_NS_DELIMITER, value: "$" }
             - { name: LANCE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            {{- if not .Values.openbao.enabled }}
             - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
-            # Consume the S3 secret from the OpenBao/Dapr secret store at boot (env above is the fallback)
-            # — the audit's 'wired but never read' fix. Needs the lance-secrets component (scoped to catalog).
-            - { name: LANCE_SECRETS_FROM_DAPR, value: {{ .Values.openbao.enabled | ternary "true" "false" | quote }} }
+            {{- else }}
+            # OpenBao on → the S3 secret comes ONLY from the Dapr secret store at boot; it is deliberately
+            # NOT in pod env (the audit's 'plaintext still ships' fix). The catalog fails closed if the
+            # store can't provide it. Needs the lance-secrets component (scoped to catalog).
+            - { name: LANCE_SECRETS_FROM_DAPR, value: "true" }
+            {{- end }}
             - { name: LANCE_S3_REGION, value: "us-east-1" }
             - { name: LANCE_S3_ALLOW_HTTP, value: "true" }
             - { name: LANCE_S3_VIRTUAL_HOSTED, value: "false" }
@@ -129,7 +133,15 @@ spec:
             - name: APP_API_TOKEN
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
+            {{- if not .Values.openbao.enabled }}
             - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
+            {{- else }}
+            # OpenBao on → the AGE password is NOT in the connection string in pod env; lineage fetches it
+            # from the secret store at boot and splices it into the URL (the audit's 'plaintext still ships'
+            # fix). The URL here carries the user/host/db only, no password.
+            - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
+            - { name: LINEAGE_SECRETS_FROM_DAPR, value: "true" }
+            {{- end }}
             - { name: LINEAGE_GRAPH, value: {{ .Values.age.lineageDb | quote }} }
             - { name: LINEAGE_DAPR_ENABLED, value: "true" }
             - { name: LINEAGE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
@@ -137,7 +149,9 @@ spec:
             - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
             - { name: LINEAGE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
             - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            {{- if not .Values.openbao.enabled }}
             - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            {{- end }}
             - { name: LINEAGE_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
             {{- if .Values.auth.enabled }}
             - { name: LINEAGE_OIDC_ENABLED, value: "true" }

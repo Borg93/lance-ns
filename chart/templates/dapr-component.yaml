@@ -46,7 +46,18 @@ spec:
   version: v1
   metadata:
     - { name: vaultAddr, value: "http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}" }
+    {{- if .Values.openbao.devMode }}
     - { name: vaultToken, value: {{ .Values.openbao.devToken | quote }} }
+    {{- else }}
+    # Prod path: NOT the dev root token (it can't authenticate against an operator-initialized OpenBao).
+    # The operator supplies a real, scoped token via this Kubernetes secret; Dapr resolves it through its
+    # default k8s secret store. Create it out-of-band: kubectl create secret generic <release>-openbao-token
+    # --from-literal=token=<bao-token>.
+    - name: vaultToken
+      secretKeyRef:
+        name: {{ .Release.Name }}-openbao-token
+        key: token
+    {{- end }}
     - { name: enginePath, value: "secret" }
     # Dapr defaults vaultKVPrefix to "dapr", so it reads secret/data/dapr/<key>; our seed writes
     # secret/data/<key>. Drop the prefix so the path is the natural secret/data/<key> (the kv-v2 nuance).

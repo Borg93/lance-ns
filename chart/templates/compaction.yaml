@@ -1,0 +1,78 @@
+{{- if .Values.compaction.enabled }}
+{{- $root := . }}
+{{- $port := .Values.compaction.port }}
+{{- $rustfs := include "lance.rustfsHost" . }}
+# Dapr cron INPUT binding — the sidecar POSTs to /<bindingName> on `schedule`. The schedule lives here
+# as component config, not in app code (no scheduler thread in the service). Scoped to the compaction app.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Values.compaction.bindingName }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+    - { name: schedule, value: {{ .Values.compaction.schedule | quote }} }
+scopes:
+  - {{ .Values.compaction.daprAppId }}
+---
+# Compaction/GC service — runs uvicorn compaction.service:app (shares the catalog image).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" . }}-compaction
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: compaction, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: compaction
+      {{- if .Values.dapr.sidecars }}
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.compaction.daprAppId | quote }}
+        dapr.io/app-port: {{ $port | quote }}
+        dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        {{- if .Values.observability.enabled }}
+        dapr.io/config: "lance-tracing"
+        {{- end }}
+      {{- end }}
+    spec:
+      containers:
+        - name: compaction
+          image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- if .Values.observability.enabled }}
+          command: ["opentelemetry-instrument", "uvicorn", "compaction.service:app", "--host=0.0.0.0", "--port={{ $port }}"]
+          {{- else }}
+          command: ["uvicorn", "compaction.service:app", "--host=0.0.0.0", "--port={{ $port }}"]
+          {{- end }}
+          ports: [{ name: http, containerPort: {{ $port }} }]
+          env:
+            {{- if .Values.observability.enabled }}
+            {{- include "lance.otelEnv" (list $root .Values.compaction.daprAppId) | nindent 12 }}
+            {{- end }}
+            - { name: COMPACTION_BINDING_NAME, value: {{ .Values.compaction.bindingName | quote }} }
+            - { name: COMPACTION_OLDER_THAN_DAYS, value: {{ .Values.compaction.olderThanDays | quote }} }
+            - { name: COMPACTION_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: COMPACTION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            - { name: COMPACTION_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            - { name: COMPACTION_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
+            - { name: COMPACTION_S3_REGION, value: "us-east-1" }
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" . }}-compaction
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports: [{ name: http, port: {{ $port }}, targetPort: http }]
+  selector: { app.kubernetes.io/component: compaction, app.kubernetes.io/instance: {{ .Release.Name }} }
+{{- end }}

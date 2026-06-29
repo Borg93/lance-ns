@@ -230,6 +230,17 @@ medallion:
     - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver }
     - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "" }
 
+# --- Compaction/GC microservice (Dapr cron binding) -----------------------------------------------
+# A bindings.cron component POSTs /<bindingName> on `schedule`; the service compacts small Lance
+# fragments + GCs old versions across the lakehouse bucket. Schedule/retention are component config.
+compaction:
+  enabled: true
+  daprAppId: compaction
+  port: 8000
+  bindingName: compaction-cron
+  schedule: "@every 120s" # demo cadence (prod: e.g. "0 */30 * * * *")
+  olderThanDays: 7 # version GC keeps this much history
+
 resources:
   default:
     requests: { cpu: 50m, memory: 128Mi }

@@ -26,6 +26,7 @@ into `.localbin/` (gitignored).
 | **lineage** | app (FastAPI) + daprd sidecar | **consumer** — Dapr subscription ingests events into Apache AGE; serves the lineage API |
 | **web** | app (SvelteKit) | the UI (datasets / jobs / columns DAG) |
 | **medallion** | 4 apps + sidecars | event-driven pipeline: `lance-ray` producer + raw→bronze→silver→gold movers (see [MEDALLION.md](MEDALLION.md)) |
+| **compaction** | app + sidecar | compaction/GC service triggered by a Dapr **cron binding** (`bindings.cron`) — compacts Lance fragments + GCs old versions |
 | **Dapr** | subchart | control plane + sidecar injection + pub/sub + secret-store + tracing config |
 | **NATS** | subchart | JetStream — the durable event bus behind Dapr pub/sub |
 | **Apache AGE Postgres** | StatefulSet | the lineage graph (`lineage`) **and** OpenFGA's datastore (`openfga` db) |
@@ -99,5 +100,8 @@ Dapr sidecar injection, the full 3-signal observability (`make e2e-obs` green �
 ✅ Verified: the event-driven **medallion** cascade — one `lance-ray` `/produce` cascades
 raw→bronze→silver→gold via Dapr pub/sub, building the lineage DAG, as **one distributed trace** across
 all 5 services, with the `medallion_stage_transitions_total` metric in PromQL (`make e2e-medallion`).
+✅ Verified: the **compaction/GC** service — a Dapr `bindings.cron` component POSTs `/compaction-cron`
+on its schedule (and `make compaction` on demand); each sweep discovers every Lance dataset in the bucket
+and runs `compact_files()` + `cleanup_old_versions()`, with `compaction_*` metrics in PromQL.
 ⚠️ Deployed-not-wired: auth (`auth.enabled=false`); OpenBao secret read via Dapr (kv-v2 path nuance).
-❌ Not built: a compaction/GC microservice (Dapr cron binding); an API gateway; RustFS STS.
+❌ Not built: an API gateway; RustFS STS.

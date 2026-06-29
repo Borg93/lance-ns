@@ -20,11 +20,12 @@ helm_repo('openfga-repo', 'https://openfga.github.io/helm-charts', labels=['infr
 docker_build(
     'lance-rest-catalog', '.',
     dockerfile='.docker/rest-catalog.dockerfile',
-    only=['.docker', 'pyproject.toml', 'uv.lock', 'app', 'lineage', 'medallion'],
+    only=['.docker', 'pyproject.toml', 'uv.lock', 'app', 'lineage', 'medallion', 'compaction'],
     live_update=[
         sync('app', '/app/app'),
         sync('lineage', '/app/lineage'),
         sync('medallion', '/app/medallion'),
+        sync('compaction', '/app/compaction'),
     ],
 )
 docker_build(

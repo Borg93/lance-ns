@@ -29,8 +29,8 @@ VCS_REF     := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
 VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
-.PHONY: help bootstrap kind-up kind-down deps images load deploy up verify dashboards status k9s \
-        tilt-up tilt-ci clean down
+.PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
+        e2e-obs e2e-medallion dashboards status k9s tilt-up tilt-ci clean down
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -85,6 +85,9 @@ medallion: ## Fire the event-driven pipeline: lance-ray POST /produce → raw→
 	@sleep 6
 	@echo "resulting lineage DAG (gold's provenance):"
 	@kubectl exec deploy/$(RELEASE)-lineage -c lineage -- python -c "import httpx; print(httpx.get('http://localhost:8000/datasets/gold\$$catalog/upstream', timeout=8).json())"
+
+compaction: ## Trigger a compaction/GC sweep now (the Dapr cron binding also fires it on its schedule)
+	@kubectl exec deploy/$(RELEASE)-compaction -c compaction -- python -c "import httpx; print('sweep:', httpx.post('http://localhost:$(MEDALLION_PORT)/compaction-cron', timeout=30).json())"
 
 dashboards: ## Port-forward all the UIs (Ctrl-C to stop)
 	@echo "web        → http://localhost:5173"

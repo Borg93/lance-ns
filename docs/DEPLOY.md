@@ -107,5 +107,9 @@ and runs `compact_files()` + `cleanup_old_versions()`, with `compaction_*` metri
 ✅ Verified: the **API gateway** — one nginx front routes `/lineage/*` and `/catalog/*` through its own
 Dapr sidecar via **service invocation** (mTLS + retries + tracing on the hop), `/`→web UI; one
 port-forward fronts the whole platform (`/lineage/livez` → 200 through the gateway).
-⚠️ Deployed-not-wired: auth (`auth.enabled=false`); OpenBao secret read via Dapr (kv-v2 path nuance).
+✅ Verified: **OpenBao secret consumption** — apps read secrets through their Dapr sidecar
+(`GET /v1.0/secrets/lance-secrets/lance` → 200) instead of plaintext env. Fixed the kv-v2 nuance:
+Dapr defaults `vaultKVPrefix=dapr` (reads `secret/data/dapr/<key>`); set `vaultKVUsePrefix=false` so it
+reads the natural `secret/data/<key>` the seed writes.
+⚠️ Deployed-not-wired: auth (`auth.enabled=false`) — the governed Dex→catalog→OpenFGA demo.
 ❌ Not built: RustFS STS.

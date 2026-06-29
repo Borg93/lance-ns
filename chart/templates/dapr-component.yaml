@@ -1,0 +1,25 @@
+{{- if .Values.dapr.enabled }}
+# Dapr pub/sub component — backs the catalog→lineage topic onto NATS JetStream. The sidecar owns
+# retry/backoff/DLQ here (config, not app code). The lineage subscription is programmatic (the lineage
+# app serves GET /dapr/subscribe via dapr-ext-fastapi), so no declarative Subscription CRD is needed.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Values.pubsub.name }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  type: pubsub.jetstream
+  version: v1
+  metadata:
+    - { name: natsURL, value: "nats://{{ include "lance.natsHost" . }}:4222" }
+    - { name: name, value: "lance-dapr" }
+    - { name: durableName, value: "lineage-ingest" }
+    - { name: queueGroupName, value: "lineage" }
+    - { name: ackWait, value: "30s" }
+    - { name: maxDeliver, value: "5" }
+    - { name: backOff, value: "1s,5s,10s,30s,60s" }
+# Only the catalog (publisher) + lineage (subscriber) app-ids use this component.
+scopes:
+  - {{ .Values.services.catalog.daprAppId }}
+  - {{ .Values.services.lineage.daprAppId }}
+{{- end }}

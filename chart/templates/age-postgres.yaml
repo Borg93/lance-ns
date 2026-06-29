@@ -1,0 +1,76 @@
+{{- if .Values.age.enabled }}
+# Apache AGE Postgres — the OpenLineage graph store (graph 'lineage') AND OpenFGA's datastore (db
+# 'openfga'). CNPG's image lacks the AGE extension, so this is a plain StatefulSet on the apache/age
+# image (postgres 16 + AGE). initdb scripts (alphabetical) load AGE + create the graph, then the
+# openfga database.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lance.ageHost" . }}-init
+  labels: {{- include "lance.labels" . | nindent 4 }}
+data:
+  10-age.sql: |
+    CREATE EXTENSION IF NOT EXISTS age;
+    LOAD 'age';
+    SET search_path = ag_catalog, "$user", public;
+    SELECT create_graph('lineage');
+  20-openfga.sql: |
+    CREATE DATABASE {{ .Values.age.openfgaDb }};
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.ageHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: postgres, port: {{ .Values.age.port }}, targetPort: 5432 }
+  selector:
+    app.kubernetes.io/component: age
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "lance.ageHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  serviceName: {{ include "lance.ageHost" . }}
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: age
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: age
+    spec:
+      containers:
+        - name: postgres
+          image: {{ .Values.age.image }}
+          env:
+            - { name: POSTGRES_USER, value: {{ .Values.age.user | quote }} }
+            - { name: POSTGRES_PASSWORD, value: {{ .Values.age.password | quote }} }
+            - { name: POSTGRES_DB, value: {{ .Values.age.lineageDb | quote }} }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - { name: postgres, containerPort: 5432 }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+            - { name: init, mountPath: /docker-entrypoint-initdb.d }
+          readinessProbe:
+            exec: { command: ["pg_isready", "-U", {{ .Values.age.user | quote }}, "-d", {{ .Values.age.lineageDb | quote }}] }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+      volumes:
+        - name: init
+          configMap: { name: {{ include "lance.ageHost" . }}-init }
+  volumeClaimTemplates:
+    - metadata: { name: data }
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources: { requests: { storage: {{ .Values.age.storage }} } }
+{{- end }}

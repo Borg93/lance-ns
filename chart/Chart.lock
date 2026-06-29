@@ -1,0 +1,12 @@
+dependencies:
+- name: dapr
+  repository: https://dapr.github.io/helm-charts/
+  version: 1.18.1
+- name: nats
+  repository: https://nats-io.github.io/k8s/helm/charts/
+  version: 2.14.2
+- name: openfga
+  repository: https://openfga.github.io/helm-charts
+  version: 0.3.9
+digest: sha256:0fe608984637965a3dbb34568e5cbe3747c81a8acafc13a540126cd245cd20f8
+generated: "2026-06-29T17:09:36.876220544+02:00"

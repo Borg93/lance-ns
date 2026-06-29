@@ -1,0 +1,165 @@
+{{- $root := . }}
+{{- $age := include "lance.ageHost" . }}
+{{- $minio := include "lance.minioHost" . }}
+# Catalog (producer) — creates Lance tables on S3 and PUBLISHES OpenLineage events to the Dapr
+# pubsub.jetstream component. The daprd sidecar (injected by the annotations) carries the publish to NATS.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" . }}-catalog
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: catalog, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: catalog
+      {{- if .Values.dapr.sidecars }}
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.services.catalog.daprAppId | quote }}
+        dapr.io/app-port: {{ .Values.services.catalog.port | quote }}
+        dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+      {{- end }}
+    spec:
+      containers:
+        - name: catalog
+          image: "{{ .Values.image.catalog }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
+          ports: [{ name: http, containerPort: {{ .Values.services.catalog.port }} }]
+          env:
+            - { name: LANCE_REST_IMPL, value: "dir" }
+            - { name: LANCE_REST_ROOT, value: "s3://{{ .Values.minio.bucket }}" }
+            - { name: LANCE_NS_DELIMITER, value: "$" }
+            - { name: LANCE_S3_ENDPOINT, value: "http://{{ $minio }}:{{ .Values.minio.port }}" }
+            - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.minio.accessKey | quote }} }
+            - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.minio.secretKey | quote }} }
+            - { name: LANCE_S3_REGION, value: "us-east-1" }
+            - { name: LANCE_S3_ALLOW_HTTP, value: "true" }
+            - { name: LANCE_S3_VIRTUAL_HOSTED, value: "false" }
+            - { name: LANCE_LINEAGE_EMIT_ENABLED, value: "true" }
+            - { name: LANCE_LINEAGE_TRANSPORT, value: "dapr" }
+            - { name: LANCE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
+            - { name: LANCE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            {{- if .Values.auth.enabled }}
+            - { name: LANCE_OIDC_ENABLED, value: "true" }
+            - { name: LANCE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
+            - { name: LANCE_OIDC_AUDIENCE, value: {{ .Values.dex.clientId | quote }} }
+            - { name: LANCE_OIDC_ALLOW_INSECURE, value: "true" }
+            - { name: LANCE_FGA_ENABLED, value: "true" }
+            - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            {{- end }}
+          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" . }}-catalog
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports: [{ name: http, port: {{ .Values.services.catalog.port }}, targetPort: http }]
+  selector: { app.kubernetes.io/component: catalog, app.kubernetes.io/instance: {{ .Release.Name }} }
+---
+# Lineage (consumer) — SUBSCRIBES (via its daprd sidecar) to the lineage topic and ingests into AGE.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" . }}-lineage
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: lineage, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: lineage
+      {{- if .Values.dapr.sidecars }}
+      annotations:
+        dapr.io/enabled: "true"
+        dapr.io/app-id: {{ .Values.services.lineage.daprAppId | quote }}
+        dapr.io/app-port: {{ .Values.services.lineage.port | quote }}
+        dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+      {{- end }}
+    spec:
+      initContainers:
+        - name: wait-age
+          image: busybox:1.36
+          command: ["sh", "-c", "until nc -z {{ $age }} {{ .Values.age.port }}; do echo wait-age; sleep 3; done"]
+      containers:
+        - name: lineage
+          image: "{{ .Values.image.catalog }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command: ["uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
+          ports: [{ name: http, containerPort: {{ .Values.services.lineage.port }} }]
+          env:
+            - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
+            - { name: LINEAGE_GRAPH, value: {{ .Values.age.lineageDb | quote }} }
+            - { name: LINEAGE_DAPR_ENABLED, value: "true" }
+            - { name: LINEAGE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
+            - { name: LINEAGE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
+            - { name: LINEAGE_S3_ENDPOINT, value: "http://{{ $minio }}:{{ .Values.minio.port }}" }
+            - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.minio.accessKey | quote }} }
+            - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.minio.secretKey | quote }} }
+            - { name: LINEAGE_S3_BUCKET, value: {{ .Values.minio.bucket | quote }} }
+            {{- if .Values.auth.enabled }}
+            - { name: LINEAGE_OIDC_ENABLED, value: "true" }
+            - { name: LINEAGE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
+            - { name: LINEAGE_OIDC_AUDIENCE, value: {{ .Values.dex.clientId | quote }} }
+            - { name: LINEAGE_OIDC_ALLOW_INSECURE, value: "true" }
+            - { name: LINEAGE_FGA_ENABLED, value: "true" }
+            - { name: LINEAGE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            {{- end }}
+          readinessProbe: { httpGet: { path: /livez, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" . }}-lineage
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports: [{ name: http, port: {{ .Values.services.lineage.port }}, targetPort: http }]
+  selector: { app.kubernetes.io/component: lineage, app.kubernetes.io/instance: {{ .Release.Name }} }
+---
+# Web — the SvelteKit UI; proxies /api → the lineage service in-cluster.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" . }}-web
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: web
+    spec:
+      containers:
+        - name: web
+          image: "{{ .Values.image.web }}:{{ .Values.image.tag }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }
+            - { name: PORT, value: "3000" }
+          ports: [{ name: http, containerPort: 3000 }]
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" . }}-web
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports: [{ name: http, port: 3000, targetPort: http }]
+  selector: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }

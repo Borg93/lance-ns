@@ -1,0 +1,31 @@
+apiVersion: v2
+name: lance-ns
+description: >-
+  Lance lakehouse REST catalog + in-service lineage (OpenLineage → Apache AGE) + governance
+  (Dex OIDC + OpenFGA), event-driven on Dapr pub/sub over NATS JetStream. One umbrella chart =
+  the single deploy artifact for local kind and production.
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+home: https://github.com/Borg93/lance-ns
+maintainers:
+  - name: Gabriel Borg
+
+# Cluster infra is bundled as conditional subchart dependencies (one `helm install` brings up
+# everything), each gated by <key>.enabled so a prod install with external infra can turn it off.
+# kind + helm are the only out-of-chart bootstrap. The Apache-AGE Postgres, Dex, and the three app
+# services are first-party templates (not subcharts) — AGE needs a specific postgres image, Dex is a
+# tiny static-config deploy, and the services are ours.
+dependencies:
+  - name: dapr
+    version: "1.18.1"
+    repository: https://dapr.github.io/helm-charts/
+    condition: dapr.enabled
+  - name: nats
+    version: "2.14.2"
+    repository: https://nats-io.github.io/k8s/helm/charts/
+    condition: nats.enabled
+  - name: openfga
+    version: "0.3.9"
+    repository: https://openfga.github.io/helm-charts
+    condition: openfga.enabled

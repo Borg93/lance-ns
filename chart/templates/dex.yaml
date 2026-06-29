@@ -1,0 +1,78 @@
+{{- if .Values.dex.enabled }}
+# Dex — OIDC issuer for the governed demo. In-memory storage + one static client + one static user
+# (demo only). The catalog/lineage verify tokens against this issuer when auth.enabled.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "lance.dexHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    issuer: {{ .Values.dex.issuer }}
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:{{ .Values.dex.port }}
+    oauth2:
+      skipApprovalScreen: true
+      passwordConnector: local
+    enablePasswordDB: true
+    staticPasswords:
+      - email: {{ .Values.dex.staticUser | quote }}
+        hash: "$2b$10$TsVVN0.5g.XntmJAGNuXF.gyhwQZgmgjmkevKxTa48M7k06J./53G"
+        username: alice
+        userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+    staticClients:
+      - id: {{ .Values.dex.clientId }}
+        name: Lance Catalog
+        secret: {{ .Values.dex.clientSecret }}
+        public: true
+        redirectURIs:
+          - http://localhost:8080/callback
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.dexHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: http, port: {{ .Values.dex.port }}, targetPort: {{ .Values.dex.port }} }
+  selector:
+    app.kubernetes.io/component: dex
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.dexHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: dex
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: dex
+    spec:
+      containers:
+        - name: dex
+          image: {{ .Values.dex.image }}
+          args: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports:
+            - { name: http, containerPort: {{ .Values.dex.port }} }
+          volumeMounts:
+            - { name: config, mountPath: /etc/dex }
+          readinessProbe:
+            httpGet: { path: /dex/.well-known/openid-configuration, port: {{ .Values.dex.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+      volumes:
+        - name: config
+          configMap: { name: {{ include "lance.dexHost" . }} }
+{{- end }}

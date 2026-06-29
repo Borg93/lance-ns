@@ -1,0 +1,74 @@
+{{- if .Values.minio.enabled }}
+# MinIO — S3-compatible object storage for the Lance lakehouse. A post-install Job creates the bucket.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.minioHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: s3, port: {{ .Values.minio.port }}, targetPort: 9000 }
+  selector:
+    app.kubernetes.io/component: minio
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.minioHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: minio
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: minio
+    spec:
+      containers:
+        - name: minio
+          image: {{ .Values.minio.image }}
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - { name: MINIO_ROOT_USER, value: {{ .Values.minio.accessKey | quote }} }
+            - { name: MINIO_ROOT_PASSWORD, value: {{ .Values.minio.secretKey | quote }} }
+          ports:
+            - { name: s3, containerPort: 9000 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          readinessProbe:
+            httpGet: { path: /minio/health/ready, port: 9000 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "lance.minioHost" . }}-mkbucket
+  labels: {{- include "lance.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: {{ .Values.minio.image }}
+          command:
+            - sh
+            - -c
+            - |
+              until mc alias set m http://{{ include "lance.minioHost" . }}:{{ .Values.minio.port }} {{ .Values.minio.accessKey }} {{ .Values.minio.secretKey }}; do echo wait-minio; sleep 3; done
+              mc mb --ignore-existing m/{{ .Values.minio.bucket }}
+{{- end }}

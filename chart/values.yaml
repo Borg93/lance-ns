@@ -1,0 +1,101 @@
+# lance-ns umbrella chart values. Infra toggles gate both the subchart/template and its wiring, so a
+# prod install with external infra flips one switch. Defaults target a local kind cluster.
+
+# --- App images (the catalog + lineage share one image, different uvicorn entrypoint) ---------------
+image:
+  catalog: lance-rest-catalog # catalog (app.main:app) + lineage (lineage.main:app)
+  web: lance-lineage-web
+  tag: dev
+  pullPolicy: IfNotPresent
+
+# --- Governance (Dex OIDC + OpenFGA). Off → open dev mode; on → the full governed demo. ------------
+auth:
+  enabled: false
+
+# --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------
+dapr:
+  enabled: true
+  sidecars: true # add dapr.io/* annotations to catalog + lineage
+  logLevel: info
+  global:
+    ha:
+      enabled: false # single-node kind
+
+# --- NATS (subchart) — JetStream backs the Dapr pubsub.jetstream component -------------------------
+nats:
+  enabled: true
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc:
+          size: 1Gi
+  # the headless service is <release>-nats:4222
+
+# --- OpenFGA (subchart) — Zanzibar authz; datastore = the AGE Postgres (it's just postgres) --------
+openfga:
+  enabled: true
+  replicaCount: 1
+  datastore:
+    engine: postgres
+    uri: postgres://lance:lance@lance-ns-age:5432/openfga?sslmode=disable
+  migrate:
+    enabled: true
+
+# --- Apache AGE Postgres (first-party template) — the lineage graph store AND openfga's datastore --
+age:
+  enabled: true
+  image: apache/age:release_PG16_1.5.0
+  user: lance
+  password: lance
+  lineageDb: lineage
+  openfgaDb: openfga
+  port: 5432
+  storage: 1Gi
+
+# --- Dex (first-party template) — OIDC issuer for the governed demo --------------------------------
+dex:
+  enabled: true
+  image: ghcr.io/dexidp/dex:v2.42.0
+  port: 5556
+  issuer: http://lance-ns-dex:5556/dex # in-cluster issuer (matches the OIDC config)
+  # A static client + a static password (demo only).
+  clientId: lance-catalog
+  clientSecret: lance-catalog-secret
+  staticUser: alice@example.com
+  staticPassword: password # bcrypt set in the dex template
+
+# --- MinIO (first-party template) — S3 for the Lance lakehouse -------------------------------------
+minio:
+  enabled: true
+  image: minio/minio:RELEASE.2024-10-13T13-34-11Z
+  accessKey: minioadmin
+  secretKey: minioadmin
+  bucket: lakehouse
+  port: 9000
+  storage: 2Gi
+
+# --- The three app services ------------------------------------------------------------------------
+services:
+  catalog:
+    module: app.main:app
+    port: 2333
+    daprAppId: catalog
+  lineage:
+    module: lineage.main:app
+    port: 8000
+    daprAppId: lineage
+
+# Dapr pub/sub: the component name the catalog publishes to + the lineage topic/route.
+pubsub:
+  name: lineage-pubsub
+  topic: lineage.events.v1
+  route: /lineage-events
+
+resources:
+  default:
+    requests: { cpu: 50m, memory: 128Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+ingress:
+  enabled: false

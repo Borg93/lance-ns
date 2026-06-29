@@ -1,0 +1,11 @@
+lance-ns deployed (release {{ .Release.Name }}, namespace {{ .Release.Namespace }}).
+
+Event-driven path:  catalog --Dapr publish--> [pubsub.jetstream over NATS] --> lineage /lineage-events --> Apache AGE
+
+Reach the services (kind has no host ports — port-forward):
+  kubectl port-forward svc/{{ include "lance.fullname" . }}-web      5173:3000   # the UI
+  kubectl port-forward svc/{{ include "lance.fullname" . }}-lineage  8000:8000   # the lineage API
+  kubectl port-forward svc/{{ include "lance.fullname" . }}-catalog  2333:2333   # the catalog
+
+Inspect:  k9s   (or: kubectl get pods)
+Auth (Dex OIDC + OpenFGA): {{ if .Values.auth.enabled }}ENABLED{{ else }}off — set auth.enabled=true to demo governance{{ end }}

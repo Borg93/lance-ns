@@ -12,4 +12,5 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "lance.natsHost" -}}{{ .Release.Name }}-nats{{- end -}}
 {{- define "lance.openfgaHost" -}}{{ .Release.Name }}-openfga{{- end -}}
 {{- define "lance.dexHost" -}}{{ .Release.Name }}-dex{{- end -}}
-{{- define "lance.minioHost" -}}{{ .Release.Name }}-minio{{- end -}}
+{{- define "lance.rustfsHost" -}}{{ .Release.Name }}-rustfs{{- end -}}
+{{- define "lance.openbaoHost" -}}{{ .Release.Name }}-openbao{{- end -}}

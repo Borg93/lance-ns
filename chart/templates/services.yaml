@@ -1,6 +1,6 @@
 {{- $root := . }}
 {{- $age := include "lance.ageHost" . }}
-{{- $minio := include "lance.minioHost" . }}
+{{- $rustfs := include "lance.rustfsHost" . }}
 # Catalog (producer) — creates Lance tables on S3 and PUBLISHES OpenLineage events to the Dapr
 # pubsub.jetstream component. The daprd sidecar (injected by the annotations) carries the publish to NATS.
 apiVersion: apps/v1
@@ -27,17 +27,17 @@ spec:
     spec:
       containers:
         - name: catalog
-          image: "{{ .Values.image.catalog }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
           ports: [{ name: http, containerPort: {{ .Values.services.catalog.port }} }]
           env:
             - { name: LANCE_REST_IMPL, value: "dir" }
-            - { name: LANCE_REST_ROOT, value: "s3://{{ .Values.minio.bucket }}" }
+            - { name: LANCE_REST_ROOT, value: "s3://{{ .Values.rustfs.bucket }}" }
             - { name: LANCE_NS_DELIMITER, value: "$" }
-            - { name: LANCE_S3_ENDPOINT, value: "http://{{ $minio }}:{{ .Values.minio.port }}" }
-            - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.minio.accessKey | quote }} }
-            - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.minio.secretKey | quote }} }
+            - { name: LANCE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
             - { name: LANCE_S3_REGION, value: "us-east-1" }
             - { name: LANCE_S3_ALLOW_HTTP, value: "true" }
             - { name: LANCE_S3_VIRTUAL_HOSTED, value: "false" }
@@ -94,7 +94,7 @@ spec:
           command: ["sh", "-c", "until nc -z {{ $age }} {{ .Values.age.port }}; do echo wait-age; sleep 3; done"]
       containers:
         - name: lineage
-          image: "{{ .Values.image.catalog }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           command: ["uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
           ports: [{ name: http, containerPort: {{ .Values.services.lineage.port }} }]
@@ -105,10 +105,10 @@ spec:
             - { name: LINEAGE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
             - { name: LINEAGE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
             - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
-            - { name: LINEAGE_S3_ENDPOINT, value: "http://{{ $minio }}:{{ .Values.minio.port }}" }
-            - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.minio.accessKey | quote }} }
-            - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.minio.secretKey | quote }} }
-            - { name: LINEAGE_S3_BUCKET, value: {{ .Values.minio.bucket | quote }} }
+            - { name: LINEAGE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            - { name: LINEAGE_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
             {{- if .Values.auth.enabled }}
             - { name: LINEAGE_OIDC_ENABLED, value: "true" }
             - { name: LINEAGE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
@@ -147,7 +147,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: "{{ .Values.image.web }}:{{ .Values.image.tag }}"
+          image: "{{ .Values.image.web.repository }}:{{ .Values.image.web.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }

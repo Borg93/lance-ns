@@ -23,7 +23,7 @@ spec:
             - -c
             - |
               S="nats://{{ include "lance.natsHost" . }}:4222"
-              until nats --server "$S" server ping >/dev/null 2>&1; do echo wait-nats; sleep 3; done
+              until nats --server "$S" stream ls >/dev/null 2>&1; do echo wait-nats; sleep 3; done
               if nats --server "$S" stream info LINEAGE >/dev/null 2>&1; then
                 echo "stream LINEAGE already exists"
               else

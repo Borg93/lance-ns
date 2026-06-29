@@ -1,0 +1,57 @@
+# -*- mode: Python -*-
+# lance-ns dev loop on kind. One `tilt up` builds the app images, deploys the umbrella Helm chart
+# (every component — catalog, lineage, web, Dapr, NATS, Apache-AGE Postgres, OpenFGA, Dex, RustFS,
+# OpenBao), and HOT-RELOADS the FastAPI services on source change (Tilt syncs the file, uvicorn
+# --reload restarts the worker in ~1s instead of a full rebuild).
+#
+# Prereqs: a kind cluster (`kind create cluster --config deploy/kind/kind-config.yaml`) + helm.
+# Then: tilt up   (inspect with k9s, or the Tilt UI at http://localhost:10350)
+
+load('ext://helm_resource', 'helm_resource', 'helm_repo')
+
+# Subchart repos (helm_resource resolves dapr/nats/openfga from chart/charts/, vendored via
+# `helm dependency build ./chart` — these keep them refreshable).
+helm_repo('dapr-repo', 'https://dapr.github.io/helm-charts/', labels=['infra'])
+helm_repo('nats-repo', 'https://nats-io.github.io/k8s/helm/charts/', labels=['infra'])
+helm_repo('openfga-repo', 'https://openfga.github.io/helm-charts', labels=['infra'])
+
+# Build the catalog/lineage image (shared) + the web image. `only=` keeps the build context tight so
+# unrelated edits don't trigger rebuilds; live_update syncs source for uvicorn --reload.
+docker_build(
+    'lance-rest-catalog', '.',
+    dockerfile='.docker/rest-catalog.dockerfile',
+    only=['.docker', 'pyproject.toml', 'uv.lock', 'app', 'lineage'],
+    live_update=[
+        sync('app', '/app/app'),
+        sync('lineage', '/app/lineage'),
+    ],
+)
+docker_build(
+    'lance-lineage-web', '.',
+    dockerfile='.docker/web.dockerfile',
+    only=['.docker', 'web'],
+)
+
+# Deploy the umbrella chart via real helm (post-install hooks + subchart CRDs honored — unlike Tilt's
+# bare helm() which only templates). Tilt injects the freshly built images into the chart's per-image
+# repository/tag values and side-loads them into kind.
+helm_resource(
+    'lance-ns',
+    'chart',
+    flags=['--timeout=300s'],
+    image_deps=['lance-rest-catalog', 'lance-lineage-web'],
+    image_keys=[
+        ('image.catalog.repository', 'image.catalog.tag'),
+        ('image.web.repository', 'image.web.tag'),
+    ],
+    resource_deps=['dapr-repo', 'nats-repo', 'openfga-repo'],
+    labels=['lance-ns'],
+)
+
+# Handy port-forwards (kind has no host ports).
+local_resource(
+    'port-forwards',
+    serve_cmd='kubectl port-forward svc/lance-ns-web 5173:3000 & kubectl port-forward svc/lance-ns-lineage 8000:8000 & wait',
+    resource_deps=['lance-ns'],
+    labels=['lance-ns'],
+)

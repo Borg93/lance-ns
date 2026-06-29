@@ -1,11 +1,11 @@
 # lance-ns umbrella chart values. Infra toggles gate both the subchart/template and its wiring, so a
 # prod install with external infra flips one switch. Defaults target a local kind cluster.
 
-# --- App images (the catalog + lineage share one image, different uvicorn entrypoint) ---------------
+# --- App images (the catalog + lineage share one image, different uvicorn entrypoint). Per-image
+# repository/tag so Tilt can inject each built image independently (image_keys). ------------------
 image:
-  catalog: lance-rest-catalog # catalog (app.main:app) + lineage (lineage.main:app)
-  web: lance-lineage-web
-  tag: dev
+  catalog: { repository: lance-rest-catalog, tag: dev } # catalog (app.main:app) + lineage (lineage.main:app)
+  web: { repository: lance-lineage-web, tag: dev }
   pullPolicy: IfNotPresent
 
 # --- Governance (Dex OIDC + OpenFGA). Off → open dev mode; on → the full governed demo. ------------
@@ -36,11 +36,18 @@ nats:
 openfga:
   enabled: true
   replicaCount: 1
+  # Pin to v1.8.0: v1.18.0's migration 006 (DROP INDEX CONCURRENTLY) breaks against the AGE-shared
+  # Postgres; v1.8.0 migrates cleanly. Server + our migrate Job both use this tag (schema match).
+  image:
+    tag: v1.8.0
   datastore:
     engine: postgres
     uri: postgres://lance:lance@lance-ns-age:5432/openfga?sslmode=disable
-  migrate:
-    enabled: true
+    # The chart's bundled migrate (both job + initContainer types) fails to pass the datastore flags in
+    # 0.3.9, so we disable it and run our own proven migrate Job (templates/openfga-migrate.yaml) that
+    # waits for the AGE Postgres first. The server then connects to the already-migrated db.
+    applyMigrations: false
+    waitForMigrations: false
 
 # --- Apache AGE Postgres (first-party template) — the lineage graph store AND openfga's datastore --
 age:
@@ -65,15 +72,23 @@ dex:
   staticUser: alice@example.com
   staticPassword: password # bcrypt set in the dex template
 
-# --- MinIO (first-party template) — S3 for the Lance lakehouse -------------------------------------
-minio:
+# --- RustFS (first-party template) — S3 for the Lance lakehouse (the project's chosen store) --------
+rustfs:
   enabled: true
-  image: minio/minio:RELEASE.2024-10-13T13-34-11Z
-  accessKey: minioadmin
-  secretKey: minioadmin
-  bucket: lakehouse
+  image: rustfs/rustfs:latest
+  accessKey: rustfsadmin
+  secretKey: rustfsadmin
+  bucket: lance-catalog
   port: 9000
   storage: 2Gi
+  mcImage: minio/mc:latest # `mc` speaks plain S3, so it bootstraps the bucket on RustFS too
+
+# --- OpenBao (first-party template) — secret store, fronted by Dapr secretstores.* ------------------
+openbao:
+  enabled: true
+  image: openbao/openbao:2.2.0
+  port: 8200
+  devToken: root # dev-mode root token (demo only; prod uses real auth + unseal)
 
 # --- The three app services ------------------------------------------------------------------------
 services:

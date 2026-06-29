@@ -1,0 +1,75 @@
+{{- if .Values.openbao.enabled }}
+# OpenBao (the open-source Vault fork) — the secret store, fronted by a Dapr secretstores.hashicorp.vault
+# component (OpenBao is Vault-API compatible). Dev mode (in-memory, fixed root token) for the demo; prod
+# uses real auth + unseal + a persistent backend.
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.openbaoHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: http, port: {{ .Values.openbao.port }}, targetPort: 8200 }
+  selector:
+    app.kubernetes.io/component: openbao
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.openbaoHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: openbao
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: openbao
+    spec:
+      containers:
+        - name: openbao
+          image: {{ .Values.openbao.image }}
+          args: ["server", "-dev", "-dev-root-token-id={{ .Values.openbao.devToken }}", "-dev-listen-address=0.0.0.0:8200"]
+          env:
+            - { name: BAO_ADDR, value: "http://127.0.0.1:8200" }
+          ports:
+            - { name: http, containerPort: 8200 }
+          readinessProbe:
+            httpGet: { path: /v1/sys/health, port: 8200 }
+            initialDelaySeconds: 4
+            periodSeconds: 10
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+---
+# Seed a demo secret so the Dapr secret store has something to serve (proves the wiring end-to-end).
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "lance.openbaoHost" . }}-seed
+  labels: {{- include "lance.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: seed
+          image: {{ .Values.openbao.image }}
+          env:
+            - { name: BAO_ADDR, value: "http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}" }
+            - { name: BAO_TOKEN, value: {{ .Values.openbao.devToken | quote }} }
+          command:
+            - sh
+            - -c
+            - |
+              until bao status >/dev/null 2>&1; do echo wait-openbao; sleep 3; done
+              bao kv put secret/lance rustfs-secret-key={{ .Values.rustfs.secretKey }} postgres-password={{ .Values.age.password }}
+              echo "seeded secret/lance into OpenBao"
+{{- end }}

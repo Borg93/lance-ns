@@ -1,0 +1,72 @@
+{{- if .Values.rustfs.enabled }}
+# RustFS — the S3-compatible object store for the Lance lakehouse (the project's chosen store; mc
+# bootstraps the bucket since it speaks plain S3).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.rustfsHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  ports:
+    - { name: s3, port: {{ .Values.rustfs.port }}, targetPort: 9000 }
+  selector:
+    app.kubernetes.io/component: rustfs
+    app.kubernetes.io/instance: {{ .Release.Name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.rustfsHost" . }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: rustfs
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rustfs
+    spec:
+      containers:
+        - name: rustfs
+          image: {{ .Values.rustfs.image }}
+          args: ["/data"] # RustFS takes the data path as the final command arg
+          env:
+            - { name: RUSTFS_ACCESS_KEY, value: {{ .Values.rustfs.accessKey | quote }} }
+            - { name: RUSTFS_SECRET_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            - { name: RUSTFS_ADDRESS, value: ":9000" }
+          ports:
+            - { name: s3, containerPort: 9000 }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+      volumes:
+        - name: data
+          emptyDir: {}
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "lance.rustfsHost" . }}-mkbucket
+  labels: {{- include "lance.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: {{ .Values.rustfs.mcImage }}
+          command:
+            - sh
+            - -c
+            - |
+              until mc alias set rfs http://{{ include "lance.rustfsHost" . }}:{{ .Values.rustfs.port }} {{ .Values.rustfs.accessKey }} {{ .Values.rustfs.secretKey }}; do echo wait-rustfs; sleep 3; done
+              mc mb --ignore-existing rfs/{{ .Values.rustfs.bucket }}
+{{- end }}

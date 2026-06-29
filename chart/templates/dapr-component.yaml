@@ -22,4 +22,25 @@ spec:
 scopes:
   - {{ .Values.services.catalog.daprAppId }}
   - {{ .Values.services.lineage.daprAppId }}
+{{- if .Values.openbao.enabled }}
+---
+# Dapr secret store fronting OpenBao (Vault-API compatible). Apps read secrets via their sidecar
+# (GET /v1.0/secrets/lance-secrets/<name>) instead of plaintext env — the secret-handling fix.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: lance-secrets
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  type: secretstores.hashicorp.vault
+  version: v1
+  metadata:
+    - { name: vaultAddr, value: "http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}" }
+    - { name: vaultToken, value: {{ .Values.openbao.devToken | quote }} }
+    - { name: enginePath, value: "secret" }
+    - { name: skipVerify, value: "true" }
+scopes:
+  - {{ .Values.services.catalog.daprAppId }}
+  - {{ .Values.services.lineage.daprAppId }}
+{{- end }}
 {{- end }}

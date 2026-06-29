@@ -27,17 +27,20 @@ ARG BUILD_DATE
 ARG VCS_REF
 ARG VERSION
 LABEL org.opencontainers.image.title="lance-rest-catalog" \
-      org.opencontainers.image.description="Lance Namespace REST Catalog (FastAPI over native DirectoryNamespace, MinIO/S3)" \
+      org.opencontainers.image.description="Lance Namespace REST Catalog (FastAPI over native DirectoryNamespace on RustFS/S3) + lineage service" \
+      org.opencontainers.image.source="https://github.com/Borg93/lance-ns" \
       org.opencontainers.image.created="${BUILD_DATE}" \
       org.opencontainers.image.revision="${VCS_REF}" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-# tini for correct PID 1 signal handling / zombie reaping.
+# tini for correct PID 1 signal handling / zombie reaping. Strip setuid/setgid bits from the base
+# image's account tools (passwd/chsh/...) — no use in a container, residual privesc surface.
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -u 10001 --no-create-home --shell /usr/sbin/nologin app
+    && useradd -r -u 10001 --no-create-home --shell /usr/sbin/nologin app \
+    && find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -55,8 +58,10 @@ USER app
 # `command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000` (see docker-compose.governance.yml).
 EXPOSE 2333 8000
 
+# Cheap socket-connect probe (avoids urllib's ssl/http.client cold-import cost). k8s owns real
+# readiness via /readyz; this HEALTHCHECK is for the compose demo where no orchestrator probe exists.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
-    CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:2333/livez').read()"]
+    CMD ["python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',2333)); s.close()"]
 
 ENTRYPOINT ["tini", "--"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "2333"]

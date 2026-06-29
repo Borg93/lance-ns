@@ -1,22 +1,37 @@
 # syntax=docker/dockerfile:1.11
 # Lance Lineage web UI — SvelteKit (Svelte Flow + bits-ui) on Bun. Build context = repo root.
-FROM oven/bun:1.3-slim AS build
+
+# ── build: install deps + compile the SvelteKit node build ─────────────────────
+FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS build
 WORKDIR /app
 COPY web/package.json web/bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
 COPY web/ ./
 RUN bun run build
 
-FROM oven/bun:1.3-slim AS runtime
+# ── runtime: the node-adapter server only ──────────────────────────────────────
+FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS runtime
+
+ARG BUILD_DATE
+ARG VCS_REF
+ARG VERSION
+LABEL org.opencontainers.image.title="lance-lineage-web" \
+      org.opencontainers.image.description="Lance lineage UI — SvelteKit (Svelte Flow) graph explorer" \
+      org.opencontainers.image.source="https://github.com/Borg93/lance-ns" \
+      org.opencontainers.image.created="${BUILD_DATE}" \
+      org.opencontainers.image.revision="${VCS_REF}" \
+      org.opencontainers.image.version="${VERSION}" \
+      org.opencontainers.image.licenses="Apache-2.0"
+
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
-COPY --from=build /app/build ./build
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/package.json ./package.json
+COPY --from=build --link /app/build ./build
+COPY --from=build --link /app/node_modules ./node_modules
+COPY --from=build --link /app/package.json ./package.json
 EXPOSE 3000
 # Bun is the init/PID1 here; the slim image has no curl, so health-check via bun's fetch.
-HEALTHCHECK --interval=15s --timeout=3s --retries=5 \
+HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
     CMD bun -e "fetch('http://localhost:'+ (process.env.PORT||3000)).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 USER bun
 ENTRYPOINT ["bun", "./build/index.js"]

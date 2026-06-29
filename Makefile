@@ -22,6 +22,11 @@ K9S_V       := v0.32.7
 TILT_V      := 0.33.21
 CATALOG_IMG := lance-rest-catalog:dev
 WEB_IMG     := lance-lineage-web:dev
+# OCI label provenance — supplied to every image build (BUILD_DATE rfc3339, VCS_REF full SHA, VERSION).
+BUILD_DATE  := $(shell date -u +%FT%TZ)
+VCS_REF     := $(shell git rev-parse HEAD 2>/dev/null || echo unknown)
+VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify dashboards status k9s \
         tilt-up tilt-ci clean down
@@ -49,8 +54,8 @@ deps: ## Add subchart repos + vendor chart deps into chart/charts/
 	@echo "✓ chart deps vendored"
 
 images: ## Build the catalog (catalog+lineage) + web images
-	docker build -f .docker/rest-catalog.dockerfile -t $(CATALOG_IMG) .
-	docker build -f .docker/web.dockerfile -t $(WEB_IMG) .
+	docker build $(BUILD_ARGS) -f .docker/rest-catalog.dockerfile -t $(CATALOG_IMG) .
+	docker build $(BUILD_ARGS) -f .docker/web.dockerfile -t $(WEB_IMG) .
 
 load: ## Side-load the app images into kind
 	kind load docker-image $(CATALOG_IMG) $(WEB_IMG) --name $(CLUSTER)

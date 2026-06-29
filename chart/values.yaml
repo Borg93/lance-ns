@@ -217,6 +217,12 @@ pubsub:
 medallion:
   enabled: true
   port: 8000
+  # ReBAC enforcement: when true, each mover CHECKS it's authorized (OpenFGA) to produce its target stage
+  # before emitting — the silver→gold mover needs `can_promote` (validator), the others `can_create_table`
+  # (writer). Off by default (the open-mode demo runs without it); seed the mover-identity grants first
+  # (scripts/seed_medallion_fga.sh) before flipping it on.
+  fgaEnabled: false
+  fgaApiUrl: http://lance-ns-openfga:8080
   producer:
     daprAppId: lance-ray
     rawDataset: raw_events
@@ -225,10 +231,12 @@ medallion:
     author: ray
     rawTopic: medallion.raw
   # The 3 stage movers run medallion.mover:app, differing only by env. order = the DAG.
+  # requiredAction/serviceIdentity gate each hop when fgaEnabled: silver→gold needs `can_promote`
+  # (validator-only); the others `can_create_table` (writer). Each mover checks as its own identity.
   movers:
-    - { name: raw-to-bronze, daprAppId: raw-to-bronze, fromNamespace: raw, fromDataset: raw_events, toNamespace: bronze, toDataset: bronze$events, operation: ingest_events, author: alice, subTopic: medallion.raw, pubTopic: medallion.bronze }
-    - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver }
-    - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "" }
+    - { name: raw-to-bronze, daprAppId: raw-to-bronze, fromNamespace: raw, fromDataset: raw_events, toNamespace: bronze, toDataset: bronze$events, operation: ingest_events, author: alice, subTopic: medallion.raw, pubTopic: medallion.bronze, requiredAction: can_create_table, serviceIdentity: "user:service-raw-to-bronze" }
+    - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver, requiredAction: can_create_table, serviceIdentity: "user:service-bronze-to-silver" }
+    - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "", requiredAction: can_promote, serviceIdentity: "user:service-silver-to-gold" }
 
 # --- Compaction/GC microservice (Dapr cron binding) -----------------------------------------------
 # A bindings.cron component POSTs /<bindingName> on `schedule`; the service compacts small Lance

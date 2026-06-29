@@ -22,14 +22,16 @@ from dapr.aio.clients import DaprClient
 from dapr.ext.fastapi import DaprApp
 from fastapi import FastAPI, Request
 
+from app.core import fga
 from medallion.config import MedallionSettings, get_settings
 from medallion.events import build_run_event
-from medallion.metrics import record_transition
+from medallion.metrics import record_denied, record_transition
 
 log = logging.getLogger(__name__)
 
 _SUCCESS = {"status": "SUCCESS"}
 _RETRY = {"status": "RETRY"}
+_DROP = {"status": "DROP"}
 
 _settings = get_settings()
 
@@ -37,11 +39,21 @@ _settings = get_settings()
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.dapr = DaprClient()  # local sidecar; persists publishes to NATS JetStream
+    app.state.fga = None
+    settings = get_settings()
+    if settings.fga_enabled:
+        # Provision by store NAME so the mover converges on the catalog's Zanzibar store (idempotent),
+        # then check authorization as its own service identity before every transition.
+        store_id, model_id = await fga.provision(settings.fga_api_url)
+        app.state.fga = fga.make_client(settings.fga_api_url, store_id, model_id)
     try:
         yield
     finally:
         with suppress(Exception):
             await app.state.dapr.close()
+        if app.state.fga is not None:
+            with suppress(Exception):
+                await app.state.fga.close()
 
 
 app = FastAPI(
@@ -67,15 +79,44 @@ async def readyz() -> dict[str, str]:
 async def on_stage(event: dict[str, Any], request: Request) -> dict[str, str]:
     """The Dapr subscription route — thin wrapper over the testable :func:`handle_stage`. ``event`` is
     typed ``dict`` so FastAPI parses the CloudEvent JSON body (an ``Any`` param → query param → 422)."""
-    return await handle_stage(request.app.state.dapr, get_settings(), event)
+    return await handle_stage(
+        request.app.state.dapr, get_settings(), event, fga_client=request.app.state.fga
+    )
 
 
-async def handle_stage(dapr: DaprClient, settings: MedallionSettings, event: Any) -> dict[str, str]:
+async def handle_stage(
+    dapr: DaprClient, settings: MedallionSettings, event: Any, *, fga_client: Any = None
+) -> dict[str, str]:
     """Handle one upstream stage trigger: emit the transform's lineage, then trigger the next stage.
-    ``event`` is the untrusted Dapr CloudEvent envelope (hence ``Any`` + the ``isinstance`` guard)."""
+    ``event`` is the untrusted Dapr CloudEvent envelope (hence ``Any`` + the ``isinstance`` guard).
+
+    When ``fga_client`` is set (MEDALLION_FGA_ENABLED), the mover first CHECKS it is authorized to produce
+    the target stage — ``can_promote`` for the silver→gold mover, ``can_create_table`` for the others — as
+    its own service identity. Unauthorized → ``DROP`` (redelivery won't grant the role): the cascade
+    enforces the ReBAC, so a mover lacking the validator role genuinely cannot promote to gold."""
     data = event.get("data") if isinstance(event, dict) else None
     token = data.get("token") if isinstance(data, dict) else None
     transition = f"{settings.from_namespace}->{settings.to_namespace}"
+
+    if fga_client is not None:
+        allowed = await fga.check(
+            fga_client,
+            user=settings.fga_service_identity,
+            relation=settings.fga_required_action,
+            obj=settings.fga_object(),
+        )
+        if not allowed:
+            record_denied(transition)
+            log.warning(
+                "medallion_stage_denied",
+                extra={
+                    "transition": transition,
+                    "identity": settings.fga_service_identity,
+                    "action": settings.fga_required_action,
+                    "object": settings.fga_object(),
+                },
+            )
+            return _DROP
 
     run_event = build_run_event(
         operation=settings.operation,

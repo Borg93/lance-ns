@@ -34,6 +34,19 @@ class MedallionSettings(BaseSettings):
     sub_topic: str = Field(default="medallion.raw", alias="MEDALLION_SUB_TOPIC")
     pub_topic: str = Field(default="", alias="MEDALLION_PUB_TOPIC")  # "" = terminal stage (gold)
 
+    # --- Optional FGA gate (ReBAC enforcement) — the mover checks it is AUTHORIZED to produce the target
+    # stage before emitting. The silver→gold mover checks `can_promote` (validator-only); the others check
+    # `can_create_table` (writer). It checks as its own service identity, so a mover not granted the role
+    # is DENIED — the cascade then ENFORCES the model, not just describes it. Off by default. -------------
+    fga_enabled: bool = Field(default=False, alias="MEDALLION_FGA_ENABLED")
+    fga_api_url: str = Field(default="http://openfga:8080", alias="MEDALLION_FGA_API_URL")
+    fga_service_identity: str = Field(default="user:service-mover", alias="MEDALLION_FGA_SERVICE_IDENTITY")
+    fga_required_action: str = Field(default="can_create_table", alias="MEDALLION_FGA_REQUIRED_ACTION")
+
+    def fga_object(self) -> str:
+        """The FGA object the mover must be authorized on — the target stage namespace."""
+        return f"namespace:{self.to_namespace}"
+
     # --- producer (lance-ray) config — produces the raw dataset + the first trigger -------------
     raw_dataset: str = Field(default="raw_events", alias="MEDALLION_RAW_DATASET")
     raw_namespace: str = Field(default="raw", alias="MEDALLION_RAW_NAMESPACE")

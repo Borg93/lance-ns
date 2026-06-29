@@ -118,6 +118,12 @@ spec:
             - { name: MEDALLION_AUTHOR, value: {{ .author | quote }} }
             - { name: MEDALLION_SUB_TOPIC, value: {{ .subTopic | quote }} }
             - { name: MEDALLION_PUB_TOPIC, value: {{ .pubTopic | quote }} }
+            {{- if $root.Values.medallion.fgaEnabled }}
+            - { name: MEDALLION_FGA_ENABLED, value: "true" }
+            - { name: MEDALLION_FGA_API_URL, value: {{ $root.Values.medallion.fgaApiUrl | quote }} }
+            - { name: MEDALLION_FGA_SERVICE_IDENTITY, value: {{ .serviceIdentity | quote }} }
+            - { name: MEDALLION_FGA_REQUIRED_ACTION, value: {{ .requiredAction | quote }} }
+            {{- end }}
           readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
           resources: {{- toYaml $root.Values.resources.default | nindent 12 }}
 {{- end }}

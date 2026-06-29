@@ -113,3 +113,32 @@ def test_producer_emits_raw_then_first_trigger(monkeypatch: pytest.MonkeyPatch) 
     assert raw_lineage["data"]["inputs"] == []  # raw is the source — no upstream
     assert trigger["topic"] == "medallion.raw"
     assert trigger["data"]["dataset"] == "raw_events"
+
+
+async def _allow(*_a: Any, **_k: Any) -> bool:
+    return True
+
+
+async def _deny(*_a: Any, **_k: Any) -> bool:
+    return False
+
+
+def test_mover_denied_when_not_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
+    # FGA gate on + the service identity lacks the required role → DROP, and NOTHING is published.
+    monkeypatch.setattr(mover.fga, "check", _deny)
+    dapr = _FakeDapr()
+    status = asyncio.run(
+        mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=object())
+    )
+    assert status == {"status": "DROP"}
+    assert dapr.calls == []  # not authorized → no lineage emitted, no next stage triggered
+
+
+def test_mover_allowed_when_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(mover.fga, "check", _allow)
+    dapr = _FakeDapr()
+    status = asyncio.run(
+        mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=object())
+    )
+    assert status == {"status": "SUCCESS"}
+    assert len(dapr.calls) == 2  # authorized → lineage + next trigger

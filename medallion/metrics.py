@@ -16,8 +16,18 @@ _stage_transitions = _meter.create_counter(
     unit="{transition}",
     description="Medallion stage transitions completed, by transition (e.g. raw->bronze).",
 )
+_stage_denied = _meter.create_counter(
+    "medallion.stage.denied",
+    unit="{transition}",
+    description="Stage transitions DENIED by the FGA gate (the mover lacked the required role).",
+)
 
 
 def record_transition(transition: str) -> None:
     """Increment the stage-transition counter for ``transition`` (``"<from>-><to>"``)."""
     _stage_transitions.add(1, {"transition": transition})
+
+
+def record_denied(transition: str) -> None:
+    """Increment the denied counter (the mover was not authorized to produce the target stage)."""
+    _stage_denied.add(1, {"transition": transition})

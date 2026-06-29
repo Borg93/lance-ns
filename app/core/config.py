@@ -55,13 +55,13 @@ class Settings(BaseSettings):
     fga_api_url: str = Field(default="http://openfga:8080", alias="LANCE_FGA_API_URL")
     fga_store_id: str | None = Field(default=None, alias="LANCE_FGA_STORE_ID")
     fga_model_id: str | None = Field(default=None, alias="LANCE_FGA_MODEL_ID")
-    # The FGA `catalog:` root object. Two roles: (1) every top-level namespace links to it
-    # as its `parent`, so a grant here cascades into all namespaces/tables (the medallion
-    # "project" catalog); (2) it gates create-on-parent for top-level creation when
-    # fga_lock_root_create is on (creating a top-level object then needs can_create_* here).
-    # Grant admins owner/writer on it to bootstrap. Must be a `catalog:` object (the model's
-    # root type). Dev/e2e seeds it; see scripts/seed_demo.sh.
-    fga_root_object: str = Field(default="catalog:lance", alias="LANCE_FGA_ROOT_OBJECT")
+    # The FGA `warehouse:` root object (= the lakehouse bucket). Two roles: (1) every top-level
+    # namespace links to it as its `parent`, so a grant here cascades into all namespaces/tables;
+    # (2) it gates create-on-parent for top-level creation when fga_lock_root_create is on. Grant
+    # admins owner/writer on it to bootstrap — OR attach it to a `project:` (and the project to a
+    # `team:`) for the full Lakekeeper-style multi-tenant hierarchy (see app/auth/model.fga). Must be
+    # a `warehouse:` object (the model's catalog-root type). Dev/e2e seeds it; see scripts/seed_demo.sh.
+    fga_root_object: str = Field(default="warehouse:lance_catalog", alias="LANCE_FGA_ROOT_OBJECT")
     # When False (default), any authenticated caller may create a TOP-LEVEL namespace/
     # table and becomes its owner (the "users create their own workspaces" model). When
     # True, top-level creation also requires can_create_* on fga_root_object — an admin-gated

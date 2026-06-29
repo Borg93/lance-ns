@@ -74,12 +74,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             leeway=settings.oidc_leeway,
             allow_insecure=settings.oidc_allow_insecure,
         )
-    if settings.fga_enabled and settings.fga_store_id and settings.fga_model_id:
+    if settings.fga_enabled:
+        # Converge on the catalog's store: provision is idempotent by store NAME ("lance-catalog"), so
+        # both services resolve the same store + model without the id being pinned ahead of boot. (The
+        # catalog writes the grants on create; lineage reads them — one shared Zanzibar store.)
+        store_id, model_id = settings.fga_store_id, settings.fga_model_id
+        if not (store_id and model_id):
+            store_id, model_id = await fga.provision(settings.fga_api_url)
+            log.info("openfga_provisioned", extra={"store_id": store_id, "model_id": model_id})
         app.state.fga = fga.make_client(
-            settings.fga_api_url,
-            settings.fga_store_id,
-            settings.fga_model_id,
-            timeout_seconds=settings.fga_timeout_seconds,
+            settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
         )
     # Durable ingest (#25) is the Dapr subscription wired below (declarative — the sidecar drives it);
     # there is no consumer task to manage here. The HTTP /api/v1/lineage path stays for external producers.

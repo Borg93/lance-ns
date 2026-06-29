@@ -1,53 +1,76 @@
 model
   schema 1.1
 
-# Lance catalog authorization model.
+# Lance catalog authorization model — Lakekeeper-style multi-tenant ReBAC (OpenFGA / Zanzibar).
 #
-# Hierarchy:  catalog -> namespace (self-nesting) -> table
-# Privileges: concentric rungs  owner > writer > reader, cascading DOWN via `parent`.
-# Permissions: every API operation is checked against a `can_*` ACTION relation
-#   (e.g. can_read_data, can_write_data, can_drop) — the model, not the app, owns
-#   the op->privilege mapping. Roles (`role#assignee`) are first-class subjects so a
-#   grant can target a team/service account, not just a single user.
-#
-# MEDALLION layout maps straight onto this: top-level namespaces `bronze`/`silver`/
-# `gold` (or per-domain sub-namespaces), with persona roles granted per layer —
-# e.g. role:ingestion writer on bronze, role:data_engineer reader on bronze +
-# writer on silver, role:analyst reader on gold — inheriting to all child tables.
+# Hierarchy:  team -> project -> warehouse(= one S3 bucket) -> namespace (self-nesting) -> table
+#   mirrors Lakekeeper's  server -> project -> warehouse -> namespace -> table  hierarchy, with lance's
+#   concentric-rung style (owner > writer > reader) layered on top, plus a `validator` rung.
+# Privileges: concentric rungs cascade DOWN via `parent` / `project`. A SEPARATE `validator` rung gates
+#   medallion stage PROMOTION (e.g. silver -> gold): a plain writer can write within a stage but cannot
+#   promote INTO a gated stage; only an owner or an explicit validator can (`can_promote: validator`).
+# Multi-tenancy: a team owns a project (members inherit project admin); a team can own MANY projects;
+#   each project has exactly ONE warehouse (bucket). Projects are isolated — a grant on project A's
+#   warehouse never reaches project B.
+# Permissions: every API operation is checked against a `can_*` ACTION relation (the model, not the app,
+#   owns the op->privilege mapping). Roles (`role#assignee`) and teams (`team#member`) are first-class
+#   subjects, so a grant can target a persona or a whole team, not just a single user.
 
 type user
 
-# First-class subject: grant a role on an object, then add members to the role.
-# `role:analysts#assignee` is usable anywhere a `[user]` is.
+# A team — a group of users. `team:eng#member` is usable anywhere a [user] subject is.
+type team
+  relations
+    define member: [user]
+
+# An assignable role (persona): `role:validators#assignee` is a first-class subject. Members can be
+# users, whole teams, or other roles (nesting).
 type role
   relations
-    define assignee: [user, role#assignee]
+    define assignee: [user, team#member, role#assignee]
 
-# The single root container (replaces the out-of-model `settings.fga_root_object`
-# magic string). Top-level namespaces parent to it; admins are granted here.
-type catalog
+# A project = a tenant. Owned by a team (members become admins). Holds one warehouse.
+type project
   relations
-    define owner: [user, role#assignee]
+    define team: [team]
+    define admin: [user, role#assignee] or member from team
+    define member: [user, team#member, role#assignee] or admin
+    # ---- actions ----
+    define can_administer: admin
+    define can_create_warehouse: admin
+
+# A warehouse = exactly one S3 bucket, owned by one project. The catalog root object is a `warehouse:`.
+# Concentric rungs inherit from the project (admins own; members read).
+type warehouse
+  relations
+    define project: [project]
+    define owner: [user, role#assignee] or admin from project
     define writer: [user, role#assignee] or owner
-    define reader: [user, role#assignee] or writer
-    # ---- actions (checked, never assigned) ----
+    define reader: [user, role#assignee] or writer or member from project
+    # A warehouse-level validator validates EVERY stage below it.
+    define validator: [user, role#assignee] or owner
+    # ---- actions ----
     define can_get_metadata: reader
     define can_create_namespace: writer
     define can_create_table: writer
 
+# Namespace = a medallion stage (bronze/silver/gold) or a domain namespace; self-nesting under a warehouse.
 type namespace
   relations
-    define parent: [catalog, namespace]
-    # concentric rungs, inheriting from the parent (catalog or namespace)
+    define parent: [warehouse, namespace]
     define owner: [user, role#assignee] or owner from parent
     define writer: [user, role#assignee] or owner or writer from parent
     define reader: [user, role#assignee] or writer or reader from parent
+    # The validator rung is SEPARATE from writer — a writer is NOT a validator. Inherits from the parent
+    # so a warehouse/parent validator validates this stage. This is what gates promotion INTO the stage.
+    define validator: [user, role#assignee] or owner or validator from parent
     # ---- actions ----
     define can_get_metadata: reader
     define can_list: reader
     define can_create_namespace: writer
     define can_create_table: writer
     define can_update_properties: writer
+    define can_promote: validator
     define can_delete: owner
 
 type table
@@ -56,10 +79,12 @@ type table
     define owner: [user, role#assignee] or owner from parent
     define writer: [user, role#assignee] or owner or writer from parent
     define reader: [user, role#assignee] or writer or reader from parent
+    define validator: [user, role#assignee] or owner or validator from parent
     # ---- actions ----
     define can_get_metadata: reader
     define can_read_data: reader
     define can_write_data: writer
+    define can_promote: validator
     define can_alter: writer
     define can_commit: writer
     define can_rename: writer

@@ -18,10 +18,16 @@ data:
       passwordConnector: local
     enablePasswordDB: true
     staticPasswords:
+      # Two demo identities (same password) so the governed demo can show authz allow vs. deny:
+      # alice creates a table (→ she's granted), bob is denied reading it. bcrypt hash of "password".
       - email: {{ .Values.dex.staticUser | quote }}
         hash: "$2b$10$TsVVN0.5g.XntmJAGNuXF.gyhwQZgmgjmkevKxTa48M7k06J./53G"
         username: alice
         userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+      - email: "bob@example.com"
+        hash: "$2b$10$TsVVN0.5g.XntmJAGNuXF.gyhwQZgmgjmkevKxTa48M7k06J./53G"
+        username: bob
+        userID: "1b6e2f5a-7c4d-4e9b-9f1a-2d3c4b5a6e7f"
     staticClients:
       - id: {{ .Values.dex.clientId }}
         name: Lance Catalog

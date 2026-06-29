@@ -1,23 +1,18 @@
-# OpenFGA model tests for the Lance catalog authorization model.
+# OpenFGA model tests for the Lance catalog authorization model (Lakekeeper-style multi-tenant ReBAC).
 #
-# Self-contained: the `model` block below is the EXACT DSL kept in
-# `app/auth/model.fga` (and hand-translated to `app/auth/model.json`). Keep all
-# three in sync — when you edit the model, edit it here too, then re-run
-# `fga model transform --input app/auth/model.fga --output app/auth/model.json`
-# and `fga model test --tests app/auth/model.fga.yaml`.
+# The `model` block below is the EXACT DSL kept in `app/auth/model.fga` (and transformed to
+# `app/auth/model.json`, which the catalog loads). Keep all three in sync — edit the model here too, then
+#   .localbin/fga model transform --input app/auth/model.fga --output app/auth/model.json
+#   .localbin/fga model test --tests app/auth/model.fga.yaml
 #
-# Proves what the app relies on, modelled on a MEDALLION layout
-# (catalog:lance -> bronze/silver/gold namespaces -> tables), with persona ROLES
-# granted per layer:
-#   1. concentric cascade owner => writer => reader on every type (the table rungs
-#      now include `or owner`, so a direct table owner is also writer+reader).
-#   2. parent cascade DOWN the hierarchy: catalog -> namespace -> (nested ns) -> table.
-#   3. `can_*` ACTION relations resolve to the right rung (reader/writer/owner) —
-#      the app checks these, never the raw roles.
-#   4. roles as first-class subjects: `role:X#assignee` granted on a layer reaches
-#      every member, and inherits to that layer's tables.
-#   5. a table/namespace WITHOUT a parent tuple is denied inheritance — the cascade
-#      is tuple-driven, not name-prefix-driven (so grant_on_create MUST seed parent).
+# Scenario (proves the goal's requirements):
+#   team:eng      owns project:acme AND project:research   (a team can own MANY projects)
+#   team:partners owns project:beta
+#   each project has exactly ONE warehouse (= one S3 bucket): acme_bucket / research_bucket / beta_bucket
+#   acme_bucket has medallion stage namespaces: acme_bronze / acme_silver / acme_gold
+#   dave  = a plain WRITER on acme_bucket (data engineer) — writes stages, but CANNOT promote to gold
+#   carol = a VALIDATOR (via role:validators) on acme_gold + reader on the warehouse — CAN promote to gold
+#   eve   = an outsider with no grants
 name: Lance catalog authorization model
 
 model: |
@@ -26,30 +21,46 @@ model: |
 
   type user
 
+  type team
+    relations
+      define member: [user]
+
   type role
     relations
-      define assignee: [user, role#assignee]
+      define assignee: [user, team#member, role#assignee]
 
-  type catalog
+  type project
     relations
-      define owner: [user, role#assignee]
+      define team: [team]
+      define admin: [user, role#assignee] or member from team
+      define member: [user, team#member, role#assignee] or admin
+      define can_administer: admin
+      define can_create_warehouse: admin
+
+  type warehouse
+    relations
+      define project: [project]
+      define owner: [user, role#assignee] or admin from project
       define writer: [user, role#assignee] or owner
-      define reader: [user, role#assignee] or writer
+      define reader: [user, role#assignee] or writer or member from project
+      define validator: [user, role#assignee] or owner
       define can_get_metadata: reader
       define can_create_namespace: writer
       define can_create_table: writer
 
   type namespace
     relations
-      define parent: [catalog, namespace]
+      define parent: [warehouse, namespace]
       define owner: [user, role#assignee] or owner from parent
       define writer: [user, role#assignee] or owner or writer from parent
       define reader: [user, role#assignee] or writer or reader from parent
+      define validator: [user, role#assignee] or owner or validator from parent
       define can_get_metadata: reader
       define can_list: reader
       define can_create_namespace: writer
       define can_create_table: writer
       define can_update_properties: writer
+      define can_promote: validator
       define can_delete: owner
 
   type table
@@ -58,9 +69,11 @@ model: |
       define owner: [user, role#assignee] or owner from parent
       define writer: [user, role#assignee] or owner or writer from parent
       define reader: [user, role#assignee] or writer or reader from parent
+      define validator: [user, role#assignee] or owner or validator from parent
       define can_get_metadata: reader
       define can_read_data: reader
       define can_write_data: writer
+      define can_promote: validator
       define can_alter: writer
       define can_commit: writer
       define can_rename: writer
@@ -68,160 +81,103 @@ model: |
       define can_deregister: owner
 
 tuples:
-  # --- catalog admin (root) ---------------------------------------------------
-  - user: user:admin_amy
-    relation: owner
-    object: catalog:lance
-
-  # --- medallion namespaces, each parented to the catalog ----------------------
-  - user: catalog:lance
-    relation: parent
-    object: namespace:bronze
-  - user: catalog:lance
-    relation: parent
-    object: namespace:silver
-  - user: catalog:lance
-    relation: parent
-    object: namespace:gold
-
-  # --- persona roles + members ------------------------------------------------
-  - user: user:svc_ingest
-    relation: assignee
-    object: role:ingestion
-  - user: user:dee
-    relation: assignee
-    object: role:data_engineer
-  - user: user:ana
-    relation: assignee
-    object: role:analyst
-
-  # --- per-layer role grants (the medallion access policy) ---------------------
-  - user: role:ingestion#assignee   # ingestion writes raw bronze
-    relation: writer
-    object: namespace:bronze
-  - user: role:data_engineer#assignee  # engineers read bronze, write silver
-    relation: reader
-    object: namespace:bronze
-  - user: role:data_engineer#assignee
-    relation: writer
-    object: namespace:silver
-  - user: role:analyst#assignee     # analysts read curated gold
-    relation: reader
-    object: namespace:gold
-
-  # --- tables, each linked to its layer namespace ------------------------------
-  - user: namespace:bronze
-    relation: parent
-    object: table:bronze$images
-  - user: namespace:silver
-    relation: parent
-    object: table:silver$features
-  - user: namespace:gold
-    relation: parent
-    object: table:gold$metrics
-
-  # --- a nested namespace under bronze, to prove ns->ns cascade ----------------
-  - user: namespace:bronze
-    relation: parent
-    object: namespace:bronze$domain1
-  - user: namespace:bronze$domain1
-    relation: parent
-    object: table:bronze$domain1$raw
-
-  # NOTE: table:bronze$orphan deliberately has NO parent tuple — see deny tests.
+  # teams + members
+  - { user: user:alice, relation: member, object: team:eng }
+  - { user: user:bob, relation: member, object: team:eng }
+  - { user: user:frank, relation: member, object: team:partners }
+  # team:eng owns TWO projects; team:partners owns one
+  - { user: team:eng, relation: team, object: project:acme }
+  - { user: team:eng, relation: team, object: project:research }
+  - { user: team:partners, relation: team, object: project:beta }
+  # one warehouse (bucket) per project
+  - { user: project:acme, relation: project, object: warehouse:acme_bucket }
+  - { user: project:research, relation: project, object: warehouse:research_bucket }
+  - { user: project:beta, relation: project, object: warehouse:beta_bucket }
+  # medallion stages under the acme bucket
+  - { user: warehouse:acme_bucket, relation: parent, object: namespace:acme_bronze }
+  - { user: warehouse:acme_bucket, relation: parent, object: namespace:acme_silver }
+  - { user: warehouse:acme_bucket, relation: parent, object: namespace:acme_gold }
+  - { user: namespace:acme_silver, relation: parent, object: table:acme_silver_features }
+  - { user: namespace:acme_gold, relation: parent, object: table:acme_gold_catalog }
+  # dave: a plain WRITER on the warehouse (writes any stage, but is NOT a validator)
+  - { user: user:dave, relation: writer, object: warehouse:acme_bucket }
+  # carol: a VALIDATOR on the gold stage via role:validators, + reader on the warehouse (to read silver)
+  - { user: user:carol, relation: assignee, object: role:validators }
+  - { user: "role:validators#assignee", relation: validator, object: namespace:acme_gold }
+  - { user: user:carol, relation: reader, object: warehouse:acme_bucket }
 
 tests:
-  - name: catalog admin cascades to every layer, namespace, nested ns and table
+  - name: team-owned project admins get full warehouse access (and a team owns MANY projects)
     check:
-      - user: user:admin_amy
-        object: catalog:lance
-        assertions: { owner: true, can_create_namespace: true }
-      - user: user:admin_amy
-        object: namespace:bronze
-        assertions: { owner: true, can_delete: true, can_create_table: true }
-      - user: user:admin_amy
-        object: namespace:bronze$domain1   # nested ns inherits from bronze -> catalog
-        assertions: { owner: true, can_delete: true }
-      - user: user:admin_amy
-        object: table:bronze$images
-        assertions: { owner: true, can_drop: true, can_write_data: true, can_read_data: true }
-      - user: user:admin_amy
-        object: table:bronze$domain1$raw   # two hops down still owned
-        assertions: { owner: true, can_drop: true }
+      - user: user:alice
+        object: warehouse:acme_bucket
+        assertions: { can_get_metadata: true, can_create_table: true }
+      - user: user:alice
+        object: warehouse:research_bucket # same team, second project — still admin/owner
+        assertions: { can_get_metadata: true, can_create_table: true }
+      - user: user:alice
+        object: table:acme_gold_catalog # owner cascades all the way down
+        assertions: { can_read_data: true, can_drop: true }
 
-  - name: ingestion role can write bronze tables but not own them (writer rung)
+  - name: projects are ISOLATED — a grant on one project's bucket never reaches another
     check:
-      - user: user:svc_ingest
-        object: namespace:bronze
-        assertions: { writer: true, owner: false, can_create_table: true }
-      - user: user:svc_ingest
-        object: table:bronze$images
-        assertions:
-          can_write_data: true   # writer
-          can_read_data: true    # writer => reader
-          can_alter: true        # writer
-          can_drop: false        # owner-only
-          can_deregister: false  # owner-only
-      - user: user:svc_ingest    # no grant on other layers
-        object: table:gold$metrics
-        assertions: { can_read_data: false, can_write_data: false }
+      - user: user:alice # eng owns acme + research, NOT beta
+        object: warehouse:beta_bucket
+        assertions: { can_get_metadata: false, can_create_table: false }
+      - user: user:frank # partners owns beta, NOT acme
+        object: warehouse:acme_bucket
+        assertions: { can_get_metadata: false }
+      - user: user:frank
+        object: warehouse:beta_bucket
+        assertions: { can_get_metadata: true, can_create_table: true }
 
-  - name: data_engineer reads bronze, writes silver (multi-layer role)
+  - name: a plain WRITER can write a stage but CANNOT promote to gold
     check:
-      - user: user:dee
-        object: table:bronze$images
-        assertions: { can_read_data: true, can_write_data: false }   # reader on bronze
-      - user: user:dee
-        object: table:silver$features
-        assertions: { can_read_data: true, can_write_data: true, can_drop: false }  # writer on silver
-      - user: user:dee
-        object: table:bronze$domain1$raw   # reader inherited through nested ns
-        assertions: { can_read_data: true, can_write_data: false }
+      - user: user:dave
+        object: table:acme_silver_features
+        assertions: { can_read_data: true, can_write_data: true }
+      - user: user:dave # the headline: writer is NOT a validator → no promotion into gold
+        object: namespace:acme_gold
+        assertions: { can_get_metadata: true, can_promote: false }
+      - user: user:dave
+        object: table:acme_gold_catalog
+        assertions: { can_write_data: true, can_promote: false }
 
-  - name: analyst reads only curated gold
+  - name: a VALIDATOR can promote silver to gold; an owner is implicitly a validator
     check:
-      - user: user:ana
-        object: table:gold$metrics
-        assertions: { can_read_data: true, can_get_metadata: true, can_write_data: false }
-      - user: user:ana
-        object: table:bronze$images
-        assertions: { can_read_data: false }
+      - user: user:carol # validator on gold via role:validators
+        object: namespace:acme_gold
+        assertions: { can_promote: true }
+      - user: user:carol
+        object: table:acme_gold_catalog # validator cascades to tables in the gold stage
+        assertions: { can_promote: true }
+      - user: user:carol # she can read silver (reader on the bucket) to do the promotion
+        object: table:acme_silver_features
+        assertions: { can_read_data: true }
+      - user: user:alice # owner ⇒ validator, so admins promote too
+        object: namespace:acme_gold
+        assertions: { can_promote: true }
 
-  - name: a table without a parent tuple denies inheritance (cascade needs the tuple)
+  - name: an outsider with no grants is denied
     check:
-      - user: user:admin_amy   # even the catalog owner cannot reach an unlinked table
-        object: table:bronze$orphan
-        assertions: { owner: false, can_read_data: false, can_drop: false }
+      - user: user:eve
+        object: warehouse:acme_bucket
+        assertions: { can_get_metadata: false }
+      - user: user:eve
+        object: table:acme_gold_catalog
+        assertions: { can_read_data: false, can_promote: false }
 
-  - name: list_objects — tables each persona can read (drives GET /v1/table filtering)
-    list_objects:
-      - user: user:admin_amy
-        type: table
-        assertions:
-          can_read_data:
-            - table:bronze$images
-            - table:silver$features
-            - table:gold$metrics
-            - table:bronze$domain1$raw
-      - user: user:svc_ingest
-        type: table
-        assertions:
-          can_write_data:
-            - table:bronze$images
-            - table:bronze$domain1$raw   # writer cascades bronze -> bronze$domain1 -> its tables
-      - user: user:ana
-        type: table
-        assertions:
-          can_read_data:
-            - table:gold$metrics
-
-  - name: list_users — who can read bronze$images (audit/sharing view)
+  - name: who can promote into gold? (list_users) — owners + validators, never plain writers
     list_users:
-      - object: table:bronze$images
-        user_filter:
-          - type: user
-        relation: can_read_data
-        users:
-          - user:admin_amy      # catalog owner -> bronze -> table
-          - user:svc_ingest     # ingestion role writer -> reader
-          - user:dee            # data_engineer role reader on bronze
+      - object: namespace:acme_gold
+        user_filter: [{ type: user }]
+        assertions:
+          can_promote:
+            users: [user:alice, user:bob, user:carol]
+
+  - name: which buckets can the writer dave see? (list_objects) — only acme, by isolation
+    list_objects:
+      - user: user:dave
+        type: warehouse
+        assertions:
+          can_get_metadata: [warehouse:acme_bucket]

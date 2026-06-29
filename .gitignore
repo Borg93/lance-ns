@@ -16,3 +16,6 @@ lance-namespace/
 lance-namespace-impls/
 lance-format-lance-ray/
 lakekeeper-ref/
+rask/
+# Locally-downloaded cluster tooling (kind/kubectl/k9s/tilt) — not committed
+.localbin/

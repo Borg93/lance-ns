@@ -299,10 +299,22 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     - **Remaining sub-task**: the column-lineage **UI** (Svelte Flow field-to-field view) — backend is
       complete. Also still unblocks **schema-diffing between Lance versions** (#23 fast-follow).
     (supersedes P2 #12b)
-25. ⬜ **Event-driven runtime is designed, not built.** The medallion is a synchronous driver; the
-    NATS JetStream + Ray bridge + Dapr-Workflow gold QC gate is the design in
-    `docs/image-pipeline-event-driven.{html,md}` + `docs/event-driven-pipeline.{html,md}` (P2 #14). Build:
-    S3 ObjectCreated → NATS → Ray bridge → Dapr gold gate, OpenLineage at every hop.
+25. 🔶 **Event-driven runtime — IN PROGRESS (Dapr transport landed).** Phase 1 DONE: the catalog→lineage
+    transport is **Dapr pub/sub** (`DaprEmitter` → `pubsub.jetstream` component; `handle_cloud_event`
+    Dapr subscription on the lineage side) replacing best-effort `BackgroundTasks` — the sidecar owns
+    retry/DLQ/trace-propagation, app holds no broker client. Still designed-not-built: S3 ObjectCreated →
+    NATS → Ray bridge → **Dapr-Workflow** gold QC gate, OpenLineage at every hop
+    (`docs/image-pipeline-event-driven.{html,md}`).
+26. 🔶 **k8s (kind) + Helm + Tilt + Dapr platform — IN PROGRESS (the big migration, modeled on `rask/`).**
+    Goal: a working running event-driven example on **kind** with frontend + **Apache-AGE Postgres** +
+    **NATS** (events/pubsub via Dapr) + **OpenFGA (in Postgres)** + **Dex (OIDC)**, deployed by ONE
+    umbrella Helm `chart/` (infra as gated subchart deps) and iterated with **Tilt** live-reload; **k9s**
+    to inspect. Decisions: Dapr pub/sub (not nats-direct), kind (not k3s — Docker-only), Tilt (not
+    Skaffold), **OpenBao** Dapr secret store = a later phase. Toolchain installed in `.localbin/`
+    (kind/kubectl/k9s/tilt; helm on PATH). **Done:** the Dapr app-code pivot (#25 phase 1, commit 9b1c5f5).
+    **Next:** author `chart/` (Chart.yaml deps dapr+nats+openfga; Dex + AGE-StatefulSet + dapr pubsub
+    Component + subscription; values toggles; service Deployments w/ `dapr.io/*` annotations; Tiltfile;
+    Makefile kind/tilt targets) → `helm lint`/`template` → kind deploy → verify with k9s → OpenBao.
 
 **Cheap spec-fidelity facets (Marquez-ingestable, low effort):** `outputStatistics` (rows/bytes on WROTE)
 and `lifecycleStateChange` (the carrier for #19's write events) are near-term load-bearing; `dataQuality`

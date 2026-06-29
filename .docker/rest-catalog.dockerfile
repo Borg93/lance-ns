@@ -34,13 +34,12 @@ LABEL org.opencontainers.image.title="lance-rest-catalog" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-# tini for correct PID 1 signal handling / zombie reaping. Strip setuid/setgid bits from the base
-# image's account tools (passwd/chsh/...) — no use in a container, residual privesc surface.
+# tini for correct PID 1 signal handling / zombie reaping. No `|| true` here — a failed apt/useradd
+# MUST fail the build (else the image ships without tini and every container fails to start).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tini \
     && rm -rf /var/lib/apt/lists/* \
-    && useradd -r -u 10001 --no-create-home --shell /usr/sbin/nologin app \
-    && find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true
+    && useradd -r -u 10001 --no-create-home --shell /usr/sbin/nologin app
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -57,6 +56,11 @@ COPY --link lineage ./lineage
 COPY --link medallion ./medallion
 # The compaction/GC service (Dapr cron binding) also shares this image: `uvicorn compaction.service:app`.
 COPY --link compaction ./compaction
+
+# Strip setuid/setgid bits from the whole shipped filesystem (base account tools passwd/chsh/... +
+# anything in the venv) — no use in a container, residual privesc surface. Own RUN so its `|| true`
+# (which only tolerates find matching nothing) cannot mask a real build failure above.
+RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true
 
 USER app
 # 2333 = catalog (app.main:app); 8000 = lineage service (lineage.main:app) — same image, run with

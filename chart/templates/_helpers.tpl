@@ -36,6 +36,6 @@ table); metrics/logs must NOT carry the pipeline header, so traces get their own
 {{/* Default metric export interval is 60s — too slow to observe in a demo/test. Push every 5s. */}}
 - { name: OTEL_METRIC_EXPORT_INTERVAL, value: "5000" }
 - { name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, value: "true" }
-- { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=lance-ns,deployment.environment=kind" }
+- { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=lance-ns,deployment.environment=kind,service.version={{ $root.Chart.AppVersion }}" }
 {{- end -}}
 

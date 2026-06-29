@@ -2,8 +2,8 @@
 
 Auto-instrumentation gives generic HTTP server/client metrics; these are the *business* golden
 signals you'd actually alert on — how many lineage events we ingest vs. drop vs. retry, and how long
-ingest takes. They go out via the OTel SDK (activated by ``opentelemetry-instrument``) over OTLP to
-the Collector, which fans metrics to Prometheus.
+ingest takes. They go out via the OTel SDK (activated by ``opentelemetry-instrument``) **OTLP-direct to
+GreptimeDB** (no Collector — mirrors rask), queryable in PromQL / Perses.
 
 Cardinality is bounded on purpose (the otel skill's #1 cost driver): the only attribute is the bounded
 ``outcome`` — per-run / per-table identifiers belong on spans and logs, never on metric attributes.

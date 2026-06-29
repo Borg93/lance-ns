@@ -47,4 +47,5 @@ def test_summarize_aggregates_reclaimed_and_errors() -> None:
     assert summary["datasets"] == 3
     assert summary["fragments_removed"] == 4
     assert summary["versions_removed"] == 2
-    assert summary["errors"] == ["s3://b/c"]
+    # failures keep their message (the why), not just the URI
+    assert summary["errors"] == {"s3://b/c": "open: not a dataset"}

@@ -53,12 +53,13 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
 
 
 def summarize(results: list[DatasetResult]) -> dict[str, Any]:
-    """Aggregate one sweep's per-dataset results into the cron response."""
+    """Aggregate one sweep's per-dataset results into the cron response. Failures keep their MESSAGE
+    (not just the URI) — a cron sweep has no human watching, so the *why* is the only debugging signal."""
     return {
         "datasets": len(results),
         "fragments_removed": sum(r.fragments_removed for r in results),
         "versions_removed": sum(r.old_versions_removed for r in results),
-        "errors": [r.uri for r in results if r.error],
+        "errors": {r.uri: r.error for r in results if r.error},
     }
 
 

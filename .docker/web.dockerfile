@@ -26,6 +26,11 @@ LABEL org.opencontainers.image.title="lance-lineage-web" \
 WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
+# NOTE: we copy the build stage's full node_modules rather than a `--production` tree. svelte-adapter-bun
+# externalizes @sveltejs/kit (a devDependency) into build/server but omits it from build/package.json, so
+# a production-only install drops a module the SSR server needs at runtime ("Cannot find module
+# @sveltejs/kit"). A precise prod tree means hoisting the adapter's true runtime deps into dependencies
+# (fragile, needs a SvelteKit build to verify) — deferred; the dev-dep leak is an accepted-low hygiene cost.
 COPY --from=build --link /app/build ./build
 COPY --from=build --link /app/node_modules ./node_modules
 COPY --from=build --link /app/package.json ./package.json

@@ -30,7 +30,8 @@ VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
-        gateway governed e2e-obs e2e-medallion dashboards status k9s tilt-up tilt-ci clean down
+        gateway governed e2e-obs e2e-medallion e2e-gateway e2e-compaction dashboards status k9s \
+        tilt-up tilt-ci clean down
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -132,6 +133,20 @@ e2e-medallion: ## Run the e2e medallion-cascade test against the deployed stack 
 	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
 	   uv run pytest tests/e2e/test_medallion_e2e.py -v -m medallion; rc=$$?; \
 	 kill $$R $$L 2>/dev/null; exit $$rc
+
+e2e-gateway: ## Run the e2e gateway test (Dapr service-invocation routing) against the deployed stack
+	@kubectl port-forward svc/$(RELEASE)-gateway 8088:8080 >/dev/null 2>&1 & G=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_GATEWAY_URL=http://localhost:8088 uv run pytest tests/e2e/test_gateway_e2e.py -v -m gateway; rc=$$?; \
+	 kill $$G 2>/dev/null; exit $$rc
+
+e2e-compaction: ## Run the e2e compaction test (real Lance sweep + OTel metric) against the deployed stack
+	@kubectl port-forward svc/$(RELEASE)-compaction 8000:8000 >/dev/null 2>&1 & C=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 >/dev/null 2>&1 & G=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_COMPACTION_URL=http://localhost:8000 LANCE_E2E_GREPTIME_URL=http://localhost:4000 \
+	   uv run pytest tests/e2e/test_compaction_e2e.py -v -m compaction; rc=$$?; \
+	 kill $$C $$G 2>/dev/null; exit $$rc
 
 status: ## Show all pods
 	@kubectl get pods

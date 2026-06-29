@@ -32,6 +32,15 @@ CREATE_TABLE = "create_table"
 #: and what a Marquez-style consumer records as the event source).
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/app/core/lineage_emit.py"
 
+#: OpenLineage standard ``DatasetVersionDatasetFacet`` schema URL. The output dataset carries this
+#: facet so the lineage service records the Lance version on the ``WROTE`` edge
+#: (``repository.output_version`` reads ``outputs[].facets.version.datasetVersion``) — without it a real
+#: ``create_table`` persists a versionless edge (the custom ``lance`` run facet is not read for version).
+_VERSION_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-0-1/DatasetVersionDatasetFacet.json"
+    "#/$defs/DatasetVersionDatasetFacet"
+)
+
 
 def build_create_event(
     *,
@@ -60,7 +69,20 @@ def build_create_event(
         "run": {"runId": run_id, "facets": run_facets},
         "job": {"namespace": job_namespace, "name": CREATE_TABLE},
         "inputs": [],
-        "outputs": [{"namespace": namespace, "name": table_id}],
+        "outputs": [
+            {
+                "namespace": namespace,
+                "name": table_id,
+                # Standard version facet → the lineage WROTE edge carries the Lance version (#20).
+                "facets": {
+                    "version": {
+                        "_producer": _PRODUCER,
+                        "_schemaURL": _VERSION_FACET_SCHEMA,
+                        "datasetVersion": str(version),
+                    }
+                },
+            }
+        ],
     }
 
 

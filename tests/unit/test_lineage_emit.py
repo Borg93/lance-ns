@@ -35,7 +35,11 @@ def test_build_create_event_shape() -> None:
         job_namespace="lance-catalog",
     )
     assert event["eventType"] == "COMPLETE"
-    assert event["outputs"] == [{"namespace": "alpha$bronze", "name": "alpha$bronze$images"}]
+    output = event["outputs"][0]
+    assert output["namespace"] == "alpha$bronze"
+    assert output["name"] == "alpha$bronze$images"
+    # #20: the standard version facet rides the output so the WROTE edge carries the Lance version.
+    assert output["facets"]["version"]["datasetVersion"] == "1"
     assert event["run"]["facets"]["author"] == {"name": "alice", "sub": "alice"}
     assert event["run"]["facets"]["lance"] == {"operation": "create_table", "version": 1}
     assert event["job"] == {"namespace": "lance-catalog", "name": "create_table"}
@@ -75,6 +79,8 @@ def test_emitted_event_round_trips_into_lineage_model() -> None:
     assert parsed.operation == "create_table"
     assert parsed.author == "alice"
     assert parsed.outputs[0].name == "alpha$bronze$images"
+    # #20: the version the lineage service folds onto the WROTE edge (was None before this fix).
+    assert parsed.output_version("alpha$bronze$images") == "1"
 
 
 def test_noop_emitter_does_nothing() -> None:
@@ -109,9 +115,12 @@ def test_http_emitter_posts_the_event() -> None:
     emitter = HttpLineageEmitter(
         cast(httpx.AsyncClient, client), "http://lineage/api/v1/lineage", job_namespace="lance-catalog"
     )
-    asyncio.run(emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=1))
+    asyncio.run(emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=3))
     assert client.posted is not None
-    assert client.posted["outputs"] == [{"namespace": "a", "name": "a$b"}]
+    output = client.posted["outputs"][0]
+    assert output["namespace"] == "a"
+    assert output["name"] == "a$b"
+    assert output["facets"]["version"]["datasetVersion"] == "3"  # #20
     assert client.posted["run"]["facets"]["author"]["sub"] == "alice"
 
 

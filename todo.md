@@ -239,10 +239,10 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     has only `emit_create`; `data.py:79` calls it only on create — insert/merge/update/delete emit
     NOTHING (the rich flow exists only in `seed.py` / `medallion_demo.py`). Add `emit_insert/merge/delete`
     + wire the 4 call sites; each needs the resulting Lance version. (supersedes P2 #11)
-20. ⬜ **version-on-WROTE in prod (S, decisive).** `build_create_event` puts version in a CUSTOM `lance`
-    facet; `repository.output_version` reads the STANDARD per-output `DatasetVersionDatasetFacet` (only the
-    demo emits it) → a real `create_table` persists `WROTE.version = NULL`. Fix: attach the standard
-    version facet to each output in `build_create_event` (~3 lines, revives the storage-version edge).
+20. ✅ **version-on-WROTE in prod — DONE.** `build_create_event` now attaches the standard
+    `DatasetVersionDatasetFacet` (`outputs[].facets.version.datasetVersion`) so a real `create_table`
+    persists the Lance version on the `WROTE` edge (was `NULL` — only the demo emitted it). Proven by the
+    round-trip unit test (`RunEvent.output_version == "1"`). Revives the storage-version differentiator.
 21. ⬜ **Lineage ↔ data KEY embedded in the Lance file (self-describing data) — user request.** Today the
     only link is a *convention*: the canonical id (`Dataset.name`) + the version on WROTE. NOTHING is
     written into the Lance file at create (verified — `create_table` writes no table metadata); only gold's

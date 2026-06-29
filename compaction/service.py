@@ -9,6 +9,8 @@ runs in the threadpool so the event loop stays free. Run: ``uvicorn compaction.s
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from datetime import timedelta
 from typing import Any
 
@@ -17,13 +19,23 @@ from fastapi import Depends, FastAPI
 from fastapi.concurrency import run_in_threadpool
 
 from app.core.dapr_auth import require_dapr_token
-from compaction.config import CompactionSettings, get_settings
+from compaction.config import CompactionSettings, apply_dapr_secrets, get_settings
 from compaction.metrics import record_reclaimed, record_run
 from compaction.optimize import DatasetResult, compact_one, discover_dataset_uris
 
 log = logging.getLogger(__name__)
 
-app = FastAPI(title="Lance compaction/GC", version="0.1.0")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Consume the S3 secret from the Dapr secret store (OpenBao) before the first cron sweep, so the
+    # sweep's S3 access uses a store-sourced key and the plaintext secret never ships in pod env — the
+    # audit's secret-consumption fix. Mutates the cached settings in place; fails closed if unavailable.
+    apply_dapr_secrets(get_settings())
+    yield
+
+
+app = FastAPI(title="Lance compaction/GC", version="0.1.0", lifespan=lifespan)
 _settings = get_settings()
 
 

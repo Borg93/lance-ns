@@ -65,7 +65,13 @@ spec:
             - { name: COMPACTION_OLDER_THAN_DAYS, value: {{ .Values.compaction.olderThanDays | quote }} }
             - { name: COMPACTION_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
             - { name: COMPACTION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            {{- if not .Values.openbao.enabled }}
             - { name: COMPACTION_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            {{- else }}
+            # OpenBao on → the S3 secret comes ONLY from the Dapr secret store at boot; not in pod env (the
+            # audit's fix — compaction is a real S3 consumer that compacts/GCs the lakehouse). Fails closed.
+            - { name: COMPACTION_SECRETS_FROM_DAPR, value: "true" }
+            {{- end }}
             - { name: COMPACTION_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
             - { name: COMPACTION_S3_REGION, value: "us-east-1" }
           readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }

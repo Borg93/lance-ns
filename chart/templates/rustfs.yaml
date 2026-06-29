@@ -36,7 +36,11 @@ spec:
           args: ["/data"] # RustFS takes the data path as the final command arg
           env:
             - { name: RUSTFS_ACCESS_KEY, value: {{ .Values.rustfs.accessKey | quote }} }
-            - { name: RUSTFS_SECRET_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            # The S3 root secret from a k8s Secret (not a plaintext pod-spec value) — this is the most
+            # sensitive credential (bucket root). Prod populates the Secret from OpenBao via the operator.
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "lance.fullname" . }}-infra-credentials, key: rustfs-secret-key }
             - { name: RUSTFS_ADDRESS, value: ":9000" }
           ports:
             - { name: s3, containerPort: 9000 }

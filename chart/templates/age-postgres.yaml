@@ -55,7 +55,11 @@ spec:
           image: {{ .Values.age.image }}
           env:
             - { name: POSTGRES_USER, value: {{ .Values.age.user | quote }} }
-            - { name: POSTGRES_PASSWORD, value: {{ .Values.age.password | quote }} }
+            # From a k8s Secret (not a plaintext pod-spec value) — the audit's 'POSTGRES_PASSWORD plaintext
+            # on the DB server pod' fix. Prod populates the Secret from OpenBao via the operator.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: {{ include "lance.fullname" . }}-infra-credentials, key: postgres-password }
             - { name: POSTGRES_DB, value: {{ .Values.age.lineageDb | quote }} }
             - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
           ports:

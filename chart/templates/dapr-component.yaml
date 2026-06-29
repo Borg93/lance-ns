@@ -66,5 +66,8 @@ spec:
 scopes:
   - {{ .Values.services.catalog.daprAppId }}
   - {{ .Values.services.lineage.daprAppId }}
+{{- if .Values.compaction.enabled }}
+  - {{ .Values.compaction.daprAppId }}
+{{- end }}
 {{- end }}
 {{- end }}

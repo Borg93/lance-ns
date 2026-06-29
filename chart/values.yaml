@@ -17,6 +17,11 @@ dapr:
   enabled: true
   sidecars: true # add dapr.io/* annotations to catalog + lineage
   logLevel: info
+  # Dapr app-API-token — Dapr injects it (APP_API_TOKEN) into subscriber apps AND stamps a
+  # `dapr-api-token` header on every event it DELIVERS, so the sidecar-delivered routes (/lineage-events,
+  # /medallion-event, the cron route) reject any forged request that didn't come through the sidecar.
+  # OVERRIDE in prod (it's the auth secret for those routes). Closes the provenance-forgery prod-blocker.
+  appToken: "lance-dev-dapr-app-token-override-me"
   # The Dapr dashboard — a web UI for the Dapr stuff (components, subscriptions, configurations,
   # control plane). These are first-party keys (the dapr subchart ignores them).
   dashboard:

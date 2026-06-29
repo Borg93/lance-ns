@@ -20,9 +20,10 @@ from typing import Any
 
 from dapr.aio.clients import DaprClient
 from dapr.ext.fastapi import DaprApp
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 
 from app.core import fga
+from app.core.dapr_auth import require_dapr_token
 from medallion.config import MedallionSettings, get_settings
 from medallion.events import build_run_event
 from medallion.metrics import record_denied, record_transition
@@ -76,9 +77,12 @@ async def readyz() -> dict[str, str]:
 
 
 @_dapr_app.subscribe(pubsub=_settings.pubsub, topic=_settings.sub_topic, route="/medallion-event")
-async def on_stage(event: dict[str, Any], request: Request) -> dict[str, str]:
+async def on_stage(
+    event: dict[str, Any], request: Request, _: None = Depends(require_dapr_token)
+) -> dict[str, str]:
     """The Dapr subscription route — thin wrapper over the testable :func:`handle_stage`. ``event`` is
-    typed ``dict`` so FastAPI parses the CloudEvent JSON body (an ``Any`` param → query param → 422)."""
+    typed ``dict`` so FastAPI parses the CloudEvent JSON body (an ``Any`` param → query param → 422).
+    Authenticated by the Dapr app-api-token so a forged stage trigger can't drive the cascade."""
     return await handle_stage(
         request.app.state.dapr, get_settings(), event, fga_client=request.app.state.fga
     )

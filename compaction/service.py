@@ -13,9 +13,10 @@ from datetime import timedelta
 from typing import Any
 
 import pyarrow.fs as pafs
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.concurrency import run_in_threadpool
 
+from app.core.dapr_auth import require_dapr_token
 from compaction.config import CompactionSettings, get_settings
 from compaction.metrics import record_reclaimed, record_run
 from compaction.optimize import DatasetResult, compact_one, discover_dataset_uris
@@ -89,5 +90,11 @@ async def ack_binding() -> dict[str, str]:
 
 # Register the cron route at the exact binding name the sidecar delivers to: POST runs the sweep, OPTIONS
 # acks Dapr's binding-discovery pre-flight (else it 405s and Dapr logs the app as not consuming it).
-app.add_api_route(f"/{_settings.binding_name}", on_cron, methods=["POST"], tags=["compaction"])
+app.add_api_route(
+    f"/{_settings.binding_name}",
+    on_cron,
+    methods=["POST"],
+    tags=["compaction"],
+    dependencies=[Depends(require_dapr_token)],  # only the sidecar's cron tick may trigger a sweep
+)
 app.add_api_route(f"/{_settings.binding_name}", ack_binding, methods=["OPTIONS"], include_in_schema=False)

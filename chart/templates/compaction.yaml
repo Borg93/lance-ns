@@ -38,6 +38,7 @@ spec:
         dapr.io/app-id: {{ .Values.compaction.daprAppId | quote }}
         dapr.io/app-port: {{ $port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}
@@ -57,6 +58,9 @@ spec:
             {{- if .Values.observability.enabled }}
             {{- include "lance.otelEnv" (list $root .Values.compaction.daprAppId) | nindent 12 }}
             {{- end }}
+            - name: APP_API_TOKEN  # verify the Dapr-stamped header on the cron route (forged-sweep guard)
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
             - { name: COMPACTION_BINDING_NAME, value: {{ .Values.compaction.bindingName | quote }} }
             - { name: COMPACTION_OLDER_THAN_DAYS, value: {{ .Values.compaction.olderThanDays | quote }} }
             - { name: COMPACTION_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }

@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from lance_namespace import LanceNamespaceError
 
 from app.core import fga
+from app.core.dapr_auth import require_dapr_token
 from app.core.exceptions import problem_detail
 from app.core.oidc import OIDCVerifier
 from lineage import demo
@@ -105,12 +106,26 @@ _dapr_app = DaprApp(app)
 _dapr_settings = get_settings()
 
 
-@_dapr_app.subscribe(
-    pubsub=_dapr_settings.dapr_pubsub, topic=_dapr_settings.dapr_topic, route="/lineage-events"
-)
-async def on_lineage_event(event: dict[str, Any], request: Request) -> dict[str, str]:
-    """Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status."""
+async def on_lineage_event(
+    event: dict[str, Any], request: Request, _: None = Depends(require_dapr_token)
+) -> dict[str, str]:
+    """Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status.
+
+    Authenticated by the Dapr **app-api-token** (``require_dapr_token``): without this the route was an
+    unauthenticated, publicly-reachable ingest path co-mounted on the query app — a forged POST could
+    self-assert any ``author`` and inject fabricated nodes/edges into the authoritative AGE graph,
+    *even with OIDC/FGA on* (the security-audit prod-blocker). The catalog stamps the verified author;
+    the token guard ensures only the sidecar (carrying the secret) can deliver."""
     return await handle_cloud_event(request.app.state.repository, event)
+
+
+# Register the subscription ONLY when Dapr ingest is enabled, so an HTTP-only deployment carries no
+# always-live ingest route. Combined with the token guard above, the pubsub component's publisher scopes,
+# and the gateway blocking this route, a forged external event cannot reach the graph.
+if _dapr_settings.dapr_enabled:
+    _dapr_app.subscribe(
+        pubsub=_dapr_settings.dapr_pubsub, topic=_dapr_settings.dapr_topic, route="/lineage-events"
+    )(on_lineage_event)
 
 
 @app.exception_handler(LanceNamespaceError)

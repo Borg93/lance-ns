@@ -23,6 +23,7 @@ spec:
         dapr.io/app-id: {{ .Values.services.catalog.daprAppId | quote }}
         dapr.io/app-port: {{ .Values.services.catalog.port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}
@@ -96,6 +97,7 @@ spec:
         dapr.io/app-id: {{ .Values.services.lineage.daprAppId | quote }}
         dapr.io/app-port: {{ .Values.services.lineage.port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}
@@ -119,6 +121,11 @@ spec:
             {{- if .Values.observability.enabled }}
             {{- include "lance.otelEnv" (list $root "lineage") | nindent 12 }}
             {{- end }}
+            # Explicit APP_API_TOKEN (recommended k8s approach) so require_dapr_token can verify the
+            # `dapr-api-token` header the sidecar stamps on delivery → forged direct POSTs are 403'd.
+            - name: APP_API_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
             - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
             - { name: LINEAGE_GRAPH, value: {{ .Values.age.lineageDb | quote }} }
             - { name: LINEAGE_DAPR_ENABLED, value: "true" }

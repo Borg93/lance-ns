@@ -14,3 +14,4 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "lance.dexHost" -}}{{ .Release.Name }}-dex{{- end -}}
 {{- define "lance.rustfsHost" -}}{{ .Release.Name }}-rustfs{{- end -}}
 {{- define "lance.openbaoHost" -}}{{ .Release.Name }}-openbao{{- end -}}
+{{- define "lance.jaegerHost" -}}{{ .Release.Name }}-jaeger{{- end -}}

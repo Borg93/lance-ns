@@ -23,6 +23,9 @@ spec:
         dapr.io/app-id: {{ .Values.services.catalog.daprAppId | quote }}
         dapr.io/app-port: {{ .Values.services.catalog.port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        {{- if .Values.observability.enabled }}
+        dapr.io/config: "lance-tracing"
+        {{- end }}
       {{- end }}
     spec:
       containers:
@@ -86,6 +89,9 @@ spec:
         dapr.io/app-id: {{ .Values.services.lineage.daprAppId | quote }}
         dapr.io/app-port: {{ .Values.services.lineage.port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        {{- if .Values.observability.enabled }}
+        dapr.io/config: "lance-tracing"
+        {{- end }}
       {{- end }}
     spec:
       initContainers:

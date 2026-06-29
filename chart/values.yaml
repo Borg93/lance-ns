@@ -90,6 +90,17 @@ openbao:
   port: 8200
   devToken: root # dev-mode root token (demo only; prod uses real auth + unseal)
 
+# --- Observability — Dapr distributed tracing → OTLP → Jaeger (traces + UI) ------------------------
+# Dapr's sidecars emit spans for service-invocation AND pub/sub when a tracing Configuration is set, so
+# the catalog→lineage event flow is traced with NO app changes. Jaeger all-in-one has a native OTLP
+# receiver (4317) + a UI (16686). A standalone OTel Collector is the prod fan-out layer (future).
+observability:
+  enabled: true
+  jaegerImage: jaegertracing/all-in-one:1.62.0
+  samplingRate: "1" # trace everything in the demo (prod: 0.1 via the Collector)
+  otlpPort: 4317
+  uiPort: 16686
+
 # --- The three app services ------------------------------------------------------------------------
 services:
   catalog:

@@ -13,8 +13,11 @@ spec:
   metadata:
     - { name: natsURL, value: "nats://{{ include "lance.natsHost" . }}:4222" }
     - { name: name, value: "lance-dapr" }
-    - { name: durableName, value: "lineage-ingest" }
-    - { name: queueGroupName, value: "lineage" }
+    # No durableName: Dapr's durable PUSH consumer orphans on every pod redeploy (the dead consumer's
+    # deliver subject blocks the new pod with "consumer name already in use"). An ephemeral consumer is
+    # auto-cleaned on disconnect and recreated cleanly — and ingest is idempotent (MERGE on run_id) so a
+    # replay is a no-op. (Durable redelivery across a redeploy gap is the production-hardening follow-up:
+    # a durable PULL consumer.)
     - { name: ackWait, value: "30s" }
     - { name: maxDeliver, value: "5" }
     - { name: backOff, value: "1s,5s,10s,30s,60s" }

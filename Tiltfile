@@ -48,10 +48,6 @@ helm_resource(
     labels=['lance-ns'],
 )
 
-# Handy port-forwards (kind has no host ports).
-local_resource(
-    'port-forwards',
-    serve_cmd='kubectl port-forward svc/lance-ns-web 5173:3000 & kubectl port-forward svc/lance-ns-lineage 8000:8000 & wait',
-    resource_deps=['lance-ns'],
-    labels=['lance-ns'],
-)
+# kind has no host ports — port-forward manually once up (see chart NOTES / DEPLOY.md):
+#   kubectl port-forward svc/lance-ns-web 5173:3000
+#   kubectl port-forward svc/lance-ns-lineage 8000:8000

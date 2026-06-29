@@ -17,7 +17,7 @@ from typing import Any
 import lance
 from fastapi import APIRouter
 
-from lineage.config import get_settings
+from lineage.config import get_settings, storage_options
 from lineage.schemas import DemoDataset, DemoDatasets, DemoField, DemoVersion
 
 log = logging.getLogger(__name__)
@@ -33,15 +33,7 @@ _LAYOUT: list[tuple[str, str]] = [
 
 
 def _storage_options() -> dict[str, str]:
-    settings = get_settings()
-    return {
-        "endpoint": settings.s3_endpoint or "",
-        "access_key_id": settings.s3_access_key_id or "",
-        "secret_access_key": settings.s3_secret_access_key or "",
-        "region": settings.s3_region,
-        "allow_http": "true",
-        "virtual_hosted_style_request": "false",
-    }
+    return storage_options(get_settings())
 
 
 def _read_lineage_jsonb(ds: Any) -> dict[str, Any] | None:

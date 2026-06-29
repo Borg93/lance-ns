@@ -260,10 +260,19 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     pass-through). **Proven durable** by a restart-survival test (24 events survive `docker restart`; was
     0 before). Reset script now drops the table too. Unit test for the gate + 140 unit/integration pass.
     (Retention is a fast-follow once it's a high-volume log.)
-23. ⬜ **Storage-version reconciliation.** `/demo/datasets` reads real Lance versions/schema off S3 but is
-    demo-gated, hardcoded to 3 datasets, NEVER reconciled vs the AGE `WROTE.version`. Promote to a
-    first-class gated capability that cross-checks emitted vs on-disk version + flags drift; then layer
-    **version diffing** (schema + row delta between two Lance versions, and which run caused it).
+23. ✅ **Storage-version reconciliation — DONE (the format-aware moat).** New gated
+    `GET /datasets/{name}/reconcile` cross-checks the version the graph recorded on the `WROTE` edge
+    (`latest_write_version` = most-recent *successful* write, monotonic) against the **actual on-disk
+    Lance version** read straight off object storage (`lineage/reconcile.py`, `read_storage_version` in
+    the threadpool so blocking I/O never stalls the loop) and classifies drift: `in_sync` / `storage_ahead`
+    (a write that bypassed lineage) / `graph_ahead` (a lineage claim with no data) / `untracked` /
+    `missing_on_storage` / `absent`. Gated on `can_get_metadata` for `name` (in the route-gate set test).
+    Shared `storage_options(settings)` promoted out of the demo module (config.py); demo reuses it.
+    **Proven live** on the medallion stack: bronze v1==v1, silver v2==v2 (proves it picks the latest
+    write, not v1), gold v1==v1 all `in_sync`; unknown dataset → `absent`. Drift paths covered by the
+    parametrized core test + the endpoint-wiring test. Marquez/Lakekeeper are format-unaware and cannot
+    do this. **Fast-follow:** version diffing (schema + row delta between two Lance versions, and which
+    run caused it) + persist-schema-per-version (the #24 prerequisite).
 24. ⬜ **Column-level lineage (L — the one real feature).** `SchemaDatasetFacet` is emitted but DISCARDED
     on ingest; AGE stores ZERO schema, no `(:Column)` nodes. Needs: the transform to DECLARE column→column
     mappings (`columnLineage` facet — not free), `(:Column)` nodes + field-to-field edges, ingest storage,
@@ -282,8 +291,10 @@ assertions (the gold QC gate), `nominalTime`, `parent-run`, `processing_engine` 
 one-identity); mutable description/tag CRUD (body-trusted). Full 25-gap matrix lives in the
 `marquez-verdict` workflow transcript.
 
-**Suggested next order:** #20 (version facet, tiny) → #21 (lineage↔data key, pairs with #20) → #19 (emit
-on all writes) → #22 (`/events` durable+gated, same move as `/runs`) → then #23/#24/#25.
+**Suggested next order:** ✅ #20 (version facet) → ✅ #21 (lineage↔data key) → ✅ #19 (emit on all
+writes) → ✅ #22 (`/events` durable+gated) → ✅ #23 (storage-version reconciliation) → **next: #24**
+(column-level lineage — persist schema-per-version first) then **#25** (the Dapr/NATS event-driven
+runtime — the stated end goal).
 
 ---
 

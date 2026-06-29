@@ -73,3 +73,20 @@ class LineageSettings(BaseSettings):
 def get_settings() -> LineageSettings:
     """Return the process-wide cached lineage settings."""
     return LineageSettings()
+
+
+def storage_options(settings: LineageSettings) -> dict[str, str]:
+    """Object-store options for reading Lance datasets directly (reconcile #23, demo peek).
+
+    The same S3-compatible config the catalog writes with, so the lineage service reads the *actual*
+    on-disk version to cross-check the graph. Empty strings let the object-store client fall back to
+    its default credential chain (e.g. real AWS) when the ``LINEAGE_S3_*`` env vars are unset.
+    """
+    return {
+        "endpoint": settings.s3_endpoint or "",
+        "access_key_id": settings.s3_access_key_id or "",
+        "secret_access_key": settings.s3_secret_access_key or "",
+        "region": settings.s3_region,
+        "allow_http": "true",
+        "virtual_hosted_style_request": "false",
+    }

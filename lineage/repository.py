@@ -126,6 +126,14 @@ _PRODUCERS: Final = (
     "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) "
     "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version, r.producer, r.error_message"
 )
+# Reconcile (#23): the version the graph believes is current = the version on the most-recent
+# *successful* WROTE edge (failed runs carry a WROTE edge with no version, so the IS NOT NULL guard
+# skips them). Most-recent by run event_time, since Lance versions are monotonic per dataset.
+_LATEST_WRITE_VERSION: Final = (
+    "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) WHERE w.version IS NOT NULL "
+    "RETURN w.version ORDER BY r.event_time DESC LIMIT 1"
+)
+_SOURCE_URI: Final = "MATCH (d:Dataset {name:$name}) RETURN d.source_uri LIMIT 1"
 _MERGE_USER: Final = "MERGE (u:User {name:$name}) RETURN 1"
 # Latest-create-wins: the CREATED edge carries the create event_time so creator() is deterministic
 # even when a table name is dropped+recreated by a different principal (the most recent create is
@@ -296,6 +304,17 @@ class LineageRepository:
                 for r in rows
             ],
         )
+
+    async def latest_write_version(self, name: str) -> int | None:
+        """The Lance version on the most-recent successful WROTE edge for ``name`` (the version the
+        lineage graph believes is current), or ``None`` if ``name`` was never successfully written. (#23)"""
+        rows = await fetch(self._pool, self._graph, _LATEST_WRITE_VERSION, {"name": name}, columns=1)
+        return int(rows[0][0]) if rows and rows[0][0] is not None else None
+
+    async def source_uri(self, name: str) -> str | None:
+        """The storage location (``dataSource`` URI) recorded for ``name``, or ``None`` if unknown. (#23)"""
+        rows = await fetch(self._pool, self._graph, _SOURCE_URI, {"name": name}, columns=1)
+        return rows[0][0] if rows and rows[0][0] is not None else None
 
     async def list_runs(self) -> Runs:
         """Every run's current lifecycle state, folded onto its ``(:Run)`` node in AGE.

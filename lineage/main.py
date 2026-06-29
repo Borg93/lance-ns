@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from lance_namespace import LanceNamespaceError
@@ -30,8 +31,9 @@ from lineage.auth import (
     enforce_author,
     require_metadata_access,
 )
-from lineage.config import get_settings
+from lineage.config import get_settings, storage_options
 from lineage.models import RunEvent
+from lineage.reconcile import read_storage_version, reconcile
 from lineage.repository import LineageRepository
 from lineage.schemas import (
     Creator,
@@ -39,6 +41,7 @@ from lineage.schemas import (
     LineageGraph,
     Neighbors,
     Producers,
+    ReconcileStatus,
     Runs,
 )
 
@@ -231,6 +234,26 @@ async def get_producers(name: str, repository: RepositoryDep) -> Producers:
 async def get_creator(name: str, repository: RepositoryDep) -> Creator:
     """Who created ``name`` (the verified catalog principal). Gated on ``can_get_metadata``."""
     return await repository.creator(name)
+
+
+@app.get("/datasets/{name}/reconcile", tags=["query"], dependencies=[Depends(require_metadata_access)])
+async def get_reconcile(name: str, repository: RepositoryDep, settings: SettingsDep) -> ReconcileStatus:
+    """Does the lineage graph agree with the **actual Lance file on storage**? (#23)
+
+    Our moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we
+    read the real on-disk version and cross-check it against the version the graph recorded on the
+    ``WROTE`` edge — surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim
+    with no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the
+    Lance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.
+    """
+    graph_version = await repository.latest_write_version(name)
+    uri = await repository.source_uri(name)
+    storage_version = (
+        await run_in_threadpool(read_storage_version, uri, storage_options(settings))
+        if uri is not None
+        else None
+    )
+    return reconcile(dataset=name, graph_version=graph_version, storage_version=storage_version)
 
 
 @app.get("/datasets/{name}/graph", tags=["query"], dependencies=[Depends(require_metadata_access)])

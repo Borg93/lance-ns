@@ -215,6 +215,7 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         "/datasets/{name}/producers",
         "/datasets/{name}/graph",
         "/datasets/{name}/creator",
+        "/datasets/{name}/reconcile",
     }
     seen = set()
     for route in app.routes:
@@ -222,7 +223,7 @@ def test_read_routes_wire_the_metadata_gate() -> None:
             calls = [d.call for d in route.dependant.dependencies]
             assert auth.require_metadata_access in calls, route.path
             seen.add(route.path)
-    assert seen == gated  # all four reads are present and gated
+    assert seen == gated  # every per-dataset read is present and gated
 
 
 def test_ingest_route_requires_authentication() -> None:
@@ -272,6 +273,8 @@ class _FakeRepo:
         self.ingested: RunEvent | None = None
         self.events: list[EventRecord] = []
         self.runs: list[RunStatus] = []
+        self.write_version: int | None = None
+        self.uri: str | None = None
 
     async def ingest_event(self, event: RunEvent) -> None:
         self.ingested = event
@@ -284,6 +287,12 @@ class _FakeRepo:
 
     async def list_runs(self) -> Runs:
         return Runs(runs=self.runs)
+
+    async def latest_write_version(self, name: str) -> int | None:  # noqa: ARG002
+        return self.write_version
+
+    async def source_uri(self, name: str) -> str | None:  # noqa: ARG002
+        return self.uri
 
     async def upstream(self, name: str) -> Neighbors:
         return Neighbors(dataset=name, related=[DatasetRef(name="a"), DatasetRef(name="b")])
@@ -326,6 +335,41 @@ def test_get_events_hides_dataset_less_events_when_governed(monkeypatch: pytest.
     flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
     assert result.events == []  # dataset-less event is hidden under governance
+
+
+def test_get_reconcile_flags_storage_drift(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #23: the endpoint wires graph version + on-disk version → drift status. Here the graph says v1 but
+    # storage is at v2 (a write that bypassed lineage) → storage_ahead, not in sync.
+    from lineage.main import get_reconcile
+    from lineage.schemas import ReconcileState
+
+    settings = _settings()  # gating is route-level; the body just compares the two versions
+    repo = _FakeRepo()
+    repo.write_version = 1
+    repo.uri = "s3://lakehouse/silver/features"
+    monkeypatch.setattr("lineage.main.read_storage_version", lambda _uri, _opts: 2)
+    result = asyncio.run(get_reconcile("silver$features", cast(LineageRepository, repo), settings))
+    assert result.status is ReconcileState.STORAGE_AHEAD
+    assert result.in_sync is False
+    assert (result.graph_version, result.storage_version) == (1, 2)
+
+
+def test_get_reconcile_skips_storage_read_without_uri(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No recorded source_uri → we can't read storage, so storage_version is None (graph claims a write
+    # with nothing readable behind it) without ever touching the object store.
+    from lineage.main import get_reconcile
+    from lineage.schemas import ReconcileState
+
+    def _boom(_uri: str, _opts: dict[str, str]) -> int:
+        raise AssertionError("storage must not be read when no source_uri is recorded")
+
+    monkeypatch.setattr("lineage.main.read_storage_version", _boom)
+    repo = _FakeRepo()
+    repo.write_version = 3
+    repo.uri = None
+    result = asyncio.run(get_reconcile("g$x", cast(LineageRepository, repo), _settings()))
+    assert result.status is ReconcileState.MISSING_ON_STORAGE
+    assert result.storage_version is None
 
 
 def test_get_runs_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:

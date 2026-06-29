@@ -253,9 +253,13 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     creating run in the graph). **Proven in real Lance** by a write→read test (the keys survive
     `write_dataset`). Best-effort (never fails a create); the re-encode runs in the threadpool. The data
     is now reconcilable to the graph WITHOUT the catalog — nobody else (Marquez/Lakekeeper) does this.
-22. ⬜ **Persist + gate `/events`.** `/runs` is now durable (#17); `/events` is still `deque(500)`,
-    in-memory + UNGATED. Move to a durable store + reuse the `can_get_metadata` filter; add retention once
-    it's a real log. (overlaps P2 #16)
+22. ✅ **Persist + gate `/events` — DONE.** Moved the feed from the in-memory `deque(500)` to a durable
+    `public.lineage_events` table (plain SQL in the same Postgres that hosts AGE; `ensure_events_table`
+    on boot, `record_event` on ingest, `list_events` for the feed). **Gated** like the per-dataset reads:
+    `DatasetFilter` drops any event referencing a dataset the caller can't `can_get_metadata` (auth-off →
+    pass-through). **Proven durable** by a restart-survival test (24 events survive `docker restart`; was
+    0 before). Reset script now drops the table too. Unit test for the gate + 140 unit/integration pass.
+    (Retention is a fast-follow once it's a high-volume log.)
 23. ⬜ **Storage-version reconciliation.** `/demo/datasets` reads real Lance versions/schema off S3 but is
     demo-gated, hardcoded to 3 datasets, NEVER reconciled vs the AGE `WROTE.version`. Promote to a
     first-class gated capability that cross-checks emitted vs on-disk version + flags drift; then layer

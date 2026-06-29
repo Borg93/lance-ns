@@ -32,7 +32,7 @@ from lineage import auth
 from lineage.config import LineageSettings
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
-from lineage.schemas import DatasetRef, Neighbors
+from lineage.schemas import DatasetRef, EventRecord, Neighbors
 
 _ISSUER = "https://idp.example.com"
 
@@ -270,9 +270,16 @@ class _FakeRepo:
 
     def __init__(self) -> None:
         self.ingested: RunEvent | None = None
+        self.events: list[EventRecord] = []
 
     async def ingest_event(self, event: RunEvent) -> None:
         self.ingested = event
+
+    async def record_event(self, **_kwargs: object) -> None:
+        return None
+
+    async def list_events(self, limit: int = 500) -> list[EventRecord]:  # noqa: ARG002
+        return self.events
 
     async def upstream(self, name: str) -> Neighbors:
         return Neighbors(dataset=name, related=[DatasetRef(name="a"), DatasetRef(name="b")])
@@ -287,13 +294,27 @@ def test_get_upstream_drops_unauthorized_related(monkeypatch: pytest.MonkeyPatch
     assert [ref.name for ref in result.related] == ["a"]  # "b" is filtered out
 
 
+def test_get_events_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #22: the durable events feed is governed — drop events referencing a dataset the caller can't see.
+    from lineage.main import get_events
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    repo = _FakeRepo()
+    repo.events = [
+        EventRecord(seq=2, outputs=["a"], inputs=[], event={}),
+        EventRecord(seq=1, outputs=["b"], inputs=[], event={}),  # "b" not visible → dropped
+    ]
+    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), _settings(**_FULL_AUTH), _token())
+    result = asyncio.run(get_events(cast(LineageRepository, repo), flt))
+    assert [e.outputs for e in result.events] == [["a"]]  # the "b" event is filtered out
+
+
 def test_ingest_handler_binds_verified_author() -> None:
     from lineage.main import ingest_event
 
     repo = _FakeRepo()
     event = _event(claimed_author="attacker")
-    req = _request(events=[], event_seq=0)
-    asyncio.run(ingest_event(event, cast(LineageRepository, repo), _token("real-user"), req))
+    asyncio.run(ingest_event(event, cast(LineageRepository, repo), _token("real-user")))
     assert repo.ingested is not None and repo.ingested.author == "real-user"  # body claim overridden
 
 
@@ -302,6 +323,5 @@ def test_ingest_handler_keeps_body_author_when_oidc_off() -> None:
 
     repo = _FakeRepo()
     event = _event(claimed_author="claimed")
-    req = _request(events=[], event_seq=0)
-    asyncio.run(ingest_event(event, cast(LineageRepository, repo), None, req))
+    asyncio.run(ingest_event(event, cast(LineageRepository, repo), None))
     assert repo.ingested is not None and repo.ingested.author == "claimed"

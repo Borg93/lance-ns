@@ -7,7 +7,6 @@ it). Run: ``uvicorn lineage.main:app``. See ``docs/LINEAGE.md``.
 from __future__ import annotations
 
 import logging
-from collections import deque
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,7 +28,6 @@ from lineage.models import RunEvent
 from lineage.repository import LineageRepository
 from lineage.schemas import (
     Creator,
-    EventRecord,
     Events,
     LineageGraph,
     Neighbors,
@@ -47,10 +45,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = make_pool(settings.database_url)
     await pool.open()
     app.state.pool = pool
-    app.state.repository = LineageRepository(pool, settings.graph)
-    # Recent-events ring buffer for the Marquez-style /events feed (in-memory, demo/observability).
-    app.state.events = deque(maxlen=500)
-    app.state.event_seq = 0
+    repository = LineageRepository(pool, settings.graph)
+    app.state.repository = repository
+    # Durable events feed: a Postgres table created on first boot. /runs folds onto the AGE (:Run)
+    # node; both now survive restart + are replica-shared — no in-memory state. (#22)
+    await repository.ensure_events_table()
     # Auth is opt-in; when enabled, reuse the catalog's verifier + the shared OpenFGA store.
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(
@@ -105,9 +104,7 @@ async def livez() -> dict[str, str]:
 
 
 @app.post("/api/v1/lineage", status_code=201, tags=["ingest"])
-async def ingest_event(
-    event: RunEvent, repository: RepositoryDep, token: CurrentToken, request: Request
-) -> dict[str, str]:
+async def ingest_event(event: RunEvent, repository: RepositoryDep, token: CurrentToken) -> dict[str, str]:
     """Ingest one OpenLineage ``RunEvent`` into the lineage graph.
 
     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
@@ -120,19 +117,15 @@ async def ingest_event(
     """
     enforce_author(event, token)
     await repository.ingest_event(event)
-    request.app.state.event_seq += 1
-    request.app.state.events.append(
-        {
-            "seq": request.app.state.event_seq,
-            "run_id": event.run.run_id,
-            "event_type": event.event_type,
-            "event_time": event.event_time,
-            "job": f"{event.job.namespace}/{event.job.name}",
-            "author": event.author,
-            "inputs": [d.name for d in event.inputs],
-            "outputs": [d.name for d in event.outputs],
-            "event": event.model_dump(by_alias=True),
-        }
+    await repository.record_event(
+        run_id=event.run.run_id,
+        event_type=event.event_type,
+        event_time=event.event_time,
+        job=f"{event.job.namespace}/{event.job.name}",
+        author=event.author,
+        inputs=[d.name for d in event.inputs],
+        outputs=[d.name for d in event.outputs],
+        event=event.model_dump(by_alias=True),
     )
     return {"status": "ingested", "run": event.run.run_id}
 
@@ -149,14 +142,19 @@ async def get_runs(repository: RepositoryDep) -> Runs:
 
 
 @app.get("/events", tags=["query"])
-async def get_events(request: Request) -> Events:
+async def get_events(repository: RepositoryDep, datasets: FilterDep) -> Events:
     """The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
 
-    In-memory + ungated (demo/observability). In production this would be persisted and gated like
-    the per-dataset query endpoints.
+    **Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is
+    on the feed is filtered like the per-dataset reads — an event is shown only if the caller
+    ``can_get_metadata`` on *every* dataset it references (inputs + outputs), so the audit feed never
+    discloses a table outside the caller's reach. Auth off → pass-through (dev/observability). (#22)
     """
-    buffer = list(getattr(request.app.state, "events", []))
-    return Events(events=[EventRecord(**record) for record in reversed(buffer)])
+    records = await repository.list_events()
+    referenced = {name for record in records for name in (*record.inputs, *record.outputs)}
+    visible = await datasets.visible(list(referenced))
+    events = [r for r in records if set(r.inputs) <= visible and set(r.outputs) <= visible]
+    return Events(events=events)
 
 
 @app.get("/datasets/{name}/upstream", tags=["query"], dependencies=[Depends(require_metadata_access)])

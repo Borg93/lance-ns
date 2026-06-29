@@ -29,7 +29,8 @@ so a dataset referenced by several runs is never duplicated.
 
 from __future__ import annotations
 
-from typing import Final
+import json
+from typing import Any, Final
 
 from psycopg_pool import AsyncConnectionPool
 
@@ -38,6 +39,7 @@ from lineage.models import Dataset, RunEvent
 from lineage.schemas import (
     Creator,
     DatasetRef,
+    EventRecord,
     GraphEdge,
     GraphNode,
     LineageGraph,
@@ -72,6 +74,24 @@ _SET_RUN_OUTPUTS: Final = "MATCH (r:Run {run_id:$rid}) SET r.outputs=$outs RETUR
 _LIST_RUNS: Final = (
     "MATCH (r:Run) RETURN r.run_id, r.job, r.author, r.event_type, r.progress_done, r.progress_total, "
     "r.error_message, r.started_at, r.event_time, r.events_count, r.outputs"
+)
+
+# Durable events feed — a plain table in the SAME Postgres that hosts AGE (qualified ``public.`` so it
+# never lands in AGE's ``ag_catalog`` schema on the search path). Replaces the in-memory deque so /events
+# survives restart + is replica-shared, mirroring the durable /runs fold. (#22)
+_CREATE_EVENTS_TABLE: Final = (
+    "CREATE TABLE IF NOT EXISTS public.lineage_events ("
+    "seq bigserial PRIMARY KEY, run_id text, event_type text, event_time text, "
+    "job text, author text, inputs jsonb, outputs jsonb, event jsonb)"
+)
+_INSERT_EVENT: Final = (
+    "INSERT INTO public.lineage_events "
+    "(run_id, event_type, event_time, job, author, inputs, outputs, event) "
+    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)"
+)
+_LIST_EVENTS: Final = (
+    "SELECT seq, event_type, event_time, job, author, inputs, outputs, event "
+    "FROM public.lineage_events ORDER BY seq DESC LIMIT %s"
 )
 _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
@@ -301,6 +321,58 @@ class LineageRepository:
         ]
         runs.sort(key=lambda run: run.updated_at or "", reverse=True)
         return Runs(runs=runs)
+
+    async def ensure_events_table(self) -> None:
+        """Create the durable events-feed table if absent (idempotent; called once at startup)."""
+        async with self._pool.connection() as conn:
+            await conn.execute(_CREATE_EVENTS_TABLE)
+
+    async def record_event(
+        self,
+        *,
+        run_id: str,
+        event_type: str | None,
+        event_time: str | None,
+        job: str | None,
+        author: str | None,
+        inputs: list[str],
+        outputs: list[str],
+        event: dict[str, Any],
+    ) -> None:
+        """Append one ingested OpenLineage event to the durable feed (survives restart)."""
+        async with self._pool.connection() as conn:
+            await conn.execute(
+                _INSERT_EVENT,
+                (
+                    run_id,
+                    event_type,
+                    event_time,
+                    job,
+                    author,
+                    json.dumps(inputs),
+                    json.dumps(outputs),
+                    json.dumps(event),
+                ),
+            )
+
+    async def list_events(self, limit: int = 500) -> list[EventRecord]:
+        """The most-recent ingested events, newest first (durable — read from Postgres, not memory)."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_LIST_EVENTS, (limit,))
+            rows = await cur.fetchall()
+        return [
+            EventRecord(
+                seq=r[0],
+                event_type=r[1],
+                event_time=r[2],
+                job=r[3],
+                author=r[4],
+                inputs=r[5] or [],
+                outputs=r[6] or [],
+                event=r[7] or {},
+            )
+            for r in rows
+        ]
 
     async def creator(self, name: str) -> Creator:
         """Who created ``name`` — the verified principal on the catalog create event."""

@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Reset the live demo to a CLEAN SLATE so you can drive it yourself from empty:
 #   - wipes the Lance tables on S3 (RustFS)
-#   - empties the lineage graph (Apache AGE)
-#   - clears the in-memory events buffer (restarts lineage-api)
+#   - empties the lineage graph (Apache AGE) AND the durable events feed (lineage_events table)
+#   - restarts lineage-api (recreates the empty events table + reconnects)
 #
 # Just run it — it reads .medallion-demo.env (written when the stack started) for the endpoints:
 #   ./scripts/medallion_reset.sh
@@ -26,11 +26,11 @@ S3_ENDPOINT="$S3_ENDPOINT" S3_ACCESS_KEY="${S3_ACCESS_KEY:-rustfsadmin}" \
 	S3_SECRET_KEY="${S3_SECRET_KEY:-rustfsadmin}" S3_BUCKET="${S3_BUCKET:-lakehouse}" \
 	uv run --no-sync scripts/medallion_demo.py --reset
 
-echo "== 2) empty the lineage graph (Apache AGE) =="
+echo "== 2) empty the lineage graph (Apache AGE) + the durable events feed =="
 docker exec lance-lineage-postgres psql -U lineage -d lineage -tA \
-	-c "LOAD 'age'; SET search_path = ag_catalog, \"\$user\", public; SELECT drop_graph('lineage', true); SELECT create_graph('lineage');" >/dev/null
+	-c "LOAD 'age'; SET search_path = ag_catalog, \"\$user\", public; SELECT drop_graph('lineage', true); SELECT create_graph('lineage'); DROP TABLE IF EXISTS public.lineage_events;" >/dev/null
 
-echo "== 3) clear the in-memory events buffer (restart lineage-api) =="
+echo "== 3) recreate the events table + reconnect (restart lineage-api) =="
 docker restart lance-lineage-api >/dev/null
 until curl -fsS "${LINEAGE_URL}/livez" >/dev/null 2>&1; do sleep 2; done
 

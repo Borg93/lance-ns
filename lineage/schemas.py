@@ -2,9 +2,31 @@
 
 from __future__ import annotations
 
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
+
+
+class ReconcileState(StrEnum):
+    """Result of reconciling the lineage graph's recorded version against the on-disk Lance version."""
+
+    IN_SYNC = "in_sync"  # graph and storage agree
+    STORAGE_AHEAD = "storage_ahead"  # data changed on disk without a lineage event (drift)
+    GRAPH_AHEAD = "graph_ahead"  # lineage claims a newer version than exists on disk (inconsistency)
+    UNTRACKED = "untracked"  # data exists on disk but the graph has no versioned write (no lineage)
+    MISSING_ON_STORAGE = "missing_on_storage"  # graph records a version but the dataset isn't on disk
+    ABSENT = "absent"  # neither side has it
+
+
+class ReconcileStatus(BaseModel):
+    """Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23)."""
+
+    dataset: str
+    graph_version: int | None = None
+    storage_version: int | None = None
+    in_sync: bool
+    status: ReconcileState
 
 
 class DatasetRef(BaseModel):

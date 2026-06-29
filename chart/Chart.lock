@@ -8,5 +8,14 @@ dependencies:
 - name: openfga
   repository: https://openfga.github.io/helm-charts
   version: 0.3.9
-digest: sha256:0fe608984637965a3dbb34568e5cbe3747c81a8acafc13a540126cd245cd20f8
-generated: "2026-06-29T17:09:36.876220544+02:00"
+- name: greptimedb-standalone
+  repository: https://greptimeteam.github.io/helm-charts/
+  version: 0.4.5
+- name: vector
+  repository: https://helm.vector.dev
+  version: 0.56.0
+- name: perses
+  repository: https://perses.github.io/helm-charts
+  version: 0.22.0
+digest: sha256:3d62e09266d8ccee7c6fe4dd0c1566ea22e9ef398c178c8f09552625f74308e9
+generated: "2026-06-29T19:51:20.987562922+02:00"

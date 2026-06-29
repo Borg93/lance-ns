@@ -1,0 +1,55 @@
+{{- if and .Values.observability.enabled .Values.observability.retention }}
+{{- /*
+Durable retention: a post-install/post-upgrade hook that sets a database-level TTL on GreptimeDB's
+`public` database. Every table (lance_logs, opentelemetry_traces, the metrics physical table) inherits
+the DB TTL, so all three signals age out at observability.retention instead of growing forever on the
+single local disk. Idempotent; runs as a hook so it re-applies after GreptimeDB is (re)created, with a
+retry loop that tolerates GreptimeDB still starting up.
+*/}}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}-greptimedb-ttl
+  labels: {{- include "lance.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-weight": "5"
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 20
+  ttlSecondsAfterFinished: 300
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: greptimedb-ttl
+    spec:
+      restartPolicy: OnFailure
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: set-ttl
+          image: curlimages/curl:8.10.1
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: { drop: ["ALL"] }
+          resources:
+            requests: { cpu: "10m", memory: "16Mi" }
+            limits: { cpu: "100m", memory: "64Mi" }
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              GT="http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}"
+              TTL='{{ .Values.observability.retention }}'
+              echo "waiting for GreptimeDB at $GT ..."
+              until curl -sf "$GT/health" >/dev/null 2>&1; do sleep 3; done
+              echo "setting public database ttl=$TTL"
+              curl -sf "$GT/v1/sql?db={{ .Values.observability.dbName }}" \
+                --data-urlencode "sql=ALTER DATABASE {{ .Values.observability.dbName }} SET 'ttl'='$TTL'" \
+                | grep -q affectedrows
+              echo "retention applied: $TTL"
+{{- end }}

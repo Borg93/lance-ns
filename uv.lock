@@ -800,6 +800,7 @@ dependencies = [
     { name = "opentelemetry-distro", marker = "sys_platform == 'linux'" },
     { name = "opentelemetry-exporter-otlp", marker = "sys_platform == 'linux'" },
     { name = "opentelemetry-instrumentation-fastapi", marker = "sys_platform == 'linux'" },
+    { name = "opentelemetry-instrumentation-grpc", marker = "sys_platform == 'linux'" },
     { name = "opentelemetry-instrumentation-httpx", marker = "sys_platform == 'linux'" },
     { name = "opentelemetry-instrumentation-logging", marker = "sys_platform == 'linux'" },
     { name = "opentelemetry-instrumentation-psycopg", marker = "sys_platform == 'linux'" },
@@ -834,6 +835,7 @@ requires-dist = [
     { name = "opentelemetry-distro", specifier = ">=0.64b0" },
     { name = "opentelemetry-exporter-otlp", specifier = ">=1.43.0" },
     { name = "opentelemetry-instrumentation-fastapi", specifier = ">=0.64b0" },
+    { name = "opentelemetry-instrumentation-grpc", specifier = ">=0.64b0" },
     { name = "opentelemetry-instrumentation-httpx", specifier = ">=0.64b0" },
     { name = "opentelemetry-instrumentation-logging", specifier = ">=0.64b0" },
     { name = "opentelemetry-instrumentation-psycopg", specifier = ">=0.64b0" },
@@ -1255,6 +1257,21 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/db/a1/52282e2cc5c08f4df13b087896d9907258fe2ff4f34035d3b21aa92684c3/opentelemetry_instrumentation_fastapi-0.64b0.tar.gz", hash = "sha256:05f75149929e433c1630de381688e650bf651c1e1cce7f9a7b649a807dac8a98", size = 26236, upload-time = "2026-06-24T15:19:27.219Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/72/2d/4f48dc2d6f289f2febc5b871940dbea9f3b04ab9186d23342581b49cb984/opentelemetry_instrumentation_fastapi-0.64b0-py3-none-any.whl", hash = "sha256:43cbbfb2d3079dc81104478a2950ae93ac6d0e90a5020fa3987a236f8f2bdef1", size = 13263, upload-time = "2026-06-24T15:18:38.553Z" },
+]
+
+[[package]]
+name = "opentelemetry-instrumentation-grpc"
+version = "0.64b0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opentelemetry-api", marker = "sys_platform == 'linux'" },
+    { name = "opentelemetry-instrumentation", marker = "sys_platform == 'linux'" },
+    { name = "opentelemetry-semantic-conventions", marker = "sys_platform == 'linux'" },
+    { name = "wrapt", marker = "sys_platform == 'linux'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f9/92/95e012d07267fd4fb1361b8c44b27e742d816927a15c6f3ad16b40d40a84/opentelemetry_instrumentation_grpc-0.64b0.tar.gz", hash = "sha256:e690781928b6fdb930637c983d27968515ffc333d5c67be548e141870786b482", size = 31746, upload-time = "2026-06-24T15:19:28.457Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c5/ff/fa6b68626db1b160c394c0051eba8b7826f867abb5cf84f3d95dbaa67060/opentelemetry_instrumentation_grpc-0.64b0-py3-none-any.whl", hash = "sha256:66c8d875b56deab35dd4f6192d5bf95fbc777bbb0f054528b647dc8f363a6122", size = 24243, upload-time = "2026-06-24T15:18:40.492Z" },
 ]
 
 [[package]]

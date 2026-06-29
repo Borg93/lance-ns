@@ -16,10 +16,12 @@ Trust model: the topic is an internal, catalog-only channel, so the handler **tr
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 
 from pydantic import ValidationError
 
+from lineage.metrics import Outcome, record_ingest_duration, record_outcome
 from lineage.models import RunEvent
 from lineage.repository import LineageRepository
 
@@ -55,19 +57,25 @@ async def record_event_best_effort(repository: LineageRepository, event: RunEven
         log.warning("record_event_failed", extra={"run": event.run.run_id, "error": str(exc)})
 
 
-async def handle_cloud_event(repository: LineageRepository, body: dict[str, Any]) -> dict[str, str]:
+async def handle_cloud_event(repository: LineageRepository, body: Any) -> dict[str, str]:
     """Ingest one Dapr-delivered CloudEvent. ``body["data"]`` is the OpenLineage event (Dapr parses it
-    since we publish with ``datacontenttype=application/json``). Returns the Dapr ack status."""
+    since we publish with ``datacontenttype=application/json``). ``body`` is an untrusted external
+    envelope, hence ``Any`` + the ``isinstance`` guard. Returns the Dapr ack status."""
     data = body.get("data") if isinstance(body, dict) else None
     try:
         event = RunEvent.model_validate(data)
     except (ValidationError, TypeError, ValueError) as exc:
         log.error("lineage_event_invalid", extra={"error": str(exc)})
+        record_outcome(Outcome.DROPPED)
         return _DROP  # malformed — redelivery won't help; drop it (don't poison the subscription)
+    started = time.perf_counter()
     try:
         await repository.ingest_event(event)
         await record_event_best_effort(repository, event)
-        return _SUCCESS
     except Exception as exc:  # noqa: BLE001 — transient (e.g. AGE unavailable) → let Dapr redeliver
         log.warning("lineage_ingest_failed", extra={"run": event.run.run_id, "error": str(exc)})
+        record_outcome(Outcome.RETRIED)
         return _RETRY
+    record_ingest_duration(time.perf_counter() - started)
+    record_outcome(Outcome.INGESTED)
+    return _SUCCESS

@@ -14,20 +14,27 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{- define "lance.dexHost" -}}{{ .Release.Name }}-dex{{- end -}}
 {{- define "lance.rustfsHost" -}}{{ .Release.Name }}-rustfs{{- end -}}
 {{- define "lance.openbaoHost" -}}{{ .Release.Name }}-openbao{{- end -}}
-{{- define "lance.jaegerHost" -}}{{ .Release.Name }}-jaeger{{- end -}}
-{{- define "lance.otelHost" -}}{{ .Release.Name }}-otel-collector{{- end -}}
+{{- define "lance.greptimeHost" -}}{{ .Release.Name }}-greptimedb-standalone{{- end -}}
 
 {{/* OTel SDK env for an app (call: include "lance.otelEnv" (list $root "<service.name>")). The apps run
-under `opentelemetry-instrument`; this exports all three signals over OTLP to the Collector. */}}
+under `opentelemetry-instrument` and export all three signals OTLP-direct to GreptimeDB — no Collector
+(mirrors rask). The SDK appends /v1/{traces,metrics,logs} to the /v1/otlp base. GreptimeDB needs the
+db-name header on every signal and ADDITIONALLY the trace-pipeline header on traces (→ opentelemetry_traces
+table); metrics/logs must NOT carry the pipeline header, so traces get their own *_TRACES_HEADERS. */}}
 {{- define "lance.otelEnv" -}}
 {{- $root := index . 0 -}}
 {{- $svc := index . 1 -}}
+{{- $o := $root.Values.observability -}}
 - { name: OTEL_SERVICE_NAME, value: {{ $svc | quote }} }
-- { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://{{ include "lance.otelHost" $root }}:{{ $root.Values.observability.collectorPort }}" }
-- { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "grpc" }
+- { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://{{ include "lance.greptimeHost" $root }}:{{ $o.greptimePort }}/v1/otlp" }
+- { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf" }
+- { name: OTEL_EXPORTER_OTLP_HEADERS, value: "x-greptime-db-name={{ $o.dbName }}" }
+- { name: OTEL_EXPORTER_OTLP_TRACES_HEADERS, value: "x-greptime-db-name={{ $o.dbName }},x-greptime-pipeline-name={{ $o.tracePipeline }}" }
 - { name: OTEL_TRACES_EXPORTER, value: "otlp" }
 - { name: OTEL_METRICS_EXPORTER, value: "otlp" }
 - { name: OTEL_LOGS_EXPORTER, value: "otlp" }
+{{/* Default metric export interval is 60s — too slow to observe in a demo/test. Push every 5s. */}}
+- { name: OTEL_METRIC_EXPORT_INTERVAL, value: "5000" }
 - { name: OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED, value: "true" }
 - { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=lance-ns,deployment.environment=kind" }
 {{- end -}}

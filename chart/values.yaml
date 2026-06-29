@@ -95,18 +95,102 @@ openbao:
   port: 8200
   devToken: root # dev-mode root token (demo only; prod uses real auth + unseal)
 
-# --- Observability — Dapr distributed tracing → OTLP → Jaeger (traces + UI) ------------------------
-# Dapr's sidecars emit spans for service-invocation AND pub/sub when a tracing Configuration is set, so
-# the catalog→lineage event flow is traced with NO app changes. Jaeger all-in-one has a native OTLP
-# receiver (4317) + a UI (16686). A standalone OTel Collector is the prod fan-out layer (future).
+# --- Observability — the rask stack: GreptimeDB + Vector + Perses (standard OTLP, NOT OTel-Arrow) ----
+# GreptimeDB is ONE unified store for metrics+logs+traces (tables: metrics → PromQL series, lance_logs,
+# opentelemetry_traces), backed by RustFS S3. Apps + Dapr export OTLP-direct to :4000/v1/otlp — there is
+# NO OTel Collector in the path (mirrors rask). Vector ships pod logs; Perses is dashboards-as-code over
+# GreptimeDB's Prometheus-compatible API (:4000/v1/prometheus).
 observability:
   enabled: true
-  jaegerImage: jaegertracing/all-in-one:1.62.0
-  collectorImage: otel/opentelemetry-collector:0.115.0
-  samplingRate: "1" # trace everything in the demo (prod: 0.1)
-  otlpPort: 4317
-  uiPort: 16686
-  collectorPort: 4317
+  bucket: lance-observability # RustFS bucket for GreptimeDB object storage
+  retention: "14d" # DB-level TTL on the `public` database (applied by greptimedb-ttl-job)
+  greptimePort: 4000 # GreptimeDB HTTP: /v1/otlp (ingest), /v1/prometheus (query), /v1/sql, /health
+  dbName: public # the GreptimeDB database all signals land in (x-greptime-db-name header)
+  tracePipeline: greptime_trace_v1 # required pipeline header for OTLP trace ingestion → opentelemetry_traces
+  samplingRate: "1" # Dapr trace sampling — full, so the catalog→lineage context always propagates
+
+# GreptimeDB standalone subchart — unified metrics/logs/traces store on the in-cluster RustFS S3.
+greptimedb-standalone:
+  objectStorage:
+    s3:
+      bucket: lance-observability
+      region: us-east-1
+      root: /greptimedb
+      endpoint: http://lance-ns-rustfs:9000
+    credentials:
+      existingSecretName: lance-ns-observability-s3
+
+# Vector subchart — Agent DaemonSet shipping pod logs to GreptimeDB's logs sink (table lance_logs).
+vector:
+  role: Agent
+  service:
+    enabled: false # the Agent only pushes; it exposes no inbound ports → no Service
+  serviceHeadless:
+    enabled: false
+  # customConfig fully REPLACES the chart default, so it must be complete.
+  customConfig:
+    data_dir: /vector-data-dir
+    api:
+      enabled: false
+    sources:
+      pod_logs:
+        type: kubernetes_logs
+        # GreptimeDB's logs sink is schema-on-write — every distinct enrichment key becomes a PERMANENT
+        # column, so disable the noisy node/namespace/pod-annotation enrichments (rask learned this the
+        # hard way: node labels alone added ~107 columns). Keep the core pod/container/namespace fields.
+        node_annotation_fields:
+          node_labels: ""
+        namespace_annotation_fields:
+          namespace_labels: ""
+        pod_annotation_fields:
+          pod_annotations: ""
+    sinks:
+      greptimedb_logs:
+        type: greptimedb_logs
+        inputs: ["pod_logs"]
+        endpoint: http://lance-ns-greptimedb-standalone:4000
+        dbname: public
+        table: lance_logs
+        compression: gzip
+
+# Perses subchart — dashboards-as-code over GreptimeDB's Prometheus-compatible API.
+perses:
+  # Perses extracts its datasource/panel plugins to /etc/perses/plugins at startup, but the container is
+  # readOnlyRootFilesystem → that path isn't writable → datasource provisioning fails. Give it an
+  # emptyDir there (keeps readOnlyRootFilesystem true).
+  volumes:
+    - name: perses-plugins
+      emptyDir: {}
+    - name: perses-dashboards
+      configMap:
+        name: lance-ns-perses-dashboards
+  volumeMounts:
+    - name: perses-plugins
+      mountPath: /etc/perses/plugins
+    - name: perses-dashboards
+      mountPath: /etc/perses/dashboards
+  # PROXY mode (not directUrl): the in-cluster GreptimeDB DNS name is unreachable from a browser on a
+  # port-forward, so route queries through the Perses server which can resolve it.
+  datasources:
+    - kind: GlobalDatasource
+      metadata:
+        name: greptimedb
+      spec:
+        default: true
+        plugin:
+          kind: PrometheusDatasource
+          spec:
+            proxy:
+              kind: HTTPProxy
+              spec:
+                url: http://lance-ns-greptimedb-standalone:4000/v1/prometheus
+  config:
+    provisioning:
+      folders:
+        - /etc/perses/provisioning
+        - /etc/perses/datasources
+        - /etc/perses/dashboards
+      interval: 1m
 
 # --- The three app services ------------------------------------------------------------------------
 services:

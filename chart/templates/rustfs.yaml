@@ -69,4 +69,7 @@ spec:
             - |
               until mc alias set rfs http://{{ include "lance.rustfsHost" . }}:{{ .Values.rustfs.port }} {{ .Values.rustfs.accessKey }} {{ .Values.rustfs.secretKey }}; do echo wait-rustfs; sleep 3; done
               mc mb --ignore-existing rfs/{{ .Values.rustfs.bucket }}
+              {{- if .Values.observability.enabled }}
+              mc mb --ignore-existing rfs/{{ .Values.observability.bucket }}  # GreptimeDB object store
+              {{- end }}
 {{- end }}

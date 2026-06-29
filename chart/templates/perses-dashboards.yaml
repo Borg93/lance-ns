@@ -1,0 +1,88 @@
+{{- if .Values.observability.enabled }}
+{{- if index .Values "perses" "enabled" | default true }}
+{{- /*
+Perses dashboards-as-code. Mounted into a folder in perses.config.provisioning.folders; Perses loads the
+Project + Dashboard on startup and reconciles every interval. Queries hit the default `greptimedb`
+Prometheus datasource. The hero panels are the *domain* signal — lineage_events_processed_total by
+outcome + ingest p95 (our custom metrics) — alongside the OTLP RED metrics from FastAPI instrumentation.
+NB: Perses seriesNameFormat uses {{`{{label}}`}} syntax — escaped so Helm emits literal braces.
+*/}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-perses-dashboards
+  labels: {{- include "lance.labels" . | nindent 4 }}
+data:
+  project.json: |
+    {
+      "kind": "Project",
+      "metadata": { "name": "lance-ns" },
+      "spec": { "display": { "name": "lance-ns" } }
+    }
+  lineage.json: |
+    {
+      "kind": "Dashboard",
+      "metadata": { "name": "lineage", "project": "lance-ns" },
+      "spec": {
+        "display": { "name": "Lance Lineage — ingest + RED", "description": "Domain signal (events ingested/dropped/retried, ingest latency) + OTLP HTTP RED, all from GreptimeDB." },
+        "duration": "1h",
+        "panels": {
+          "eventsByOutcome": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "Lineage events /s by outcome" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "sum by (outcome) (rate(lineage_events_processed_total[5m]))",
+                "seriesNameFormat": {{ "{{outcome}}" | quote }} } } } } ]
+            }
+          },
+          "ingestP95": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "Ingest p95 (s)" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" }, "yAxis": { "format": { "unit": "seconds" } } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "histogram_quantile(0.95, sum by (le) (rate(lineage_ingest_duration_seconds_bucket[5m])))",
+                "seriesNameFormat": "p95" } } } } ]
+            }
+          },
+          "httpRate": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "HTTP request rate (req/s)" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "sum by (service_name) (rate(http_server_duration_milliseconds_count[5m]))",
+                "seriesNameFormat": {{ "{{service_name}}" | quote }} } } } } ]
+            }
+          },
+          "httpP95": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "HTTP p95 latency (ms)" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" }, "yAxis": { "format": { "unit": "milliseconds" } } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "histogram_quantile(0.95, sum by (service_name, le) (rate(http_server_duration_milliseconds_bucket[5m])))",
+                "seriesNameFormat": {{ "{{service_name}}" | quote }} } } } } ]
+            }
+          }
+        },
+        "layouts": [
+          {
+            "kind": "Grid",
+            "spec": {
+              "display": { "title": "Lineage ingest + RED" },
+              "items": [
+                { "x": 0, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/eventsByOutcome" } },
+                { "x": 12, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/ingestP95" } },
+                { "x": 0, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/httpRate" } },
+                { "x": 12, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/httpP95" } }
+              ]
+            }
+          }
+        ]
+      }
+    }
+{{- end }}
+{{- end }}

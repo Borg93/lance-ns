@@ -26,6 +26,7 @@ dependencies = [
     "opentelemetry-instrumentation-httpx>=0.64b0",
     "opentelemetry-instrumentation-psycopg>=0.64b0",
     "opentelemetry-instrumentation-logging>=0.64b0",
+    "opentelemetry-instrumentation-grpc>=0.64b0",
 ]
 
 [dependency-groups]
@@ -59,6 +60,7 @@ addopts = "-q --import-mode=importlib"
 pythonpath = ["."]
 markers = [
     "e2e: end-to-end tests against a running server (set LANCE_REST_E2E_URL)",
+    "observability: e2e tests against the deployed kind stack — catalog + lineage + GreptimeDB (set LANCE_E2E_*_URL)",
 ]
 
 [tool.ty.environment]

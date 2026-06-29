@@ -50,6 +50,9 @@ deps: ## Add subchart repos + vendor chart deps into chart/charts/
 	@helm repo add dapr https://dapr.github.io/helm-charts/ >/dev/null 2>&1 || true
 	@helm repo add nats https://nats-io.github.io/k8s/helm/charts/ >/dev/null 2>&1 || true
 	@helm repo add openfga https://openfga.github.io/helm-charts >/dev/null 2>&1 || true
+	@helm repo add greptime https://greptimeteam.github.io/helm-charts/ >/dev/null 2>&1 || true
+	@helm repo add vector https://helm.vector.dev >/dev/null 2>&1 || true
+	@helm repo add perses https://perses.github.io/helm-charts >/dev/null 2>&1 || true
 	@helm repo update >/dev/null && helm dependency build ./chart >/dev/null
 	@echo "✓ chart deps vendored"
 
@@ -78,12 +81,25 @@ verify: ## Prove the event-driven flow: catalog publishes via Dapr, lineage inge
 dashboards: ## Port-forward all the UIs (Ctrl-C to stop)
 	@echo "web        → http://localhost:5173"
 	@echo "lineage    → http://localhost:8000"
-	@echo "Jaeger     → http://localhost:16686"
-	@echo "Dapr dash  → http://localhost:8080"
+	@echo "Perses     → http://localhost:8080   (metrics+traces+logs dashboards over GreptimeDB)"
+	@echo "GreptimeDB → http://localhost:4000   (/dashboard — SQL + PromQL over all 3 signals)"
+	@echo "Dapr dash  → http://localhost:8081"
 	@kubectl port-forward svc/$(RELEASE)-web 5173:3000 & \
 	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 & \
-	 kubectl port-forward svc/$(RELEASE)-jaeger 16686:16686 & \
-	 kubectl port-forward svc/$(RELEASE)-dapr-dashboard 8080:8080 & wait
+	 kubectl port-forward svc/$(RELEASE)-perses 8080:8080 & \
+	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 & \
+	 kubectl port-forward svc/$(RELEASE)-dapr-dashboard 8081:8080 & wait
+
+e2e-obs: ## Run the e2e observability test against the deployed stack (auto-forwards catalog/lineage/greptime)
+	@echo "port-forwarding catalog/lineage/greptime …"
+	@kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & C=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 >/dev/null 2>&1 & G=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_CATALOG_URL=http://localhost:2333 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
+	   LANCE_E2E_GREPTIME_URL=http://localhost:4000 \
+	   uv run pytest tests/e2e/test_observability_e2e.py -v -m observability; rc=$$?; \
+	 kill $$C $$L $$G 2>/dev/null; exit $$rc
 
 status: ## Show all pods
 	@kubectl get pods

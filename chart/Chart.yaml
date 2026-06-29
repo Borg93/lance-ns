@@ -29,3 +29,17 @@ dependencies:
     version: "0.3.9"
     repository: https://openfga.github.io/helm-charts
     condition: openfga.enabled
+  # Observability — the rask stack: GreptimeDB (unified metrics/logs/traces store) + Vector (pod-log
+  # shipper) + Perses (dashboards-as-code). Apps + Dapr export OTLP-direct to GreptimeDB — no Collector.
+  - name: greptimedb-standalone
+    version: "0.4.5"
+    repository: https://greptimeteam.github.io/helm-charts/
+    condition: observability.enabled
+  - name: vector
+    version: "0.56.0"
+    repository: https://helm.vector.dev
+    condition: observability.enabled
+  - name: perses
+    version: "0.22.0"
+    repository: https://perses.github.io/helm-charts
+    condition: observability.enabled

@@ -9,7 +9,7 @@ iterated with Tilt. Diagram: [`k8s-event-driven-architecture.html`](k8s-event-dr
 ```bash
 make up        # bootstrap toolchain + kind cluster + build images + deploy everything
 make verify    # prove the event-driven flow end-to-end
-make dashboards# port-forward the UIs (web / lineage / Jaeger / Dapr dashboard)
+make dashboards# port-forward the UIs (web / lineage / Perses / GreptimeDB / Dapr dashboard)
 make k9s       # inspect the cluster
 make tilt-up   # dev loop: hot-reload the FastAPI services
 make down      # tear down
@@ -32,7 +32,9 @@ into `.localbin/` (gitignored).
 | **Dex** | Deployment | OIDC issuer (authn) |
 | **RustFS** | Deployment | S3-compatible object store for the Lance lakehouse |
 | **OpenBao** | Deployment | secret store (Vault fork), fronted by a Dapr `secretstores.hashicorp.vault` component |
-| **Jaeger** | Deployment | tracing backend + UI — Dapr sidecars export spans here (OTLP) |
+| **GreptimeDB** | subchart | **one unified store for metrics + logs + traces** (on RustFS S3) — apps export OTLP-direct here |
+| **Vector** | subchart | Agent DaemonSet shipping pod logs → GreptimeDB (`lance_logs`) |
+| **Perses** | subchart | dashboards-as-code over GreptimeDB's Prometheus API (`/v1/prometheus`) |
 | **Dapr dashboard** | Deployment | web UI for the Dapr stuff (components, subscriptions, configurations) |
 
 ## The event-driven path (verified)
@@ -51,12 +53,26 @@ catalog --DaprClient.publish_event--> [daprd sidecar] --pubsub.jetstream--> NATS
   (MERGE on `run_id`).
 - `make verify` publishes a `create_table` event and asserts AGE recorded the creator.
 
-## Observability (OTel for Dapr)
+## Observability (GreptimeDB + Vector + Perses — the rask stack)
 
-A Dapr `Configuration` (`lance-tracing`) makes the catalog + lineage sidecars export **distributed
-traces** over OTLP to **Jaeger** — no app code needed. The `/v1.0/publish/lineage-pubsub/...` span and
-the lineage delivery span show up in the Jaeger UI. (App-level OTel SDK metrics/logs, and a standalone
-OTel Collector fan-out, are the next layer.)
+All three OTel signals are **valuable and queryable**, mirroring rask: the apps run under
+`opentelemetry-instrument` and export **OTLP-direct to GreptimeDB** (`:4000/v1/otlp`, `http/protobuf`,
+`x-greptime-*` headers) — **no OTel Collector** in the path. GreptimeDB is one unified store; Perses
+dashboards it over GreptimeDB's Prometheus-compatible API. Verified end-to-end (`make e2e-obs`):
+
+- **Traces** → `opentelemetry_traces`. A **single distributed trace spans catalog → Dapr publish →
+  lineage → AGE write** (`opentelemetry-instrumentation-grpc` injects `traceparent` into the gRPC
+  publish; the lineage FastAPI extracts it). Dapr's `lance-tracing` Configuration keeps `samplingRate=1`
+  so the W3C context always propagates — it has **no** otel exporter (Dapr's own spans can't carry
+  GreptimeDB's required headers; the apps do all export).
+- **Metrics** → PromQL. Custom **domain** golden signals `lineage_events_processed_total{outcome}` +
+  `lineage_ingest_duration_seconds_*` (recorded in the consumer), plus FastAPI RED
+  (`http_server_duration_milliseconds_*`). Export interval is 5s (`OTEL_METRIC_EXPORT_INTERVAL`).
+- **Logs** → app OTLP logs (`opentelemetry_logs`) **and** Vector pod logs (`lance_logs`).
+
+`make e2e-obs` runs `tests/e2e/test_observability_e2e.py` — one catalog table-create, then it asserts the
+graph data landed in AGE, the metric incremented in PromQL, the distributed trace joined catalog+lineage,
+and both log tables are populated. That's the regression guard for "the pipeline works **and** is observable".
 
 ## Governance (Dex + OpenFGA)
 
@@ -77,7 +93,8 @@ Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `
 ## Status (audited)
 
 ✅ Verified: the event-driven catalog→lineage flow, all components healthy (`helm STATUS: deployed`),
-Dapr sidecar injection, Jaeger traces, `tilt ci` brings the whole stack up green.
+Dapr sidecar injection, the full 3-signal observability (`make e2e-obs` green — AGE data + PromQL metric
++ distributed trace + logs in GreptimeDB), `tilt ci` brings the whole stack up green.
 ⚠️ Deployed-not-wired: auth (`auth.enabled=false`); OpenBao secret read via Dapr (kv-v2 path nuance).
 ❌ Not built: the medallion stage movers (raw→bronze / bronze→silver / silver→gold) as event-driven
 services + a dummy Ray producer; a compaction/GC microservice; an API gateway; RustFS STS.

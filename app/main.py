@@ -46,18 +46,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # nothing — we fetch from the store (retrying while it seeds) and FAIL CLOSED if it never arrives,
     # rather than booting with an empty/plaintext key.
     if settings.secrets_from_dapr:
+        # Strict sole source: a store miss FAILS CLOSED — never fall back to a plaintext env value (the
+        # chart ships none when openbao is on, and silently using one would contradict 'OpenBao is the
+        # sole source'). fetch_dapr_secret retries while the store/sidecar/seed come up.
         bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
         s3_secret = bundle.get(settings.dapr_secret_s3_field)
-        if s3_secret:
-            settings.s3_secret_access_key = SecretStr(s3_secret)
-            log.info("secret_from_dapr_store", extra={"field": settings.dapr_secret_s3_field})
-        elif settings.s3_secret_access_key.get_secret_value():
-            log.warning("secret_from_dapr_missing_env_fallback", extra={"store": settings.dapr_secret_store})
-        else:
+        if not s3_secret:
             raise RuntimeError(
                 f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
-                f"{settings.dapr_secret_key!r} and no env fallback — failing closed"
+                f"{settings.dapr_secret_key!r} — failing closed (store is the sole source)"
             )
+        settings.s3_secret_access_key = SecretStr(s3_secret)
+        log.info("secret_from_dapr_store", extra={"field": settings.dapr_secret_s3_field})
     elif not settings.s3_secret_access_key.get_secret_value():
         raise RuntimeError("LANCE_S3_SECRET_ACCESS_KEY is required when secrets_from_dapr is off")
     app.state.namespace = build_namespace(settings)  # fail fast if storage misconfigured

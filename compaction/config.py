@@ -54,20 +54,20 @@ def get_settings() -> CompactionSettings:
 
 
 def apply_dapr_secrets(settings: CompactionSettings) -> None:
-    """Consume the S3 secret from the Dapr secret store (OpenBao) and set it on ``settings`` in place, as
-    the SOLE source — no plaintext fallback when the store is meant to provide it. Fails closed if neither
-    the store nor env yields a secret. No-op (and no Dapr import) when ``secrets_from_dapr`` is off.
-    Symmetric with lineage.config.apply_dapr_secrets / the catalog lifespan."""
+    """Consume the S3 secret from the Dapr secret store (OpenBao) and set it on ``settings`` in place. When
+    ``secrets_from_dapr`` is on the store is the STRICT sole source: a store miss FAILS CLOSED (raises),
+    never falling back to a plaintext env value — the chart ships none, and silently using one would
+    contradict 'OpenBao is the sole source'. No-op (and no Dapr import) when off. Symmetric with
+    lineage.config.apply_dapr_secrets / the catalog lifespan."""
     if not settings.secrets_from_dapr:
         return
     from app.core.secrets import fetch_dapr_secret
 
     bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
     s3_secret = bundle.get(settings.dapr_secret_s3_field)
-    if s3_secret:
-        settings.s3_secret_access_key = s3_secret
-    elif not settings.s3_secret_access_key:
+    if not s3_secret:
         raise RuntimeError(
             f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
-            f"{settings.dapr_secret_key!r} and no env fallback — failing closed"
+            f"{settings.dapr_secret_key!r} — failing closed (store is the sole source)"
         )
+    settings.s3_secret_access_key = s3_secret

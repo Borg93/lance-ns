@@ -67,11 +67,18 @@ spec:
       containers:
         - name: mc
           image: {{ .Values.rustfs.mcImage }}
+          # The S3 root secret from a k8s Secret (not interpolated plaintext into the shell command) —
+          # `mc alias set` reads it from "$RUSTFS_SECRET_KEY", so it never appears in the rendered Job
+          # command/args. Mirrors the RustFS server Deployment (the audit's sibling-Job leak fix).
+          env:
+            - name: RUSTFS_SECRET_KEY
+              valueFrom:
+                secretKeyRef: { name: {{ include "lance.fullname" . }}-infra-credentials, key: rustfs-secret-key }
           command:
             - sh
             - -c
             - |
-              until mc alias set rfs http://{{ include "lance.rustfsHost" . }}:{{ .Values.rustfs.port }} {{ .Values.rustfs.accessKey }} {{ .Values.rustfs.secretKey }}; do echo wait-rustfs; sleep 3; done
+              until mc alias set rfs http://{{ include "lance.rustfsHost" . }}:{{ .Values.rustfs.port }} {{ .Values.rustfs.accessKey }} "$RUSTFS_SECRET_KEY"; do echo wait-rustfs; sleep 3; done
               mc mb --ignore-existing rfs/{{ .Values.rustfs.bucket }}
               {{- if .Values.observability.enabled }}
               mc mb --ignore-existing rfs/{{ .Values.observability.bucket }}  # GreptimeDB object store

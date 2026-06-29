@@ -106,22 +106,23 @@ def _with_db_password(url: str, password: str) -> str:
 
 def apply_dapr_secrets(settings: LineageSettings) -> None:
     """Consume sensitive values (S3 secret, AGE DB password) from the Dapr secret store and splice them
-    into ``settings`` in place. Fails closed on the S3 secret (no plaintext fallback when the store is the
-    source); the DB password is spliced only when present (the URL keeps its env value otherwise). No-op
-    when ``secrets_from_dapr`` is off. Imported lazily so the catalog dep isn't pulled in dev/tests."""
+    into ``settings`` in place. When ``secrets_from_dapr`` is on the store is the STRICT sole source for
+    the S3 secret: a store miss FAILS CLOSED (raises), never falling back to a plaintext env value (the
+    chart ships none). The DB password is spliced only when present (the chart ships a password-less URL,
+    so a missing password leaves an unusable DSN that pool.open() rejects → still fail-closed). No-op when
+    off. Imported lazily so the catalog dep isn't pulled in dev/tests."""
     if not settings.secrets_from_dapr:
         return
     from app.core.secrets import fetch_dapr_secret
 
     bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
     s3_secret = bundle.get(settings.dapr_secret_s3_field)
-    if s3_secret:
-        settings.s3_secret_access_key = s3_secret
-    elif not settings.s3_secret_access_key:
+    if not s3_secret:
         raise RuntimeError(
             f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
-            f"{settings.dapr_secret_key!r} and no env fallback — failing closed"
+            f"{settings.dapr_secret_key!r} — failing closed (store is the sole source)"
         )
+    settings.s3_secret_access_key = s3_secret
     db_password = bundle.get(settings.dapr_secret_db_field)
     if db_password:
         settings.database_url = _with_db_password(settings.database_url, db_password)

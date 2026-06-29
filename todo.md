@@ -85,6 +85,10 @@
     OpenFGA + AGE DB creds) **and the LINEAGE svc** (AGE DB creds).
 - **Lineage = separate service** sharing only the `table:<id>` identity (services never call
   each other); read + ingest authz reuse the shared OpenFGA store (read-only) + the IdP.
+- **Postgres is state-of-record ONLY** — the **AGE lineage graph** + the **OpenFGA store**. The
+  **catalog is pure Lance/S3** (no DB dependency). **No relational/Postgres task queue** — all async /
+  queued / scheduled / event work runs on **NATS JetStream + Dapr** (Jobs / Workflow / pub-sub).
+  (Lakekeeper uses a Postgres task queue; we deliberately do not.)
 
 ---
 

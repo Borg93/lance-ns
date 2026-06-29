@@ -15,9 +15,12 @@ import httpx
 
 from app.core.lineage_emit import (
     CREATE_TABLE,
+    INSERT,
+    MERGE_INSERT,
     HttpLineageEmitter,
     NoopEmitter,
     build_create_event,
+    build_write_event,
     make_emitter,
 )
 from lineage.models import RunEvent
@@ -179,3 +182,88 @@ def test_make_emitter_selects_implementation() -> None:
         make_emitter(enabled=False, url="http://lineage", client=client, job_namespace="x"), NoopEmitter
     )
     assert isinstance(make_emitter(enabled=True, url=None, client=client, job_namespace="x"), NoopEmitter)
+
+
+# --- #19: lineage on every write (not just create) ---
+
+
+def test_build_write_event_insert_omits_version_facet() -> None:
+    event = build_write_event(
+        table_id="a$b",
+        namespace="a",
+        author="alice",
+        version=None,
+        operation=INSERT,
+        run_id="r1",
+        event_time="t",
+        job_namespace="lance-catalog",
+    )
+    assert event["job"]["name"] == "insert"
+    assert event["run"]["facets"]["lance"] == {"operation": "insert"}  # no version key
+    assert "facets" not in event["outputs"][0]  # no version facet asserted when version is None
+
+
+def test_build_write_event_merge_carries_version() -> None:
+    event = build_write_event(
+        table_id="a$b",
+        namespace="a",
+        author=None,
+        version=4,
+        operation=MERGE_INSERT,
+        run_id="r1",
+        event_time="t",
+        job_namespace="lance-catalog",
+    )
+    assert event["run"]["facets"]["lance"] == {"operation": "merge_insert", "version": 4}
+    assert event["outputs"][0]["facets"]["version"]["datasetVersion"] == "4"
+    assert "author" not in event["run"]["facets"]
+
+
+def test_create_event_is_a_write_event_with_create_operation() -> None:
+    via_create = build_create_event(
+        table_id="t", namespace="", author="a", version=1, run_id="r", event_time="t", job_namespace="j"
+    )
+    via_write = build_write_event(
+        table_id="t",
+        namespace="",
+        author="a",
+        version=1,
+        operation=CREATE_TABLE,
+        run_id="r",
+        event_time="t",
+        job_namespace="j",
+    )
+    assert via_create == via_write
+
+
+def test_write_event_round_trips_into_lineage_model() -> None:
+    event = build_write_event(
+        table_id="a$b",
+        namespace="a",
+        author="alice",
+        version=None,
+        operation=INSERT,
+        run_id="r1",
+        event_time="2026-06-24T00:00:00+00:00",
+        job_namespace="lance-catalog",
+    )
+    parsed = RunEvent.model_validate(event)
+    assert parsed.operation == "insert"
+    assert parsed.is_success is True
+    assert parsed.output_version("a$b") is None  # an insert asserts no Lance version on the WROTE edge
+
+
+def test_http_emitter_emit_write_posts_operation_and_version() -> None:
+    client = _CapturingClient()
+    emitter = HttpLineageEmitter(
+        cast(httpx.AsyncClient, client), "http://lineage/api/v1/lineage", job_namespace="lance-catalog"
+    )
+    asyncio.run(
+        emitter.emit_write(
+            table_id="a$b", namespace="a", author="alice", version=4, operation=MERGE_INSERT, run_id="r-9"
+        )
+    )
+    assert client.posted is not None
+    assert client.posted["job"]["name"] == "merge_insert"
+    assert client.posted["run"]["runId"] == "r-9"
+    assert client.posted["outputs"][0]["facets"]["version"]["datasetVersion"] == "4"

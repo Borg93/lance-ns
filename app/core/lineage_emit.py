@@ -23,10 +23,14 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-#: Operation marker carried in the OpenLineage ``lance`` run facet. The lineage service keys the
-#: ``(:User)-[:CREATED]->(:Dataset)`` edge off this value, so the two sides share this contract
-#: string (see ``lineage/repository.py``).
+#: Operation markers carried in the OpenLineage ``lance`` run facet. The lineage service keys the
+#: ``(:User)-[:CREATED]->(:Dataset)`` edge off ``create_table`` specifically, so the two sides share
+#: these contract strings (see ``lineage/repository.py``); the rest just record a versioned ``WROTE``.
 CREATE_TABLE = "create_table"
+INSERT = "insert"
+MERGE_INSERT = "merge_insert"
+UPDATE = "update"
+DELETE = "delete"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
 #: and what a Marquez-style consumer records as the event source).
@@ -42,6 +46,54 @@ _VERSION_FACET_SCHEMA = (
 )
 
 
+def build_write_event(
+    *,
+    table_id: str,
+    namespace: str,
+    author: str | None,
+    version: int | None,
+    operation: str,
+    run_id: str,
+    event_time: str,
+    job_namespace: str,
+) -> dict[str, Any]:
+    """Build the OpenLineage ``RunEvent`` (wire JSON) for any catalog write to a table.
+
+    ``table_id`` is the catalog's canonical id (e.g. ``alpha$bronze$images``) so the lineage
+    ``Dataset`` name matches the OpenFGA object id byte-for-byte — one identity across the three
+    governance axes. ``operation`` is the catalog op (``create_table`` / ``insert`` / ``merge_insert``
+    / ``update`` / ``delete``). ``version`` is the Lance version the write produced; when it is ``None``
+    (e.g. an insert whose response carries no version) the standard version facet is omitted so the
+    ``WROTE`` edge records the run without asserting a version. ``run_id`` / ``event_time`` are injected
+    so the builder is pure and deterministically testable.
+    """
+    lance_facet: dict[str, Any] = {"operation": operation}
+    if version is not None:
+        lance_facet["version"] = version
+    run_facets: dict[str, Any] = {"lance": lance_facet}
+    if author is not None:
+        run_facets["author"] = {"name": author, "sub": author}
+    output: dict[str, Any] = {"namespace": namespace, "name": table_id}
+    if version is not None:
+        # Standard version facet → the lineage WROTE edge carries the Lance version (#20).
+        output["facets"] = {
+            "version": {
+                "_producer": _PRODUCER,
+                "_schemaURL": _VERSION_FACET_SCHEMA,
+                "datasetVersion": str(version),
+            }
+        }
+    return {
+        "eventType": "COMPLETE",
+        "eventTime": event_time,
+        "producer": _PRODUCER,
+        "run": {"runId": run_id, "facets": run_facets},
+        "job": {"namespace": job_namespace, "name": operation},
+        "inputs": [],
+        "outputs": [output],
+    }
+
+
 def build_create_event(
     *,
     table_id: str,
@@ -52,38 +104,17 @@ def build_create_event(
     event_time: str,
     job_namespace: str,
 ) -> dict[str, Any]:
-    """Build the OpenLineage ``RunEvent`` (wire JSON) for a table creation.
-
-    ``table_id`` is the catalog's canonical id (e.g. ``alpha$bronze$images``) so the lineage
-    ``Dataset`` name matches the OpenFGA object id byte-for-byte — one identity across the three
-    governance axes. ``run_id`` / ``event_time`` are injected (not generated here) so the builder
-    is pure and deterministically testable.
-    """
-    run_facets: dict[str, Any] = {"lance": {"operation": CREATE_TABLE, "version": version}}
-    if author is not None:
-        run_facets["author"] = {"name": author, "sub": author}
-    return {
-        "eventType": "COMPLETE",
-        "eventTime": event_time,
-        "producer": _PRODUCER,
-        "run": {"runId": run_id, "facets": run_facets},
-        "job": {"namespace": job_namespace, "name": CREATE_TABLE},
-        "inputs": [],
-        "outputs": [
-            {
-                "namespace": namespace,
-                "name": table_id,
-                # Standard version facet → the lineage WROTE edge carries the Lance version (#20).
-                "facets": {
-                    "version": {
-                        "_producer": _PRODUCER,
-                        "_schemaURL": _VERSION_FACET_SCHEMA,
-                        "datasetVersion": str(version),
-                    }
-                },
-            }
-        ],
-    }
+    """The ``RunEvent`` for a table creation — :func:`build_write_event` with ``operation=create_table``."""
+    return build_write_event(
+        table_id=table_id,
+        namespace=namespace,
+        author=author,
+        version=version,
+        operation=CREATE_TABLE,
+        run_id=run_id,
+        event_time=event_time,
+        job_namespace=job_namespace,
+    )
 
 
 @runtime_checkable
@@ -101,6 +132,18 @@ class LineageEmitter(Protocol):
         authorization: str | None = None,
     ) -> None: ...
 
+    async def emit_write(
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int | None,
+        operation: str,
+        run_id: str | None = None,
+        authorization: str | None = None,
+    ) -> None: ...
+
 
 class NoopEmitter:
     """The emitter used when lineage emission is disabled — does nothing."""
@@ -112,6 +155,19 @@ class NoopEmitter:
         namespace: str,
         author: str | None,
         version: int,
+        run_id: str | None = None,
+        authorization: str | None = None,
+    ) -> None:
+        return None
+
+    async def emit_write(  # noqa: ARG002
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int | None,
+        operation: str,
         run_id: str | None = None,
         authorization: str | None = None,
     ) -> None:
@@ -136,20 +192,42 @@ class HttpLineageEmitter:
         run_id: str | None = None,
         authorization: str | None = None,
     ) -> None:
-        event = build_create_event(
+        await self.emit_write(
             table_id=table_id,
             namespace=namespace,
             author=author,
             version=version,
-            # Same run id the catalog stamped into the Lance file (#21), so the file points at its
-            # creating run in the graph. Generate one only when the caller didn't supply it.
+            operation=CREATE_TABLE,
+            run_id=run_id,
+            authorization=authorization,
+        )
+
+    async def emit_write(
+        self,
+        *,
+        table_id: str,
+        namespace: str,
+        author: str | None,
+        version: int | None,
+        operation: str,
+        run_id: str | None = None,
+        authorization: str | None = None,
+    ) -> None:
+        event = build_write_event(
+            table_id=table_id,
+            namespace=namespace,
+            author=author,
+            version=version,
+            operation=operation,
+            # For a create this is the run id stamped into the Lance file (#21); for other writes a
+            # fresh id. Generate one only when the caller didn't supply it.
             run_id=run_id or str(uuid.uuid4()),
             event_time=datetime.now(UTC).isoformat(),
             job_namespace=self._job_namespace,
         )
         # Forward the caller's bearer so ingest accepts the event when the lineage service has OIDC
-        # on (else every create event 401s and is silently dropped). The lineage side then binds the
-        # author to this same verified principal.
+        # on (else the event 401s and is silently dropped). The lineage side then binds the author to
+        # this same verified principal.
         headers = {"Authorization": authorization} if authorization else None
         try:
             response = await self._client.post(self._url, json=event, headers=headers)
@@ -157,7 +235,7 @@ class HttpLineageEmitter:
         except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
             log.warning(
                 "lineage_emit_failed",
-                extra={"operation": CREATE_TABLE, "table": table_id, "error": str(exc)},
+                extra={"operation": operation, "table": table_id, "error": str(exc)},
             )
 
 

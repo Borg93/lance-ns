@@ -36,14 +36,43 @@ from app.api.dependencies import (
     SettingsDep,
     StorageOptionsDep,
 )
-from app.api.security import CurrentToken
+from app.api.security import CurrentToken, IDToken
 from app.core import fga
+from app.core.config import Settings
 from app.core.identifiers import parse_identifier
+from app.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE, LineageEmitter
 from app.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
 from app.core.serialization import dump
 from app.services import dataplane, native
 
 log = logging.getLogger(__name__)
+
+
+def _queue_write_event(
+    background_tasks: BackgroundTasks,
+    emitter: LineageEmitter,
+    settings: Settings,
+    token: IDToken | None,
+    segments: list[str],
+    *,
+    version: int | None,
+    operation: str,
+    authorization: str | None,
+) -> None:
+    """Queue a best-effort OpenLineage write event after the response (#19 — the same fire-and-forget
+    path as create, for every catalog mutation). ``version=None`` (e.g. an insert whose response has
+    no version) records the run + operation without asserting a Lance version on the ``WROTE`` edge."""
+    background_tasks.add_task(
+        emitter.emit_write,
+        table_id=fga.canonical_object_id(segments, delimiter=settings.delimiter),
+        namespace=fga.parent_namespace_id(segments, delimiter=settings.delimiter) or "",
+        author=token.sub if token is not None else None,
+        version=version,
+        operation=operation,
+        run_id=str(uuid.uuid4()),
+        authorization=authorization,
+    )
+
 
 ARROW_STREAM = "application/vnd.apache.arrow.stream"
 ARROW_FILE = "application/vnd.apache.arrow.file"
@@ -115,11 +144,28 @@ def insert_into_table(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    background_tasks: BackgroundTasks,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> InsertIntoTableResponse:
-    req = InsertIntoTableRequest(id=parse_identifier(id, settings.delimiter), mode=mode)
-    return native.call(ns, "insert_into_table", req, data)
+    segments = parse_identifier(id, settings.delimiter)
+    req = InsertIntoTableRequest(id=segments, mode=mode)
+    response: InsertIntoTableResponse = native.call(ns, "insert_into_table", req, data)
+    # Insert's response carries no Lance version → record the run + operation without a version facet.
+    _queue_write_event(
+        background_tasks,
+        emitter,
+        settings,
+        token,
+        segments,
+        version=None,
+        operation=INSERT,
+        authorization=authorization,
+    )
+    return response
 
 
 @router.post("/{id}/merge_insert", response_model_exclude_none=True)
@@ -127,36 +173,92 @@ def merge_insert_into_table(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    background_tasks: BackgroundTasks,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     on: str | None = None,
     when_matched_update_all: bool | None = None,
     when_not_matched_insert_all: bool | None = None,
     when_not_matched_by_source_delete: bool | None = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> MergeInsertIntoTableResponse:
+    segments = parse_identifier(id, settings.delimiter)
     req = MergeInsertIntoTableRequest(
-        id=parse_identifier(id, settings.delimiter),
+        id=segments,
         on=on,
         when_matched_update_all=when_matched_update_all,
         when_not_matched_insert_all=when_not_matched_insert_all,
         when_not_matched_by_source_delete=when_not_matched_by_source_delete,
     )
-    return native.call(ns, "merge_insert_into_table", req, data)
+    response: MergeInsertIntoTableResponse = native.call(ns, "merge_insert_into_table", req, data)
+    _queue_write_event(
+        background_tasks,
+        emitter,
+        settings,
+        token,
+        segments,
+        version=response.version,
+        operation=MERGE_INSERT,
+        authorization=authorization,
+    )
+    return response
 
 
 @router.post("/{id}/update", response_model_exclude_none=True)
 def update_table(
-    id: str, body: UpdateTableRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
+    id: str,
+    body: UpdateTableRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    background_tasks: BackgroundTasks,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> UpdateTableResponse:
-    body.id = parse_identifier(id, settings.delimiter)
-    return dataplane.update_table(ns, so, body)
+    segments = parse_identifier(id, settings.delimiter)
+    body.id = segments
+    response: UpdateTableResponse = dataplane.update_table(ns, so, body)
+    _queue_write_event(
+        background_tasks,
+        emitter,
+        settings,
+        token,
+        segments,
+        version=response.version,
+        operation=UPDATE,
+        authorization=authorization,
+    )
+    return response
 
 
 @router.post("/{id}/delete", response_model_exclude_none=True)
 def delete_from_table(
-    id: str, body: DeleteFromTableRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
+    id: str,
+    body: DeleteFromTableRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    background_tasks: BackgroundTasks,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> DeleteFromTableResponse:
-    body.id = parse_identifier(id, settings.delimiter)
-    return dataplane.delete_from_table(ns, so, body)
+    segments = parse_identifier(id, settings.delimiter)
+    body.id = segments
+    response: DeleteFromTableResponse = dataplane.delete_from_table(ns, so, body)
+    _queue_write_event(
+        background_tasks,
+        emitter,
+        settings,
+        token,
+        segments,
+        version=response.version,
+        operation=DELETE,
+        authorization=authorization,
+    )
+    return response
 
 
 @router.post("/{id}/query")

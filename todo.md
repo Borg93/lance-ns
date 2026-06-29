@@ -235,10 +235,13 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
 ### Production-viability checklist (most is "finish the wiring", not hard)
 18. ⬜ **Turn auth ON in prod** (`LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED` + store/model ids). The
     capability is wired (5 gated routes, 3-layer fail-closed, 23 unit tests) but DEFAULT OFF → flip it on.
-19. ⬜ **Real catalog emits the full lifecycle, not just `create_table` (M).** `app/core/lineage_emit.py`
-    has only `emit_create`; `data.py:79` calls it only on create — insert/merge/update/delete emit
-    NOTHING (the rich flow exists only in `seed.py` / `medallion_demo.py`). Add `emit_insert/merge/delete`
-    + wire the 4 call sites; each needs the resulting Lance version. (supersedes P2 #11)
+19. ✅ **Real catalog emits the full lifecycle — DONE.** Generalised the emitter to `emit_write` +
+    `build_write_event(operation, version: int | None)` (create delegates); wired `insert` / `merge_insert`
+    / `update` / `delete` handlers in `data.py` to queue a best-effort write event after the response
+    (shared `_queue_write_event` helper). merge/update/delete carry the response's Lance version on the
+    `WROTE` edge; insert's response has no version so it records the run + operation without one. Covered
+    by unit tests (build/emit for each op + round-trip) + the integration suite (139 tests pass).
+    (supersedes P2 #11)
 20. ✅ **version-on-WROTE in prod — DONE.** `build_create_event` now attaches the standard
     `DatasetVersionDatasetFacet` (`outputs[].facets.version.datasetVersion`) so a real `create_table`
     persists the Lance version on the `WROTE` edge (was `NULL` — only the demo emitted it). Proven by the

@@ -90,6 +90,37 @@
   queued / scheduled / event work runs on **NATS JetStream + Dapr** (Jobs / Workflow / pub-sub).
   (Lakekeeper uses a Postgres task queue; we deliberately do not.)
 
+## Contribution boundary → rask (2026-06-30)
+This project's deliverable is **merged into the sibling `rask/` repo**, not shipped standalone. That fixes
+the scope hard:
+- **What we bring to rask:** the **lakehouse** (the Lance REST catalog + the in-process dataplane), **Dapr**,
+  and the **event-driven estate** (the medallion raw→bronze→silver→gold cascade, the lineage service →
+  AGE graph, the compaction/GC cron). This is the unit that must be clean + mergeable.
+- **What rask already provides (use, don't rebuild here):** the **frontends** (SvelteKit microfrontends)
+  and the **operators** — **CloudNativePG** (Postgres), **rustfs-operator** (S3), **KubeRay + Kueue** (Ray).
+  → lance-ns's own `frontend/` and the hand-rolled chart infra (AGE StatefulSet, RustFS Deployment) are
+  **demo scaffolding** here, superseded by rask. Don't reinvent CNPG/rustfs-operator.
+- **Deployment model = ephemeral, spin-up-per-workload** (like rask): the whole platform stands up + tears
+  down with the cluster. **Persistence lives in the DATA, not the server** — the pre-ingest S3 input and the
+  **gold dataset (which embeds lineage as JSONB)** are exported to permanent storage, with **stage-level
+  recovery via Lance version time-travel**. The catalog/lineage processes are stateless + disposable.
+- **🔶 Deferred to the rask merge:** HA (replicas/PDB/HPA), backup automation, operator adoption — rask
+  solves these with CNPG/rustfs-operator/KubeRay. Do NOT hand-roll `pg_dump`/`VolumeSnapshot` CronJobs.
+- **⛔ Confirmed OUT of scope (N/A for spin-up-per-workload, reinforcing the Lakekeeper-reference stance):**
+  multi-warehouse data plane, control-plane management REST API, soft-delete/undrop. Isolation = a separate
+  cluster per warehouse; provisioning = Helm (declarative); the catalog serves ONE fixed root.
+- **Mergeability bar:** the lakehouse + Dapr core must stay **low-coupled** — services talk only over
+  Dapr/NATS + HTTP, never a shared DB or each other's code; `common` is a flat shared lib. This (not infra)
+  is the priority to validate before contributing.
+
+### Shipped this session (2026-06-30)
+- ✅ Security/durability/authz hardening: RustFS PVC durability, external-endpoint hooks (P1),
+  external-secrets operator + secrets-via-Dapr decouple (P2), and the **stale-FGA-tuple revoke** on
+  drop/deregister/drop_namespace/rename (closes the privilege-bleed; was P1 `w8u4rc2tg`). All adversarially
+  audited + tested.
+- 🟡 In progress: a backend-backed validation (200-vs-501 probe across the 54 ops) + the durable
+  gold/lineage/recovery story + a low-coupling audit (validation `wfefr8vtx`).
+
 ---
 
 ## Next (priority order)
@@ -139,11 +170,12 @@
     bump the version instead of creating a self-`DERIVED_FROM` edge. `services/lineage/models.py`, `services/lineage/services/repository.py`.
 
 ### P1 — verified security/consistency cleanups (audit `w8u4rc2tg`)
-- ⛔ **OpenFGA tuple cleanup on drop / deregister / rename** — `services/common/fga.py` is **write-only**
-  (`write_tuples` issues `ClientWriteRequest(writes=…)`, no deletes); `drop_table`/`deregister_table`/
-  `drop_namespace`/`rename_table` leave stale `owner`/`parent` tuples → **stale-grant privilege bleed**
-  if an id is reused. Add a `ClientWriteRequest(deletes=…)` path + call on drop/deregister/rename.
-  **✔audit**. Touch: `services/common/fga.py`, `services/catalog/api/v1/endpoints/tables.py`, `namespaces.py`.
+- ✅ **OpenFGA tuple cleanup on drop / deregister / rename** (DONE 2026-06-30) — added the revoke path to
+  `services/common/fga.py` (`read_object_tuples` paginated + `delete_tuples` per-tuple/idempotent +
+  `revoke_object_tuples`) + `fga_deps.revoke_ownership`, wired into `drop_table`/`deregister_table`/
+  `drop_namespace` and `rename_table` (revokes the SOURCE id, seeds the dest). Closes the stale-grant bleed.
+  Adversarially audited (12/12 findings addressed — incl. the OpenFGA transactional-delete masking fix +
+  endpoint wiring tests). `services/common/fga.py`, `services/catalog/api/v1/endpoints/{tables,namespaces}.py`.
 - ⛔ **Wire or remove unused `can_list` / `can_alter` / `can_commit` / `can_rename`** — defined in
   `services/common/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
   Maintenance hazard: the model advertises finer granularity than enforcement implements. **✔audit**.

@@ -25,6 +25,10 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "lance.openbaoHost" . }}-data
   labels: {{- include "lance.labels" . | nindent 4 }}
+  # Keep the sealed secret store across `helm uninstall` (same reclaim caveat as the RustFS PVC) — losing it
+  # would discard every secret; a reinstall re-adopts it and the operator unseals with the existing keys.
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   accessModes: ["ReadWriteOnce"]
   resources: { requests: { storage: {{ .Values.openbao.storage }} } }

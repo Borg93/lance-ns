@@ -22,8 +22,16 @@ kind: PersistentVolumeClaim
 metadata:
   name: {{ include "lance.rustfsHost" . }}-data
   labels: {{- include "lance.labels" . | nindent 4 }}
+  # Survive `helm uninstall` — this is the lakehouse, not throwaway. Helm reclaims release-owned PVCs on
+  # uninstall UNLESS kept (the AGE/NATS PVCs are StatefulSet-owned → retained by default; a directly
+  # templated PVC like this one is not). A later reinstall with the same release name re-adopts it.
+  annotations:
+    helm.sh/resource-policy: keep
 spec:
   accessModes: ["ReadWriteOnce"]
+  {{- with .Values.rustfs.persistence.storageClassName }}
+  storageClassName: {{ . | quote }} # prod: a snapshot-capable/encrypted CSI class (for the documented VolumeSnapshot backups)
+  {{- end }}
   resources: { requests: { storage: {{ .Values.rustfs.storage }} } }
 ---
 {{- end }}

@@ -109,6 +109,7 @@ rustfs:
   # are snapshot-able in prod). false → emptyDir, for throwaway CI only (wipes on every roll).
   persistence:
     enabled: true
+    storageClassName: "" # "" = the cluster default SC (local-path on kind); prod: a snapshot-capable CSI class
   mcImage: minio/mc:RELEASE.2025-08-13T08-35-41Z # pinned (multi-arch); `mc` speaks plain S3 → bootstraps the bucket on RustFS too
   # OIDC identity provider for STS AssumeRoleWithWebIdentity (Track B). When on, RustFS trusts Dex id_tokens
   # → a client can mint short-TTL creds it scopes per-table via the catalog's vending endpoint (vending.mode=
@@ -298,5 +299,10 @@ resources:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
 
+# --- Ingress — fronts the gateway Service in prod (kind uses a port-forward instead) ---------------
 ingress:
   enabled: false
+  className: "" # e.g. nginx / traefik; "" omits ingressClassName → the cluster's default IngressClass
+  host: "" # e.g. lance.example.com; "" → a host-less rule that matches any host
+  annotations: {} # e.g. cert-manager.io/cluster-issuer, nginx.ingress.kubernetes.io/*
+  tls: [] # e.g. [{ secretName: lance-tls, hosts: ["lance.example.com"] }]

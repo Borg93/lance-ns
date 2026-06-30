@@ -1,0 +1,33 @@
+{{- if and .Values.ingress.enabled .Values.gateway.enabled }}
+# The north-south edge in prod: routes inbound traffic to the gateway Service (the nginx reverse proxy
+# that path-routes to every in-cluster service — same routing table the port-forward demo used). On kind
+# there's no Ingress controller, so the default is ingress.enabled=false + a port-forward to the gateway.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "lance.fullname" . }}-gateway
+  labels: {{- include "lance.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . | quote }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls: {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" . }}-gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+      {{- with .Values.ingress.host }}
+      host: {{ . | quote }}
+      {{- end }}
+{{- end }}

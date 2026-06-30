@@ -37,8 +37,14 @@ external endpoint:
 |---------|----------------------|-----|
 | **S3 lakehouse** | the permanent ingest+export surface; you want a managed, replicated, lifecycle-policied object store (AWS S3 / a RustFS or MinIO cluster) | `rustfs.enabled=false` + point `LANCE_S3_ENDPOINT` (+ lineage/compaction S3 env) at the external store |
 | **Postgres (AGE)** | a managed DB (RDS/Cloud SQL/CNPG) for backups, HA, PITR | `age.enabled=false` + point `LINEAGE_DATABASE_URL` + the OpenFGA datastore at it |
-| **OpenBao / secrets** | a hardened external Vault / cloud KMS; the operator populates the k8s `infra-credentials` Secret from it (external-secrets / the Vault agent) | `openbao.enabled=false`; the two-tier secret model already assumes an operator-populated Secret |
+| **OpenBao / secrets** | a hardened external Vault / cloud KMS; an operator populates the k8s `infra-credentials` Secret from it (external-secrets / the Vault agent) | ⚠️ **not a safe flip yet** — today `openbao.enabled=false` makes the apps fall back to PLAINTEXT secrets in pod env (re-opens the closed leak); the app branches read `.Values`, not the infra Secret. Needs the secretKeyRef-from-infra-Secret wiring first. |
 | **Observability** (GreptimeDB / Vector / Perses) | you don't want observability to die with the cluster it observes — run it on a separate platform/cluster | `observability.enabled=false` + point OTLP at the external collector/store |
+
+> ⚠️ **The tier-3 rows describe the intended mechanism, not a present-day knob.** Today only the
+> `*.enabled=false` toggle exists; the matching external-endpoint overrides (`LANCE_S3_ENDPOINT`,
+> `LINEAGE_DATABASE_URL`, the OTLP endpoint, the OpenBao address) are **not yet wired** — disabling a
+> component removes the in-cluster copy but the apps still target its in-cluster DNS name. Wiring those
+> overrides is the remaining chart work (mirrored in the EXTERNALIZE note in `values-prod.yaml`).
 
 ## Data lifecycle — what's permanent vs transient
 The S3 store is permanent **infrastructure**; the *data within it* has a lifecycle:
@@ -65,6 +71,6 @@ So: long-lived lakehouse + provenance, with a compaction/GC lifecycle aging out 
 
 ## Prod profile
 `chart/values-prod.yaml` is a starting overlay — it flips the safe-by-default-off prod switches (sealed
-OpenBao, durable RustFS) and is where you'd disable the in-cluster stateful services + point at external
-endpoints once those endpoint overrides are wired. Apply with `helm upgrade … -f chart/values.yaml -f
-chart/values-prod.yaml`.
+OpenBao, governance on, Dapr dashboard off, ingress) and sizes the already-on durable RustFS volume, and is
+where you'd disable the in-cluster stateful services + point at external endpoints once those endpoint
+overrides are wired. Apply with `helm upgrade … -f chart/values.yaml -f chart/values-prod.yaml`.

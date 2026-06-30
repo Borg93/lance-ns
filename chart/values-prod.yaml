@@ -6,15 +6,21 @@
 # Switches set here are wired today; the EXTERNALIZE stanzas at the bottom are commented because they
 # also need the matching external-endpoint chart hooks (tracked as follow-up) before they do anything.
 
-# --- Pin the app images to an immutable release tag (never :dev/:latest in prod) -------------------
+# --- App images: set a real release tag before applying (never :dev/:latest in prod). The chart's image
+# helper FAILS the render on an empty tag, so DON'T ship tag:"" here — uncomment and fill these. -------
 image:
-  catalog: { tag: "" } # set to the released digest/tag, e.g. v1.2.3 or @sha256:…
-  web: { tag: "" }
   pullPolicy: IfNotPresent
+  # catalog: { tag: v1.2.3 }   # the released catalog/lineage image tag
+  # web:     { tag: v1.2.3 }   # the released web image tag
 
-# --- Governance ON — the catalog is governed (Dex OIDC + OpenFGA) in prod --------------------------
+# --- Governance ON — Dex OIDC + OpenFGA. auth.enabled governs the catalog + lineage; medallion.fgaEnabled
+# additionally governs the raw→bronze→silver→gold movers' WRITE path (can_create_table / can_promote).
+# PREREQUISITE: seed the mover-identity grants first (scripts/seed_medallion_fga.sh) or the movers fail
+# closed and the pipeline stalls. ------------------------------------------------------------------
 auth:
   enabled: true
+medallion:
+  fgaEnabled: true
 
 # --- Secrets: the SEALED, file-backed OpenBao (no fixed root token; an operator must init + unseal) -
 openbao:
@@ -26,19 +32,26 @@ dapr:
   dashboard:
     enabled: false # don't expose the Dapr control-plane UI in prod
 
-# --- Durable lakehouse storage (explicit; already the default) -------------------------------------
+# --- Durable lakehouse storage. persistence is already on by default; SIZE it for prod (the 2Gi dev
+# default is far too small — this one volume holds the lakehouse AND 14d of full-sampling observability).
+# Set a snapshot-capable storageClassName for the documented VolumeSnapshot backups. ----------------
 rustfs:
+  storage: 200Gi
   persistence:
     enabled: true
+    storageClassName: "" # e.g. a CSI class that supports VolumeSnapshot + encryption
 
 # --- Compaction/GC at a real cadence (not the 120s demo sweep) -------------------------------------
 compaction:
   schedule: "0 */30 * * * *" # every 30 min
   olderThanDays: 7
 
-# --- Ingress fronts the gateway in prod (kind used a port-forward) ---------------------------------
+# --- Ingress fronts the gateway in prod (kind used a port-forward). Wired in templates/ingress.yaml →
+# set your className / host / TLS. ------------------------------------------------------------------
 ingress:
   enabled: true
+  className: nginx # match your cluster's Ingress controller (nginx / traefik / …)
+  host: "" # e.g. lance.example.com
 
 # ===================================================================================================
 # EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Uncomment per service AND point

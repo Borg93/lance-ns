@@ -1,7 +1,7 @@
 {{- if .Values.medallion.enabled }}
 {{- $root := . }}
 {{- $port := .Values.medallion.port }}
-{{- $img := printf "%s:%s" .Values.image.catalog.repository .Values.image.catalog.tag }}
+{{- $img := include "lance.catalogImage" . }}
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 # lance-ray — the dummy producer / HEAD of the medallion pipeline. POST /produce emits the raw_events
 # OpenLineage event + publishes the first trigger (medallion.raw) that the raw→bronze mover consumes.

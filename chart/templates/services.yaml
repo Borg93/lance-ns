@@ -31,7 +31,7 @@ spec:
     spec:
       containers:
         - name: catalog
-          image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
+          image: "{{ include "lance.catalogImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- if .Values.observability.enabled }}
           command: ["opentelemetry-instrument", "uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
@@ -125,7 +125,7 @@ spec:
           command: ["sh", "-c", "until nc -z {{ $age }} {{ .Values.age.port }}; do echo wait-age; sleep 3; done"]
       containers:
         - name: lineage
-          image: "{{ .Values.image.catalog.repository }}:{{ .Values.image.catalog.tag }}"
+          image: "{{ include "lance.catalogImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- if .Values.observability.enabled }}
           command: ["opentelemetry-instrument", "uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
@@ -200,7 +200,7 @@ spec:
     spec:
       containers:
         - name: web
-          image: "{{ .Values.image.web.repository }}:{{ .Values.image.web.tag }}"
+          image: "{{ include "lance.webImage" . }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           env:
             - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }

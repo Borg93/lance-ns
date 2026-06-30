@@ -32,10 +32,12 @@ scopes:
   - {{ .daprAppId }}
 {{- end }}
 {{- end }}
-{{- if .Values.openbao.enabled }}
+{{- if include "lance.secretsViaDapr" . }}
 ---
-# Dapr secret store fronting OpenBao (Vault-API compatible). Apps read secrets via their sidecar
-# (GET /v1.0/secrets/lance-secrets/<name>) instead of plaintext env — the secret-handling fix.
+# Dapr secret store fronting OpenBao / an external Vault (Vault-API compatible). Apps read secrets via
+# their sidecar (GET /v1.0/secrets/lance-secrets/<name>) instead of plaintext env — the secret-handling
+# fix. Renders for the in-cluster OpenBao OR an external Vault (openbao.externalAddr), so externalizing
+# the store does not force the apps back to plaintext.
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
@@ -46,7 +48,7 @@ spec:
   version: v1
   metadata:
     - { name: vaultAddr, value: "{{ include "lance.vaultAddr" . }}" }
-    {{- if .Values.openbao.devMode }}
+    {{- if and .Values.openbao.enabled .Values.openbao.devMode }}
     - { name: vaultToken, value: {{ .Values.openbao.devToken | quote }} }
     {{- else }}
     # Prod path: NOT the dev root token (it can't authenticate against an operator-initialized OpenBao).

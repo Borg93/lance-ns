@@ -44,6 +44,13 @@ This is what makes the docs/DURABILITY.md tier-3 externalization real (values-pr
 {{- define "lance.vaultAddr" -}}
 {{- if .Values.openbao.externalAddr -}}{{ .Values.openbao.externalAddr }}{{- else -}}http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}{{- end -}}
 {{- end -}}
+{{/* Do the app services consume secrets via Dapr (the secret store), vs plaintext env? True when there is
+ANY Vault to read from — the in-cluster OpenBao OR an external Vault address. This decouples "use the secret
+store" from "render the in-cluster OpenBao server", so openbao.enabled=false + externalAddr consumes from
+the external Vault WITHOUT falling back to plaintext secrets in pod env (the closed leak). */}}
+{{- define "lance.secretsViaDapr" -}}
+{{- if or .Values.openbao.enabled .Values.openbao.externalAddr -}}true{{- end -}}
+{{- end -}}
 
 {{/* OTel SDK env for an app (call: include "lance.otelEnv" (list $root "<service.name>")). The apps run
 under `opentelemetry-instrument` and export all three signals OTLP-direct to GreptimeDB — no Collector

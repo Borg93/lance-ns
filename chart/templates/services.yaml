@@ -47,7 +47,7 @@ spec:
             - { name: LANCE_NS_DELIMITER, value: "$" }
             - { name: LANCE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
-            {{- if not .Values.openbao.enabled }}
+            {{- if not (include "lance.secretsViaDapr" .) }}
             - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
             {{- else }}
             # OpenBao on → the S3 secret comes ONLY from the Dapr secret store at boot; it is deliberately
@@ -141,7 +141,7 @@ spec:
             - name: APP_API_TOKEN
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
-            {{- if not .Values.openbao.enabled }}
+            {{- if not (include "lance.secretsViaDapr" .) }}
             - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ include "lance.ageConnectHost" . }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
             {{- else }}
             # OpenBao on → the AGE password is NOT in the connection string in pod env; lineage fetches it
@@ -157,7 +157,7 @@ spec:
             - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
             - { name: LINEAGE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
-            {{- if not .Values.openbao.enabled }}
+            {{- if not (include "lance.secretsViaDapr" .) }}
             - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
             {{- end }}
             - { name: LINEAGE_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }

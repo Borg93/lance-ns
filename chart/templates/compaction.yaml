@@ -65,10 +65,10 @@ spec:
             - { name: COMPACTION_OLDER_THAN_DAYS, value: {{ .Values.compaction.olderThanDays | quote }} }
             - { name: COMPACTION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: COMPACTION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
-            {{- if not .Values.openbao.enabled }}
+            {{- if not (include "lance.secretsViaDapr" .) }}
             - { name: COMPACTION_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
             {{- else }}
-            # OpenBao on → the S3 secret comes ONLY from the Dapr secret store at boot; not in pod env (the
+            # A secret store is configured → the S3 secret comes ONLY from it at boot; not in pod env (the
             # audit's fix — compaction is a real S3 consumer that compacts/GCs the lakehouse). Fails closed.
             - { name: COMPACTION_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}

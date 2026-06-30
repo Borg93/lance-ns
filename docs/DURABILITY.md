@@ -37,14 +37,14 @@ external endpoint:
 |---------|----------------------|-----|
 | **S3 lakehouse** | the permanent ingest+export surface; you want a managed, replicated, lifecycle-policied object store (AWS S3 / a RustFS or MinIO cluster) | `rustfs.enabled=false` + `rustfs.externalEndpoint=…` → catalog/lineage/compaction + vending connect there (also override `greptimedb-standalone.objectStorage.s3.endpoint`) |
 | **Postgres (AGE)** | a managed DB (RDS/Cloud SQL/CNPG) for backups, HA, PITR | `age.enabled=false` + `age.externalHost=…` (+ matching user/password/dbs) → lineage DSN + the OpenFGA datastore Secret point there (also override the openfga subchart's `datastore.uri`) |
-| **OpenBao / secrets** | a hardened external Vault / cloud KMS; an operator populates the k8s `infra-credentials` Secret from it (external-secrets / the Vault agent) | `openbao.externalAddr=…` points the Dapr secret store at the external Vault. ⚠️ Full disable (`openbao.enabled=false`) without re-opening the plaintext-env leak lands with the external-secrets operator — see below. |
+| **OpenBao / secrets — app tier** | a hardened external Vault / cloud KMS | `openbao.enabled=false` + `openbao.externalAddr=…` → the apps consume from the external Vault via their Dapr sidecar (`secretsViaDapr` keys off `externalAddr`, so there is **no** plaintext-env fallback) and the in-cluster OpenBao is not rendered |
+| **infra-tier Secret** | the `infra-credentials` Secret (AGE/RustFS root creds) should come from Vault, not chart values | `externalSecrets.enabled=true` → the external-secrets.io operator syncs `<release>-infra-credentials` from Vault (the static Secret is skipped); the openfga DSN is assembled from the fetched password |
 | **Observability** (GreptimeDB / Vector / Perses) | you don't want observability to die with the cluster it observes — run it on a separate platform/cluster | `observability.enabled=false` + `observability.externalOtlpEndpoint=…` → apps + Dapr export OTLP there |
 
-> The S3 / Postgres / OTLP overrides are **wired and verified** (a render-check confirms no in-cluster DNS
-> name leaks into app env when externalized). The `values-prod.yaml` EXTERNALIZE block shows the full set.
-> OpenBao is the one nuance: `openbao.enabled=false` currently falls the apps back to plaintext env (the
-> closed leak), so external-Vault use is completed by the external-secrets operator path (P2) rather than a
-> bare `enabled=false`.
+> All four overrides are **wired and verified** (render-checks confirm: no in-cluster DNS leaks into app env
+> when externalized; external-Vault keeps the apps on Dapr secrets with no plaintext fallback; the
+> external-secrets operator owns the infra Secret with no static values). The `values-prod.yaml` EXTERNALIZE
+> block shows the full set.
 
 ## Data lifecycle — what's permanent vs transient
 The S3 store is permanent **infrastructure**; the *data within it* has a lifecycle:

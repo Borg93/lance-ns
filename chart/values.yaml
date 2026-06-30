@@ -138,8 +138,22 @@ openbao:
   devToken: root # dev-mode root token (devMode=true only)
   storage: 1Gi # PVC size for the prod (devMode=false) file backend
   # Externalize: when set, the Dapr secret store points at THIS Vault/OpenBao address instead of the
-  # in-cluster server — pair with openbao.enabled=false to use an external Vault.
+  # in-cluster server — pair with openbao.enabled=false to use an external Vault. The apps still consume
+  # via Dapr (no plaintext fallback) because secretsViaDapr keys off this too.
   externalAddr: "" # e.g. https://vault.internal:8200
+
+# --- external-secrets.io — sync the infra-tier Secret FROM Vault so NO plaintext secret ships in the chart.
+# Requires the external-secrets operator in-cluster. When on, templates/external-secrets.yaml creates a
+# SecretStore (→ vaultAddr) + an ExternalSecret that OWNS <release>-infra-credentials, and the static
+# Secret in infra-credentials.yaml is skipped. Complements openbao.externalAddr (the app tier's Dapr path).
+externalSecrets:
+  enabled: false
+  refreshInterval: "1h"
+  kvMount: secret # the Vault KV mount path
+  kvVersion: "v2"
+  secretPath: lance # the KV key holding postgres-password + rustfs-secret-key (e.g. secret/data/lance)
+  kubernetesAuthPath: kubernetes # the Vault Kubernetes auth backend mount
+  role: lance-infra # the Vault role the operator's ServiceAccount assumes
 
 # --- Observability — the rask stack: GreptimeDB + Vector + Perses (standard OTLP, NOT OTel-Arrow) ----
 # GreptimeDB is ONE unified store for metrics+logs+traces (tables: metrics → PromQL series, lance_logs,

@@ -149,6 +149,13 @@ _SET_WROTE_STATS: Final = (
     "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) "
     "SET w.row_count=$rows, w.size_bytes=$size RETURN 1"
 )
+# Quality-gate result rides the same WROTE edge: a ``quality_passed`` bool (the headline signal) + the
+# full assertions as a JSON **string** scalar (same scalar-round-trips-cleanly reasoning as the schema).
+# A passed=false edge with a real version is the auditable record of a batch the gate blocked.
+_SET_WROTE_QUALITY: Final = (
+    "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) "
+    "SET w.quality_passed=$passed, w.quality_assertions=$assertions RETURN 1"
+)
 _DERIVED_FROM: Final = (
     "MATCH (o:Dataset {name:$on}), (i:Dataset {name:$inp}) MERGE (o)-[:DERIVED_FROM]->(i) RETURN 1"
 )
@@ -162,7 +169,7 @@ _DOWNSTREAM: Final = (
 _PRODUCERS: Final = (
     "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) "
     "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version, r.producer, r.error_message, "
-    "w.row_count, w.size_bytes"
+    "w.row_count, w.size_bytes, w.quality_passed, w.quality_assertions"
 )
 # Reconcile (#23): the version the graph believes is current = the version on the most-recent
 # *successful* WROTE edge (failed runs carry a WROTE edge with no version, so the IS NOT NULL guard
@@ -356,6 +363,21 @@ class LineageRepository:
                                 "size": stats[1],
                             },
                         )
+                    # Quality-gate result onto the same edge — present only when the quality gate validated
+                    # the write. A passed=false edge (with a real version) records a batch the gate blocked.
+                    assertions = ds.quality_assertions
+                    if assertions:
+                        await run_cypher(
+                            conn,
+                            self._graph,
+                            _SET_WROTE_QUALITY,
+                            {
+                                "rid": event.run.run_id,
+                                "name": ds.name,
+                                "passed": all(a["success"] for a in assertions),
+                                "assertions": json.dumps(assertions),
+                            },
+                        )
             # Only a successful run asserts lineage: a failed run derived nothing.
             if event.is_success:
                 for out in event.outputs:
@@ -523,7 +545,7 @@ class LineageRepository:
 
     async def producers(self, name: str) -> Producers:
         """The runs that wrote (or failed to write) ``name`` — who / when / how / version / error."""
-        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=9)
+        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=11)
         return Producers(
             dataset=name,
             producers=[
@@ -537,6 +559,12 @@ class LineageRepository:
                     error_message=(r[6] or None),
                     row_count=(int(r[7]) if r[7] is not None else None),
                     size_bytes=(int(r[8]) if r[8] is not None else None),
+                    # NOT `r[9] or None` — quality_passed is a bool, and `False or None` would silently
+                    # drop a failed-quality signal. _parse already json.loads it to a real Python bool.
+                    quality_passed=(r[9] if r[9] is not None else None),
+                    # Stored as a JSON string (like schema); _parse unwraps one agtype layer, so json.loads
+                    # the remaining string back into the assertions list.
+                    quality_assertions=(json.loads(r[10]) if r[10] else []),
                 )
                 for r in rows
             ],

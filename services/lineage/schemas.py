@@ -45,6 +45,11 @@ class ProducerInfo(BaseModel):
     ``row_count`` / ``size_bytes`` are the runtime-measured output statistics the compute recorded for
     this write (the rows + on-disk bytes it actually produced, from the standard ``outputStatistics``
     facet); ``None`` when the run was a dummy emit (no compute) or a failure (no data produced).
+
+    ``quality_passed`` is the validator gate's verdict (all assertions succeeded) and ``quality_assertions``
+    the checks it ran (from the standard ``dataQualityAssertions`` facet); ``quality_passed=False`` with a
+    real ``dataset_version`` is the auditable record of a batch the gate blocked from promotion. Both are
+    ``None`` / empty when the quality gate did not run.
     """
 
     run_id: str
@@ -56,6 +61,8 @@ class ProducerInfo(BaseModel):
     error_message: str | None = None
     row_count: int | None = None
     size_bytes: int | None = None
+    quality_passed: bool | None = None
+    quality_assertions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class Neighbors(BaseModel):

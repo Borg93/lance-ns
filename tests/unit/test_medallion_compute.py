@@ -13,10 +13,12 @@ import json
 from typing import Any, cast
 
 import lance
+import pyarrow as pa
 from dapr.aio.clients import DaprClient
 from medallion.core.config import MedallionSettings
 from medallion.services.compute import seed_raw, transform_stage
 from medallion.services.produce import produce
+from medallion.services.quality import assert_quality, passed
 from medallion.services.transform import handle_stage
 
 # --------------------------------------------------------------------------- #
@@ -181,3 +183,109 @@ def test_produce_seeds_real_raw_and_emits_its_version(tmp_path: Any) -> None:
     assert lineage["data"]["outputs"][0]["facets"]["version"]["datasetVersion"] == str(
         lance.dataset(raw).version
     )
+
+
+# --------------------------------------------------------------------------- #
+# the quality gate — assertions on the produced data, and blocked promotion
+# --------------------------------------------------------------------------- #
+
+
+def test_assert_quality_passes_on_clean_data(tmp_path: Any) -> None:
+    uri = str(tmp_path / "gold")
+    seed_raw(uri, {}, rows=3)  # ids 0..2, no nulls
+    checks = assert_quality(uri, {}, key_column="id")
+    assert {c.assertion for c in checks} == {"row_count_positive", "not_null"}
+    assert passed(checks)
+
+
+def test_assert_quality_fails_on_null_key(tmp_path: Any) -> None:
+    uri = str(tmp_path / "gold")
+    lance.write_dataset(
+        pa.table({"id": pa.array([1, None, 3], pa.int64()), "p": ["a", "b", "c"]}), uri, mode="overwrite"
+    )
+    checks = assert_quality(uri, {}, key_column="id")
+    not_null = next(c for c in checks if c.assertion == "not_null")
+    assert not_null.success is False and not_null.column == "id"
+    assert not passed(checks)
+
+
+def test_assert_quality_fails_on_empty_dataset(tmp_path: Any) -> None:
+    uri = str(tmp_path / "gold")
+    lance.write_dataset(pa.table({"id": pa.array([], pa.int64())}), uri, mode="overwrite")
+    checks = assert_quality(uri, {}, key_column="id")
+    assert next(c for c in checks if c.assertion == "row_count_positive").success is False
+    assert not passed(checks)
+
+
+def test_assert_quality_skips_null_check_when_key_absent(tmp_path: Any) -> None:
+    # A different stage may not carry the key column — skip the null check, don't fail it.
+    uri = str(tmp_path / "gold")
+    seed_raw(uri, {}, rows=2)
+    checks = assert_quality(uri, {}, key_column="nonexistent")
+    assert [c.assertion for c in checks] == ["row_count_positive"]
+
+
+def _quality_mover_settings(from_uri: str, to_uri: str) -> MedallionSettings:
+    return MedallionSettings.model_validate(
+        {
+            "compute_enabled": True,
+            "quality_enabled": True,
+            "quality_key_column": "id",
+            "from_uri": from_uri,
+            "to_uri": to_uri,
+            "from_namespace": "silver",
+            "from_dataset": "silver$features",
+            "to_namespace": "gold",
+            "to_dataset": "gold$ml",
+            "operation": "aggregate_gold",
+            "pub_topic": "gold.ready",
+        }
+    )
+
+
+def test_quality_gate_blocks_promotion_on_failed_assertion(tmp_path: Any) -> None:
+    # Upstream carries a null id; the gate fails not_null → DROP, run recorded, next stage NOT triggered.
+    silver = str(tmp_path / "silver")
+    lance.write_dataset(
+        pa.table({"id": pa.array([1, None], pa.int64()), "p": ["a", "b"]}), silver, mode="overwrite"
+    )
+    gold = str(tmp_path / "gold")
+    settings = _quality_mover_settings(silver, gold)
+    dapr = _FakeDapr()
+
+    result = asyncio.run(handle_stage(cast(DaprClient, dapr), settings, {"data": {"token": "t"}}))
+    assert result == {"status": "DROP"}  # quality-blocked
+
+    # The lineage WAS emitted with the failed assertion (auditable) — but the next-stage trigger did NOT.
+    lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
+    facet = lineage["data"]["outputs"][0]["facets"]["dataQualityAssertions"]
+    assert any(a["assertion"] == "not_null" and a["success"] is False for a in facet["assertions"])
+    assert not any(p["topic"] == "gold.ready" for p in dapr.published)
+
+
+def test_quality_gate_promotes_on_clean_data(tmp_path: Any) -> None:
+    silver = str(tmp_path / "silver")
+    seed_raw(silver, {}, rows=4)  # clean ids 0..3
+    gold = str(tmp_path / "gold")
+    settings = _quality_mover_settings(silver, gold)
+    dapr = _FakeDapr()
+
+    result = asyncio.run(handle_stage(cast(DaprClient, dapr), settings, {"data": {"token": "t"}}))
+    assert result == {"status": "SUCCESS"}
+
+    lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
+    facet = lineage["data"]["outputs"][0]["facets"]["dataQualityAssertions"]
+    assert all(a["success"] for a in facet["assertions"])
+    assert any(p["topic"] == "gold.ready" for p in dapr.published)  # promoted
+
+
+def test_quality_off_emits_no_assertions_facet(tmp_path: Any) -> None:
+    # compute ON but quality OFF: a real write + outputStatistics, but NO dataQualityAssertions facet.
+    raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
+    seed_raw(raw, {}, rows=3)
+    settings = _mover_settings(raw, bronze)  # compute on, quality off
+    dapr = _FakeDapr()
+    asyncio.run(handle_stage(cast(DaprClient, dapr), settings, {"data": {"token": "t"}}))
+    output = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)["data"]["outputs"][0]
+    assert "outputStatistics" in output["facets"]
+    assert "dataQualityAssertions" not in output["facets"]

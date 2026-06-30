@@ -57,6 +57,15 @@ class MedallionSettings(BaseSettings):
     from_uri: str = Field(default="", alias="MEDALLION_FROM_URI")  # upstream Lance dataset (mover input)
     to_uri: str = Field(default="", alias="MEDALLION_TO_URI")  # downstream Lance dataset (mover output)
 
+    # --- Optional quality GATE — when on, after the compute writes the downstream dataset the mover runs
+    # data-quality assertions on it (row_count > 0, key column non-null) and BLOCKS promotion on a failure:
+    # the failed run + its dataQualityAssertions facet are still emitted (auditable in lineage), but the next
+    # stage is NOT triggered, so a bad batch can't cascade. The automated *validator* half of governance —
+    # FGA decides who MAY promote, quality decides if the DATA is good enough to. Requires compute (there is
+    # no data to check otherwise). Off by default. ---------------------------------------------------------
+    quality_enabled: bool = Field(default=False, alias="MEDALLION_QUALITY_ENABLED")
+    quality_key_column: str = Field(default="id", alias="MEDALLION_QUALITY_KEY_COLUMN")
+
     # --- S3 access for the fake-Ray compute (only used when compute_enabled). Empty creds let the
     # object-store client fall back to its default chain (or a local path needs no creds at all). ---------
     s3_endpoint: str = Field(default="", alias="MEDALLION_S3_ENDPOINT")

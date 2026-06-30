@@ -71,6 +71,28 @@ def test_statistics_partial_facet_fills_absent_half_with_minus_one() -> None:
     assert _output_with_stats({"outputStatistics": {"size": 64}}).statistics == (-1, 64)
 
 
+def test_quality_assertions_parses_facet() -> None:
+    """The validator gate's assertions are read from the standard dataQualityAssertions facet."""
+    ds = _output_with_stats(
+        {
+            "dataQualityAssertions": {
+                "assertions": [
+                    {"assertion": "row_count_positive", "success": True},
+                    {"assertion": "not_null", "success": False, "column": "id"},
+                ]
+            }
+        }
+    )
+    assert ds.quality_assertions == [
+        {"assertion": "row_count_positive", "success": True},
+        {"assertion": "not_null", "success": False, "column": "id"},
+    ]
+
+
+def test_quality_assertions_absent_when_no_facet() -> None:
+    assert _output_with_stats({"version": {"datasetVersion": "1"}}).quality_assertions == []
+
+
 _JOBS = ["ingest_events", "embed_features", "embed_features", "caption_features", "aggregate_gold"]
 
 
@@ -283,6 +305,49 @@ def test_ingest_records_output_statistics_on_wrote_edge(monkeypatch: pytest.Monk
     set_stats = [p for q, p in calls if "SET w.row_count" in q]
     assert set_stats and set_stats[0]["name"] == "bronze$events"
     assert set_stats[0]["rows"] == 8 and set_stats[0]["size"] == 132
+
+
+def test_ingest_records_quality_on_wrote_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A failed quality assertion is recorded on the WROTE edge: passed=False + the assertions JSON."""
+    import lineage.services.repository as repo_mod
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+        calls.append((query, params))
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _capture)
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-07-01T09:00:00Z",
+            "run": {"runId": "aggregate_gold-x"},
+            "job": {"namespace": "lance-jobs", "name": "aggregate_gold"},
+            "inputs": [],
+            "outputs": [
+                {
+                    "namespace": "gold",
+                    "name": "gold$ml",
+                    "facets": {
+                        "version": {"datasetVersion": "2"},
+                        "dataQualityAssertions": {
+                            "assertions": [
+                                {"assertion": "row_count_positive", "success": True},
+                                {"assertion": "not_null", "success": False, "column": "id"},
+                            ]
+                        },
+                    },
+                }
+            ],
+        }
+    )
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    asyncio.run(repo.ingest_event(event))
+
+    set_q = [p for q, p in calls if "SET w.quality_passed" in q]
+    assert set_q and set_q[0]["name"] == "gold$ml"
+    assert set_q[0]["passed"] is False  # one assertion failed → the batch was gate-blocked
+    assert json.loads(cast(str, set_q[0]["assertions"]))[1]["column"] == "id"
 
 
 def test_failed_run_records_error_but_no_version_or_lineage(monkeypatch: pytest.MonkeyPatch) -> None:

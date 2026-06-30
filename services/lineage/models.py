@@ -131,6 +131,33 @@ class Dataset(BaseModel):
         )
 
     @property
+    def quality_assertions(self) -> list[dict[str, Any]]:
+        """Validator checks from the standard ``dataQualityAssertions`` facet — ``[{assertion, success,
+        column?}]``.
+
+        Emitted by a medallion stage that validated the dataset it produced (the quality gate). Empty when
+        the run carried no assertions (gate off / no compute). A ``success: false`` entry is the durable
+        record of a batch the gate BLOCKED from promotion — the WROTE edge keeps both the failed assertion
+        and the version it wrote, so the bad batch is auditable.
+        """
+        facet = (self.facets or {}).get("dataQualityAssertions")
+        items = facet.get("assertions") if isinstance(facet, dict) else None
+        if not isinstance(items, list):
+            return []
+        out: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict) or not item.get("assertion"):
+                continue
+            entry: dict[str, Any] = {
+                "assertion": str(item["assertion"]),
+                "success": bool(item.get("success")),
+            }
+            if item.get("column"):
+                entry["column"] = str(item["column"])
+            out.append(entry)
+        return out
+
+    @property
     def tags(self) -> list[str]:
         """Governance labels from the standard ``tags`` facet, as ``key=value`` strings."""
         facet = (self.facets or {}).get("tags")

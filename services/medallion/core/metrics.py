@@ -21,6 +21,11 @@ _stage_denied = _meter.create_counter(
     unit="{transition}",
     description="Stage transitions DENIED by the FGA gate (the mover lacked the required role).",
 )
+_stage_quality_blocked = _meter.create_counter(
+    "medallion.stage.quality_blocked",
+    unit="{transition}",
+    description="Stage transitions BLOCKED by the quality gate (a data-quality assertion failed).",
+)
 
 
 def record_transition(transition: str) -> None:
@@ -31,3 +36,8 @@ def record_transition(transition: str) -> None:
 def record_denied(transition: str) -> None:
     """Increment the denied counter (the mover was not authorized to produce the target stage)."""
     _stage_denied.add(1, {"transition": transition})
+
+
+def record_quality_blocked(transition: str) -> None:
+    """Increment the quality-blocked counter (the produced data failed a quality assertion → not promoted)."""
+    _stage_quality_blocked.add(1, {"transition": transition})

@@ -30,7 +30,7 @@ service recovers via JetStream buffer + replay on restart.
 ## Where it CAN bite — the real gaps (honest)
 
 1. **The catalog outbox gap (the #1 weakness).** The catalog emits lineage as a **fire-and-forget,
-   best-effort** background task *after* the Lance write commits to S3 (`app/core/lineage_emit.py`). If
+   best-effort** background task *after* the Lance write commits to S3 (`services/catalog/core/lineage_emit.py`). If
    the catalog crashes (or its sidecar is down) **between the S3 write and the publish**, the data exists
    on storage but **the lineage event is lost** — the graph under-reports that write. No corruption, but a
    provenance hole. *Fix:* a transactional outbox, or make the **Ray job the durable producer** (it owns

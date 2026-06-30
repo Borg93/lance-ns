@@ -54,7 +54,7 @@ flow runs in both — only the credential/byte-path changes.
 
 The target is **S3-compatible storage** — MinIO is the default test backend; AWS S3, Ceph RGW,
 RustFS, GCS-via-interop all work the same way. The design is **vending-first** with a pluggable
-`CredentialVendor` (`app/core/vending.py`: `StsVendor` / `StaticPrefixVendor` / `ModeBVendor`).
+`CredentialVendor` (`services/catalog/core/vending.py`: `StsVendor` / `StaticPrefixVendor` / `ModeBVendor`).
 The toggle is the *credential-delivery* shape — both modes run on the **same** S3 storage.
 
 > ℹ️ **STS works on MinIO** (and Ceph RGW, AWS): `StsVendor` points boto3's STS client at the S3

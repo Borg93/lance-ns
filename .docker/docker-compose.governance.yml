@@ -15,7 +15,7 @@
 # Note: the lineage service runs with its own auth OFF here (the demo focuses on catalog
 # authz + provenance authorship). In production, enable LINEAGE_OIDC_ENABLED +
 # LINEAGE_FGA_ENABLED and pin LINEAGE_FGA_STORE_ID/MODEL_ID to the catalog's store — the catalog
-# forwards the caller's bearer on emit (app/core/lineage_emit.py), so create events are accepted.
+# forwards the caller's bearer on emit (services/catalog/core/lineage_emit.py), so create events are accepted.
 services:
   server:
     environment:
@@ -24,7 +24,7 @@ services:
       LANCE_LINEAGE_URL: http://lineage-api:8000/api/v1/lineage
 
   lineage-api:
-    image: lance-rest-catalog:dev   # same image as the catalog (now ships lineage/ too)
+    image: lance-rest-catalog:dev   # same image as the catalog (now ships the lineage service too)
     build:
       context: ..
       dockerfile: .docker/rest-catalog.dockerfile

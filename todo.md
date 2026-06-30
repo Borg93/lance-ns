@@ -25,20 +25,20 @@
 - ✅ OIDC authn (PyJWT/JWKS), **fail-closed**.
 - ✅ OpenFGA authz — op→`can_*` actions, concentric owner⊇writer⊇reader, parent cascade
   (`catalog→namespace→table`), roles as `role:#assignee`, `catalog:lance` root,
-  `grant_on_create`/`seed_ownership`. Model at `app/auth/model.fga` (+ `.fga.yaml` tests).
+  `grant_on_create`/`seed_ownership`. Model at `services/catalog/auth/model.fga` (+ `.fga.yaml` tests).
 - ✅ Resilience — transient-aware retries; network errors → 503 (never escape as 500).
 - ✅ Postgres (OpenFGA datastore) over sqlite.
 - ✅ Auth e2e + docker compose overlays; `docs/ARCHITECTURE.md`.
-- ✅ Pluggable `CredentialVendor` scaffold — `app/core/vending.py` (ModeB / StaticPrefix / Sts).
-- ✅ Read-only maintenance middleware — `app/api/maintenance.py` (default OFF).
-- ✅ Lineage service (incoming) — `lineage/`: OpenLineage ingest → Apache AGE graph,
+- ✅ Pluggable `CredentialVendor` scaffold — `services/catalog/core/vending.py` (ModeB / StaticPrefix / Sts).
+- ✅ Read-only maintenance middleware — `services/catalog/api/maintenance.py` (default OFF).
+- ✅ Lineage service (incoming) — `services/lineage/`: OpenLineage ingest → Apache AGE graph,
   `upstream/downstream/producers/graph`; dataset name = catalog `table:<id>`; injection-safe
   Cypher (agtype bind params). **Open holes below.**
 - ✅ Interactive system diagram — `docs/system-diagram.html` + `docs/system-diagram.md`.
 - ✅ **Lineage auth (P0 #1/#2)** — in-service OIDC + OpenFGA `can_get_metadata` gate on all reads
   (+ `batch_check` transitive-disclosure filtering via `DatasetFilter`) and ingest authn +
   verified-author binding; reuses the catalog's verifier/check. Default OFF, fail-closed.
-  `lineage/auth.py`, `lineage/config.py`, `lineage/main.py` (reviewed by audit `wi2l437mq`).
+  `services/lineage/api/{security,fga_deps}.py`, `services/lineage/core/config.py`, `services/lineage/main.py` (reviewed by audit `wi2l437mq`).
 - ✅ **Structured logging standardized** repo-wide (event-name + `extra=`, level discipline per
   `observability.md`) + authz-decision audit logging (`access_denied`) in catalog + lineage.
 - ✅ **Catalog → lineage emission (P0 #3)** — table create emits OpenLineage with the verified author
@@ -48,7 +48,7 @@
 - ✅ **HCP dropped → S3-compatible only** (MinIO default; AWS / Ceph RGW / RustFS / GCS-interop). Code +
   docs + diagram reframed to **Mode B (server-mediated) vs STS vending**. RustFS storage-agnostic e2e:
   `.docker/docker-compose.rustfs.yml` + `scripts/rustfs_e2e.sh` (same lifecycle test, bytes on RustFS).
-- ✅ **Realistic medallion lineage sim + version linkage (P1 #10)** — `lineage/seed.py`: alice ingests
+- ✅ **Realistic medallion lineage sim + version linkage (P1 #10)** — `services/lineage/seed.py`: alice ingests
   bronze → data_eng embeds silver (v1, +`embedding`) → refines silver in place (v2, +`caption`) →
   analyst aggregates gold; each output carries its Lance `version`. `producers()` surfaces the version;
   in-place refine bumps version (no self-loop). Unit-tested; `test_lineage_e2e.py` asserts the chain + v1/v2.
@@ -97,36 +97,36 @@
 ### P0 — security / correctness (do first)
 1. ✅ **Lineage READ authz** — `upstream/downstream/producers/graph` gated on OIDC +
    OpenFGA `can_get_metadata` on `table:<name>`, reusing the catalog's `OIDCVerifier` +
-   `fga.check` (`lineage/auth.py`, `lineage/main.py`). Default OFF, fail-closed when enabled.
+   `fga.check` (`services/lineage/api/{security,fga_deps}.py`, `services/lineage/main.py`). Default OFF, fail-closed when enabled.
    **Plus** transitive-disclosure filtering: related/graph datasets the caller can't see are
    dropped via `fga.batch_check` (`DatasetFilter`), mirroring the catalog's `list_objects`
    filtering. *(audit `w8u4rc2tg` follow-up; reviewed by `wi2l437mq`.)* **Prod must set
    `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED`.**
 2. ✅ **Lineage INGEST authz + verified author (anti-forgery)** — ingest requires a verified
    token (401 otherwise) and `enforce_author` binds `author` = `token.sub`, overwriting any
-   body-claimed facet (`lineage/auth.py`, `lineage/main.py`). Tested end-to-end so deleting the
+   body-claimed facet (`services/lineage/api/{security,fga_deps}.py`, `services/lineage/main.py`). Tested end-to-end so deleting the
    bind regresses a test. *(Remaining: optional FGA authz that the producer may write the named
    outputs — attributable today, not yet output-scoped.)*
 3. ✅ **Catalog emits lineage on create** with `author` = the verified `token.sub` — "who created
    the table" is now an audit fact: a `(:User)-[:CREATED]->(:Dataset)` edge, queryable at
    `GET /datasets/{id}/creator`. Fire-and-forget + best-effort (never blocks/fails a write), default
    OFF (`LANCE_LINEAGE_EMIT_ENABLED`), canonical id (lineage Dataset == OpenFGA object id).
-   `app/core/lineage_emit.py`, `app/api/v1/endpoints/data.py`, `lineage/{models,repository,main}.py`.
+   `services/catalog/core/lineage_emit.py`, `services/catalog/api/v1/endpoints/data.py`, `services/lineage/models.py`, `services/lineage/services/repository.py`, `services/lineage/main.py`.
    *(Remaining → P2: emit on insert/merge/delete/compaction + Lance-version linkage.)*
 4. 🟡 **Identity-consistency** — the catalog now emits lineage via `fga.canonical_object_id`, so a
    catalog-created Dataset name == its OpenFGA object id under any delimiter. **Still TODO:** the
-   `lineage/seed.py` demo emitter hardcodes `$`, and a byte-identical cross-axis test under a
-   non-default delimiter. Touch: `lineage/config.py`, `lineage/seed.py` + a test.
+   `services/lineage/seed.py` demo emitter hardcodes `$`, and a byte-identical cross-axis test under a
+   non-default delimiter. Touch: `services/lineage/core/config.py`, `services/lineage/seed.py` + a test.
 
 ### P1 — needed for prod
 5. ⛔ **Wire the credential vendor** into `describe_table?vend_credentials=true`
-   (OpenFGA-tiered: `can_read_data`→read, `can_write_data`→write). Default OFF. `app/core/vending.py`, `app/api/v1/endpoints/data.py`.
+   (OpenFGA-tiered: `can_read_data`→read, `can_write_data`→write). Default OFF. `services/catalog/core/vending.py`, `services/catalog/api/v1/endpoints/data.py`.
    **`StsVendor` is the recommended path** (MinIO/Ceph/AWS all implement STS `AssumeRole` + inline
    session policy → short-TTL table-scoped creds). `mode_b` (server-mediated) stays the safe OOTB
    default; `static` for S3 backends without STS (GCS interop). Point the STS client at the S3
    endpoint via `LANCE_S3_STS_ENDPOINT` + `LANCE_S3_ASSUME_ROLE_ARN`.
 6. ⛔ **lance-ray promotion + compaction jobs** (bronze→silver→gold) on the KubeRay cluster,
-   using the Mode-B/vending data plane **and** emitting OpenLineage (template: `lineage/seed.py`).
+   using the Mode-B/vending data plane **and** emitting OpenLineage (template: `services/lineage/seed.py`).
    This is the medallion flow end-to-end.
 7. ⛔ **OpenBao SecretStore** (KV v2): move catalog base storage cred + OIDC client secret +
    OpenFGA/AGE DB creds out of env; lineage AGE DB creds. lance-ray = **workload identity** (no Bao).
@@ -136,18 +136,18 @@
 10. ✅ **Lineage version linkage** — the `WROTE` edge carries the Lance **version** each run
     produced (OpenLineage `version` facet → `producers().dataset_version`), so refinement passes
     (silver v1 → v2) are distinguishable and provenance lines up with time-travel. In-place refines
-    bump the version instead of creating a self-`DERIVED_FROM` edge. `lineage/{models,repository}.py`.
+    bump the version instead of creating a self-`DERIVED_FROM` edge. `services/lineage/models.py`, `services/lineage/services/repository.py`.
 
 ### P1 — verified security/consistency cleanups (audit `w8u4rc2tg`)
-- ⛔ **OpenFGA tuple cleanup on drop / deregister / rename** — `app/core/fga.py` is **write-only**
+- ⛔ **OpenFGA tuple cleanup on drop / deregister / rename** — `services/common/fga.py` is **write-only**
   (`write_tuples` issues `ClientWriteRequest(writes=…)`, no deletes); `drop_table`/`deregister_table`/
   `drop_namespace`/`rename_table` leave stale `owner`/`parent` tuples → **stale-grant privilege bleed**
   if an id is reused. Add a `ClientWriteRequest(deletes=…)` path + call on drop/deregister/rename.
-  **✔audit**. Touch: `app/core/fga.py`, `app/api/v1/endpoints/tables.py`, `namespaces.py`.
+  **✔audit**. Touch: `services/common/fga.py`, `services/catalog/api/v1/endpoints/tables.py`, `namespaces.py`.
 - ⛔ **Wire or remove unused `can_list` / `can_alter` / `can_commit` / `can_rename`** — defined in
-  `app/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
+  `services/catalog/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
   Maintenance hazard: the model advertises finer granularity than enforcement implements. **✔audit**.
-  Touch: `app/api/fga_deps.py`, `app/auth/model.fga`.
+  Touch: `services/catalog/api/fga_deps.py`, `services/catalog/auth/model.fga`.
 
 ### P2 — later / deferred
 11. 🔶 **Lineage events for delete/drop, schema evolution, compaction/maintenance** — complete
@@ -164,7 +164,7 @@
     the real stack (RustFS + lineage/AGE): writes bronze (blob `payload`), adds `embedding` then
     `caption` to silver (Lance write + add-column → v1, v2), aggregates gold with the embedded
     `lineage` JSONB — each step emitting **real** OpenLineage. `--step N` lets you be the producer.
-    UI = a **SvelteKit app** (`web/`, Svelte Flow + bits-ui on Bun) with three live views: Graph (DAG,
+    UI = a **SvelteKit app** (`frontend/`, Svelte Flow + bits-ui on Bun) with three live views: Graph (DAG,
     version chips, failed run, source_uri+tags), Events (Marquez-style `/events` with full facets),
     Storage (`/demo/datasets` — real Lance schema per version + gold JSONB). Backend gained `/events`
     + `/demo/datasets` (reads real Lance on S3). `scripts/medallion_demo.sh` brings the whole stack up
@@ -248,7 +248,7 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     round-trip unit test (`RunEvent.output_version == "1"`). Revives the storage-version differentiator.
 21. ✅ **Lineage ↔ data KEY embedded in the Lance file — DONE (self-describing data).** `create_table`
     now stamps `{lineage.dataset_id, lineage.namespace, lineage.create_run_id, lineage.created_by}` into
-    the Lance **schema metadata** (`app/core/lineage_metadata.py` injects them into the Arrow stream
+    the Lance **schema metadata** (`services/catalog/core/lineage_metadata.py` injects them into the Arrow stream
     before the write; `create_run_id` = the same run id the create event emits, so the file points at its
     creating run in the graph). **Proven in real Lance** by a write→read test (the keys survive
     `write_dataset`). Best-effort (never fails a create); the re-encode runs in the threadpool. The data
@@ -263,7 +263,7 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
 23. ✅ **Storage-version reconciliation — DONE (the format-aware moat).** New gated
     `GET /datasets/{name}/reconcile` cross-checks the version the graph recorded on the `WROTE` edge
     (`latest_write_version` = most-recent *successful* write, monotonic) against the **actual on-disk
-    Lance version** read straight off object storage (`lineage/reconcile.py`, `read_storage_version` in
+    Lance version** read straight off object storage (`services/lineage/core/reconcile.py`, `read_storage_version` in
     the threadpool so blocking I/O never stalls the loop) and classifies drift: `in_sync` / `storage_ahead`
     (a write that bypassed lineage) / `graph_ahead` (a lineage claim with no data) / `untracked` /
     `missing_on_storage` / `absent`. Gated on `can_get_metadata` for `name` (in the route-gate set test).
@@ -279,7 +279,7 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     - **Prerequisite (schema-per-version)** ✅ — ingest persists each output's column schema (JSON-string
       scalar) on the `WROTE` edge; `GET /datasets/{name}/schema?version=N`. (caught+fixed a string-vs-int
       version-match bug the read-coercion had masked.)
-    - **Emit** — `lineage/seed.py` declares the standard `columnLineage` facet across the medallion
+    - **Emit** — `services/lineage/seed.py` declares the standard `columnLineage` facet across the medallion
       (embedding←payload TRANSFORMATION, caption←embedding *same-dataset*, identity pass-throughs).
     - **Model** — `Dataset.column_edges` parses the facet (modern `transformations[]` + deprecated
       fallback; `masking = any()`).
@@ -344,12 +344,12 @@ soft-delete, contract hooks, user/role admin, task queue) is **out of scope** �
 don't re-evaluate it: it is NOT our roadmap.
 
 ### Postgres: why it's here, and the Lance-only option
-**The catalog needs ZERO Postgres** — it is pure Lance on S3 (verified: `app/` has no DB dependency). The
+**The catalog needs ZERO Postgres** — it is pure Lance on S3 (verified: `services/catalog/` has no DB dependency). The
 **only** Postgres in the stack is the **lineage graph**, because it runs on **Apache AGE**
-(`apache/age:PG16` — literally "A Graph Extension" *for* Postgres; `lineage/age.py`). AGE buys a durable
+(`apache/age:PG16` — literally "A Graph Extension" *for* Postgres; `services/lineage/core/age.py`). AGE buys a durable
 property graph + openCypher (`DERIVED_FROM*1..` upstream/downstream in one query). For **zero Postgres /
-100% Lance**, the alternative is storing lineage **as Lance tables** (`runs`, `edges`) and traversing in
-app/DataFusion — at the cost of hand-rolling the recursive walk AGE gives free. **OPEN DECISION:** keep
+100% Lance**, the alternative is storing lineage **as Lance tables** (`runs`, `edges`) and traversing
+in-app via DataFusion — at the cost of hand-rolling the recursive walk AGE gives free. **OPEN DECISION:** keep
 AGE, or go Lance-native lineage. (OpenFGA's own store can be SQLite — not a Postgres reason.)
 
 ### Dapr is the chosen runtime for the microservices — what it gives us
@@ -371,15 +371,15 @@ vending app-logic (#5) stay app-level. It is the **service-layer runtime**, adop
 ## Security & consistency backlog (verified — audit `w8u4rc2tg`, 5/9 high-criticals confirmed)
 Severity in brackets; "latent" = real but not live today (lineage svc undeployed).
 - ✅ **[high]** Lineage **read** endpoints unauthenticated → data-estate disclosure. **FIXED** —
-  OIDC + `can_get_metadata` gate + `batch_check` transitive-disclosure filter (`lineage/auth.py`). → **P0 #1**.
+  OIDC + `can_get_metadata` gate + `batch_check` transitive-disclosure filter (`services/lineage/api/{security,fga_deps}.py`). → **P0 #1**.
 - ✅ **[high→latent]** Lineage **ingest** unauthenticated + `author` **self-asserted** → forgeable
   audit graph. **FIXED** — ingest requires a verified token; `enforce_author` binds `author`=`token.sub`
-  (`lineage/auth.py`, `lineage/main.py`). → **P0 #2**. *(Remaining: optional output-scoped ingest authz.)*
+  (`services/lineage/api/{security,fga_deps}.py`, `services/lineage/main.py`). → **P0 #2**. *(Remaining: optional output-scoped ingest authz.)*
 - ✅ **[high]** Catalog emitted **no lineage** → no audit record of who created a table. **FIXED (create)** —
   catalog emits create-lineage with the verified author → `(:User)-[:CREATED]->(:Dataset)` + `/creator`
-  (`app/core/lineage_emit.py`). → **P0 #3**. *(Remaining: insert/delete/compaction → P2.)*
+  (`services/catalog/core/lineage_emit.py`). → **P0 #3**. *(Remaining: insert/delete/compaction → P2.)*
 - **[low→latent]** Lineage hardcodes `$` while catalog delimiter is configurable → cross-axis identity
-  mismatch (`config.py:28` vs `lineage/seed.py`). → **P0 #4 / P1 cleanup**.
+  mismatch (`services/catalog/core/config.py:28` vs `services/lineage/seed.py`). → **P0 #4 / P1 cleanup**.
 - ✅ **[resolved — HCP dropped]** The old "HCP has no STS / static-keys-only" constraint no longer
   applies: the target is **S3-compatible only** (MinIO/Ceph/AWS), all of which implement STS. `StsVendor`
   is the recommended path → **P1 #5**.

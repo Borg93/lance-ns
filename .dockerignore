@@ -31,7 +31,7 @@ rask/
 .ruff_cache
 .pytest_cache
 
-# JS/TS build artefacts and caches (web/ is built inside the image). Use **/ so nested copies like
+# JS/TS build artefacts and caches (frontend/ is built inside the image). Use **/ so nested copies like
 # web/node_modules are excluded too — a bare `node_modules` only matches the context root, which let
 # 136M of host node_modules ship AND overwrite the clean `bun install` via `COPY web/ ./`.
 **/node_modules

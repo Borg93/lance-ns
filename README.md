@@ -14,7 +14,7 @@ for *what you may do*. With auth disabled it is a plain, open catalog.
 flowchart TB
     client["Client (SDK / curl)"]
 
-    subgraph app["FastAPI app (app/)"]
+    subgraph app["FastAPI app (services/catalog/)"]
         direction TB
         router["api/v1/router.py<br/>APIRouter(dependencies=[authorize])"]
 
@@ -34,15 +34,18 @@ flowchart TB
 
         subgraph core["core/"]
             config["config.py · Settings (LANCE_*)"]
-            oidc["oidc.py · OIDCVerifier"]
-            fga["fga.py · OpenFGA client + grant_on_create"]
-            exc["exceptions.py · ErrorCode→HTTP, RFC-9457"]
             ns["namespace.py · build_namespace / open_dataset"]
             ident["identifiers.py · parse / parent_segments"]
             ser["serialization.py · snake_case + exclude_none"]
         end
 
         handlers["main.py exception handlers<br/>LanceNamespaceError / Validation / 500<br/>→ application/problem+json"]
+    end
+
+    subgraph common["services/common/ · shared package (every service: 'from common.X')"]
+        oidc["oidc.py · OIDCVerifier"]
+        fga["fga.py · OpenFGA client + grant_on_create"]
+        exc["exceptions.py · ErrorCode→HTTP, RFC-9457"]
     end
 
     backend["pylance DirectoryNamespace"]
@@ -218,8 +221,8 @@ OpenFGA. `/livez` = process up; `/readyz` = 3-state (`starting` / `ready` + name
 
 | Path | Ops | Mechanism |
 |---|---|---|
-| **native** (`services/native.py`) | create/insert/merge/query/count, describe/exists/list, register/deregister/rename/restore/stats, indices, versions, transactions, materialized views | delegate to Rust `DirectoryNamespace`; missing/stub → spec-correct **501** |
-| **pylance data plane** (`services/dataplane.py`) | `update`, `delete`, add/alter/drop columns, field-metadata, all 5 tag ops | `open_dataset(...)` then call pylance directly |
+| **native** (`services/catalog/services/native.py`) | create/insert/merge/query/count, describe/exists/list, register/deregister/rename/restore/stats, indices, versions, transactions, materialized views | delegate to Rust `DirectoryNamespace`; missing/stub → spec-correct **501** |
+| **pylance data plane** (`services/catalog/services/dataplane.py`) | `update`, `delete`, add/alter/drop columns, field-metadata, all 5 tag ops | `open_dataset(...)` then call pylance directly |
 
 Writes/reads of table **data** exchange **Arrow IPC** (`application/vnd.apache.arrow.stream` in,
 `application/vnd.apache.arrow.file` out). All metadata responses are typed `lance_namespace`

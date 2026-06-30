@@ -1,7 +1,7 @@
 # Lineage service — OpenLineage → Apache AGE
 
 The **provenance axis** from [`ARCHITECTURE.md`](ARCHITECTURE.md) §9. A *separate*
-microservice (`lineage/`) that ingests OpenLineage events emitted by compute/ETL jobs and
+microservice (`services/lineage/`) that ingests OpenLineage events emitted by compute/ETL jobs and
 answers "where did this data come from / where does it flow / who produced it" over a
 graph. It is **not** part of the catalog control plane.
 
@@ -44,7 +44,7 @@ via the shared OpenFGA store — is now **implemented** (see the next section).
 ## Read-side authz (implemented — in-service, default OFF)
 
 > ✅ **Implemented** (audit `w8u4rc2tg` P0; reviewed by `wi2l437mq`). The query + ingest
-> endpoints are gated in-service (`lineage/auth.py`), **default OFF** like the catalog — set
+> endpoints are gated in-service (`services/lineage/api/{security,fga_deps}.py`), **default OFF** like the catalog — set
 > `LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED` (+ the shared `LINEAGE_FGA_STORE_ID` /
 > `LINEAGE_FGA_MODEL_ID`) in production. Ingest also requires a verified token and binds the run
 > author to it (no forged provenance), and related/graph datasets the caller can't see are
@@ -125,7 +125,7 @@ nodes/edges — see `todo.md` P2 #12b.*
 `author` is read from a custom OpenLineage `author` run facet (the OIDC sub of whoever ran
 the job), falling back to the standard `ownership` job facet so events from external producers
 still attribute an owner. On a catalog **create** event (`lance` facet `operation=create_table`,
-emitted by `app.core.lineage_emit`), the verified author is also recorded as a first-class
+emitted by `catalog.core.lineage_emit`), the verified author is also recorded as a first-class
 `(:User)-[:CREATED]->(:Dataset)` edge — the authoritative "who created this table" answer.
 Datasets are MERGEd on `{name}` only, then `namespace` is `SET`, so a dataset referenced by
 several runs is never duplicated.
@@ -178,14 +178,15 @@ queryable, cross-dataset source of truth; the embedded JSONB is the self-describ
 
 ## Code shape (FastAPI house style)
 
-Layered, no raw Cypher in the endpoints:
+Layered like the catalog (`api/` · `core/` · `services/` + a thin entrypoint), no raw Cypher in the endpoints:
 
-- `lineage/models.py` — Pydantic `RunEvent` (the OpenLineage wire subset we ingest; camelCase aliases).
-- `lineage/schemas.py` — typed response models (`Neighbors`, `Producers`, `LineageGraph`).
-- `lineage/age.py` — thin Apache AGE client over `psycopg`; safe SQL via `psycopg.sql` composition.
-- `lineage/repository.py` — `LineageRepository` (the only place Cypher lives) returning the schemas above.
-- `lineage/main.py` — FastAPI app; lifespan builds the pool + repository onto `app.state`, injected via an `Annotated` dep; every route has a typed `response_model`.
-- `lineage/seed.py` — **producer-side** OpenLineage emitter (see below); the service never imports it.
+- `services/lineage/models.py` — Pydantic `RunEvent` (the OpenLineage wire subset we ingest; camelCase aliases).
+- `services/lineage/schemas.py` — typed response models (`Neighbors`, `Producers`, `LineageGraph`).
+- `services/lineage/core/age.py` — thin Apache AGE client over `psycopg`; safe SQL via `psycopg.sql` composition.
+- `services/lineage/services/repository.py` — `LineageRepository` (the only place Cypher lives) returning the schemas above.
+- `services/lineage/api/v1/endpoints/{datasets,columns,runs,reconcile,ingest,demo}.py` — the ~15 routes, thin (call the repository; every route has a typed `response_model`); auth/filter deps live in `services/lineage/api/{security,fga_deps}.py`.
+- `services/lineage/main.py` — FastAPI app; lifespan builds the pool + repository onto `app.state`, injected via an `Annotated` dep, and includes the `api/v1` router.
+- `services/lineage/seed.py` — **producer-side** OpenLineage emitter (see below); the service never imports it.
 
 ## API
 
@@ -215,7 +216,7 @@ pointed here with `OPENLINEAGE_URL` ingests with no glue.
 
 ## Mock medallion data (a real OpenLineage producer)
 
-`lineage/seed.py` is the **producer** — compute-layer instrumentation that uses the official
+`services/lineage/seed.py` is the **producer** — compute-layer instrumentation that uses the official
 `openlineage-python` client to build spec-correct events for the medallion flow (dataset names =
 catalog ids, authors = OIDC subs, Ray = the compute job, Lance = the data; each output carries
 `schema` + `dataSource` + `tags` + `version` facets):
@@ -228,7 +229,7 @@ caption_features  TRANSFORM      (data_eng) silver$features → silver$features 
 aggregate_gold    TRANSFORM      (analyst)  silver$features → gold$catalog   v1  (+lineage JSONB)
 ```
 
-`lineage/sample_events.json` is generated from it (`--write`), so the static fixture stays in
+`services/lineage/sample_events.json` is generated from it (`--write`), so the static fixture stays in
 sync with what a real OpenLineage client emits. After ingest: `upstream(gold$catalog)` →
 silver, bronze, raw source; `producers(silver$features)` → the failed attempt (with its error,
 no version) **and** the two successful `data_eng` runs (v1, v2); `graph(silver$features)` carries
@@ -241,12 +242,12 @@ events): it **executes** the medallion flow against the real docker-compose stac
 evolving real Lance datasets on **RustFS** (S3-compatible; the driver is storage-agnostic, so
 MinIO/Ceph/AWS work by changing the creds) **and** emitting a real OpenLineage event after each step.
 
-The UI is a **SvelteKit app** (`web/` — Svelte Flow + bits-ui on Bun) with three live views polled
+The UI is a **SvelteKit app** (`frontend/` — Svelte Flow + bits-ui on Bun) with three live views polled
 every 2s: the **Graph** (the medallion DAG — version chips silver v1→v2, the failed run in red, each
 node's S3 `source_uri` + tags), the **Events** feed (Marquez-style, full facets per event from
 `GET /events`), and **Storage (S3)** (`GET /demo/datasets` — each real Lance dataset's schema *at
 every version*, so you watch `embedding` then `caption` appear, plus gold's embedded JSONB lineage).
-A zero-dependency fallback (`lineage/static/index.html`) is also served at `/ui/`.
+A zero-dependency fallback (`services/lineage/static/index.html`) is also served at `/ui/`.
 
 ```bash
 # bring up RustFS + lineage + the SvelteKit UI (host ports overridable to avoid clashes):
@@ -266,7 +267,7 @@ S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
 
 `--emit-only` skips the Lance write and just emits the OpenLineage event (pure producer
 simulation). The driver reuses `seed.build_events()`, so the live graph matches the tested fixture.
-See `web/README.md` for developing the UI on the host (`bun run dev`).
+See `frontend/README.md` for developing the UI on the host (`bun run dev`).
 
 ## Run / verify (dev)
 
@@ -284,7 +285,7 @@ curl -s localhost:2334/datasets/gold\$catalog/upstream | jq
 curl -s localhost:2334/datasets/silver\$features/graph | jq
 
 # regenerate the static fixture from the emitter (instead of emitting)
-uv run python -m lineage.seed --write lineage/sample_events.json
+uv run python -m lineage.seed --write services/lineage/sample_events.json
 
 # tests
 uv run pytest tests/unit/test_lineage.py -q                                   # our logic, no DB
@@ -303,7 +304,7 @@ LINEAGE_DATABASE_URL=postgresql://lineage:lineage@localhost:5433/lineage \
 - **Output-scoped ingest authz** — additionally check the producer may write the named output
   tables (`can_write_data`), not just that it is authenticated. Attributable today, not yet scoped.
 - ✅ **Deployed** — `lineage-api` service (`.docker/docker-compose.governance.yml`, same image) +
-  `COPY lineage/` in the dockerfile. Catalog emits create-lineage to it (`/datasets/{id}/creator`).
+  `COPY services/` in the dockerfile. Catalog emits create-lineage to it (`/datasets/{id}/creator`).
 - **Async ingest at scale:** jobs publish OpenLineage to NATS; the service consumes
   (same owner, just decoupled). Direct `POST /api/v1/lineage` is fine until then.
 - **Frontend:** an SSR micro-frontend renders the DAG by calling `/graph` via the gateway

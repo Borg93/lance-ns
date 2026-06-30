@@ -10,7 +10,7 @@
 #   ./scripts/medallion_demo.sh             # bring up, run the driver, leave the stack up
 #   KEEP_STACK=0 ./scripts/medallion_demo.sh   # tear the stack down afterwards
 #
-# The catalog (app.main) is NOT needed here — this demo is the compute/data + provenance loop.
+# The catalog (catalog.main) is NOT needed here — this demo is the compute/data + provenance loop.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

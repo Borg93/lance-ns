@@ -48,7 +48,7 @@ authorizes, locates, and records. Compute is a **client** of the catalog. This i
 
 When a client opens a table, `describe_table?vend_credentials=true` returns the table's
 **location** plus a **credential** to reach object storage directly. Three pluggable shapes
-(`app/core/vending.py`), strongest first:
+(`services/catalog/core/vending.py`), strongest first:
 
 1. **STS vending (`StsVendor`) — recommended.** The catalog calls the S3 backend's STS
    `AssumeRole` with an **inline session policy** scoped to *just this table's bucket/prefix and
@@ -89,18 +89,22 @@ flowchart LR
   OS --- L[Lance dataset dirs: bronze/…, silver/…, gold/…]
 ```
 
-Code layout (where each concern lives):
+Code layout (where each concern lives). The catalog service lives under
+`services/catalog/`, layered into `api/` (routes/deps/security), `core/` (config + infra),
+and `services/` (business logic); the five cross-service modules (`secrets`, `dapr_auth`,
+`fga`, `oidc`, `exceptions`) live in `services/common/` and every service imports them as
+`from common.X`:
 
 | Path | Responsibility |
 |---|---|
-| `app/main.py` | App lifespan: build OIDC verifier + OpenFGA client into `app.state`, graceful shutdown |
-| `app/api/security.py` | **Authn** — verify the OIDC token → `CurrentToken` (or fail closed) |
-| `app/api/fga_deps.py` | **Authz** — `authorize` (router-level pre-op `can_*` check) **and** `seed_ownership` (post-create grant). The op→`can_*` map is the only policy logic in the app. |
-| `app/core/fga.py` | OpenFGA client wrapper: `check`/`batch_check`/`list_objects`/`write_tuples`/`grant_on_create`, id helpers, retry + fail-closed |
-| `app/auth/model.fga` / `model.json` / `model.fga.yaml` | The authorization **model** (DSL, the JSON the app loads, and the model tests) — the model owns the privilege math |
-| `app/api/v1/endpoints/*` | Thin HTTP handlers → `services.native`/`services.dataplane` for the backend, `fga_deps.seed_ownership` for grants |
-| `app/services/native.py`, `dataplane.py` | Call pylance (run in a threadpool — it's blocking) |
-| `app/core/config.py` | `pydantic-settings` (env-driven config) |
+| `services/catalog/main.py` (entrypoint `catalog.main:app`) | App lifespan: build OIDC verifier + OpenFGA client into `app.state`, graceful shutdown |
+| `services/catalog/api/security.py` | **Authn** — verify the OIDC token → `CurrentToken` (or fail closed) |
+| `services/catalog/api/fga_deps.py` | **Authz** — `authorize` (router-level pre-op `can_*` check) **and** `seed_ownership` (post-create grant). The op→`can_*` map is the only policy logic in the app. |
+| `services/common/fga.py` | Shared OpenFGA client wrapper (imported as `from common import fga`): `check`/`batch_check`/`list_objects`/`write_tuples`/`grant_on_create`, id helpers, retry + fail-closed |
+| `services/catalog/auth/model.fga` / `model.json` / `model.fga.yaml` | The authorization **model** (DSL, the JSON the app loads, and the model tests) — the model owns the privilege math |
+| `services/catalog/api/v1/endpoints/*` | Thin HTTP handlers → `services.native`/`services.dataplane` for the backend, `fga_deps.seed_ownership` for grants |
+| `services/catalog/services/native.py`, `dataplane.py` | Call pylance (run in a threadpool — it's blocking) |
+| `services/catalog/core/config.py` | `pydantic-settings` (env-driven config) |
 
 ---
 
@@ -109,11 +113,11 @@ Code layout (where each concern lives):
 ```
 HTTP request
   │
-  ├─ 1. Authn  (app/api/security.py)
+  ├─ 1. Authn  (services/catalog/api/security.py)
   │      verify the OIDC JWT (signature via JWKS, iss/aud/exp, alg allowlist).
   │      → CurrentToken (the caller's sub) or 401. Fail closed if verifier missing → 503.
   │
-  ├─ 2. Authz  (app/api/fga_deps.authorize — a router-level dependency)
+  ├─ 2. Authz  (services/catalog/api/fga_deps.authorize — a router-level dependency)
   │      derive (object, can_* relation) from the route, e.g.
   │        describe table  -> check can_get_metadata on table:<id>
   │        insert  table   -> check can_write_data   on table:<id>
@@ -121,7 +125,7 @@ HTTP request
   │        create  table   -> check can_create_table on the PARENT    (create-on-parent)
   │      OpenFGA says yes/no. No → 403. OpenFGA down → 503 (never silent allow).
   │
-  ├─ 3. Handler  (app/api/v1/endpoints/*)
+  ├─ 3. Handler  (services/catalog/api/v1/endpoints/*)
   │      run the pylance backend op in a threadpool (it's blocking I/O).
   │
   └─ 4. Seed  (only on create — fga_deps.seed_ownership)
@@ -288,10 +292,10 @@ commit  ──▶  OpenFGA check (may you?)        ← access control      [done
 ```
 
 **Built as a lightweight Marquez.** Rather than Marquez (Java/Dropwizard + relational
-Postgres) or Neo4j, the `lineage/` service is a small FastAPI app that ingests OpenLineage
+Postgres) or Neo4j, the `services/lineage/` service is a small FastAPI app that ingests OpenLineage
 events at the standard `POST /api/v1/lineage` path and stores them in **Apache AGE** (a
 Postgres graph extension), so lineage traversal is native openCypher. Producers emit via the
-official `openlineage-python` client (see `lineage/seed.py` for the mock medallion emitter).
+official `openlineage-python` client (see `services/lineage/seed.py` for the mock medallion emitter).
 Full design + API in [`docs/LINEAGE.md`](LINEAGE.md).
 
 ---
@@ -308,7 +312,7 @@ uvx ruff check . && uvx ty check
 AUTH_OVERLAY=.docker/docker-compose.auth.sqlite.yml ./scripts/auth_e2e.sh   # lighter SQLite stack
 ```
 
-Config is env-driven (`LANCE_*`, see `app/core/config.py`): `LANCE_OIDC_ENABLED`,
+Config is env-driven (`LANCE_*`, see `services/catalog/core/config.py`): `LANCE_OIDC_ENABLED`,
 `LANCE_FGA_ENABLED`, `LANCE_FGA_API_URL`, `LANCE_FGA_ROOT_OBJECT` (default `catalog:lance`),
 `LANCE_FGA_TIMEOUT_SECONDS`, etc.
 

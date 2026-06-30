@@ -99,7 +99,7 @@ dex:
 # --- RustFS (first-party template) — S3 for the Lance lakehouse (the project's chosen store) --------
 rustfs:
   enabled: true
-  image: rustfs/rustfs:latest
+  image: rustfs/rustfs:1.0.0-beta.8 # pinned (multi-arch amd64+arm64); rustfs is pre-1.0 so this is the current release
   accessKey: rustfsadmin
   secretKey: rustfsadmin
   bucket: lance-catalog
@@ -109,7 +109,7 @@ rustfs:
   # are snapshot-able in prod). false → emptyDir, for throwaway CI only (wipes on every roll).
   persistence:
     enabled: true
-  mcImage: minio/mc:latest # `mc` speaks plain S3, so it bootstraps the bucket on RustFS too
+  mcImage: minio/mc:RELEASE.2025-08-13T08-35-41Z # pinned (multi-arch); `mc` speaks plain S3 → bootstraps the bucket on RustFS too
   # OIDC identity provider for STS AssumeRoleWithWebIdentity (Track B). When on, RustFS trusts Dex id_tokens
   # → a client can mint short-TTL creds it scopes per-table via the catalog's vending endpoint (vending.mode=
   # web_identity). Off by default (plain dev needs no STS). Enabling it rolls RustFS (emptyDir → data wipes).

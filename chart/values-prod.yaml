@@ -1,0 +1,56 @@
+# Production overlay — apply ON TOP of values.yaml:
+#   helm upgrade lance-ns ./chart -f chart/values.yaml -f chart/values-prod.yaml
+#
+# It flips the safe-by-default-OFF prod switches and is the place to externalize the durable/stateful
+# tier. See docs/DURABILITY.md for the tier model (ephemeral compute / durable data / external-in-prod).
+# Switches set here are wired today; the EXTERNALIZE stanzas at the bottom are commented because they
+# also need the matching external-endpoint chart hooks (tracked as follow-up) before they do anything.
+
+# --- Pin the app images to an immutable release tag (never :dev/:latest in prod) -------------------
+image:
+  catalog: { tag: "" } # set to the released digest/tag, e.g. v1.2.3 or @sha256:…
+  web: { tag: "" }
+  pullPolicy: IfNotPresent
+
+# --- Governance ON — the catalog is governed (Dex OIDC + OpenFGA) in prod --------------------------
+auth:
+  enabled: true
+
+# --- Secrets: the SEALED, file-backed OpenBao (no fixed root token; an operator must init + unseal) -
+openbao:
+  devMode: false
+
+# --- Dapr: the app-API token is the auth secret for the sidecar-delivered routes — MUST be overridden
+dapr:
+  appToken: "REPLACE-ME-with-a-real-secret" # source from OpenBao / an external secret, not this file
+  dashboard:
+    enabled: false # don't expose the Dapr control-plane UI in prod
+
+# --- Durable lakehouse storage (explicit; already the default) -------------------------------------
+rustfs:
+  persistence:
+    enabled: true
+
+# --- Compaction/GC at a real cadence (not the 120s demo sweep) -------------------------------------
+compaction:
+  schedule: "0 */30 * * * *" # every 30 min
+  olderThanDays: 7
+
+# --- Ingress fronts the gateway in prod (kind used a port-forward) ---------------------------------
+ingress:
+  enabled: true
+
+# ===================================================================================================
+# EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Uncomment per service AND point
+# the apps at the external endpoint. NOTE: disabling a component today removes the in-cluster copy but
+# the apps still target the in-cluster DNS name — wiring the external-endpoint overrides is the
+# remaining chart work (LANCE_S3_ENDPOINT / LINEAGE_DATABASE_URL / OTLP endpoint / openbao address).
+# ---------------------------------------------------------------------------------------------------
+# rustfs:
+#   enabled: false          # use a managed/replicated external S3 for the lakehouse + observability bucket
+# age:
+#   enabled: false          # use a managed Postgres (RDS / Cloud SQL / CNPG) for lineage + OpenFGA
+# openbao:
+#   enabled: false          # use an external Vault / cloud KMS; an operator populates the infra Secret
+# observability:
+#   enabled: false          # run GreptimeDB / Vector / Perses on a separate platform; point OTLP at it

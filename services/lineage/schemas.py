@@ -37,10 +37,14 @@ class DatasetRef(BaseModel):
 
 
 class ProducerInfo(BaseModel):
-    """A run that wrote (or attempted to write) a dataset — who / when / how / version.
+    """A run that wrote (or attempted to write) a dataset — who / when / how / version / measured size.
 
     A **failed** run (``event_type`` FAIL/ABORT) appears here too, with no
     ``dataset_version`` and an ``error_message`` — it tried but produced no data.
+
+    ``row_count`` / ``size_bytes`` are the runtime-measured output statistics the compute recorded for
+    this write (the rows + on-disk bytes it actually produced, from the standard ``outputStatistics``
+    facet); ``None`` when the run was a dummy emit (no compute) or a failure (no data produced).
     """
 
     run_id: str
@@ -50,6 +54,8 @@ class ProducerInfo(BaseModel):
     dataset_version: str | None = None
     producer: str | None = None
     error_message: str | None = None
+    row_count: int | None = None
+    size_bytes: int | None = None
 
 
 class Neighbors(BaseModel):

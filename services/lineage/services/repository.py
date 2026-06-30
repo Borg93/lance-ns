@@ -142,6 +142,13 @@ _SET_WROTE_VERSION: Final = (
 _SET_WROTE_SCHEMA: Final = (
     "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) SET w.schema=$schema RETURN 1"
 )
+# Runtime-measured output statistics ride the same WROTE edge (the rows + on-disk bytes the compute
+# actually wrote, from the standard ``outputStatistics`` facet). Both are plain int scalars set in a
+# standalone MATCH...SET (no MERGE-on-edge in this statement → AGE binds both $params, like _SET_COL_EDGE).
+_SET_WROTE_STATS: Final = (
+    "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) "
+    "SET w.row_count=$rows, w.size_bytes=$size RETURN 1"
+)
 _DERIVED_FROM: Final = (
     "MATCH (o:Dataset {name:$on}), (i:Dataset {name:$inp}) MERGE (o)-[:DERIVED_FROM]->(i) RETURN 1"
 )
@@ -154,7 +161,8 @@ _DOWNSTREAM: Final = (
 )
 _PRODUCERS: Final = (
     "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) "
-    "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version, r.producer, r.error_message"
+    "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version, r.producer, r.error_message, "
+    "w.row_count, w.size_bytes"
 )
 # Reconcile (#23): the version the graph believes is current = the version on the most-recent
 # *successful* WROTE edge (failed runs carry a WROTE edge with no version, so the IS NOT NULL guard
@@ -333,6 +341,21 @@ class LineageRepository:
                             _SET_WROTE_SCHEMA,
                             {"rid": event.run.run_id, "name": ds.name, "schema": json.dumps(ds.fields)},
                         )
+                    # Runtime-measured output statistics (rows + on-disk bytes) onto the same edge — present
+                    # only when the compute actually measured the write (a dummy emit omits the facet).
+                    stats = ds.statistics
+                    if stats is not None:
+                        await run_cypher(
+                            conn,
+                            self._graph,
+                            _SET_WROTE_STATS,
+                            {
+                                "rid": event.run.run_id,
+                                "name": ds.name,
+                                "rows": stats[0],
+                                "size": stats[1],
+                            },
+                        )
             # Only a successful run asserts lineage: a failed run derived nothing.
             if event.is_success:
                 for out in event.outputs:
@@ -500,7 +523,7 @@ class LineageRepository:
 
     async def producers(self, name: str) -> Producers:
         """The runs that wrote (or failed to write) ``name`` — who / when / how / version / error."""
-        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=7)
+        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=9)
         return Producers(
             dataset=name,
             producers=[
@@ -512,6 +535,8 @@ class LineageRepository:
                     dataset_version=(r[4] or None),
                     producer=(r[5] or None),
                     error_message=(r[6] or None),
+                    row_count=(int(r[7]) if r[7] is not None else None),
+                    size_bytes=(int(r[8]) if r[8] is not None else None),
                 )
                 for r in rows
             ],

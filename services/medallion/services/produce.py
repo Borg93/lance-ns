@@ -34,10 +34,11 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
     so the emitted lineage carries the real version; off → a dummy emit (version 1). Best-effort: a
     sidecar/broker outage logs + still returns (the catalog-style contract)."""
     token = uuid.uuid4().hex[:12]
-    version = 1
+    result = None
     if settings.compute_enabled and settings.raw_uri:
-        # Fake-Ray ingest: a REAL Lance write of raw_events (blocking IO → threadpool) → the real version.
-        version = await run_in_threadpool(seed_raw, settings.raw_uri, settings.storage_options())
+        # Fake-Ray ingest: a REAL Lance write of raw_events (blocking IO → threadpool) → the real version
+        # + the measured output statistics (rows + on-disk bytes) the emit records as outputStatistics.
+        result = await run_in_threadpool(seed_raw, settings.raw_uri, settings.storage_options())
     raw_event = build_run_event(
         operation=settings.producer_operation,
         author=settings.producer_author,
@@ -45,7 +46,9 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
         inputs=[],
         output_namespace=settings.raw_namespace,
         output_name=settings.raw_dataset,
-        version=version,
+        version=result.version if result else 1,
+        row_count=result.row_count if result else None,
+        size_bytes=result.size_bytes if result else None,
         run_id=f"{settings.producer_operation}-{token}",
     )
     trigger = {"token": token, "dataset": settings.raw_dataset, "namespace": settings.raw_namespace}

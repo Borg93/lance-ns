@@ -26,11 +26,23 @@ from medallion.services.transform import handle_stage
 
 def test_seed_raw_writes_a_real_dataset(tmp_path: Any) -> None:
     uri = str(tmp_path / "raw")
-    version = seed_raw(uri, {}, rows=5)
+    result = seed_raw(uri, {}, rows=5)
     table = lance.dataset(uri).to_table()
     assert table.num_rows == 5
     assert table.column_names == ["id", "payload"]
-    assert version == lance.dataset(uri).version  # the returned version == what lineage will record
+    assert result.version == lance.dataset(uri).version  # the returned version == what lineage records
+    # the measured output statistics are exact (not estimated): real rows + a positive on-disk byte count.
+    assert result.row_count == 5
+    assert result.size_bytes > 0
+
+
+def test_transform_stage_measures_real_rows_and_bytes(tmp_path: Any) -> None:
+    # The compute reports the runtime-measured output statistics the outputStatistics facet carries.
+    raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
+    seed_raw(raw, {}, rows=6)
+    result = transform_stage(raw, bronze, {}, stage="bronze")
+    assert result.row_count == 6  # rows flowed forward, exactly
+    assert result.size_bytes > 0  # the stage column adds bytes; the count is real, from the dataset stats
 
 
 def test_transform_stage_carries_rows_forward_and_stamps_stage(tmp_path: Any) -> None:
@@ -58,8 +70,8 @@ def test_transform_stage_rerun_bumps_the_version(tmp_path: Any) -> None:
     # A re-run (overwrite) produces a NEW Lance version — so the emitted lineage advances with the data.
     raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
     seed_raw(raw, {}, rows=2)
-    v1 = transform_stage(raw, bronze, {}, stage="bronze")
-    v2 = transform_stage(raw, bronze, {}, stage="bronze")
+    v1 = transform_stage(raw, bronze, {}, stage="bronze").version
+    v2 = transform_stage(raw, bronze, {}, stage="bronze").version
     assert v2 > v1
 
 
@@ -123,6 +135,11 @@ def test_handle_stage_writes_real_data_and_emits_the_real_version(tmp_path: Any)
     output = lineage["data"]["outputs"][0]
     assert output["name"] == "bronze$events"
     assert output["facets"]["version"]["datasetVersion"] == str(lance.dataset(bronze).version)
+    # …and the standard outputStatistics facet carries the runtime-measured rows + on-disk bytes it wrote.
+    stats = output["facets"]["outputStatistics"]
+    assert stats["rowCount"] == 4
+    assert stats["size"] > 0
+    assert "OutputStatisticsOutputDatasetFacet" in stats["_schemaURL"]
     # …and the next-stage trigger fired so the cascade continues.
     assert any(p["topic"] == "bronze.ready" for p in dapr.published)
 
@@ -137,7 +154,10 @@ def test_handle_stage_compute_off_writes_no_data_and_emits_version_one(tmp_path:
 
     asyncio.run(handle_stage(cast(DaprClient, dapr), settings, {"data": {"token": "t1"}}))
     lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
-    assert lineage["data"]["outputs"][0]["facets"]["version"]["datasetVersion"] == "1"
+    output = lineage["data"]["outputs"][0]
+    assert output["facets"]["version"]["datasetVersion"] == "1"
+    # …and a dummy emit measured nothing, so it must NOT claim an outputStatistics facet.
+    assert "outputStatistics" not in output["facets"]
     # No write happened — opening the downstream path as a dataset must fail (it was never created).
     try:
         lance.dataset(bronze)

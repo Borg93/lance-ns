@@ -48,6 +48,29 @@ def test_author_absent_is_none() -> None:
     assert event.author is None
 
 
+def _output_with_stats(facets: dict[str, Any]) -> Any:
+    from lineage.models import Dataset
+
+    return Dataset.model_validate({"namespace": "bronze", "name": "bronze$events", "facets": facets})
+
+
+def test_statistics_parses_output_statistics_facet() -> None:
+    """The runtime-measured (row_count, size_bytes) is read from the standard outputStatistics facet."""
+    ds = _output_with_stats({"outputStatistics": {"rowCount": 8, "size": 132}})
+    assert ds.statistics == (8, 132)
+
+
+def test_statistics_absent_when_no_facet() -> None:
+    # A dummy emit (no compute) carries no outputStatistics facet → None, so no stats land on the edge.
+    assert _output_with_stats({"version": {"datasetVersion": "1"}}).statistics is None
+
+
+def test_statistics_partial_facet_fills_absent_half_with_minus_one() -> None:
+    # Both fields are spec-optional; a facet with only rowCount still records what was measured.
+    assert _output_with_stats({"outputStatistics": {"rowCount": 5}}).statistics == (5, -1)
+    assert _output_with_stats({"outputStatistics": {"size": 64}}).statistics == (-1, 64)
+
+
 _JOBS = ["ingest_events", "embed_features", "embed_features", "caption_features", "aggregate_gold"]
 
 
@@ -223,6 +246,43 @@ def test_ingest_records_version_and_skips_self_derived_from(monkeypatch: pytest.
     # the standard dataSource + tags facets are persisted onto the dataset node.
     assert any("source_uri" in q for q, _ in calls)
     assert any("d.tags" in q for q, _ in calls)
+
+
+def test_ingest_records_output_statistics_on_wrote_edge(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful write carrying an outputStatistics facet sets row_count + size_bytes on its WROTE edge."""
+    import lineage.services.repository as repo_mod
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+        calls.append((query, params))
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _capture)
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-06-30T09:00:00Z",
+            "run": {"runId": "ingest_events-abc"},
+            "job": {"namespace": "lance-jobs", "name": "ingest_events"},
+            "inputs": [],
+            "outputs": [
+                {
+                    "namespace": "bronze",
+                    "name": "bronze$events",
+                    "facets": {
+                        "version": {"datasetVersion": "3"},
+                        "outputStatistics": {"rowCount": 8, "size": 132},
+                    },
+                }
+            ],
+        }
+    )
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    asyncio.run(repo.ingest_event(event))
+
+    set_stats = [p for q, p in calls if "SET w.row_count" in q]
+    assert set_stats and set_stats[0]["name"] == "bronze$events"
+    assert set_stats[0]["rows"] == 8 and set_stats[0]["size"] == 132
 
 
 def test_failed_run_records_error_but_no_version_or_lineage(monkeypatch: pytest.MonkeyPatch) -> None:

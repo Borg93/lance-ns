@@ -70,11 +70,12 @@ async def handle_stage(
 
     try:
         # 0. Fake-Ray compute (opt-in): a REAL in-process Lance write of the downstream dataset, so the
-        # emitted lineage carries the actual version and the cascade produces data, not just provenance.
-        # Blocking Lance/S3 IO → threadpool. Off → version 1 (dummy emit). A compute failure → RETRY below.
-        version = 1
+        # emitted lineage carries the actual version + measured output statistics (rows + on-disk bytes),
+        # and the cascade produces data, not just provenance. Blocking Lance/S3 IO → threadpool. Off →
+        # version 1, no stats (dummy emit). A compute failure → RETRY below.
+        result = None
         if settings.compute_enabled and settings.from_uri and settings.to_uri:
-            version = await run_in_threadpool(
+            result = await run_in_threadpool(
                 transform_stage,
                 settings.from_uri,
                 settings.to_uri,
@@ -88,7 +89,9 @@ async def handle_stage(
             inputs=[(settings.from_namespace, settings.from_dataset)],
             output_namespace=settings.to_namespace,
             output_name=settings.to_dataset,
-            version=version,
+            version=result.version if result else 1,
+            row_count=result.row_count if result else None,
+            size_bytes=result.size_bytes if result else None,
             run_id=f"{settings.operation}-{token}" if token else None,
         )
         # 1. Emit the transform's lineage (-> the lineage service ingests the DERIVED_FROM edge).

@@ -15,21 +15,45 @@ is the distributed job's job at rask. Blocking Lance/S3 IO; callers run it in th
 
 from __future__ import annotations
 
+from typing import Any, cast
+
 import lance
 import pyarrow as pa
+from pydantic import BaseModel
 
 _STAGE_COLUMN = "stage"
 
 
-def _version(uri: str, storage_options: dict[str, str]) -> int:
-    """The current Lance version of the dataset at ``uri`` (what the emitted lineage records)."""
-    return int(lance.dataset(uri, storage_options=storage_options).version)
+class WriteResult(BaseModel):
+    """The measured outcome of one fake-Ray Lance write — the new version + observed output statistics.
+
+    ``row_count`` / ``size_bytes`` are read straight off the just-written dataset (exact, not estimated),
+    so the emitted OpenLineage ``outputStatistics`` facet carries what the job *actually* produced — the
+    runtime-measured numbers that move our lineage from producer-declared toward Marquez-grade. Because the
+    cascade writes with ``mode="overwrite"``, the whole dataset IS this run's output, so its on-disk size
+    is the size this run wrote.
+    """
+
+    version: int
+    row_count: int
+    size_bytes: int
 
 
-def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> int:
+def _measure(uri: str, storage_options: dict[str, str]) -> WriteResult:
+    """Read the just-written dataset's version + exact output statistics (rows + on-disk bytes)."""
+    ds = lance.dataset(uri, storage_options=storage_options)
+    # lance annotates ``DataStatistics.fields`` as a single ``FieldStatistics`` but returns a list at
+    # runtime (upstream stub bug), so cast to the real shape before summing the per-field on-disk bytes.
+    fields = cast("list[Any]", ds.stats.data_stats().fields)
+    size_bytes = sum(field.bytes_on_disk for field in fields)
+    return WriteResult(version=int(ds.version), row_count=ds.count_rows(), size_bytes=size_bytes)
+
+
+def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> WriteResult:
     """Seed a small synthetic ``raw_events`` dataset — the fake lance-ray ingest at the head of the cascade.
 
-    Overwrites any existing dataset (idempotent re-seed) and returns the resulting Lance version.
+    Overwrites any existing dataset (idempotent re-seed) and returns the resulting Lance version + the
+    measured output statistics (rows + on-disk bytes) the emit records as an ``outputStatistics`` facet.
     """
     table = pa.table(
         {
@@ -38,16 +62,18 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> int
         }
     )
     lance.write_dataset(table, uri, mode="overwrite", storage_options=storage_options)
-    return _version(uri, storage_options)
+    return _measure(uri, storage_options)
 
 
-def transform_stage(from_uri: str, to_uri: str, storage_options: dict[str, str], *, stage: str) -> int:
+def transform_stage(
+    from_uri: str, to_uri: str, storage_options: dict[str, str], *, stage: str
+) -> WriteResult:
     """Read the upstream Lance dataset, stamp the ``stage`` provenance column, write the downstream dataset.
 
     The generic fake-Ray compute: real rows flow forward and the target version advances, so the cascade
     produces actual versioned data + lineage. ``stage`` is set (not appended twice) so re-running over an
     already-stamped upstream replaces the value rather than colliding on the column name. Returns the new
-    downstream Lance version.
+    downstream Lance version + the measured output statistics (rows + on-disk bytes) for the emit.
     """
     src = lance.dataset(from_uri, storage_options=storage_options).to_table()
     field = pa.field(_STAGE_COLUMN, pa.string())
@@ -58,4 +84,4 @@ def transform_stage(from_uri: str, to_uri: str, storage_options: dict[str, str],
         else src.append_column(field, marker)
     )
     lance.write_dataset(out, to_uri, mode="overwrite", storage_options=storage_options)
-    return _version(to_uri, storage_options)
+    return _measure(to_uri, storage_options)

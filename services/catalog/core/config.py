@@ -70,7 +70,7 @@ class Settings(BaseSettings):
     # (2) it gates create-on-parent for top-level creation when fga_lock_root_create is on. Grant
     # admins owner/writer on it to bootstrap — OR attach it to a `project:` (and the project to a
     # `team:`) for the full Lakekeeper-style multi-tenant hierarchy (see services/common/auth/model.fga).
-    # Must be a `warehouse:` object (the model's catalog-root type). Dev/e2e seeds it; see scripts/seed_demo.sh.
+    # Must be a `warehouse:` object (the model's catalog-root type). Dev/e2e seeds it (scripts/seed_demo.sh).
     fga_root_object: str = Field(default="warehouse:lance_catalog", alias="LANCE_FGA_ROOT_OBJECT")
     # When False (default), any authenticated caller may create a TOP-LEVEL namespace/
     # table and becomes its owner (the "users create their own workspaces" model). When

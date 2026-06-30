@@ -173,7 +173,9 @@ the scope hard:
    OpenFGA/AGE DB creds out of env; lineage AGE DB creds. lance-ray = **workload identity** (no Bao).
 8. ✅ **Deploy lineage** — `lineage-api` service (`.docker/docker-compose.governance.yml`, same image)
    + `COPY lineage` in the dockerfile. Bring up the full stack + verify: `scripts/governance_e2e.sh`.
-9. ⛔ **Routes-vs-spec conformance test** — FastAPI routes ⊆ lance-namespace spec ops.
+9. ✅ **Routes-vs-spec conformance test** (DONE 2026-06-30) — `tests/integration/test_spec_conformance.py`
+   asserts every one of the 54 spec operations has a served route (via `app.openapi()`, since starlette's
+   lazy `include_router` hides routes from `app.routes`). 0 missing. Locks the faithful-REST-surface property.
 10. ✅ **Lineage version linkage** — the `WROTE` edge carries the Lance **version** each run
     produced (OpenLineage `version` facet → `producers().dataset_version`), so refinement passes
     (silver v1 → v2) are distinguishable and provenance lines up with time-travel. In-place refines

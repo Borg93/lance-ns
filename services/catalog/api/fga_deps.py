@@ -309,11 +309,15 @@ async def revoke_ownership(
     :func:`seed_ownership`).
 
     No-op when FGA is off or the client is unwired — so lifecycle endpoints call it with one line.
-    Removes the owner grant, the ``parent`` edge, AND any later reader/writer/validator grants, so
-    a reused id can never inherit a stale grant (privilege bleed). Unlike :func:`seed_ownership`
-    this needs no token: the drop was already authorized by :func:`authorize` (owner tier), and the
-    cleanup deletes every subject's tuple regardless of who. Ids come from ``fga`` so the object
-    matches what :func:`seed_ownership` wrote byte-for-byte.
+    Removes the owner grant, the ``parent`` edge, AND any later reader/writer/validator grants, so a
+    reused id can never inherit a stale grant (privilege bleed). Needs no token: the mutation was already
+    authorized by :func:`authorize` (owner tier for drop/deregister/drop_namespace; writer tier for a
+    rename — where the revoke targets the now-DEAD source id, so the tier is immaterial to safety), and the
+    cleanup deletes every subject's tuple regardless of who. Ids come from ``fga`` so the object matches
+    what :func:`seed_ownership` wrote byte-for-byte.
+
+    Revoke runs AFTER the (irreversible) native mutation, so on an OpenFGA outage it fails closed (503)
+    with the tuples left stale until reconciled — the mutation itself already committed.
     """
     if not (settings.fga_enabled and client is not None):
         return

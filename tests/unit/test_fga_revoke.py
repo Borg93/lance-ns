@@ -30,20 +30,25 @@ def _tuple(user: str, relation: str, obj: str) -> SimpleNamespace:
 
 
 class _ReadDeleteClient:
-    """Fake OpenFGA client: serves canned read pages and records the delete write."""
+    """Fake OpenFGA client: serves canned read pages, records the options each read got, and accumulates
+    the per-tuple delete writes (delete_tuples now issues one write per tuple, not a batch)."""
 
     def __init__(self, pages: list[tuple[list[SimpleNamespace], str]]) -> None:
         self._pages = pages
         self.read_calls = 0
-        self.deleted: list[ClientTuple] | None = None
+        self.read_options: list[Any] = []
+        self.deleted: list[ClientTuple] = []
 
-    async def read(self, *_a: object, **_k: object) -> SimpleNamespace:
+    async def read(
+        self, _body: Any = None, options: Any = None, *_a: object, **_k: object
+    ) -> SimpleNamespace:
+        self.read_options.append(options)
         tuples, token = self._pages[self.read_calls]
         self.read_calls += 1
         return SimpleNamespace(tuples=tuples, continuation_token=token)
 
     async def write(self, body: Any, *_a: object, **_k: object) -> None:
-        self.deleted = body.deletes
+        self.deleted.extend(body.deletes)
 
 
 def _client(c: object) -> OpenFgaClient:
@@ -65,6 +70,9 @@ def test_read_object_tuples_paginates_to_completion() -> None:
     )
     out = asyncio.run(fga.read_object_tuples(_client(fake), "table:t"))
     assert fake.read_calls == 2
+    # The 2nd read MUST carry the continuation token from page 1 (else a >1-page object silently
+    # under-reads → partial revoke). The first read has no token.
+    assert fake.read_options == [None, {"continuation_token": "next"}]
     assert _keys(out) == {
         ("user:alice", "owner", "table:t"),
         ("user:bob", "reader", "table:t"),
@@ -89,7 +97,43 @@ def test_revoke_object_tuples_noop_when_no_grants() -> None:
     fake = _ReadDeleteClient([([], "")])
     removed = asyncio.run(fga.revoke_object_tuples(_client(fake), "table:gone"))
     assert removed == 0
-    assert fake.deleted is None  # nothing to delete → no write issued at all
+    assert fake.deleted == []  # nothing to delete → no write issued at all
+
+
+class _PartialMissingClient:
+    """read returns 3 tuples; the MIDDLE one's delete raises the missing-delete 400 (a concurrent revoke).
+    Per-tuple deletes must still remove the OTHER two — a single batched transactional delete would have
+    400'd and left ALL three in place (the exact bug the per-tuple split fixes)."""
+
+    def __init__(self) -> None:
+        self.deleted: list[ClientTuple] = []
+
+    async def read(self, *_a: object, **_k: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            tuples=[
+                _tuple("user:a", "owner", "table:t"),
+                _tuple("user:b", "reader", "table:t"),
+                _tuple("user:c", "writer", "table:t"),
+            ],
+            continuation_token="",
+        )
+
+    async def write(self, body: Any, *_a: object, **_k: object) -> None:
+        t = body.deletes[0]
+        if t.relation == "reader":
+            raise ApiException(status=400, reason="cannot delete a tuple which does not exist")
+        self.deleted.append(t)
+
+
+def test_per_tuple_delete_tolerates_one_missing_without_losing_the_rest() -> None:
+    fake = _PartialMissingClient()
+    removed = asyncio.run(fga.revoke_object_tuples(_client(fake), "table:t"))
+    assert removed == 3  # all three attempted
+    # The present two are removed; the concurrently-absent one is tolerated — NOT an all-or-nothing loss.
+    assert _keys(fake.deleted) == {
+        ("user:a", "owner", "table:t"),
+        ("user:c", "writer", "table:t"),
+    }
 
 
 class _MissingDeleteClient:
@@ -166,13 +210,23 @@ def test_revoke_ownership_noop_when_fga_disabled() -> None:
     assert fake.read_calls == 0  # FGA off → never touched
 
 
-def test_revoke_ownership_noop_when_client_unwired() -> None:
-    # client None (enabled-but-unwired) → no-op, no crash.
+def test_revoke_ownership_noop_when_client_unwired(monkeypatch: pytest.MonkeyPatch) -> None:
+    # client None (enabled-but-unwired) → short-circuit BEFORE touching fga, so a None client never
+    # reaches fga.revoke_object_tuples (which would AttributeError on None.read).
+    called = False
+
+    async def _spy(*_a: object, **_k: object) -> int:
+        nonlocal called
+        called = True
+        return 0
+
+    monkeypatch.setattr(fga, "revoke_object_tuples", _spy)
     asyncio.run(
         fga_deps.revoke_ownership(
             None, _settings(fga_enabled=True), resource="table", segments=["db", "t"]
         )
     )
+    assert called is False
 
 
 def test_revoke_ownership_deletes_every_tuple_for_the_object() -> None:

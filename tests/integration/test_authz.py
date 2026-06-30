@@ -41,8 +41,12 @@ from lance_namespace import (
     CreateNamespaceResponse,
     CreateTableResponse,
     DeclareTableResponse,
+    DeregisterTableResponse,
     DescribeTableResponse,
+    DropNamespaceResponse,
+    DropTableResponse,
     ListTablesResponse,
+    RenameTableResponse,
 )
 
 ARROW_STREAM = {"content-type": "application/vnd.apache.arrow.stream"}
@@ -295,6 +299,88 @@ def test_create_top_level_namespace_links_to_catalog_root(
     kwargs = call.kwargs
     assert kwargs["obj_id"] == "bronze"
     assert kwargs["parent_object"] == "warehouse:lance_catalog"  # default fga_root_object
+
+
+# --------------------------------------------------------------------------- #
+# Revoke-on-delete: a successful lifecycle op CLEANS UP the object's FGA tuples.
+# These guard the WIRING — deleting the revoke call in tables.py/namespaces.py
+# (re-opening the stale-grant bleed) must turn these red. The deny-path tests above
+# never reach the endpoint body, so they can't catch a missing revoke.
+# --------------------------------------------------------------------------- #
+
+
+def test_drop_table_revokes_tuples(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: a successful drop_table revokes the table's tuples (obj ``table:db1$users``)."""
+    fake_ns.drop_table.return_value = DropTableResponse()
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    revoke = AsyncMock(return_value=1)
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", revoke)
+
+    resp = client.post("/v1/table/db1$users/drop", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+    revoke.assert_awaited_once()
+    call = revoke.await_args
+    assert call is not None and call.args[1] == "table:db1$users"
+
+
+def test_deregister_table_revokes_tuples(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: a successful deregister_table revokes the table's tuples."""
+    fake_ns.deregister_table.return_value = DeregisterTableResponse()
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    revoke = AsyncMock(return_value=1)
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", revoke)
+
+    resp = client.post("/v1/table/db1$users/deregister", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+    revoke.assert_awaited_once()
+    call = revoke.await_args
+    assert call is not None and call.args[1] == "table:db1$users"
+
+
+def test_drop_namespace_revokes_tuples(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: a successful drop_namespace revokes the namespace's tuples (obj ``namespace:db1``)."""
+    fake_ns.drop_namespace.return_value = DropNamespaceResponse()
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    revoke = AsyncMock(return_value=1)
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", revoke)
+
+    resp = client.post("/v1/namespace/db1/drop", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+    revoke.assert_awaited_once()
+    call = revoke.await_args
+    assert call is not None and call.args[1] == "namespace:db1"
+
+
+def test_rename_table_revokes_source_then_seeds_destination(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT: rename revokes the SOURCE id's tuples and seeds the DEST — and revoke fires BEFORE seed,
+    so no stale grant survives under the old id (``table:db1$users``) while the dest (``db1$u2``) is owned."""
+    fake_ns.rename_table.return_value = RenameTableResponse()
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    order: list[str] = []
+
+    async def _revoke(_c: object, obj: str, **_k: object) -> int:
+        order.append(f"revoke:{obj}")
+        return 1
+
+    async def _grant(_c: object, **kw: object) -> None:
+        order.append(f"grant:{kw['obj_id']}")
+
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", _revoke)
+    monkeypatch.setattr(fga_module, "grant_on_create", _grant)
+
+    resp = client.post(
+        "/v1/table/db1$users/rename",
+        json={"new_table_name": "u2"},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200
+    assert order == ["revoke:table:db1$users", "grant:db1$u2"]
 
 
 # --------------------------------------------------------------------------- #

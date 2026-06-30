@@ -404,6 +404,10 @@ async def read_object_tuples(
             token = response.continuation_token or None
             if not token:
                 break
+        else:
+            # Hit the page ceiling with a token still outstanding → a PARTIAL set. Surface it (a partial
+            # revoke must not look complete); for one object this ceiling is unreachable in practice.
+            log.warning("openfga_read_truncated", extra={"object": obj, "max_pages": _MAX_REVOKE_PAGES})
         return collected
 
     try:
@@ -515,26 +519,29 @@ async def delete_tuples(
 ) -> None:
     """Delete relationship tuples (the revoke counterpart of :func:`write_tuples`).
 
-    Idempotent: deleting an already-absent tuple (a concurrent revoke) is swallowed, since the
-    desired post-condition — the tuple is gone — already holds. Transient failures are retried;
-    on outage we fail closed with ``ServiceUnavailableError`` so the caller does not believe a
-    revoke succeeded when it did not (stale grants would silently linger).
+    Deletes each tuple in its OWN write — NOT one batch. OpenFGA's Write is transactional (all-or-nothing),
+    so a single concurrently-absent tuple (the race our read-then-delete opens) in a batched delete would
+    400 the WHOLE call and leave EVERY grant in place while looking like success. Per-tuple, one absent
+    tuple can't block the rest, and an absent tuple is idempotent success (the post-condition — gone —
+    already holds). Transient failures are retried; on outage we fail closed with ``ServiceUnavailableError``
+    so the caller does not believe a revoke succeeded when it did not (stale grants would silently linger).
     """
     if not tuples:
         return
 
     @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
-    async def _do_delete() -> None:
-        await client.write(ClientWriteRequest(deletes=tuples))
+    async def _delete_one(t: ClientTuple) -> None:
+        await client.write(ClientWriteRequest(deletes=[t]))
 
-    try:
-        await _do_delete()
-    except _FAIL_CLOSED as exc:
-        if isinstance(exc, ApiException) and _is_missing_delete(exc):
-            log.debug("openfga_delete_absent_skipped")
-            return
-        log.error("openfga_delete_unavailable", exc_info=True)
-        raise ServiceUnavailableError("authorization service unavailable") from exc
+    for t in tuples:
+        try:
+            await _delete_one(t)
+        except _FAIL_CLOSED as exc:
+            if isinstance(exc, ApiException) and _is_missing_delete(exc):
+                log.debug("openfga_delete_absent_skipped")
+                continue
+            log.error("openfga_delete_unavailable", exc_info=True)
+            raise ServiceUnavailableError("authorization service unavailable") from exc
 
 
 async def revoke_object_tuples(
@@ -552,9 +559,11 @@ async def revoke_object_tuples(
     silently re-grant the old subjects on the NEW object (stale-grant privilege bleed). Reads the
     full tuple set, then deletes it. No-op (0) when the object has none.
 
-    Scope: this revokes the object's OWN tuples. Cascading a namespace drop to its children's
-    tuples is out of scope — the native ``drop_namespace`` requires the namespace be empty, so it
-    has no surviving child grants to strand.
+    Scope: revokes the object's OWN tuples. A CASCADING namespace drop (``DropNamespaceRequest``
+    ``behavior=Cascade``) that removes child tables/namespaces does NOT revoke their tuples here — those
+    children's grants would be stranded. The default directory backend does not cascade (so the common
+    path is safe), but the API permits it, so a Cascade drop is a known limitation pending a reconciliation
+    sweep over orphan tuples.
     """
     tuples = await read_object_tuples(
         client,

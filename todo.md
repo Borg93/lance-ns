@@ -92,7 +92,8 @@
 
 ## Contribution boundary → rask (2026-06-30)
 This project's deliverable is **merged into the sibling `rask/` repo**, not shipped standalone. That fixes
-the scope hard:
+the scope hard. **The concrete migration plan is [`docs/RASK-INTEGRATION.md`](RASK-INTEGRATION.md)** — chart
+fold-in, the externalization → operators mapping, the lance-ray seam contract, and what to drop.
 - **What we bring to rask:** the **lakehouse** (the Lance REST catalog + the in-process dataplane), **Dapr**,
   and the **event-driven estate** (the medallion raw→bronze→silver→gold cascade, the lineage service →
   AGE graph, the compaction/GC cron). This is the unit that must be clean + mergeable.

@@ -396,12 +396,19 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
       tab, live poll, masking edges) renders the field-to-field DAG; `bun run check` clean. Still unblocks
       **schema-diffing between Lance versions** (#23 fast-follow).
     (supersedes P2 #12b)
-25. 🔶 **Event-driven runtime — IN PROGRESS (Dapr transport landed).** Phase 1 DONE: the catalog→lineage
-    transport is **Dapr pub/sub** (`DaprEmitter` → `pubsub.jetstream` component; `handle_cloud_event`
-    Dapr subscription on the lineage side) replacing best-effort `BackgroundTasks` — the sidecar owns
-    retry/DLQ/trace-propagation, app holds no broker client. Still designed-not-built: S3 ObjectCreated →
-    NATS → Ray bridge → **Dapr-Workflow** gold QC gate, OpenLineage at every hop
-    (`docs/image-pipeline-event-driven.{html,md}`).
+25. 🟡 **Event-driven runtime — MOSTLY BUILT.** (a) Catalog→lineage transport is **Dapr pub/sub**
+    (`DaprEmitter` → `pubsub.jetstream`; `handle_cloud_event` subscription) — sidecar owns
+    retry/DLQ/trace-propagation, no broker client in app. (b) **The medallion cascade is event-driven**:
+    `services/medallion/` — a `producer` (lance-ray head) + 3 stage `mover`s, each subscribing to its
+    upstream trigger via Dapr, emitting OpenLineage (the `DERIVED_FROM` edge), publishing the next trigger,
+    with FGA gating + one distributed trace raw→gold. (c) ✅ **Fake-Ray compute DONE (2026-06-30)** —
+    `medallion/services/compute.py` (`seed_raw` + `transform_stage`) gives each stage a **real in-process
+    Lance write** (gated `MEDALLION_COMPUTE_ENABLED`, default off), so the loop produces **actual versioned
+    data**, not just provenance — the emitted lineage carries the real version. Same read→transform→write→
+    version contract the distributed **lance-ray** (rask KubeRay, P1 #6) swaps into. 8 tests (real Lance).
+    **Remaining (needs the live kind+Dapr stack):** S3 ObjectCreated input-binding trigger + a **Dapr-Workflow**
+    gold QC gate (`docs/image-pipeline-event-driven.{html,md}`); and swapping the fake compute for real
+    distributed lance-ray at the rask merge.
 26. 🔶 **k8s (kind) + Helm + Tilt + Dapr platform — IN PROGRESS (the big migration, modeled on `rask/`).**
     Goal: a working running event-driven example on **kind** with frontend + **Apache-AGE Postgres** +
     **NATS** (events/pubsub via Dapr) + **OpenFGA (in Postgres)** + **Dex (OIDC)**, deployed by ONE

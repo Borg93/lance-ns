@@ -19,15 +19,12 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from common import fga
+from common.oidc import IDToken
 from fastapi import Request
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials
 from lance_namespace import PermissionDeniedError, ServiceUnavailableError, UnauthenticatedError
-from openfga_sdk import OpenFgaClient
-from pydantic import ValidationError
-
-from app.core import fga
-from app.core.oidc import IDToken
 from lineage import auth
 from lineage.config import LineageSettings
 from lineage.models import RunEvent
@@ -46,6 +43,8 @@ from lineage.schemas import (
     RunStatus,
     SchemaField,
 )
+from openfga_sdk import OpenFgaClient
+from pydantic import ValidationError
 
 _ISSUER = "https://idp.example.com"
 

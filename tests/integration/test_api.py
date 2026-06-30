@@ -138,7 +138,7 @@ def test_update_builds_updates_dict(client: TestClient, monkeypatch) -> None:
     dataset = MagicMock()
     dataset.update.return_value = MagicMock(num_updated_rows=2)
     dataset.version = 5
-    monkeypatch.setattr("app.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
 
     resp = client.post("/v1/table/db$t/update", json={"predicate": "id = 1", "updates": [["name", "'x'"]]})
     assert resp.status_code == 200
@@ -150,7 +150,7 @@ def test_update_builds_updates_dict(client: TestClient, monkeypatch) -> None:
 def test_add_columns_builds_transforms(client: TestClient, monkeypatch) -> None:
     dataset = MagicMock()
     dataset.version = 3
-    monkeypatch.setattr("app.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
 
     resp = client.post(
         "/v1/table/db$t/add_columns",
@@ -162,7 +162,7 @@ def test_add_columns_builds_transforms(client: TestClient, monkeypatch) -> None:
 
 def test_create_tag_routes_to_dataset_tags(client: TestClient, monkeypatch) -> None:
     dataset = MagicMock()
-    monkeypatch.setattr("app.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
 
     resp = client.post("/v1/table/db$t/tags/create", json={"tag": "v1", "version": 1})
     assert resp.status_code == 200
@@ -170,7 +170,7 @@ def test_create_tag_routes_to_dataset_tags(client: TestClient, monkeypatch) -> N
 
 
 def test_update_with_empty_updates_is_400(client: TestClient, monkeypatch) -> None:
-    monkeypatch.setattr("app.services.dataplane.open_dataset", lambda *a, **k: MagicMock())
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: MagicMock())
     resp = client.post("/v1/table/db$t/update", json={"updates": []})
     assert resp.status_code == 400
     assert resp.json()["code"] == 13  # InvalidInput

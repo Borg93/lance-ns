@@ -9,11 +9,10 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 import pytest
+from catalog.core.config import Settings, get_settings
+from common.oidc import IDToken
 from fastapi.testclient import TestClient
 from lance_namespace import ListTablesResponse, UnauthenticatedError
-
-from app.core.config import Settings, get_settings
-from app.core.oidc import IDToken
 
 
 def _enabled_settings() -> Settings:

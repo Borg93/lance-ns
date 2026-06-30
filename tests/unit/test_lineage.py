@@ -12,11 +12,10 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-
 from lineage.age import _parse, _sql
 from lineage.models import RunEvent
 
-_SAMPLE = Path(__file__).resolve().parent.parent.parent / "lineage" / "sample_events.json"
+_SAMPLE = Path(__file__).resolve().parent.parent.parent / "services" / "lineage" / "sample_events.json"
 
 
 def test_run_event_parses_openlineage_camelcase() -> None:

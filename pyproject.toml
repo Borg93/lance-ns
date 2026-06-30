@@ -52,12 +52,14 @@ override-dependencies = [
 ]
 
 [tool.fastapi]
-entrypoint = "app.main:app"
+entrypoint = "catalog.main:app"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q --import-mode=importlib"
-pythonpath = ["."]
+# Service packages live under services/ (catalog, lineage, medallion, compaction, common); "." keeps
+# tests/ + scripts/ importable. Each service imports peers' shared code via `common`, never `app`.
+pythonpath = ["services", "."]
 markers = [
     "e2e: end-to-end tests against a running server (set LANCE_REST_E2E_URL)",
     "observability: e2e tests against the deployed kind stack — catalog + lineage + GreptimeDB (set LANCE_E2E_*_URL)",
@@ -68,7 +70,7 @@ markers = [
 
 [tool.ty.environment]
 python-version = "3.13"
-root = ["."]
+root = ["services", "."]
 
 [tool.ruff]
 line-length = 110

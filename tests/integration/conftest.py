@@ -33,12 +33,12 @@ def client(fake_ns: MagicMock, monkeypatch: pytest.MonkeyPatch) -> Iterator[Test
     monkeypatch.setenv("LANCE_S3_ACCESS_KEY_ID", "test")
     monkeypatch.setenv("LANCE_S3_SECRET_ACCESS_KEY", "test")
 
-    from app.core.config import get_settings
+    from catalog.core.config import get_settings
 
     get_settings.cache_clear()
 
-    from app.api.dependencies import get_namespace, get_storage_options
-    from app.main import app
+    from catalog.api.dependencies import get_namespace, get_storage_options
+    from catalog.main import app
 
     app.dependency_overrides[get_namespace] = lambda: fake_ns
     app.dependency_overrides[get_storage_options] = lambda: {}

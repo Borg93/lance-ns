@@ -33,6 +33,9 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from catalog.core.config import Settings, get_settings
+from common import fga as fga_module
+from common.oidc import IDToken
 from fastapi.testclient import TestClient
 from lance_namespace import (
     CreateNamespaceResponse,
@@ -41,10 +44,6 @@ from lance_namespace import (
     DescribeTableResponse,
     ListTablesResponse,
 )
-
-from app.core import fga as fga_module
-from app.core.config import Settings, get_settings
-from app.core.oidc import IDToken
 
 ARROW_STREAM = {"content-type": "application/vnd.apache.arrow.stream"}
 

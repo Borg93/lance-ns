@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 DSN = os.environ.get("LINEAGE_DATABASE_URL", "")
-_SAMPLE = Path(__file__).resolve().parent.parent.parent / "lineage" / "sample_events.json"
+_SAMPLE = Path(__file__).resolve().parents[2] / "services" / "lineage" / "sample_events.json"
 
 pytestmark = pytest.mark.e2e
 

@@ -13,8 +13,7 @@ import json
 from typing import Any, cast
 
 import httpx
-
-from app.core.lineage_emit import (
+from catalog.core.lineage_emit import (
     CREATE_TABLE,
     INSERT,
     MERGE_INSERT,

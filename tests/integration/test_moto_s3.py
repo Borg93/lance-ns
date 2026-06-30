@@ -59,10 +59,10 @@ def moto_client(moto_endpoint: str, monkeypatch: pytest.MonkeyPatch) -> Iterator
     }.items():
         monkeypatch.setenv(key, value)  # auto-restored on teardown -> order-independent
 
-    from app.core.config import get_settings
+    from catalog.core.config import get_settings
 
     get_settings.cache_clear()
-    from app.main import app
+    from catalog.main import app
 
     with TestClient(app) as test_client:
         yield test_client

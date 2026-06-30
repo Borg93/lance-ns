@@ -38,12 +38,11 @@ from typing import Any
 
 import jwt
 import pytest
+from common import oidc as oidc_module
+from common.oidc import IDToken, OIDCVerifier, _Discovery, _Provider
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from lance_namespace import UnauthenticatedError
-
-from app.core import oidc as oidc_module
-from app.core.oidc import IDToken, OIDCVerifier, _Discovery, _Provider
 
 ISSUER = "https://idp.example"
 AUDIENCE = "lance"

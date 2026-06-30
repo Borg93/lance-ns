@@ -10,8 +10,7 @@ import datetime as dt
 from typing import Any
 
 import pytest
-
-from app.core.vending import (
+from catalog.core.vending import (
     ModeBVendor,
     StaticPrefixVendor,
     StsVendor,

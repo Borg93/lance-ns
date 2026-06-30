@@ -11,10 +11,9 @@ import asyncio
 import json
 from typing import Any, cast
 
-import pytest
-
 import medallion.mover as mover
 import medallion.producer as producer
+import pytest
 from medallion.config import MedallionSettings
 from medallion.events import build_run_event
 

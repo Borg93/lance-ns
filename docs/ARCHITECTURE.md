@@ -3,6 +3,10 @@
 The doc to read first. Plain-language map of **what we're building, how the pieces fit,
 where we are right now, and what's next**. Skim the diagrams; read the section you need.
 
+> 🧭 **Want the end-to-end pipeline in order — ingest → movers → gates → lineage → compaction?** Read
+> **[`FLOW.md`](FLOW.md)**: the single coherent narrative of the *implemented* flow, with the distributed
+> (KubeRay / Ray Data) variants clearly marked as the rask future.
+
 > 🖱️ **Prefer to click through it?** Open [`system-diagram.html`](system-diagram.html) — an
 > interactive walk-through of the four core flows (create / read / promote / lineage), with the
 > data-plane mode toggle (Mode B server-mediated vs STS vending) and real payloads per step.
@@ -234,8 +238,8 @@ code (see §7).
 | Post-create ownership seeding (single `seed_ownership` helper) | ✅ done |
 | Resilience (retry + fail-closed incl. transport errors; one retry layer; bounded) | ✅ done |
 | Medallion model + tests (bronze/silver/gold + persona roles) | ✅ done (model + `model.fga.yaml`) |
-| **Promotion job** (bronze→silver→gold; a *client* of the catalog) | ⛔ not built (thin demo next) |
-| Distributed promotion at scale (lance-ray) | ⛔ not built |
+| **Promotion pipeline** (bronze→silver→gold; event-driven Dapr movers + opt-in authz + quality gates) | ✅ built & tested — see [`FLOW.md`](FLOW.md), [`MEDALLION.md`](MEDALLION.md) |
+| Distributed promotion at scale (real lance-ray Ray Data job on KubeRay) | 🔶 rask integration — the in-process fake-Ray compute fills the same contract today ([`FLOW.md` §7](FLOW.md#7-future--the-distributed-variants)) |
 | `project` type + 3-axis governance (teams × projects × layers) | 🔶 P1, planned |
 | Orchestration (cron → NATS → Dapr Workflow) | 🔶 deferred |
 | Lineage (OpenLineage ingest + graph queries over Apache AGE; producer-side emitter) | ✅ service built & e2e-verified; UI/authz next (see §9, `docs/LINEAGE.md`) |

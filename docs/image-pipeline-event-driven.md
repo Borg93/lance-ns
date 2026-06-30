@@ -1,5 +1,10 @@
 # Event-driven, durable image medallion — S3 → bronze → silver → gold (QC gate)
 
+> ⚠️ **Aspirational design sketch — NOT the implemented mechanism.** This explores a `POST /jobs` + nats-py
+> pull-worker + `ray.submit_job` + Dapr-Workflow QC-gate design with image-specific transforms. The **built**
+> system uses Dapr pub/sub subscriptions, an in-process fake-Ray transform, `POST /produce`, the `medallion.*`
+> topics, and FGA + row-count/not-null gates — read **[`FLOW.md`](FLOW.md)** for what actually runs.
+
 Interactive version: **`docs/image-pipeline-event-driven.html`** (open in a browser; click a flow tab, press
 Play, ←/→ to step). This markdown is the standalone description.
 

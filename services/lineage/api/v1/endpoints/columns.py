@@ -11,10 +11,17 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
-from lineage.api.fga_deps import FilterDep, governed, require_metadata_access
+from lineage.api.fga_deps import FilterDep, audit_read, governed, require_metadata_access
 from lineage.schemas import ColumnGraph, ColumnNeighbors
 
-router = APIRouter(prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)])
+# Gate first (require_metadata_access), then log the authorized column-level read (#6); router-level
+# deps run in declaration order. ``audit_read`` records the owning dataset ``name`` (a column has no
+# ACL of its own — it inherits its table's), so the access log is keyed by the same dataset the gate checks.
+router = APIRouter(
+    prefix="/datasets",
+    tags=["query"],
+    dependencies=[Depends(require_metadata_access), Depends(audit_read)],
+)
 
 
 @router.get("/{name}/columns/{field}/upstream")

@@ -10,10 +10,16 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 
 from lineage.api.dependencies import RepositoryDep
-from lineage.api.fga_deps import FilterDep, require_metadata_access
+from lineage.api.fga_deps import FilterDep, audit_read, require_metadata_access
 from lineage.schemas import Creator, DatasetSchema, LineageGraph, Neighbors, Producers
 
-router = APIRouter(prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)])
+# require_metadata_access gates the read (must run first); audit_read then logs the now-authorized
+# access (#6). Router-level deps run in declaration order, so the gate precedes the log.
+router = APIRouter(
+    prefix="/datasets",
+    tags=["query"],
+    dependencies=[Depends(require_metadata_access), Depends(audit_read)],
+)
 
 
 @router.get("/{name}/upstream")

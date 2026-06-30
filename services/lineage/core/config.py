@@ -78,6 +78,11 @@ class LineageSettings(BaseSettings):
     # (the authoritative provenance), so capping it bounds the high-volume log without losing lineage.
     events_retention: int = Field(default=20000, ge=0, alias="LINEAGE_EVENTS_RETENTION")
 
+    # --- Read/access audit (#6) — record WHO READ which dataset on the gated read endpoints (an access
+    # log, complementing the write provenance in the graph). Off by default; needs an authenticated subject,
+    # so it is effectively a no-op unless OIDC is on. Best-effort: an audit-write failure never fails a read.
+    read_audit_enabled: bool = Field(default=False, alias="LINEAGE_READ_AUDIT_ENABLED")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail closed: a half-configured auth layer is a startup error, not open access."""

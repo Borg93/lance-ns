@@ -255,6 +255,7 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         if route.path in gated:
             calls = [d.call for d in route.dependant.dependencies]
             assert fga_deps.require_metadata_access in calls, route.path
+            assert fga_deps.audit_read in calls, route.path  # #6: every gated read is also audited
             seen.add(route.path)
     assert seen == gated  # every per-dataset read is present and gated
 
@@ -664,3 +665,62 @@ def test_events_retention_unbounded_does_not_prune() -> None:
     repo = LineageRepository(cast(Any, _FakePool(conn)), "g", events_retention=0)
     _record(repo)
     assert not any("DELETE FROM public.lineage_events" in s for s, _ in conn.calls)
+
+
+# --------------------------------------------------------------------------- #
+# #6 — read-audit: log WHO read which dataset on a gated read. Off by default; needs a verified
+# subject; best-effort (an audit-write failure must never fail the read it is auditing).
+# --------------------------------------------------------------------------- #
+
+
+class _AuditRepo:
+    """Repository stub capturing record_read calls (and able to raise, to prove best-effort)."""
+
+    def __init__(self, *, fail: bool = False) -> None:
+        self.reads: list[tuple[str, str]] = []
+        self._fail = fail
+
+    async def record_read(self, *, reader: str, dataset: str) -> None:
+        if self._fail:
+            raise RuntimeError("audit store down")
+        self.reads.append((reader, dataset))
+
+
+def test_audit_read_disabled_does_not_record() -> None:
+    # Off by default → not even an authenticated read writes an audit row.
+    repo = _AuditRepo()
+    asyncio.run(fga_deps.audit_read("a$b", _settings(), _token(), cast(LineageRepository, repo)))
+    assert repo.reads == []
+
+
+def test_audit_read_unauthenticated_does_not_record() -> None:
+    # Enabled but no verified subject (OIDC off) → nothing to attribute, so no row.
+    repo = _AuditRepo()
+    asyncio.run(
+        fga_deps.audit_read("a$b", _settings(read_audit_enabled=True), None, cast(LineageRepository, repo))
+    )
+    assert repo.reads == []
+
+
+def test_audit_read_records_reader_and_dataset_when_enabled() -> None:
+    # The audit row is keyed by the VERIFIED subject + the dataset name — who read what.
+    repo = _AuditRepo()
+    asyncio.run(
+        fga_deps.audit_read(
+            "silver$features",
+            _settings(read_audit_enabled=True),
+            _token("dee"),
+            cast(LineageRepository, repo),
+        )
+    )
+    assert repo.reads == [("dee", "silver$features")]
+
+
+def test_audit_read_best_effort_swallows_store_failure() -> None:
+    # An audit-write failure must NEVER fail the read it is auditing — the call returns, does not raise.
+    repo = _AuditRepo(fail=True)
+    asyncio.run(
+        fga_deps.audit_read(
+            "a$b", _settings(read_audit_enabled=True), _token(), cast(LineageRepository, repo)
+        )
+    )

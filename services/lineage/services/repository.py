@@ -109,6 +109,14 @@ _PRUNE_EVENTS: Final = (
     "DELETE FROM public.lineage_events "
     "WHERE seq <= (SELECT COALESCE(MAX(seq), 0) FROM public.lineage_events) - %s"
 )
+# Read/access audit (#6) — a plain append log of WHO read WHICH dataset (public, like lineage_events; the
+# write provenance lives in the AGE graph, this is the complementary read log).
+_CREATE_READS_TABLE: Final = (
+    "CREATE TABLE IF NOT EXISTS public.lineage_reads ("
+    "seq bigserial PRIMARY KEY, reader text NOT NULL, dataset text NOT NULL, "
+    "read_at timestamptz NOT NULL DEFAULT now())"
+)
+_INSERT_READ: Final = "INSERT INTO public.lineage_reads (reader, dataset) VALUES (%s, %s)"
 _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
 )
@@ -610,6 +618,16 @@ class LineageRepository:
             )
             if self._events_retention:
                 await conn.execute(_PRUNE_EVENTS, (self._events_retention,))
+
+    async def ensure_reads_table(self) -> None:
+        """Create the read-audit log table if absent (idempotent, called on boot)."""
+        async with self._pool.connection() as conn:
+            await conn.execute(_CREATE_READS_TABLE)
+
+    async def record_read(self, *, reader: str, dataset: str) -> None:
+        """Append one read-audit row — who (``reader``) read which ``dataset`` (#6)."""
+        async with self._pool.connection() as conn:
+            await conn.execute(_INSERT_READ, (reader, dataset))
 
     async def list_events(self, limit: int = 500) -> list[EventRecord]:
         """The most-recent ingested events, newest first (durable — read from Postgres, not memory)."""

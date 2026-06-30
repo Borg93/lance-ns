@@ -49,6 +49,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Durable events feed: a Postgres table created on first boot. /runs folds onto the AGE (:Run)
     # node; both now survive restart + are replica-shared — no in-memory state. (#22)
     await repository.ensure_events_table()
+    await repository.ensure_reads_table()  # the read-audit log (#6); off unless LINEAGE_READ_AUDIT_ENABLED
     # Auth is opt-in; when enabled, reuse the catalog's verifier + the shared OpenFGA store.
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(

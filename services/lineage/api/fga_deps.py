@@ -39,7 +39,7 @@ from lance_namespace import (
     UnauthenticatedError,
 )
 
-from lineage.api.dependencies import SettingsDep
+from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.api.security import CurrentToken
 from lineage.core.config import LineageSettings
 from lineage.models import RunEvent
@@ -68,6 +68,24 @@ async def require_metadata_access(
     if not await fga.check(client, user=token.sub, relation="can_get_metadata", obj=obj):
         log.info("access_denied", extra={"sub": token.sub, "relation": "can_get_metadata", "object": obj})
         raise PermissionDeniedError(f"can_get_metadata required on {obj}")
+
+
+async def audit_read(
+    name: str, settings: SettingsDep, token: CurrentToken, repository: RepositoryDep
+) -> None:
+    """Record a read-audit row (WHO read this dataset) on a gated read — best-effort, off by default (#6).
+
+    Complements the write provenance in the AGE graph with an access log. No-op when ``read_audit_enabled``
+    is off or the request is unauthenticated (no subject to attribute). An audit-write failure is logged,
+    never raised — auditing must never break a read. Runs AFTER :func:`require_metadata_access`, so only an
+    authorized read is logged.
+    """
+    if not settings.read_audit_enabled or token is None:
+        return
+    try:
+        await repository.record_read(reader=token.sub, dataset=name)
+    except Exception as exc:  # noqa: BLE001 — audit is best-effort; never fail a read
+        log.warning("read_audit_failed", extra={"reader": token.sub, "dataset": name, "error": str(exc)})
 
 
 def enforce_author(event: RunEvent, token: IDToken | None) -> None:

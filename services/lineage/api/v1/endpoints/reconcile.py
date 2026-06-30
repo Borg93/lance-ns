@@ -12,12 +12,17 @@ from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
-from lineage.api.fga_deps import require_metadata_access
+from lineage.api.fga_deps import audit_read, require_metadata_access
 from lineage.core.config import storage_options
 from lineage.core.reconcile import read_storage_version, reconcile
 from lineage.schemas import ReconcileStatus
 
-router = APIRouter(prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)])
+# Gate first (require_metadata_access), then log the authorized reconcile read (#6); deps run in order.
+router = APIRouter(
+    prefix="/datasets",
+    tags=["query"],
+    dependencies=[Depends(require_metadata_access), Depends(audit_read)],
+)
 
 
 @router.get("/{name}/reconcile")

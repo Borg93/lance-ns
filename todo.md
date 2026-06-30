@@ -129,6 +129,12 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
   external-secrets operator + secrets-via-Dapr decouple (P2), and the **stale-FGA-tuple revoke** on
   drop/deregister/drop_namespace/rename (closes the privilege-bleed; was P1 `w8u4rc2tg`). All adversarially
   audited + tested.
+- ✅ **In-repo lineage backlog close-out** (commits `163f459`/`d618d19`/`7880dfe`/`4b2adb1`):
+  **durability fix** — all catalog write-emits converted from FastAPI `BackgroundTasks` (no retry, dies with
+  the worker — the anti-pattern) to **inline-awaited** publishes on the durable Dapr/JetStream transport;
+  **#2** output-scoped ingest authz (`can_write_data` on every claimed output); **#4** dropped unused FGA
+  relations; **#5** `/events` retention; **#6** read-audit log; **#7a** drop-table lineage; **#7b**
+  compaction maintenance lineage. Every item has valuable unit tests; full suite + ruff + ty green.
 - ✅ **Core validation** (validation `wfefr8vtx`, 6 agents, live probe → adversarial verify; see
   `docs/COVERAGE.md`). Verdict: the lakehouse + event-driven core is **valid, low-coupled, and mergeable**
   (zero cross-service imports; fail-closed authz; official OpenLineage idempotent MERGE; resilient cascade).
@@ -157,8 +163,8 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
 2. ✅ **Lineage INGEST authz + verified author (anti-forgery)** — ingest requires a verified
    token (401 otherwise) and `enforce_author` binds `author` = `token.sub`, overwriting any
    body-claimed facet (`services/lineage/api/{security,fga_deps}.py`, `services/lineage/main.py`). Tested end-to-end so deleting the
-   bind regresses a test. *(Remaining: optional FGA authz that the producer may write the named
-   outputs — attributable today, not yet output-scoped.)*
+   bind regresses a test. **Output-scoped authz DONE (2026-06-30)**: `enforce_output_authz` now requires
+   `can_write_data` on every claimed output (a producer can't record provenance for a table it can't write).
 3. ✅ **Catalog emits lineage on create** with `author` = the verified `token.sub` — "who created
    the table" is now an audit fact: a `(:User)-[:CREATED]->(:Dataset)` edge, queryable at
    `GET /datasets/{id}/creator`. Fire-and-forget + best-effort (never blocks/fails a write), default
@@ -204,19 +210,25 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
   `drop_namespace` and `rename_table` (revokes the SOURCE id, seeds the dest). Closes the stale-grant bleed.
   Adversarially audited (12/12 findings addressed — incl. the OpenFGA transactional-delete masking fix +
   endpoint wiring tests). `services/common/fga.py`, `services/catalog/api/v1/endpoints/{tables,namespaces}.py`.
-- ⛔ **Wire or remove unused `can_list` / `can_alter` / `can_commit` / `can_rename`** — defined in
-  `services/common/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
-  Maintenance hazard: the model advertises finer granularity than enforcement implements. **✔audit**.
-  Touch: `services/catalog/api/fga_deps.py`, `services/common/auth/model.fga`.
+- ✅ **Removed unused `can_list` / `can_alter` / `can_commit` / `can_rename`** (DONE 2026-06-30) — the model
+  advertised finer granularity than enforcement implemented (rename→`can_write_data`, list→`can_get_metadata`).
+  Dropped from all 3 synced model files (`model.fga` / `.fga.yaml` / `.json`, regenerated via the fga CLI
+  transform); `fga model test` green. Closes the maintenance hazard.
 
 ### P2 — later / deferred
-11. 🔶 **Lineage events for delete/drop, schema evolution, compaction/maintenance** — complete
-    the provenance surface beyond create/append.
-12. 🔶 **Read/access audit** in lineage (who *read* what, not only who wrote).
-12b. 🔶 **Column-level lineage** — producers emit OpenLineage `columnLineage` facets, but the AGE
-    graph stores **dataset-level** edges only. Add `(:Column)` nodes + column-level edges so
-    "which output column came from which input column" is queryable (the medallion seed already
-    carries schema changes per pass: silver +`embedding`, then +`caption`).
+11. ✅ **Lineage events for delete/drop + compaction/maintenance** (DONE 2026-06-30) — the provenance surface
+    now extends beyond create/append: `drop_table` emits a versionless drop run (#7a, the Dataset node
+    persists as history) and the **compaction service emits a versionless `operation=compaction` maintenance
+    run per materially-compacted dataset** (#7b, `services/compaction/core/lineage_emit.py` → Dapr pub/sub,
+    off by default). Both awaited inline on the durable transport (not FastAPI BackgroundTasks). (Insert/
+    merge/update/delete already covered by #19.) *(Remaining sub-surface: schema-evolution-only events.)*
+12. ✅ **Read/access audit** (DONE 2026-06-30) — `audit_read` logs WHO read which dataset to
+    `public.lineage_reads` on every gated per-dataset read (datasets/columns/reconcile routers), AFTER the
+    authz gate. Off by default (`LINEAGE_READ_AUDIT_ENABLED`); best-effort (never fails a read).
+    `services/lineage/api/fga_deps.py`, `services/lineage/services/repository.py`.
+12b. 🟡 **Column-level lineage** — backend DONE (#24: `(:Column)-[:DERIVED_FROM_COLUMN]->` graph + gated/
+    governed `/columns` queries, 2 live e2e). **Remaining = the Svelte Flow field-to-field UI** (buildable
+    now as demo scaffolding; migrates to rask's microfrontends later).
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
 14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows · **OTel** traces/metrics.

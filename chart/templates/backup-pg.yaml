@@ -1,0 +1,52 @@
+{{- if .Values.backups.pgDump.enabled }}
+# pg_dump the lineage + OpenFGA databases (gzip) → the lakehouse S3 under _backups/pg/<date>/.
+# SELF-CONTAINED FALLBACK ONLY: when AGE is a CloudNativePG cluster (the rask path), disable this and use
+# CNPG's scheduled backups / PITR instead — they do this better. Reads creds from the infra-tier Secret.
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "lance.fullname" . }}-pg-backup
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backups.pgDump.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          restartPolicy: OnFailure
+          volumes:
+            - { name: dump, emptyDir: {} }
+          initContainers:
+            - name: pg-dump
+              image: {{ .Values.age.image }}
+              env:
+                - name: PGPASSWORD
+                  valueFrom:
+                    secretKeyRef: { name: {{ include "lance.fullname" . }}-infra-credentials, key: postgres-password }
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  for db in {{ .Values.age.lineageDb }} {{ .Values.age.openfgaDb }}; do
+                    pg_dump -h {{ include "lance.ageConnectHost" . }} -p {{ .Values.age.port }} -U {{ .Values.age.user }} -d "$db" | gzip > /dump/"$db".sql.gz
+                  done
+              volumeMounts: [{ name: dump, mountPath: /dump }]
+          containers:
+            - name: upload
+              image: {{ .Values.rustfs.mcImage }}
+              env:
+                - name: RUSTFS_SECRET_KEY
+                  valueFrom:
+                    secretKeyRef: { name: {{ include "lance.fullname" . }}-infra-credentials, key: rustfs-secret-key }
+              command:
+                - sh
+                - -c
+                - |
+                  set -e
+                  mc alias set rfs {{ include "lance.s3Endpoint" . }} {{ .Values.rustfs.accessKey }} "$RUSTFS_SECRET_KEY"
+                  mc cp --recursive /dump/ rfs/{{ .Values.rustfs.bucket }}/_backups/pg/$(date +%Y-%m-%dT%H-%M-%SZ)/
+              volumeMounts: [{ name: dump, mountPath: /dump }]
+{{- end }}

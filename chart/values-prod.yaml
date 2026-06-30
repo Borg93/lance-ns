@@ -38,6 +38,16 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
+# --- Backups (P4): ON for the SELF-CONTAINED in-cluster-prod path (in-cluster AGE + RustFS PVC). If you
+# externalize to CloudNativePG / rustfs-operator (the rask path), set BOTH back to false — the operators do
+# PITR/scheduled backups + snapshots better. (snapshotClassName must be a real CSI VolumeSnapshotClass.) ----
+backups:
+  pgDump:
+    enabled: true
+  volumeSnapshot:
+    enabled: true
+    snapshotClassName: "" # set your cluster's CSI VolumeSnapshotClass
+
 # --- Secrets: the SEALED, file-backed OpenBao (no fixed root token; an operator must init + unseal) -
 openbao:
   devMode: false

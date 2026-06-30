@@ -334,6 +334,22 @@ compaction:
   schedule: "@every 120s" # demo cadence (prod: e.g. "0 */30 * * * *")
   olderThanDays: 7 # version GC keeps this much history
 
+# --- Backups — a FALLBACK for the SELF-CONTAINED in-cluster path only. OFF by default. When you run the
+# managed/operator path (CloudNativePG for AGE, rustfs-operator for S3 — the rask deployment), DISABLE these
+# and let the operators do backups (PITR + scheduled, better than this). These exist so a self-contained
+# in-cluster-prod deploy (in-cluster RustFS PVC + AGE) isn't backup-less. -----------------------------------
+backups:
+  # pg_dump the lineage + OpenFGA DBs (gzip) → the lakehouse S3 under _backups/pg/<date>/.
+  pgDump:
+    enabled: false
+    schedule: "0 2 * * *" # daily 02:00
+  # CSI VolumeSnapshot of the RustFS lakehouse PVC. Needs a CSI snapshotter + a VolumeSnapshotClass.
+  volumeSnapshot:
+    enabled: false
+    schedule: "0 3 * * *" # daily 03:00
+    snapshotClassName: "" # the cluster's VolumeSnapshotClass; "" = the cluster default
+    kubectlImage: bitnami/kubectl:1.31 # creates the VolumeSnapshot CR (override to your cluster's kubectl image)
+
 # --- API gateway — single entry point (reverse proxy) ---------------------------------------------
 # One nginx that path-routes to the in-cluster services, so a single `kubectl port-forward` fronts the
 # whole platform (kind has no host ports). Non-root nginx-unprivileged (listens on 8080). In prod this

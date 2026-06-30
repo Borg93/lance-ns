@@ -108,11 +108,14 @@ the scope hard:
   web) + movers take configurable `replicas` + a gated `PodDisruptionBudget` + optional CPU `HPA`
   (`chart/templates/ha.yaml`; prod overlay → 2 replicas + PDB on). This is plain Deployment config, NOT
   operator territory. Compaction stays a singleton (its cron must not double-run); producer stays 1.
-- **🔶 Deferred to the rask merge — STATEFUL HA + BACKUPS (P4):** Postgres/RustFS HA + backups/PITR are the
-  OPERATORS' job (CloudNativePG / rustfs-operator), which live in rask. We do **NOT** hand-roll
-  `pg_dump`/`VolumeSnapshot` CronJobs (that reinvents CNPG/rustfs-operator — explicit user constraint). The
-  chart's role is the P1 externalization hooks (point at an operator-managed store) + the operator-delegated
-  backup story documented in `docs/DURABILITY.md`.
+- **✅ Backups (P4, DONE 2026-06-30):** gated, OFF-by-default backup CronJobs for the SELF-CONTAINED
+  in-cluster path — `pg_dump` (lineage + OpenFGA → the lakehouse S3) + a CSI `VolumeSnapshot` of the RustFS
+  PVC (`chart/templates/backup-{pg,snapshot}.yaml`; prod overlay turns them on; creds via secretKeyRef). When
+  you externalize to **CloudNativePG / rustfs-operator** (the rask path), DISABLE these — the operators do
+  PITR/scheduled backups better; the chart documents this. A fallback for the no-operator deploy, NOT a
+  reinvention.
+- **🔶 STATEFUL HA → rask:** Postgres/RustFS failover/replication is CNPG/rustfs-operator's job in rask (the
+  P1 externalization hooks point the apps at the operator-managed store).
 - **⛔ Confirmed OUT of scope (N/A for spin-up-per-workload, reinforcing the Lakekeeper-reference stance):**
   multi-warehouse data plane, control-plane management REST API, soft-delete/undrop. Isolation = a separate
   cluster per warehouse; provisioning = Helm (declarative); the catalog serves ONE fixed root.

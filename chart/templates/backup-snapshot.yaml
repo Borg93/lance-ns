@@ -1,0 +1,69 @@
+{{- if .Values.backups.volumeSnapshot.enabled }}
+# CSI VolumeSnapshot of the RustFS lakehouse PVC on a schedule. Needs an in-cluster CSI snapshotter +
+# a VolumeSnapshotClass. SELF-CONTAINED FALLBACK ONLY: when RustFS is managed by rustfs-operator (the rask
+# path) or S3 is external, disable this and use the operator / object-store versioning instead.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "lance.fullname" . }}-snapshot
+  labels: {{- include "lance.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "lance.fullname" . }}-snapshot
+  labels: {{- include "lance.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["snapshot.storage.k8s.io"]
+    resources: ["volumesnapshots"]
+    verbs: ["create"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "lance.fullname" . }}-snapshot
+  labels: {{- include "lance.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "lance.fullname" . }}-snapshot
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "lance.fullname" . }}-snapshot
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "lance.fullname" . }}-rustfs-snapshot
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.backups.volumeSnapshot.schedule | quote }}
+  concurrencyPolicy: Forbid
+  jobTemplate:
+    spec:
+      backoffLimit: 3
+      template:
+        spec:
+          serviceAccountName: {{ include "lance.fullname" . }}-snapshot
+          restartPolicy: OnFailure
+          containers:
+            - name: snapshot
+              image: {{ .Values.backups.volumeSnapshot.kubectlImage }}
+              command:
+                - sh
+                - -c
+                - |
+                  cat <<EOF | kubectl create -f -
+                  apiVersion: snapshot.storage.k8s.io/v1
+                  kind: VolumeSnapshot
+                  metadata:
+                    name: {{ include "lance.rustfsHost" . }}-data-$(date +%Y%m%d%H%M%S)
+                    labels: { app.kubernetes.io/instance: {{ .Release.Name }}, app.kubernetes.io/component: rustfs-backup }
+                  spec:
+                    {{- with .Values.backups.volumeSnapshot.snapshotClassName }}
+                    volumeSnapshotClassName: {{ . | quote }}
+                    {{- end }}
+                    source:
+                      persistentVolumeClaimName: {{ include "lance.rustfsHost" . }}-data
+                  EOF
+{{- end }}

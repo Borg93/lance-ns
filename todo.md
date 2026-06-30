@@ -171,10 +171,13 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
    OFF (`LANCE_LINEAGE_EMIT_ENABLED`), canonical id (lineage Dataset == OpenFGA object id).
    `services/catalog/core/lineage_emit.py`, `services/catalog/api/v1/endpoints/data.py`, `services/lineage/models.py`, `services/lineage/services/repository.py`, `services/lineage/main.py`.
    *(Remaining → P2: emit on insert/merge/delete/compaction + Lance-version linkage.)*
-4. 🟡 **Identity-consistency** — the catalog now emits lineage via `fga.canonical_object_id`, so a
-   catalog-created Dataset name == its OpenFGA object id under any delimiter. **Still TODO:** the
-   `services/lineage/seed.py` demo emitter hardcodes `$`, and a byte-identical cross-axis test under a
-   non-default delimiter. Touch: `services/lineage/core/config.py`, `services/lineage/seed.py` + a test.
+4. ✅ **Identity-consistency** (DONE 2026-06-30) — the catalog emits lineage via `fga.canonical_object_id`,
+   so a catalog-created Dataset name == its OpenFGA object id == the embedded Lance metadata id under any
+   delimiter. **Locked** by `tests/unit/test_cross_axis_identity.py`: the `parse_identifier`∘`canonical_object_id`
+   round-trip across 4 delimiters (incl. non-default `.`/`/`/`::`), plus a handler-level test driving the real
+   `create_table` under a `.`-delimited config that asserts all three axes (FGA grant object / lineage Dataset /
+   embedded metadata id) byte-identical. (`services/lineage/seed.py`'s hardcoded `$` is demo-only — fixed demo
+   dataset names, not a production path.)
 
 ### P1 — needed for prod
 5. ✅ **Credential vendor — DONE.** Shipped as `POST /v1/table/{id}/credentials` (OpenFGA-tiered:

@@ -22,6 +22,9 @@ from catalog.api.dependencies import NamespaceDep, SettingsDep
 from catalog.core.identifiers import parse_identifier
 from catalog.services import native
 
+# The native dir backend implements create / describe / batch-delete versions, but its bindings are typed
+# ``request: dict`` (not the pydantic model) — ``native.call`` marshals the request to a dict for those, so
+# these delegate directly and return real results instead of the marshalling-bug 501 they surfaced before.
 router = APIRouter(prefix="/v1/table", tags=["version"])
 
 
@@ -67,6 +70,12 @@ def describe_table_version(
     version: int | None = None,
     body: DescribeTableVersionRequest | None = None,
 ) -> DescribeTableVersionResponse:
+    """Describe one table version (the latest when ``version`` is omitted).
+
+    Backed by the native dir backend, which returns a spec-correct ``TableVersion`` (with ``manifest_path``
+    / ``manifest_size`` / ``e_tag`` / ``timestamp``); ``native.call`` marshals the request to the dict the
+    binding expects. A missing version raises the backend's ``TableVersionNotFoundError`` → 404.
+    """
     req = body or DescribeTableVersionRequest()
     req.id = parse_identifier(id, settings.delimiter)
     if version is not None:

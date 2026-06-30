@@ -18,18 +18,25 @@ from lance_namespace import (
     AlterTableAlterColumnsResponse,
     AlterTableDropColumnsRequest,
     AlterTableDropColumnsResponse,
+    CreateTableBranchRequest,
+    CreateTableBranchResponse,
     CreateTableTagRequest,
     CreateTableTagResponse,
     DeleteFromTableRequest,
     DeleteFromTableResponse,
+    DeleteTableBranchRequest,
+    DeleteTableBranchResponse,
     DeleteTableTagRequest,
     DeleteTableTagResponse,
     GetTableTagVersionRequest,
     GetTableTagVersionResponse,
     InvalidInputError,
     LanceNamespace,
+    ListTableBranchesRequest,
+    ListTableBranchesResponse,
     ListTableTagsRequest,
     ListTableTagsResponse,
+    TableTagNotFoundError,
     UpdateFieldMetadataResponse,
     UpdateTableRequest,
     UpdateTableResponse,
@@ -133,13 +140,17 @@ def update_field_metadata(
 
 
 def list_tags(ns: LanceNamespace, so: StorageOptions, req: ListTableTagsRequest) -> ListTableTagsResponse:
-    """List the table's tags as ``{name: {version, manifest_size}}``."""
+    """List the table's tags as ``{name: TagContents{version, manifest_size, branch}}``."""
     table_id = _table_id(req)
     tags: dict[str, dict] = {}
     for name, tag in open_dataset(ns, so, table_id).tags.list().items():
         # pylance's Tag is a TypedDict (plain dict at runtime), so read by key.
         entry = tag if isinstance(tag, dict) else {"version": getattr(tag, "version", None)}
-        tags[name] = {"version": entry.get("version"), "manifest_size": entry.get("manifest_size") or 0}
+        tags[name] = {
+            "version": entry.get("version"),
+            "manifest_size": entry.get("manifest_size") or 0,
+            "branch": entry.get("branch"),  # None for a tag on main (TagContents.branch is optional)
+        }
     # model_validate coerces the inner dicts into TagContents (not exported to name directly).
     return ListTableTagsResponse.model_validate({"tags": tags})
 
@@ -156,7 +167,7 @@ def get_tag_version(
     """Return the table version a tag points to."""
     version = open_dataset(ns, so, _table_id(req)).tags.get_version(req.tag)
     if version is None:
-        raise InvalidInputError(f"tag {req.tag!r} not found")
+        raise TableTagNotFoundError(f"tag {req.tag!r} not found")
     return GetTableTagVersionResponse(version=version)
 
 
@@ -170,3 +181,53 @@ def delete_tag(ns: LanceNamespace, so: StorageOptions, req: DeleteTableTagReques
     """Delete a tag from the table."""
     open_dataset(ns, so, _table_id(req)).tags.delete(req.tag)
     return DeleteTableTagResponse()
+
+
+def _branch_reference(req: CreateTableBranchRequest) -> int | tuple[str | None, int | None] | None:
+    """Map the spec's ``from_branch`` / ``from_version`` to pylance ``create_branch``'s ``reference``.
+
+    fromBranch + fromVersion → ``(branch, version)``; fromBranch only → ``(branch, None)`` (latest of that
+    branch); fromVersion only → the ``version`` int (on main); neither → ``None`` (latest of main).
+    """
+    if req.from_branch is not None:
+        return (req.from_branch, req.from_version)
+    if req.from_version is not None:
+        return req.from_version
+    return None
+
+
+def list_branches(
+    ns: LanceNamespace, so: StorageOptions, req: ListTableBranchesRequest
+) -> ListTableBranchesResponse:
+    """List the table's branches as ``{name: BranchContents}``, read from pylance ``ds.branches``.
+
+    The native ``DirectoryNamespace`` 501s branch ops, but ``lance.LanceDataset`` implements them, so we
+    back them in-process here exactly like tags. A ``Branch`` is a TypedDict (plain dict at runtime).
+    """
+    branches: dict[str, dict] = {}
+    for name, branch in open_dataset(ns, so, _table_id(req)).branches.list().items():
+        entry = branch if isinstance(branch, dict) else {}
+        branches[name] = {
+            "parent_branch": entry.get("parent_branch"),
+            "parent_version": entry.get("parent_version"),
+            "create_at": entry.get("create_at"),
+            "manifest_size": entry.get("manifest_size") or 0,
+            "metadata": entry.get("metadata") or {},
+        }
+    return ListTableBranchesResponse.model_validate({"branches": branches})
+
+
+def create_branch(
+    ns: LanceNamespace, so: StorageOptions, req: CreateTableBranchRequest
+) -> CreateTableBranchResponse:
+    """Create a branch from main (or a source branch/version) — maps to pylance ``create_branch``."""
+    open_dataset(ns, so, _table_id(req)).create_branch(req.name, _branch_reference(req))
+    return CreateTableBranchResponse()
+
+
+def delete_branch(
+    ns: LanceNamespace, so: StorageOptions, req: DeleteTableBranchRequest
+) -> DeleteTableBranchResponse:
+    """Delete a branch from the table."""
+    open_dataset(ns, so, _table_id(req)).branches.delete(req.name)
+    return DeleteTableBranchResponse()

@@ -36,8 +36,11 @@ _STATUS: dict[ErrorCode, int] = {
     ErrorCode.THROTTLING: 429,
 }
 
-# The native dir backend raises plain errors (not typed) when an op is a stub.
-_UNSUPPORTED_HINTS = ("not implemented", "not supported", "is not an instance")
+# The native dir backend raises plain (untyped) errors when an op is a genuine stub. We deliberately do
+# NOT include marshalling hints like "is not an instance" here: that phrase is raised by a pydantic-vs-dict
+# TypeError on a backed op, and laundering it into a 501 hides a real bug (the audit caught exactly this —
+# create/describe/batch-delete versions were backed but appeared unsupported). Such errors now surface as 500.
+_UNSUPPORTED_HINTS = ("not implemented", "not supported")
 
 
 def status_for(code: int) -> int:

@@ -13,13 +13,17 @@ from unittest.mock import MagicMock
 
 from fastapi.testclient import TestClient
 from lance_namespace import (
+    BatchDeleteTableVersionsResponse,
     CreateNamespaceResponse,
     CreateTableResponse,
+    CreateTableVersionResponse,
     DescribeTableResponse,
+    DescribeTableVersionResponse,
     ListNamespacesResponse,
     TableAlreadyExistsError,
     TableNotFoundError,
-    UnsupportedOperationError,
+    TableVersion,
+    TableVersionNotFoundError,
 )
 
 ARROW_STREAM = {"content-type": "application/vnd.apache.arrow.stream"}
@@ -116,11 +120,91 @@ def test_backend_stub_message_maps_to_501(client: TestClient, fake_ns: MagicMock
     assert resp.json()["status"] == 501
 
 
-def test_branch_route_parses_id_and_maps_unsupported(client: TestClient, fake_ns: MagicMock) -> None:
-    fake_ns.list_table_branches.side_effect = UnsupportedOperationError("Not supported: list_table_branches")
+def test_list_branches_routes_to_dataset_branches(client: TestClient, monkeypatch) -> None:
+    # Branches are now backed in-process via pylance `ds.branches` (was a native 501).
+    dataset = MagicMock()
+    dataset.branches.list.return_value = {
+        "exp": {"parent_branch": None, "parent_version": 2, "create_at": 1, "manifest_size": 9}
+    }
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
     resp = client.post("/v1/table/db1$users/branches/list")
-    assert resp.status_code == 501
-    assert fake_ns.list_table_branches.call_args.args[0].id == ["db1", "users"]
+    assert resp.status_code == 200
+    assert resp.json()["branches"]["exp"]["parentVersion"] == 2  # serialized with the spec's camelCase alias
+
+
+def test_create_branch_maps_from_version_to_int_reference(client: TestClient, monkeypatch) -> None:
+    dataset = MagicMock()
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    resp = client.post("/v1/table/db$t/branches/create", json={"name": "exp", "from_version": 3})
+    assert resp.status_code == 200
+    dataset.create_branch.assert_called_once_with("exp", 3)  # fromVersion → int reference
+
+
+def test_create_branch_maps_from_branch_and_version_to_tuple(client: TestClient, monkeypatch) -> None:
+    dataset = MagicMock()
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    resp = client.post(
+        "/v1/table/db$t/branches/create", json={"name": "x", "from_branch": "exp", "from_version": 2}
+    )
+    assert resp.status_code == 200
+    dataset.create_branch.assert_called_once_with("x", ("exp", 2))  # (branch, version) reference
+
+
+def test_create_branch_from_main_uses_no_reference(client: TestClient, monkeypatch) -> None:
+    dataset = MagicMock()
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    resp = client.post("/v1/table/db$t/branches/create", json={"name": "exp"})
+    assert resp.status_code == 200
+    dataset.create_branch.assert_called_once_with("exp", None)  # neither → latest of main
+
+
+def test_delete_branch_routes_to_dataset(client: TestClient, monkeypatch) -> None:
+    dataset = MagicMock()
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    resp = client.post("/v1/table/db$t/branches/delete", json={"name": "exp"})
+    assert resp.status_code == 200
+    dataset.branches.delete.assert_called_once_with("exp")
+
+
+# --- version ops: the native bindings are `request: dict`-typed; native.call must marshal the pydantic ---
+# --- request to a dict, else a TypeError surfaces as a fake 501. These guard that fix (audit finding). ---
+
+
+def test_describe_version_marshals_request_to_a_dict(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.describe_table_version.return_value = DescribeTableVersionResponse(
+        version=TableVersion(version=2, manifest_path="_versions/2.manifest")
+    )
+    resp = client.post("/v1/table/db$t/version/describe?version=2")
+    assert resp.status_code == 200
+    assert resp.json()["version"]["version"] == 2
+    arg = fake_ns.describe_table_version.call_args.args[0]
+    assert isinstance(arg, dict) and arg["id"] == ["db", "t"] and arg["version"] == 2  # a dict, not the model
+
+
+def test_describe_version_missing_maps_to_404(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.describe_table_version.side_effect = TableVersionNotFoundError("version 99 not found")
+    resp = client.post("/v1/table/db$t/version/describe?version=99")
+    assert resp.status_code == 404
+
+
+def test_create_version_marshals_request_to_a_dict(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.create_table_version.return_value = CreateTableVersionResponse()
+    resp = client.post(
+        "/v1/table/db$t/version/create", json={"version": 2, "manifest_path": "_versions/2.manifest"}
+    )
+    assert resp.status_code == 200
+    arg = fake_ns.create_table_version.call_args.args[0]
+    assert isinstance(arg, dict) and arg["id"] == ["db", "t"] and arg["version"] == 2
+
+
+def test_batch_delete_versions_marshals_request_to_a_dict(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.batch_delete_table_versions.return_value = BatchDeleteTableVersionsResponse()
+    resp = client.post(
+        "/v1/table/db$t/version/delete", json={"ranges": [{"start_version": 1, "end_version": 1}]}
+    )
+    assert resp.status_code == 200
+    arg = fake_ns.batch_delete_table_versions.call_args.args[0]
+    assert isinstance(arg, dict) and arg["id"] == ["db", "t"]
 
 
 def test_request_validation_maps_to_422_problem_json(client: TestClient) -> None:

@@ -1,8 +1,8 @@
-"""Table branch endpoints (delegated to the native backend).
+"""Table branch endpoints — backed in-process via the pylance data plane.
 
-Branch models exist in lance-namespace 0.8.x; the native ``DirectoryNamespace``
-does not yet implement branch ops, so these return a spec-correct 501 until a
-managed/REST backend provides them.
+The native ``DirectoryNamespace`` 501s branch ops, but ``lance.LanceDataset`` implements Git-like branches
+(``ds.branches`` / ``ds.create_branch``), so we back them in-process here exactly like tags — turning the
+former spec-correct 501 into a real, working operation.
 """
 
 from __future__ import annotations
@@ -17,9 +17,9 @@ from lance_namespace import (
     ListTableBranchesResponse,
 )
 
-from catalog.api.dependencies import NamespaceDep, SettingsDep
+from catalog.api.dependencies import NamespaceDep, SettingsDep, StorageOptionsDep
 from catalog.core.identifiers import parse_identifier
-from catalog.services import native
+from catalog.services import dataplane
 
 router = APIRouter(prefix="/v1/table", tags=["branch"])
 
@@ -29,26 +29,27 @@ def list_table_branches(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    so: StorageOptionsDep,
     page_token: str | None = None,
     limit: int | None = None,
 ) -> ListTableBranchesResponse:
     req = ListTableBranchesRequest(
         id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit
     )
-    return native.call(ns, "list_table_branches", req)
+    return dataplane.list_branches(ns, so, req)
 
 
 @router.post("/{id}/branches/create", response_model_exclude_none=True)
 def create_table_branch(
-    id: str, body: CreateTableBranchRequest, ns: NamespaceDep, settings: SettingsDep
+    id: str, body: CreateTableBranchRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> CreateTableBranchResponse:
     body.id = parse_identifier(id, settings.delimiter)
-    return native.call(ns, "create_table_branch", body)
+    return dataplane.create_branch(ns, so, body)
 
 
 @router.post("/{id}/branches/delete", response_model_exclude_none=True)
 def delete_table_branch(
-    id: str, body: DeleteTableBranchRequest, ns: NamespaceDep, settings: SettingsDep
+    id: str, body: DeleteTableBranchRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> DeleteTableBranchResponse:
     body.id = parse_identifier(id, settings.delimiter)
-    return native.call(ns, "delete_table_branch", body)
+    return dataplane.delete_branch(ns, so, body)

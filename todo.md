@@ -268,17 +268,21 @@ gaps**, so they are closed here rather than built:
     - **[config, easy]** Catalog: `LANCE_OIDC_ENABLED`+`LANCE_FGA_ENABLED`. Lineage:
       `LINEAGE_OIDC_ENABLED`+`LINEAGE_FGA_ENABLED` pinned to the **same** `*_FGA_STORE_ID`/`MODEL_ID`.
       Dex + OpenFGA are already in the base compose; just seed the OpenFGA model + tuples.
-    - **[small new code] UI login flow** — the one genuinely-new piece: OIDC code-flow + session in the
-      SvelteKit app so its `/api/*` proxy forwards a real `Authorization` bearer (today it polls
-      unauthenticated). SvelteKit `hooks.server.ts` + a session cookie; lineage then verifies + filters.
-    - **[small, backend] Harden demo endpoints for prod** — `/demo/datasets` (reads raw S3) is
-      DEMO-ONLY → remove/keep flag-gated; `/events` is ungated in-memory → persist + gate like the
-      per-dataset reads.
-    - **[backend] Output-scoped ingest authz** — also check the producer may *write* the named output
-      tables (`can_write_data`), not just that it's authenticated (currently attributable but not scoped).
+    - ✅ **UI login flow DONE (2026-06-30)** — the genuinely-new piece, built: OIDC Authorization-Code-+-PKCE
+      in the SvelteKit BFF (`$lib/server/oidc{,-core}.ts`, `hooks.server.ts`, `/auth/{login,callback,logout}`,
+      httpOnly session) so the `/api/*` proxy forwards a real `Authorization` bearer; lineage then verifies +
+      filters. **Opt-in** (`OIDC_ISSUER` unset → demo stays auth-OFF). 15 `bun test` unit tests on the
+      security-critical logic (incl. the RFC 7636 PKCE S256 vector); `bun run check` + `vite build` clean.
+      End-to-end needs live Dex; session-sealing + refresh are documented prod-hardening fast-follows.
+    - ✅ **Demo endpoints hardened (DONE earlier)** — `/events` is persisted (`public.lineage_events`) + gated
+      (#22); `/demo/datasets` stays flag-gated (`LINEAGE_DEMO_DATA_ENABLED`, off by default).
+    - ✅ **Output-scoped ingest authz DONE (#2)** — `enforce_output_authz` requires `can_write_data` on every
+      claimed output, not just authentication.
     - **[data plane] Wire `StsVendor` into `describe_table?vend_credentials`** (P1 #5) — real per-table
       short-TTL creds on MinIO/Ceph/AWS (RustFS: mode_b/static until it supports inline policy scoping).
-    Bottom line: **easy to add later** — enforcement code exists; the only build is the UI login flow.
+    Bottom line: **the UI login flow is now built** — turning auth on is config (flip the `*_ENABLED` flags +
+    seed the OpenFGA model/tuples + point the UI at Dex via `OIDC_ISSUER`). Only the StsVendor wiring (P1 #5,
+    a data-plane nicety) remains optional.
 17. 🔶 **Run-status / lifecycle capture (provenance graph ≠ live status).** Lineage used to record only
     terminal `COMPLETE`/`FAIL`, so it couldn't show *progress*, *in-flight failures*, or *where the
     pipeline is now*.

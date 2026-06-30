@@ -104,8 +104,15 @@ the scope hard:
   down with the cluster. **Persistence lives in the DATA, not the server** — the pre-ingest S3 input and the
   **gold dataset (which embeds lineage as JSONB)** are exported to permanent storage, with **stage-level
   recovery via Lance version time-travel**. The catalog/lineage processes are stateless + disposable.
-- **🔶 Deferred to the rask merge:** HA (replicas/PDB/HPA), backup automation, operator adoption — rask
-  solves these with CNPG/rustfs-operator/KubeRay. Do NOT hand-roll `pg_dump`/`VolumeSnapshot` CronJobs.
+- **✅ App-tier HA (P3, DONE 2026-06-30):** the stateless request-serving services (catalog/lineage/gateway/
+  web) + movers take configurable `replicas` + a gated `PodDisruptionBudget` + optional CPU `HPA`
+  (`chart/templates/ha.yaml`; prod overlay → 2 replicas + PDB on). This is plain Deployment config, NOT
+  operator territory. Compaction stays a singleton (its cron must not double-run); producer stays 1.
+- **🔶 Deferred to the rask merge — STATEFUL HA + BACKUPS (P4):** Postgres/RustFS HA + backups/PITR are the
+  OPERATORS' job (CloudNativePG / rustfs-operator), which live in rask. We do **NOT** hand-roll
+  `pg_dump`/`VolumeSnapshot` CronJobs (that reinvents CNPG/rustfs-operator — explicit user constraint). The
+  chart's role is the P1 externalization hooks (point at an operator-managed store) + the operator-delegated
+  backup story documented in `docs/DURABILITY.md`.
 - **⛔ Confirmed OUT of scope (N/A for spin-up-per-workload, reinforcing the Lakekeeper-reference stance):**
   multi-warehouse data plane, control-plane management REST API, soft-delete/undrop. Isolation = a separate
   cluster per warehouse; provisioning = Helm (declarative); the catalog serves ONE fixed root.

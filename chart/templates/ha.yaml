@@ -1,0 +1,48 @@
+{{- /*
+HA for the stateless request-serving services (catalog, lineage, gateway, web). Off by default
+(single-node kind); the prod overlay enables the PDB after bumping replicas. The stateful stores
+(AGE/RustFS) get HA from their operators in rask (CNPG / rustfs-operator), NOT from here. The event-driven
+movers/producer are intentionally excluded — eviction is safe (Dapr redelivers; ingest is idempotent).
+*/ -}}
+{{- if .Values.podDisruptionBudget.enabled }}
+{{- range $c := list "catalog" "lineage" "gateway" "web" }}
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lance.fullname" $ }}-{{ $c }}
+  labels: {{- include "lance.labels" $ | nindent 4 }}
+spec:
+  minAvailable: {{ $.Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: {{ $c }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- end }}
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+{{- range $c := list "catalog" "lineage" }}
+---
+# HPA on CPU for the request-serving services. Needs metrics-server. The PDB minAvailable bounds disruption
+# during scale-down; the Deployment's replicas: becomes the HPA floor, so keep replicas <= minReplicas.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: {{ include "lance.fullname" $ }}-{{ $c }}
+  labels: {{- include "lance.labels" $ | nindent 4 }}
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ include "lance.fullname" $ }}-{{ $c }}
+  minReplicas: {{ $.Values.autoscaling.minReplicas }}
+  maxReplicas: {{ $.Values.autoscaling.maxReplicas }}
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: {{ $.Values.autoscaling.targetCPUUtilizationPercentage }}
+{{- end }}
+{{- end }}

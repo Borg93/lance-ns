@@ -21,6 +21,22 @@ auth:
   enabled: true
 medallion:
   fgaEnabled: true
+  moverReplicas: 2
+
+# --- HA (P3): multi-replica stateless services + a PodDisruptionBudget. Stateful HA (AGE/RustFS) is the
+# operators' job in rask (CNPG / rustfs-operator), not here. Optionally also set autoscaling.enabled. -----
+services:
+  catalog:
+    replicas: 2
+  lineage:
+    replicas: 2
+gateway:
+  replicas: 2
+web:
+  replicas: 2
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
 
 # --- Secrets: the SEALED, file-backed OpenBao (no fixed root token; an operator must init + unseal) -
 openbao:

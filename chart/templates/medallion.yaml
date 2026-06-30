@@ -12,7 +12,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-lance-ray
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.medallion.producerReplicas | default 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: lance-ray, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:
@@ -75,7 +75,7 @@ metadata:
   name: {{ include "lance.fullname" $root }}-{{ .name }}
   labels: {{- include "lance.labels" $root | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ $root.Values.medallion.moverReplicas | default 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: {{ .name }}, app.kubernetes.io/instance: {{ $root.Release.Name }} }
   template:

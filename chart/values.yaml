@@ -261,10 +261,28 @@ services:
     module: catalog.main:app
     port: 2333
     daprAppId: catalog
+    replicas: 1 # stateless — scale freely in prod (the prod overlay bumps these); HA via podDisruptionBudget
   lineage:
     module: lineage.main:app
     port: 8000
     daprAppId: lineage
+    replicas: 1 # Dapr load-balances event delivery across replicas; ingest is idempotent (MERGE on run_id)
+
+# Web (SvelteKit UI) replica count — stateless. (Demo scaffolding; rask supplies the real frontends.)
+web:
+  replicas: 1
+
+# --- HA: PodDisruptionBudget + (optional) HPA for the stateless request-serving services. Off by default
+# (single-node kind); the prod overlay turns the PDB on. Stateful stores (AGE/RustFS) get HA from their
+# operators in rask (CNPG / rustfs-operator), NOT from here. ----------------------------------------
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+autoscaling:
+  enabled: false # opt-in; needs metrics-server. Targets catalog + lineage.
+  minReplicas: 2
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
 
 # Dapr pub/sub: the component name the catalog publishes to + the lineage topic/route.
 pubsub:
@@ -286,6 +304,10 @@ medallion:
   # (scripts/seed_medallion_fga.sh) before flipping it on.
   fgaEnabled: false
   fgaApiUrl: http://lance-ns-openfga:8080
+  # Replica counts — movers are idempotent Dapr subscribers (Dapr load-balances deliveries → competing
+  # consumers, safe). producer (lance-ray) is request-triggered. Both stateless.
+  producerReplicas: 1
+  moverReplicas: 1
   producer:
     daprAppId: lance-ray
     rawDataset: raw_events
@@ -321,6 +343,7 @@ gateway:
   image: nginxinc/nginx-unprivileged:1.27-alpine
   port: 8080
   daprAppId: gateway # app traffic is routed via this sidecar's Dapr service-invocation API (:3500)
+  replicas: 1 # stateless nginx reverse proxy — scale freely
 
 resources:
   default:

@@ -8,7 +8,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-catalog
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.services.catalog.replicas | default 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: catalog, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:
@@ -98,7 +98,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-lineage
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.services.lineage.replicas | default 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: lineage, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:
@@ -188,7 +188,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-web
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: 1
+  replicas: {{ .Values.web.replicas | default 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:

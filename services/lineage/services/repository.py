@@ -104,6 +104,11 @@ _LIST_EVENTS: Final = (
     "SELECT seq, event_type, event_time, job, author, inputs, outputs, event "
     "FROM public.lineage_events ORDER BY seq DESC LIMIT %s"
 )
+# Retention prune — keep the most-recent N rows (by the monotonic seq), drop older. Cheap (PK-indexed seq).
+_PRUNE_EVENTS: Final = (
+    "DELETE FROM public.lineage_events "
+    "WHERE seq <= (SELECT COALESCE(MAX(seq), 0) FROM public.lineage_events) - %s"
+)
 _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
 )
@@ -240,9 +245,10 @@ def _tags_from(value: object) -> list[str]:
 class LineageRepository:
     """Reads and writes the OpenLineage graph in one Apache AGE database."""
 
-    def __init__(self, pool: AsyncConnectionPool, graph: str) -> None:
+    def __init__(self, pool: AsyncConnectionPool, graph: str, events_retention: int = 0) -> None:
         self._pool = pool
         self._graph = graph
+        self._events_retention = events_retention
 
     async def ingest_event(self, event: RunEvent) -> None:
         """Upsert the run, its job, its datasets, and their edges in one transaction."""
@@ -602,6 +608,8 @@ class LineageRepository:
                     json.dumps(event),
                 ),
             )
+            if self._events_retention:
+                await conn.execute(_PRUNE_EVENTS, (self._events_retention,))
 
     async def list_events(self, limit: int = 500) -> list[EventRecord]:
         """The most-recent ingested events, newest first (durable — read from Postgres, not memory)."""

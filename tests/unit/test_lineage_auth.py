@@ -190,13 +190,14 @@ def test_gate_allows_with_permission(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _event(claimed_author: str) -> RunEvent:
+def _event(claimed_author: str = "anon", outputs: list[str] | None = None) -> RunEvent:
     return RunEvent.model_validate(
         {
             "eventType": "COMPLETE",
             "eventTime": "2026-06-24T00:00:00Z",
             "run": {"runId": "r1", "facets": {"author": {"name": claimed_author}}},
             "job": {"namespace": "jobs", "name": "promote"},
+            "outputs": [{"namespace": "silver", "name": n} for n in (outputs or [])],
         }
     )
 
@@ -512,7 +513,9 @@ def test_ingest_handler_binds_verified_author() -> None:
 
     repo = _FakeRepo()
     event = _event(claimed_author="attacker")
-    asyncio.run(ingest_event(event, cast(LineageRepository, repo), _token("real-user")))
+    asyncio.run(
+        ingest_event(event, _request(), cast(LineageRepository, repo), _settings(), _token("real-user"))
+    )
     assert repo.ingested is not None and repo.ingested.author == "real-user"  # body claim overridden
 
 
@@ -521,5 +524,143 @@ def test_ingest_handler_keeps_body_author_when_oidc_off() -> None:
 
     repo = _FakeRepo()
     event = _event(claimed_author="claimed")
-    asyncio.run(ingest_event(event, cast(LineageRepository, repo), None))
+    asyncio.run(ingest_event(event, _request(), cast(LineageRepository, repo), _settings(), None))
     assert repo.ingested is not None and repo.ingested.author == "claimed"
+
+
+# --------------------------------------------------------------------------- #
+# #2 — output-scoped ingest authz: a producer may only record provenance for
+# outputs it can WRITE (can_write_data), not just that it's authenticated.
+# --------------------------------------------------------------------------- #
+
+
+def test_output_authz_disabled_is_noop() -> None:
+    # FGA off → no check (dev/test default).
+    asyncio.run(fga_deps.enforce_output_authz(_event(outputs=["a$b"]), _request(), _settings(), None))
+
+
+def test_output_authz_no_outputs_is_noop() -> None:
+    # An event with no outputs makes no write claim → nothing to authorize.
+    asyncio.run(
+        fga_deps.enforce_output_authz(
+            _event(outputs=[]), _request(fga=object()), _settings(**_FULL_AUTH), _token()
+        )
+    )
+
+
+def test_output_authz_unwired_client_fails_closed() -> None:
+    with pytest.raises(ServiceUnavailableError):
+        asyncio.run(
+            fga_deps.enforce_output_authz(
+                _event(outputs=["a$b"]), _request(), _settings(**_FULL_AUTH), _token()
+            )
+        )
+
+
+def test_output_authz_unauthenticated_raises() -> None:
+    with pytest.raises(UnauthenticatedError):
+        asyncio.run(
+            fga_deps.enforce_output_authz(
+                _event(outputs=["a$b"]), _request(fga=object()), _settings(**_FULL_AUTH), None
+            )
+        )
+
+
+def test_output_authz_denies_non_writable_output(monkeypatch: pytest.MonkeyPatch) -> None:
+    # alice may write a$b but NOT c$d → the whole ingest is denied (403).
+    async def _batch(_client: object, *, user: str, relation: str, objects: list[str]) -> dict[str, bool]:
+        return {o: (o == "table:a$b") for o in objects}
+
+    monkeypatch.setattr(fga, "batch_check", _batch)
+    with pytest.raises(PermissionDeniedError):
+        asyncio.run(
+            fga_deps.enforce_output_authz(
+                _event(outputs=["a$b", "c$d"]),
+                _request(fga=cast(OpenFgaClient, object())),
+                _settings(**_FULL_AUTH),
+                _token(),
+            )
+        )
+
+
+def test_output_authz_allows_when_all_outputs_writable(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+
+    async def _batch(_client: object, *, user: str, relation: str, objects: list[str]) -> dict[str, bool]:
+        captured.update(user=user, relation=relation, objects=sorted(objects))
+        return dict.fromkeys(objects, True)
+
+    monkeypatch.setattr(fga, "batch_check", _batch)
+    asyncio.run(
+        fga_deps.enforce_output_authz(
+            _event(outputs=["a$b"]),
+            _request(fga=cast(OpenFgaClient, object())),
+            _settings(**_FULL_AUTH),
+            _token(),
+        )
+    )
+    # The write check is on the right subject/relation/objects, not just "some" allow.
+    assert captured == {"user": "alice", "relation": "can_write_data", "objects": ["table:a$b"]}
+
+
+# --------------------------------------------------------------------------- #
+# #5 — durable /events feed retention (prune older rows past the cap on ingest).
+# --------------------------------------------------------------------------- #
+
+
+class _FakeConn:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, object]] = []
+
+    async def execute(self, sql: str, params: object = None) -> None:
+        self.calls.append((sql, params))
+
+
+class _FakePool:
+    """Minimal async pool whose ``connection()`` yields a recording fake conn (no DB)."""
+
+    def __init__(self, conn: _FakeConn) -> None:
+        self._conn = conn
+
+    def connection(self) -> Any:
+        conn = self._conn
+
+        class _Ctx:
+            async def __aenter__(self) -> _FakeConn:
+                return conn
+
+            async def __aexit__(self, *_a: object) -> bool:
+                return False
+
+        return _Ctx()
+
+
+def _record(repo: LineageRepository) -> None:
+    asyncio.run(
+        repo.record_event(
+            run_id="r",
+            event_type="COMPLETE",
+            event_time="t",
+            job="j",
+            author="a",
+            inputs=[],
+            outputs=["x"],
+            event={},
+        )
+    )
+
+
+def test_events_retention_prunes_when_set() -> None:
+    conn = _FakeConn()
+    repo = LineageRepository(cast(Any, _FakePool(conn)), "g", events_retention=5)
+    _record(repo)
+    assert any("INSERT INTO public.lineage_events" in s for s, _ in conn.calls)
+    prune = [p for s, p in conn.calls if "DELETE FROM public.lineage_events" in s]
+    assert prune == [(5,)]  # exactly one prune, parameterized with the retention cap
+
+
+def test_events_retention_unbounded_does_not_prune() -> None:
+    conn = _FakeConn()
+    repo = LineageRepository(cast(Any, _FakePool(conn)), "g", events_retention=0)
+    _record(repo)
+    assert not any("DELETE FROM public.lineage_events" in s for s, _ in conn.calls)

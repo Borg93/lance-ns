@@ -7,10 +7,10 @@ contract. Durable catalog→lineage delivery rides the Dapr subscription (``line
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 
-from lineage.api.dependencies import RepositoryDep
-from lineage.api.fga_deps import enforce_author
+from lineage.api.dependencies import RepositoryDep, SettingsDep
+from lineage.api.fga_deps import enforce_author, enforce_output_authz
 from lineage.api.security import CurrentToken
 from lineage.models import RunEvent
 from lineage.services.consumer import record_event_best_effort
@@ -19,7 +19,9 @@ router = APIRouter(prefix="/api/v1", tags=["ingest"])
 
 
 @router.post("/lineage", status_code=201)
-async def ingest_event(event: RunEvent, repository: RepositoryDep, token: CurrentToken) -> dict[str, str]:
+async def ingest_event(
+    event: RunEvent, request: Request, repository: RepositoryDep, settings: SettingsDep, token: CurrentToken
+) -> dict[str, str]:
     """Ingest one OpenLineage ``RunEvent`` into the lineage graph.
 
     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
@@ -27,10 +29,13 @@ async def ingest_event(event: RunEvent, repository: RepositoryDep, token: Curren
     here ingests with no glue — the lightweight-Marquez contract.
 
     When OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token
-    (401 otherwise) and :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that
-    token's subject — a producer cannot self-assert someone else's identity.
+    (401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that
+    token's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`
+    requires ``can_write_data`` on every output dataset (a producer can't record provenance for a table
+    it can't write). Both are no-ops when auth is off.
     """
     enforce_author(event, token)
+    await enforce_output_authz(event, request, settings, token)
     await repository.ingest_event(event)
     # The durable events feed is a secondary projection of the authoritative AGE graph (committed above);
     # the feed write is best-effort and shared with the JetStream consumer so both paths project alike.

@@ -73,6 +73,11 @@ class LineageSettings(BaseSettings):
     dapr_secret_s3_field: str = Field(default="rustfs-secret-key", alias="LINEAGE_DAPR_SECRET_S3_FIELD")
     dapr_secret_db_field: str = Field(default="postgres-password", alias="LINEAGE_DAPR_SECRET_DB_FIELD")
 
+    # --- Durable /events feed retention — keep at most this many most-recent rows in public.lineage_events
+    # (older rows pruned on ingest). 0 = unbounded. The feed is a secondary projection of the AGE graph
+    # (the authoritative provenance), so capping it bounds the high-volume log without losing lineage.
+    events_retention: int = Field(default=20000, ge=0, alias="LINEAGE_EVENTS_RETENTION")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail closed: a half-configured auth layer is a startup error, not open access."""

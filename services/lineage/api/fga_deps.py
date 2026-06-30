@@ -81,6 +81,37 @@ def enforce_author(event: RunEvent, token: IDToken | None) -> None:
         event.run.facets["author"] = {"name": token.sub, "sub": token.sub}
 
 
+async def enforce_output_authz(
+    event: RunEvent, request: Request, settings: LineageSettings, token: IDToken | None
+) -> None:
+    """Output-scoped ingest authz: require the producer may WRITE every output dataset it claims.
+
+    :func:`enforce_author` proves WHO is ingesting; this proves they were AUTHORIZED to write those outputs —
+    a producer cannot record provenance for a table it has no ``can_write_data`` on (the same write
+    permission the catalog requires to mutate that table). No-op when FGA is off. Fail-closed: unwired
+    client → 503, unauthenticated → 401, any non-writable output → 403. Inputs are NOT checked (recording
+    that you READ a dataset is not a claim to have written it).
+    """
+    if not settings.fga_enabled:
+        return
+    outputs = [d.name for d in event.outputs if d.name]
+    if not outputs:
+        return
+    client = getattr(request.app.state, "fga", None)
+    if client is None:
+        raise ServiceUnavailableError("authorization service is not available")
+    if token is None:
+        raise UnauthenticatedError("authentication required")
+    object_type = settings.fga_object_type
+    allowed = await fga.batch_check(
+        client, user=token.sub, relation="can_write_data", objects=[f"{object_type}:{n}" for n in outputs]
+    )
+    denied = sorted(n for n in outputs if not allowed.get(f"{object_type}:{n}"))
+    if denied:
+        log.info("ingest_denied", extra={"sub": token.sub, "relation": "can_write_data", "outputs": denied})
+        raise PermissionDeniedError(f"can_write_data required on outputs: {', '.join(denied)}")
+
+
 class DatasetFilter:
     """Drop datasets the caller may not see from a lineage result (fail-closed).
 

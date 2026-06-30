@@ -44,7 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = make_pool(settings.database_url)
     await pool.open()
     app.state.pool = pool
-    repository = LineageRepository(pool, settings.graph)
+    repository = LineageRepository(pool, settings.graph, events_retention=settings.events_retention)
     app.state.repository = repository
     # Durable events feed: a Postgres table created on first boot. /runs folds onto the AGE (:Run)
     # node; both now survive restart + are replica-shared — no in-memory state. (#22)

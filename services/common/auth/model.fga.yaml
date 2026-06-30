@@ -56,7 +56,6 @@ model: |
       define reader: [user, role#assignee] or writer or reader from parent
       define validator: [user, role#assignee] or owner or validator from parent
       define can_get_metadata: reader
-      define can_list: reader
       define can_create_namespace: writer
       define can_create_table: writer
       define can_update_properties: writer
@@ -74,9 +73,6 @@ model: |
       define can_read_data: reader
       define can_write_data: writer
       define can_promote: validator
-      define can_alter: writer
-      define can_commit: writer
-      define can_rename: writer
       define can_drop: owner
       define can_deregister: owner
 

@@ -45,6 +45,6 @@ def register_dapr(app: FastAPI) -> None:
     settings = get_settings()
     dapr_app = DaprApp(app)
     if settings.dapr_enabled:
-        dapr_app.subscribe(
-            pubsub=settings.dapr_pubsub, topic=settings.dapr_topic, route="/lineage-events"
-        )(on_lineage_event)
+        dapr_app.subscribe(pubsub=settings.dapr_pubsub, topic=settings.dapr_topic, route="/lineage-events")(
+            on_lineage_event
+        )

@@ -13,9 +13,7 @@ from lineage.api.dependencies import RepositoryDep
 from lineage.api.fga_deps import FilterDep, require_metadata_access
 from lineage.schemas import Creator, DatasetSchema, LineageGraph, Neighbors, Producers
 
-router = APIRouter(
-    prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)]
-)
+router = APIRouter(prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)])
 
 
 @router.get("/{name}/upstream")

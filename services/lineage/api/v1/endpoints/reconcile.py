@@ -17,9 +17,7 @@ from lineage.core.config import storage_options
 from lineage.core.reconcile import read_storage_version, reconcile
 from lineage.schemas import ReconcileStatus
 
-router = APIRouter(
-    prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)]
-)
+router = APIRouter(prefix="/datasets", tags=["query"], dependencies=[Depends(require_metadata_access)])
 
 
 @router.get("/{name}/reconcile")

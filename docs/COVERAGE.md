@@ -1,12 +1,21 @@
-# Catalog coverage — backend-backed validation (2026-06-30)
+# Catalog coverage — backend-backed validation (updated 2026-06-30, post version/branch backing)
 
 Authoritative result of a **live probe** against a real native pylance `DirectoryNamespace` (create a
 namespace + table, then call every op and classify 200 vs 501). Routes are 100% wired (54/54 spec ops);
 this measures which are **backend-backed (200)** vs **spec-correct 501** because the native Rust backend
-stubs them. Dispatch: most ops go to `native` (the Rust `DirectoryNamespace`); a few go to the in-process
-`dataplane` (pylance, always 200) — see `services/catalog/services/{native,dataplane}.py`.
+genuinely stubs them. Dispatch: most ops go to `native` (the Rust `DirectoryNamespace`); several go to the
+in-process `dataplane` (pylance, always 200) — see `services/catalog/services/{native,dataplane}.py`.
 
-**Tally: 41 / 54 backed (200), 13 spec-correct 501.** `uv run pytest` → 208 passed, 15 skipped.
+**Tally: 47 / 54 backed (200), 7 spec-correct 501.** `uv run pytest` → 269 passed, 15 skipped.
+
+> **Correction (2026-06-30):** an earlier version of this doc reported 41/54 and listed version + branch
+> ops as "upstream-blocked / no pylance analog". That was **wrong**, and reading the Lance Namespace spec
+> docs + an adversarial audit found why: (a) `describe`/`create`/`batch-delete` table versions were **fake
+> 501s** — those three native bindings are typed `request: dict` and forward to Rust *without*
+> `model_dump()`, so passing the pydantic model raised a marshalling `TypeError` that a too-broad
+> `"is not an instance"` stub-hint laundered into a 501; (b) **branches** are a real native 501, but
+> `lance.LanceDataset` implements Git-like branches, so they back in-process via the dataplane like tags.
+> Six ops moved 501 → 200; the hint was narrowed so a real marshalling bug surfaces as 500, not a fake 501.
 
 | Group | Backed (200) | 501 (native stub) |
 |-------|--------------|-------------------|
@@ -16,31 +25,29 @@ stubs them. Dispatch: most ops go to `native` (the Rust `DirectoryNamespace`); a
 | Columns (6) | 5 (add/alter/drop/update-field-metadata/schema-metadata via dataplane) | `backfill_columns` |
 | Indices (5) | all 5 | — |
 | Tags (5) | all 5 (dataplane) | — |
-| Versions (6) | 1 (`list`) | `create` / `describe` / `delete` / batch-create / batch-commit |
-| Branches (3) | — | `list` / `create` / `delete` |
+| Versions (6) | 4 (`list` / `describe` / `create` / `delete`, native + dict marshalling) | `batch-create` / `batch-commit` |
+| Branches (3) | all 3 (dataplane: `ds.branches` / `ds.create_branch`) | — |
 | Transactions (2) | 1 (`describe`) | `alter_transaction` |
 | Materialized views (2) | — | `create` / `refresh` |
 | Credentials + stats (2+) | all | — |
 
-The 13 501s are **backend limits, not catalog gaps** — the native `DirectoryNamespace` doesn't implement
-branch ops, MV ops, version mutation, rename, or backfill. The catalog is a faithful REST surface over what
-pylance provides; if/when pylance backs these (or the in-cluster dataplane is extended), they flip to 200
-with no route change. `rename_table` 501s at the native call, so its FGA-revoke wiring is defensive (it only
-runs if rename ever succeeds).
+The **7 remaining 501s are genuine native-backend stubs**, not catalog gaps:
+- **`create_materialized_view` / `refresh_materialized_view`** — pylance ships the *complete* typed MV API
+  (request/response models with `source_query` / `output_schema` / `udtf_spec` / `auto_refresh`) and wires
+  delegation on `DirectoryNamespace`, but the native dir backend raises `NotImplementedError`. A real
+  implementation is a **greenfield materialization subsystem** (run a query engine → write a Lance table →
+  incremental refresh); pylance offers only scan/filter, no query engine. So it's buildable, but a new
+  subsystem, not a thin delegation — out of scope here.
+- **`batch_create_table_versions` / `batch_commit_tables`** — external-manifest-store *batch* registration
+  primitives the dir backend doesn't implement (it reads `_versions/` directly rather than acting as an
+  external manifest store). A REST/managed backend would back these.
+- **`rename_table` / `backfill_columns` / `alter_transaction`** — stubbed in the native Rust namespace.
+  (`rename_table` 501s at the native call, so its FGA-revoke wiring is defensive — it only runs if rename
+  ever succeeds.)
 
-**Can the in-process dataplane back them (like it does update/delete/columns/tags)? No — investigated 2026-06-30:**
-the 13 are genuine *upstream* limits, not in-process-fillable:
-- **Version ops** (`create`/`describe`/`delete`/batch) — `create_table_version` has no clean pylance analog
-  (Lance versions are *write-created*, not declared); `cleanup_old_versions` deletes by *age/count*, not the
-  arbitrary version records `BatchDeleteTableVersions` wants; and even `describe_table_version` can't be
-  backed cleanly — the spec's `TableVersion` **requires `manifest_path`**, which pylance's public API does
-  not expose (only `{version, timestamp, metadata}`). Constructing it from Lance's (V2-hash-prefixed)
-  internals would be fragile, so it stays a 501.
-- **Materialized views** + **branches** — no public pylance API.
-- **`rename_table` / `backfill_columns`** — stubbed in the native Rust namespace.
-
-So further catalog completeness needs UPSTREAM work in pylance / the Rust `DirectoryNamespace`, not changes
-in this repo. The catalog is complete **to the limit of its backend**.
+So the catalog is complete **to the limit of its backend**; the remaining gaps need upstream work in the
+Rust `DirectoryNamespace` (rename/backfill/transaction/batch-version) or a real query engine (MV) — not a
+thin in-process fill.
 
 ## Durable-artifact + recovery
 - **Gold embeds lineage as JSONB** + sits on the durable S3 tier — but TODAY this is produced **only by the

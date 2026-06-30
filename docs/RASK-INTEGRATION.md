@@ -93,6 +93,9 @@ Reproduce those four behaviors in the Ray Data job and the cascade keeps working
 1. **AGE on CNPG** — custom AGE image vs separate operand vs Lance-native graph (`todo.md`). Affects §1.
 2. **Tenancy** — this repo is single-warehouse (`warehouse:lance_catalog`); rask is single implicit `default`
    project. Confirm one warehouse-per-deploy stays the model (no multi-warehouse routing).
-3. **Catalog 501s** — the 13 backend-stubbed ops (`docs/COVERAGE.md`) stay 501 until upstream pylance /
-   `lance-namespace` implements them; that's a parallel upstream contribution, independent of the merge.
+3. **Catalog 501s** — the **7** genuinely backend-stubbed ops (`docs/COVERAGE.md`: rename / backfill /
+   alter_transaction / MV create+refresh / batch-create+batch-commit versions) stay 501 until the upstream
+   Rust `DirectoryNamespace` (or a REST/managed backend) implements them — a parallel upstream contribution,
+   independent of the merge. (Was "13"; version describe/create/delete + branches are now backed — see the
+   COVERAGE correction.)
 4. **Observability** — share rask's one GreptimeDB or keep separate per workload.

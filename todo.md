@@ -136,21 +136,27 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
   relations; **#5** `/events` retention; **#6** read-audit log; **#7a** drop-table lineage; **#7b**
   compaction maintenance lineage. Every item has valuable unit tests; full suite + ruff + ty green.
 
-#### Track F (spec-completeness) — verdict: not buildable here (upstream pylance limits)
-Investigated against `docs/COVERAGE.md` (the P5 501-vs-backed audit). These are **backend limits, not catalog
-gaps**, so they are closed here rather than built:
-- **F1 (MV `base_objects` view-dependency index)** — ⛔ BLOCKED: materialized-view `create`/`refresh` are
-  spec-correct 501s (no public pylance MV API), so there's no working MV-create to attach a dependency index
-  to. Needs a different backend / upstream pylance MV support.
-- **F2 (`table_version_management` flag → version endpoints run)** — ⛔ INFEASIBLE: version-mutation 501s
-  because pylance's public API doesn't expose what the spec needs (`create_table_version` has no analog —
-  Lance versions are *write-created*, not declared; `describe_table_version` needs `manifest_path` pylance
-  doesn't expose). A flag would surface broken endpoints, not working ones.
-- **F3 (Partitioned Namespace family)** — ❌ DROPPED BY DESIGN (not deferred). The spec's `partition_spec`
-  is the Iceberg/Hive **directory-partitioning** model. Lance deliberately does NOT work that way — it skips
-  data with **fragments + zone maps + a columnar layout + secondary indices**, which is a *better* design
-  for our workloads. Adopting Iceberg-style partitioning would bolt an inferior, alien concept onto Lance.
-  We **reject** it, same stance as multi-warehouse / soft-delete (thesis-aligned rejection, not a gap).
+#### Track F (spec-completeness) — REVISED 2026-06-30 (my earlier "upstream-blocked" verdict was wrong)
+After reading the Lance Namespace spec docs (`lance-namespace/docs`) + an adversarial audit, the earlier
+"not buildable / upstream pylance limits" verdict was **materially wrong**. Corrected:
+- **F2 (version management)** — ✅ **DONE / was never really blocked.** `describe` / `create` /
+  `batch-delete` table versions were **fake 501s from a marshalling bug** (the 3 native bindings are typed
+  `request: dict` and forward to Rust without `model_dump()`; the pydantic `TypeError` got laundered into a
+  501 by a too-broad stub hint). `native.call` now marshals to dict → all three 200, `describe` carries
+  `manifest_path`, missing version → 404. **Branches** (a real native 501) are backed via the dataplane
+  (`ds.branches` / `ds.create_branch`), like tags. 6 ops moved 501→200; see `docs/COVERAGE.md`. (Remaining
+  version 501s: `batch-create` / `batch-commit` — external-manifest-store batch ops the dir backend doesn't
+  implement; a REST backend would.)
+- **F1 (MV `base_objects` view-dependency index)** — 🔶 native-backend-stubbed, real MV is greenfield. My
+  "pylance has NO MV API" was wrong: pylance ships the *complete* typed MV API + delegation; the native
+  **dir backend** raises `NotImplementedError` → 501. A real MV is a query-materialization subsystem (query
+  engine → write Lance table → incremental refresh) — buildable but a new subsystem, out of scope here.
+- **F3 (Partitioned Namespace family)** — ❌ DROPPED BY DESIGN. Correction: the spec **does** ship the
+  primitives (`PartitionSpec` / `PartitionField` / `PartitionTransform` — full Iceberg transform set), but
+  they're **defined-but-unwired** (no `partition_spec` on `CreateTableRequest`) AND the Lance **data format**
+  deliberately doesn't directory-partition — it skips via **fragments + zone maps + columnar layout +
+  secondary indices**, a better design for our workloads. We **reject** Iceberg-style partitioning (thesis-
+  aligned, like multi-warehouse / soft-delete), not "no primitive exists".
 - ✅ **Core validation** (validation `wfefr8vtx`, 6 agents, live probe → adversarial verify; see
   `docs/COVERAGE.md`). Verdict: the lakehouse + event-driven core is **valid, low-coupled, and mergeable**
   (zero cross-service imports; fail-closed authz; official OpenLineage idempotent MERGE; resilient cascade).

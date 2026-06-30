@@ -16,14 +16,21 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from botocore.exceptions import BotoCoreError, ClientError
 from common import fga
-from fastapi import APIRouter, Header, Query
+from fastapi import APIRouter, Query
 from fastapi.concurrency import run_in_threadpool
-from lance_namespace import DescribeTableRequest, DescribeTableResponse, PermissionDeniedError
+from lance_namespace import (
+    DescribeTableRequest,
+    DescribeTableResponse,
+    PermissionDeniedError,
+    ServiceUnavailableError,
+    UnauthenticatedError,
+)
 from pydantic import BaseModel
 
 from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep, VendorDep
-from catalog.api.security import CurrentToken
+from catalog.api.security import CurrentToken, RawBearerToken
 from catalog.core.identifiers import parse_identifier
 from catalog.core.vending import Tier, VendedCredentials
 from catalog.services import native
@@ -47,16 +54,15 @@ async def vend_credentials(
     token: CurrentToken,
     client: FgaClientDep,
     vendor: VendorDep,
+    web_identity_token: RawBearerToken,
     tier: Annotated[Tier, Query()] = "read",
-    authorization: Annotated[str | None, Header()] = None,
 ) -> CredentialResponse:
-    """Vend scoped ``storage_options`` for direct object-store access to this table at ``tier``."""
+    """Vend scoped ``storage_options`` for direct object-store access to this table at ``tier``.
+
+    ``web_identity_token`` is the caller's raw bearer JWT (via the shared HTTPBearer seam), forwarded to the
+    object store for the web_identity flow (AssumeRoleWithWebIdentity exchanges it); other vendors ignore it.
+    """
     segments = parse_identifier(id, settings.delimiter)
-    # The caller's raw bearer JWT, forwarded to the store for the web_identity flow (AssumeRoleWithWebIdentity
-    # exchanges it for creds). Other vendors ignore it. None when unauthenticated (open dev mode).
-    web_identity_token = (
-        authorization.removeprefix("Bearer ").removeprefix("bearer ").strip() if authorization else None
-    )
     # A write-tier vend needs the writer rung on top of the reader rung the router guard enforced.
     if tier == "write" and settings.fga_enabled and token is not None and client is not None:
         obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
@@ -67,10 +73,17 @@ async def vend_credentials(
     )
     if described.location is None:  # no object-store location to scope to → fall back to server-mediated
         return CredentialResponse(mode="server_mediated")
-    # The blocking STS call (AssumeRole / AssumeRoleWithWebIdentity) runs in the threadpool.
-    creds = await run_in_threadpool(
-        vendor.vend, table_location=described.location, tier=tier, web_identity_token=web_identity_token
-    )
+    # The blocking STS call (AssumeRole / AssumeRoleWithWebIdentity) runs in the threadpool. A rejected
+    # exchange is most often the caller's token (web_identity: expired / untrusted issuer) → 401; otherwise
+    # the STS backend is unavailable/misconfigured → 503. Either way a meaningful 4xx/5xx, never a bare 500.
+    try:
+        creds = await run_in_threadpool(
+            vendor.vend, table_location=described.location, tier=tier, web_identity_token=web_identity_token
+        )
+    except (ClientError, BotoCoreError) as exc:
+        if settings.vending_mode == "web_identity":
+            raise UnauthenticatedError("credential exchange rejected — token invalid or untrusted") from exc
+        raise ServiceUnavailableError("credential vending backend unavailable") from exc
     if creds is None:
         return CredentialResponse(mode="server_mediated")
     return CredentialResponse(mode="direct", credentials=creds)

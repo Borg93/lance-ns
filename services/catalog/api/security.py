@@ -42,3 +42,17 @@ def authenticate(request: Request, settings: SettingsDep, credentials: _Credenti
 #: Token of the authenticated caller (``None`` when OIDC is disabled). Endpoints that
 #: need claims can depend on this; router-level use enforces authentication.
 CurrentToken = Annotated[IDToken | None, Depends(authenticate)]
+
+
+def raw_bearer(credentials: _CredentialsDep) -> str | None:
+    """The raw bearer JWT string (scheme-stripped), or ``None`` when no bearer is present.
+
+    For routes that must FORWARD the caller's token rather than only verify it — e.g. credential vending's
+    web_identity flow re-presents it to the object store (AssumeRoleWithWebIdentity). Reuses the single
+    ``HTTPBearer`` seam, so parsing matches :func:`authenticate` (case-insensitive scheme — ``BEARER …`` too).
+    """
+    return credentials.credentials if credentials is not None else None
+
+
+#: The caller's raw bearer JWT (``None`` when absent) — for forwarding, not verification.
+RawBearerToken = Annotated[str | None, Depends(raw_bearer)]

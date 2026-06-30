@@ -134,10 +134,23 @@ def test_web_identity_vendor_exchanges_the_token_for_scoped_creds() -> None:
     assert creds is not None
     assert creds.storage_options["session_token"] == "ST"
     assert creds.storage_options["endpoint"] == "http://rustfs:9000"
+    assert creds.expires_at_millis is not None and creds.expires_at_millis > 0
     assert captured["WebIdentityToken"] == "the.jwt.tok"
     policy = json.loads(captured["Policy"])
     actions = policy["Statement"][1]["Action"]
     assert "s3:PutObject" in actions  # write tier scoped to the table prefix
+
+
+def test_web_identity_vendor_propagates_a_rejected_exchange() -> None:
+    """A rejected token exchange must PROPAGATE (the endpoint maps it to 4xx), not return None/garbage."""
+    from botocore.exceptions import ClientError
+
+    def _boom(**_kwargs: object) -> dict[str, object]:
+        raise ClientError({"Error": {"Code": "AccessDenied"}}, "AssumeRoleWithWebIdentity")
+
+    vendor = WebIdentityVendor(region="us-east-1", assume=_boom)
+    with pytest.raises(ClientError):
+        vendor.vend(table_location="s3://b/t", tier="read", web_identity_token="bad.jwt")
 
 
 def test_make_vendor_builds_web_identity() -> None:

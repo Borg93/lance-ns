@@ -3,13 +3,16 @@
 The catalog authenticates (OIDC) and authorizes (OpenFGA), then a
 :class:`CredentialVendor` turns *(table object-store location, access tier)* into
 the ``storage_options`` a client (LanceDB SDK / lance-ray / pylance) uses to reach
-object storage directly. The target is **S3-compatible** storage — MinIO (the
-default), AWS S3, Ceph RGW, RustFS, GCS via S3 interop. The design is
+object storage directly. The target is **S3-compatible** storage — RustFS (this project's default store),
+MinIO, AWS S3, Ceph RGW, GCS via S3 interop. The design is
 **vending-first**; each deployment picks the strongest plug it wants:
 
+* :class:`WebIdentityVendor` — STS ``AssumeRoleWithWebIdentity`` + an inline session policy: the caller's
+  OIDC id_token is exchanged BY THE STORE for short-TTL, per-table, read/write-scoped creds. The path for
+  **RustFS** (it trusts the OIDC issuer but does NOT support plain ``AssumeRole``). Token-authenticated.
 * :class:`StsVendor` — STS ``AssumeRole`` + an inline session policy: short-TTL,
-  per-table, read/write-scoped tokens. The **gold standard / recommended path** —
-  works on any backend that implements the STS API (MinIO, Ceph RGW, AWS).
+  per-table, read/write-scoped tokens. For backends that implement plain ``AssumeRole``
+  (AWS, MinIO, Ceph RGW) — NOT RustFS.
 * :class:`StaticPrefixVendor` — hands out a pre-provisioned per-bucket key
   (long-lived). For simple setups (e.g. a static MinIO/HMAC key, or GCS interop)
   where direct client I/O is wanted but STS isn't configured.
@@ -26,7 +29,7 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from typing import Literal, Protocol, assert_never, cast, runtime_checkable
+from typing import Any, Literal, Protocol, assert_never, cast, runtime_checkable
 from urllib.parse import urlsplit
 
 from pydantic import BaseModel
@@ -83,6 +86,10 @@ _WRITE_ACTIONS = (
     "s3:DeleteObject",
     "s3:AbortMultipartUpload",
 )
+
+# Default role ARN for STS vending. RustFS ignores it (it authorizes by the OIDC token + ROLE_POLICY); AWS /
+# MinIO / Ceph resolve it. boto3 requires the param either way. Override via LANCE_S3_ASSUME_ROLE_ARN.
+_DEFAULT_VEND_ROLE_ARN = "arn:aws:iam::000000000000:role/lance-vend"
 
 
 def build_session_policy(bucket: str, prefix: str, tier: Tier) -> dict[str, object]:
@@ -192,12 +199,14 @@ class StsVendor:
         self._endpoint = endpoint
         self._ttl = ttl_seconds
         self._assume_role = assume_role or self._default_assume_role
+        self._client: Any = None  # boto3 STS client, built once (the vendor is a lifespan singleton)
 
     def _default_assume_role(self, **kwargs: object) -> dict[str, object]:
-        import boto3  # lazy: only needed when STS vending is actually enabled
+        if self._client is None:
+            import boto3  # lazy: only needed when STS vending is actually enabled
 
-        client = boto3.client("sts", region_name=self._region, endpoint_url=self._endpoint)
-        return cast(dict[str, object], client.assume_role(**kwargs))
+            self._client = boto3.client("sts", region_name=self._region, endpoint_url=self._endpoint)
+        return cast(dict[str, object], self._client.assume_role(**kwargs))
 
     def vend(
         self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
@@ -241,7 +250,7 @@ class WebIdentityVendor:
         *,
         region: str,
         endpoint: str | None = None,
-        role_arn: str = "arn:aws:iam::000000000000:role/lance-vend",
+        role_arn: str = _DEFAULT_VEND_ROLE_ARN,
         ttl_seconds: int = 900,
         assume: Callable[..., dict[str, object]] | None = None,
     ) -> None:
@@ -250,19 +259,21 @@ class WebIdentityVendor:
         self._role_arn = role_arn  # RustFS ignores it; boto3 requires the param
         self._ttl = ttl_seconds
         self._assume = assume or self._default_assume
+        self._client: Any = None  # boto3 STS client, built once (the vendor is a lifespan singleton)
 
     def _default_assume(self, **kwargs: object) -> dict[str, object]:
-        import boto3  # lazy: only when web_identity vending is enabled
-        from botocore import UNSIGNED
-        from botocore.config import Config
+        if self._client is None:
+            import boto3  # lazy: only when web_identity vending is enabled
+            from botocore import UNSIGNED
+            from botocore.config import Config
 
-        client = boto3.client(
-            "sts",
-            region_name=self._region,
-            endpoint_url=self._endpoint,
-            config=Config(signature_version=UNSIGNED),  # token-authenticated, not SigV4
-        )
-        return cast(dict[str, object], client.assume_role_with_web_identity(**kwargs))
+            self._client = boto3.client(
+                "sts",
+                region_name=self._region,
+                endpoint_url=self._endpoint,
+                config=Config(signature_version=UNSIGNED),  # token-authenticated, not SigV4
+            )
+        return cast(dict[str, object], self._client.assume_role_with_web_identity(**kwargs))
 
     def vend(
         self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
@@ -322,7 +333,7 @@ def make_vendor(
         return WebIdentityVendor(
             region=region,
             endpoint=sts_endpoint,
-            role_arn=assume_role_arn or "arn:aws:iam::000000000000:role/lance-vend",
+            role_arn=assume_role_arn or _DEFAULT_VEND_ROLE_ARN,
             ttl_seconds=ttl_seconds,
         )
     assert_never(mode)

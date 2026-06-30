@@ -69,7 +69,9 @@ _MERGE_JOB: Final = "MERGE (j:Job {namespace:$ns, name:$nm}) RETURN 1"
 # The (:Run) node folds the whole lifecycle so /runs is durable (survives restart, replica-shared)
 # instead of folding an in-memory buffer: event_type IS the current state and event_time IS
 # updated_at (both last-event-wins via the repeated SET); started_at keeps the first event's time;
-# events_count counts the lifecycle events seen. job is denormalised so /runs needs no OF_JOB join.
+# events_count counts lifecycle events RECEIVED (incl. redeliveries — it is a delivery counter, not a
+# distinct-event count; the graph nodes/edges are idempotent, the feed dedups). job is denormalised so
+# /runs needs no OF_JOB join.
 _MERGE_RUN: Final = (
     "MERGE (r:Run {run_id:$rid}) "
     "SET r.event_type=$et, r.event_time=$tm, r.author=$au, r.producer=$pr, r.error_message=$err, "
@@ -95,10 +97,17 @@ _CREATE_EVENTS_TABLE: Final = (
     "seq bigserial PRIMARY KEY, run_id text, event_type text, event_time text, "
     "job text, author text, inputs jsonb, outputs jsonb, event jsonb)"
 )
+# A natural key over the OpenLineage lifecycle identity — so an at-least-once REDELIVERY of the same event
+# (Dapr re-drives after a lost ack) doesn't append a duplicate /events row. Idempotent on existing tables.
+_CREATE_EVENTS_INDEX: Final = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS lineage_events_natural_key "
+    "ON public.lineage_events (run_id, event_type, event_time)"
+)
 _INSERT_EVENT: Final = (
     "INSERT INTO public.lineage_events "
     "(run_id, event_type, event_time, job, author, inputs, outputs, event) "
-    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb)"
+    "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb) "
+    "ON CONFLICT (run_id, event_type, event_time) DO NOTHING"
 )
 _LIST_EVENTS: Final = (
     "SELECT seq, event_type, event_time, job, author, inputs, outputs, event "
@@ -639,6 +648,7 @@ class LineageRepository:
         try:
             async with self._pool.connection() as conn:
                 await conn.execute(_CREATE_EVENTS_TABLE)
+                await conn.execute(_CREATE_EVENTS_INDEX)
         except psycopg.errors.DuplicateTable:
             pass
 

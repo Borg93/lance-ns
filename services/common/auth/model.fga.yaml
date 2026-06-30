@@ -2,8 +2,15 @@
 #
 # The `model` block below is the EXACT DSL kept in `services/common/auth/model.fga` (and transformed to
 # `services/common/auth/model.json`, which the catalog loads). Keep all three in sync — edit the model here too, then
-#   .localbin/fga model transform --input services/common/auth/model.fga --output services/common/auth/model.json
+#   .localbin/fga model transform --file services/common/auth/model.fga --output-format json > services/common/auth/model.json
 #   .localbin/fga model test --tests services/common/auth/model.fga.yaml
+# (fga v0.6.x uses --file + --output-format and writes to stdout; the older --input/--output flags are gone.)
+#
+# Create-on-parent coverage (design-create-on-parent): warehouse creation is gated by `can_create_warehouse`
+# on the PROJECT, namespace creation by `can_create_namespace` on the warehouse / parent namespace — both
+# asserted (allow + deny) below. The remaining parent→child pair, team→project, is intentionally NOT modeled:
+# project + bucket provisioning is an out-of-band gitops/operator concern (rask's operator), not an
+# in-OpenFGA create, so there is no `can_create_project` relation by design.
 #
 # Scenario (proves the goal's requirements):
 #   team:eng      owns project:acme AND project:research   (a team can own MANY projects)
@@ -162,6 +169,29 @@ tests:
       - user: user:eve
         object: table:acme_gold_catalog
         assertions: { can_read_data: false, can_promote: false }
+
+  - name: create-on-parent — create perms are gated on the PARENT object (design-create-on-parent)
+    check:
+      # warehouse creation is gated on the project: a project admin (alice, via team:eng) may; an outsider may not.
+      - user: user:alice
+        object: project:acme
+        assertions: { can_administer: true, can_create_warehouse: true }
+      - user: user:frank # partners-team member, no grant on project:acme
+        object: project:acme
+        assertions: { can_administer: false, can_create_warehouse: false }
+      # namespace creation is gated on the warehouse AND a parent namespace: a writer (dave) may; an outsider (eve) may not.
+      - user: user:dave # plain writer on the bucket
+        object: warehouse:acme_bucket
+        assertions: { can_create_namespace: true }
+      - user: user:dave # writer cascades down the namespace parent chain
+        object: namespace:acme_silver
+        assertions: { can_create_namespace: true }
+      - user: user:eve
+        object: warehouse:acme_bucket
+        assertions: { can_create_namespace: false }
+      - user: user:eve
+        object: namespace:acme_silver
+        assertions: { can_create_namespace: false }
 
   - name: who can promote into gold? (list_users) — owners + validators, never plain writers
     list_users:

@@ -31,6 +31,10 @@ dapr:
   enabled: true
   sidecars: true # add dapr.io/* annotations to catalog + lineage
   logLevel: info
+  # Bound every DaprClient gRPC call (publish_event has no per-call timeout arg, and the SDK's default
+  # deadline is unset) so a wedged sidecar can't hang a publisher indefinitely — a timeout surfaces as a
+  # publish failure the caller handles (the producer → 503, the movers → RETRY) instead of a stuck request.
+  apiTimeoutSeconds: 30
   # Dapr app-API-token — Dapr injects it (APP_API_TOKEN) into subscriber apps AND stamps a
   # `dapr-api-token` header on every event it DELIVERS, so the sidecar-delivered routes (/lineage-events,
   # /medallion-event, the cron route) reject any forged request that didn't come through the sidecar.

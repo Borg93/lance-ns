@@ -58,6 +58,7 @@ spec:
             {{- if .Values.observability.enabled }}
             {{- include "lance.otelEnv" (list $root .Values.compaction.daprAppId) | nindent 12 }}
             {{- end }}
+            - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }
             - name: APP_API_TOKEN  # verify the Dapr-stamped header on the cron route (forged-sweep guard)
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }

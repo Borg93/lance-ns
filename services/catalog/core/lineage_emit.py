@@ -43,7 +43,7 @@ DELETE = "delete"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
 #: and what a Marquez-style consumer records as the event source).
-_PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/app/core/lineage_emit.py"
+_PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/services/catalog/core/lineage_emit.py"
 
 #: OpenLineage standard ``DatasetVersionDatasetFacet`` schema URL. The output dataset carries this
 #: facet so the lineage service records the Lance version on the ``WROTE`` edge

@@ -3,7 +3,7 @@
 When OIDC is disabled (the default) this is a no-op and all routes stay open. When
 enabled, it requires a verified bearer token and maps auth failures to RFC 9457
 problem+json (401). It binds to ``LineageSettings`` but otherwise mirrors the catalog's
-``app/api/security.py`` and reuses the catalog's :class:`~common.oidc.OIDCVerifier` — so
+``services/catalog/api/security.py`` and reuses the catalog's :class:`~common.oidc.OIDCVerifier` — so
 token verification has one source of truth.
 
 Fail-closed invariant: if OIDC is enabled in settings but the verifier was never wired

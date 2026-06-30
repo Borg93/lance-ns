@@ -1,7 +1,7 @@
 """OpenFGA authorization dependency.
 
 Router-level guard: when FGA is enabled it maps the request (resource + operation) to a
-``can_*`` ACTION relation defined in the model (``app/auth/model.fga``) and checks the
+``can_*`` ACTION relation defined in the model (``services/common/auth/model.fga``) and checks the
 authenticated caller against OpenFGA. A no-op when FGA is disabled.
 
 The op -> ``can_*`` mapping below is the ONLY policy logic in the app; the privilege math

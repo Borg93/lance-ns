@@ -1,4 +1,4 @@
-"""Unit tests for embedding lineage coordinates into the Lance file (#21, ``app.core.lineage_metadata``).
+"""Unit tests for embedding lineage coordinates into the Lance file (#21, ``catalog.core.lineage_metadata``).
 
 The round-trip tests prove the coordinates land in the Arrow schema metadata; the Lance test proves
 they survive a real ``write_dataset`` → ``dataset`` cycle (i.e. the data is genuinely self-describing).

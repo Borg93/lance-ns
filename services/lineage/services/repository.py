@@ -61,7 +61,7 @@ from lineage.schemas import (
     SchemaField,
 )
 
-# Must match app.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
+# Must match catalog.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
 # catalog emits on create, which keys the (:User)-[:CREATED]->(:Dataset) edge below (wire contract).
 _CREATE_TABLE_OP: Final = "create_table"
 

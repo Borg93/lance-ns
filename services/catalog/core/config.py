@@ -69,8 +69,8 @@ class Settings(BaseSettings):
     # namespace links to it as its `parent`, so a grant here cascades into all namespaces/tables;
     # (2) it gates create-on-parent for top-level creation when fga_lock_root_create is on. Grant
     # admins owner/writer on it to bootstrap — OR attach it to a `project:` (and the project to a
-    # `team:`) for the full Lakekeeper-style multi-tenant hierarchy (see app/auth/model.fga). Must be
-    # a `warehouse:` object (the model's catalog-root type). Dev/e2e seeds it; see scripts/seed_demo.sh.
+    # `team:`) for the full Lakekeeper-style multi-tenant hierarchy (see services/common/auth/model.fga).
+    # Must be a `warehouse:` object (the model's catalog-root type). Dev/e2e seeds it; see scripts/seed_demo.sh.
     fga_root_object: str = Field(default="warehouse:lance_catalog", alias="LANCE_FGA_ROOT_OBJECT")
     # When False (default), any authenticated caller may create a TOP-LEVEL namespace/
     # table and becomes its owner (the "users create their own workspaces" model). When
@@ -81,7 +81,7 @@ class Settings(BaseSettings):
     # retried rather than pinning a request worker. Wired into fga.make_client at startup.
     fga_timeout_seconds: float = Field(default=5.0, ge=0.1, alias="LANCE_FGA_TIMEOUT_SECONDS")
 
-    # Data-plane credential vending (pluggable; see app/core/vending.py). Target = S3-compatible
+    # Data-plane credential vending (pluggable; see services/catalog/core/vending.py). Target = S3-compatible
     # storage (MinIO default, AWS S3, Ceph RGW, RustFS). Default "mode_b": server-mediated — no
     # credential leaves the catalog (the simplest, backend-agnostic default). "sts": STS AssumeRole
     # short-TTL per-table scoped tokens (the recommended path; MinIO/Ceph/AWS all implement STS).

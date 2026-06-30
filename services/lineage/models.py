@@ -216,7 +216,7 @@ class RunEvent(BaseModel):
     def operation(self) -> str | None:
         """The catalog operation (e.g. ``create_table``) from the ``lance`` run facet, if any.
 
-        Set by the catalog's emitter (``app.core.lineage_emit``); used to attach the
+        Set by the catalog's emitter (``catalog.core.lineage_emit``); used to attach the
         ``(:User)-[:CREATED]->(:Dataset)`` edge on a table-create event.
         """
         lance = (self.run.facets or {}).get("lance")

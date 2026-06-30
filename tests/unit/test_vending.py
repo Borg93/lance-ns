@@ -1,4 +1,4 @@
-"""Unit tests for the pluggable credential vendor (app.core.vending).
+"""Unit tests for the pluggable credential vendor (catalog.core.vending).
 
 No network: the STS path is exercised with an injected fake ``assume_role`` so
 the session-policy scoping + storage_options assembly are pinned without boto3.

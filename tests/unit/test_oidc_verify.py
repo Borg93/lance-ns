@@ -1,4 +1,4 @@
-"""Unit tests for :class:`app.core.oidc.OIDCVerifier.verify`.
+"""Unit tests for :class:`common.oidc.OIDCVerifier.verify`.
 
 These exercise the *real* verification path — signature, issuer, audience, expiry,
 and the algorithm allowlist — with zero network. We generate an RSA keypair locally
@@ -11,7 +11,7 @@ real.
 Mirrors the fastapi_oidc conftest approach: ``rsa.generate_private_key`` +
 ``jwt.encode`` against the matching public key.
 
-Assumptions about the hardened verifier (already landed in ``app/core/oidc.py``):
+Assumptions about the hardened verifier (already landed in ``services/catalog/core/oidc.py``):
 
 * ``OIDCVerifier(issuer, audience, cache_ttl, *, allowed_algorithms=..., leeway=...,
   allow_insecure=...)`` — an asymmetric-only ``allowed_algorithms`` allowlist that is

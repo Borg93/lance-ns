@@ -1,9 +1,9 @@
 # OpenFGA model tests for the Lance catalog authorization model (Lakekeeper-style multi-tenant ReBAC).
 #
-# The `model` block below is the EXACT DSL kept in `app/auth/model.fga` (and transformed to
-# `app/auth/model.json`, which the catalog loads). Keep all three in sync — edit the model here too, then
-#   .localbin/fga model transform --input app/auth/model.fga --output app/auth/model.json
-#   .localbin/fga model test --tests app/auth/model.fga.yaml
+# The `model` block below is the EXACT DSL kept in `services/common/auth/model.fga` (and transformed to
+# `services/common/auth/model.json`, which the catalog loads). Keep all three in sync — edit the model here too, then
+#   .localbin/fga model transform --input services/common/auth/model.fga --output services/common/auth/model.json
+#   .localbin/fga model test --tests services/common/auth/model.fga.yaml
 #
 # Scenario (proves the goal's requirements):
 #   team:eng      owns project:acme AND project:research   (a team can own MANY projects)

@@ -1,4 +1,4 @@
-"""Unit tests for the OpenFGA resilience + id-canonicalisation fixes in app.core.fga.
+"""Unit tests for the OpenFGA resilience + id-canonicalisation fixes in common.fga.
 
 These pin the audit-confirmed contracts WITHOUT touching the network:
 

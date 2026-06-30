@@ -4,7 +4,7 @@ The REST routes carry the ``$``-delimited string identifier in the ``{id}`` path
 segment. The root namespace is represented by the delimiter itself.
 
 Object-id *canonicalization* (joining segments into the string OpenFGA stores)
-lives in :mod:`app.core.fga` (``canonical_object_id`` / ``parent_namespace_id``),
+lives in :mod:`common.fga` (``canonical_object_id`` / ``parent_namespace_id``),
 so the FGA object string is defined in exactly one place and the grant + check
 paths cannot drift apart. This module owns the structural shape of an identifier:
 splitting it into segments and deriving its parent-namespace segments.

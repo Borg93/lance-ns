@@ -25,7 +25,7 @@
 - ✅ OIDC authn (PyJWT/JWKS), **fail-closed**.
 - ✅ OpenFGA authz — op→`can_*` actions, concentric owner⊇writer⊇reader, parent cascade
   (`catalog→namespace→table`), roles as `role:#assignee`, `catalog:lance` root,
-  `grant_on_create`/`seed_ownership`. Model at `services/catalog/auth/model.fga` (+ `.fga.yaml` tests).
+  `grant_on_create`/`seed_ownership`. Model at `services/common/auth/model.fga` (+ `.fga.yaml` tests).
 - ✅ Resilience — transient-aware retries; network errors → 503 (never escape as 500).
 - ✅ Postgres (OpenFGA datastore) over sqlite.
 - ✅ Auth e2e + docker compose overlays; `docs/ARCHITECTURE.md`.
@@ -145,9 +145,9 @@
   if an id is reused. Add a `ClientWriteRequest(deletes=…)` path + call on drop/deregister/rename.
   **✔audit**. Touch: `services/common/fga.py`, `services/catalog/api/v1/endpoints/tables.py`, `namespaces.py`.
 - ⛔ **Wire or remove unused `can_list` / `can_alter` / `can_commit` / `can_rename`** — defined in
-  `services/catalog/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
+  `services/common/auth/model.fga` but `fga_deps.py` never checks them (rename→`can_write_data`, list→`can_get_metadata`).
   Maintenance hazard: the model advertises finer granularity than enforcement implements. **✔audit**.
-  Touch: `services/catalog/api/fga_deps.py`, `services/catalog/auth/model.fga`.
+  Touch: `services/catalog/api/fga_deps.py`, `services/common/auth/model.fga`.
 
 ### P2 — later / deferred
 11. 🔶 **Lineage events for delete/drop, schema evolution, compaction/maintenance** — complete

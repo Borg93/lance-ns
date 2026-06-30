@@ -1,12 +1,12 @@
 """Fine-grained authorization via OpenFGA (Zanzibar-style relationship checks).
 
-The authorization model (``app/auth/model.fga`` / ``model.json``) defines five types —
+The authorization model (``services/common/auth/model.fga`` / ``model.json``) defines five types —
 ``user``, ``role`` (with ``role#assignee`` as a first-class group subject), ``catalog``
 (the root container), a self-nesting ``namespace``, and ``table``. Privileges are
 concentric (``owner`` ⊇ ``writer`` ⊇ ``reader``) and cascade DOWN the hierarchy via
 ``parent`` (catalog → namespace → nested namespace → table). Every API operation is
 checked against a ``can_*`` ACTION relation — the model owns the op→privilege map, the
-app just names the action (see ``app/api/fga_deps.py``). Tuples persist in the OpenFGA
+app just names the action (see ``services/catalog/api/fga_deps.py``). Tuples persist in the OpenFGA
 datastore — Postgres or SQLite (see ``.docker/docker-compose.auth.yml`` /
 ``.docker/docker-compose.auth.sqlite.yml``).
 
@@ -56,7 +56,7 @@ from tenacity import (
 
 log = logging.getLogger(__name__)
 
-_MODEL_PATH = Path(__file__).resolve().parent.parent / "auth" / "model.json"
+_MODEL_PATH = Path(__file__).resolve().parent / "auth" / "model.json"
 
 # Default resilience knobs. The real values are sourced from Settings and passed
 # into make_client / check / grant_on_create; these mirror the config defaults so

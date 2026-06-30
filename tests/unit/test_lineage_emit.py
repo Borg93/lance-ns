@@ -1,4 +1,4 @@
-"""Unit tests for catalog → lineage emission (P0 #3, ``app.core.lineage_emit``).
+"""Unit tests for catalog → lineage emission (P0 #3, ``catalog.core.lineage_emit``).
 
 Infra-free: the pure event builder is checked directly, the HTTP emitter is exercised with a
 fake client (best-effort: it must swallow failures), and a round-trip pins the wire contract

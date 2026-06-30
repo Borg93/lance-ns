@@ -101,7 +101,7 @@ and `services/` (business logic); the five cross-service modules (`secrets`, `da
 | `services/catalog/api/security.py` | **Authn** — verify the OIDC token → `CurrentToken` (or fail closed) |
 | `services/catalog/api/fga_deps.py` | **Authz** — `authorize` (router-level pre-op `can_*` check) **and** `seed_ownership` (post-create grant). The op→`can_*` map is the only policy logic in the app. |
 | `services/common/fga.py` | Shared OpenFGA client wrapper (imported as `from common import fga`): `check`/`batch_check`/`list_objects`/`write_tuples`/`grant_on_create`, id helpers, retry + fail-closed |
-| `services/catalog/auth/model.fga` / `model.json` / `model.fga.yaml` | The authorization **model** (DSL, the JSON the app loads, and the model tests) — the model owns the privilege math |
+| `services/common/auth/model.fga` / `model.json` / `model.fga.yaml` | The authorization **model** (DSL, the JSON the app loads, and the model tests) — the model owns the privilege math |
 | `services/catalog/api/v1/endpoints/*` | Thin HTTP handlers → `services.native`/`services.dataplane` for the backend, `fga_deps.seed_ownership` for grants |
 | `services/catalog/services/native.py`, `dataplane.py` | Call pylance (run in a threadpool — it's blocking) |
 | `services/catalog/core/config.py` | `pydantic-settings` (env-driven config) |

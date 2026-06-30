@@ -1,12 +1,12 @@
 """Live medallion demo driver — real Lance data on S3 + real OpenLineage to the lineage service.
 
-Unlike ``lineage/seed.py`` (which emits *synthetic* events only), this **executes** the medallion
+Unlike ``services/lineage/seed.py`` (which emits *synthetic* events only), this **executes** the medallion
 flow against the real docker-compose services: it writes and evolves real Lance datasets on MinIO
 *and* emits a real OpenLineage event after each step, with a pause in between, so the thin frontend
-(``lineage/static/index.html``, served at ``/ui/``) shows the DAG build and the silver versions
+(``services/lineage/static/index.html``, served at ``/ui/``) shows the DAG build and the silver versions
 evolve live.
 
-The flow (faithful to ``lineage/seed.py`` / ``docs/LINEAGE.md``):
+The flow (faithful to ``services/lineage/seed.py`` / ``docs/LINEAGE.md``):
 
     ingest_events    (alice)    raw_events      -> bronze$events  v1  (blob payload)
     embed_features   (data_eng) bronze$events   x  silver$features     (FAILS — recorded, no data)

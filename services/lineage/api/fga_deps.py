@@ -1,7 +1,7 @@
 """In-service authz for the lineage read + ingest endpoints.
 
 The lineage service owns the audit graph, so it must protect it itself (in-service, not
-via a gateway). It mirrors the catalog's authz guard (``app/api/fga_deps.py``) and **reuses
+via a gateway). It mirrors the catalog's authz guard (``services/catalog/api/fga_deps.py``) and **reuses
 the catalog's core** — :func:`common.fga.check` / ``batch_check`` — so the OpenFGA check has
 one source of truth. The thin FastAPI authz + filter dependencies are re-derived here
 because they bind to ``LineageSettings`` rather than the catalog's ``Settings``. (Shared
@@ -88,7 +88,7 @@ class DatasetFilter:
     filtering, one table grant would disclose the existence of every table in its lineage
     neighborhood. This batch-checks ``can_get_metadata`` (fail-closed: an OpenFGA outage →
     503) and returns only the authorized names — the lineage analogue of the catalog's
-    ``list_objects``-filtered enumerations (``app/api/v1/endpoints/tables.py``). Pass-through
+    ``list_objects``-filtered enumerations (``services/catalog/api/v1/endpoints/tables.py``). Pass-through
     when FGA is off (dev/tests).
     """
 

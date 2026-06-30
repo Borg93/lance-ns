@@ -146,9 +146,11 @@ gaps**, so they are closed here rather than built:
   because pylance's public API doesn't expose what the spec needs (`create_table_version` has no analog —
   Lance versions are *write-created*, not declared; `describe_table_version` needs `manifest_path` pylance
   doesn't expose). A flag would surface broken endpoints, not working ones.
-- **F3 (Partitioned Namespace family)** — 🔶 DEFERRED: greenfield spec-completeness over the catalog's own
-  `__manifest`, not a production blocker; out of scope for spin-up-per-workload (like multi-warehouse /
-  soft-delete). Revisit only if partitioned namespaces become a real requirement.
+- **F3 (Partitioned Namespace family)** — ❌ DROPPED BY DESIGN (not deferred). The spec's `partition_spec`
+  is the Iceberg/Hive **directory-partitioning** model. Lance deliberately does NOT work that way — it skips
+  data with **fragments + zone maps + a columnar layout + secondary indices**, which is a *better* design
+  for our workloads. Adopting Iceberg-style partitioning would bolt an inferior, alien concept onto Lance.
+  We **reject** it, same stance as multi-warehouse / soft-delete (thesis-aligned rejection, not a gap).
 - ✅ **Core validation** (validation `wfefr8vtx`, 6 agents, live probe → adversarial verify; see
   `docs/COVERAGE.md`). Verdict: the lakehouse + event-driven core is **valid, low-coupled, and mergeable**
   (zero cross-service imports; fail-closed authz; official OpenLineage idempotent MERGE; resilient cascade).

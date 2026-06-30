@@ -171,17 +171,22 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
    non-default delimiter. Touch: `services/lineage/core/config.py`, `services/lineage/seed.py` + a test.
 
 ### P1 — needed for prod
-5. ⛔ **Wire the credential vendor** into `describe_table?vend_credentials=true`
-   (OpenFGA-tiered: `can_read_data`→read, `can_write_data`→write). Default OFF. `services/catalog/core/vending.py`, `services/catalog/api/v1/endpoints/data.py`.
-   **`StsVendor` is the recommended path** (MinIO/Ceph/AWS all implement STS `AssumeRole` + inline
-   session policy → short-TTL table-scoped creds). `mode_b` (server-mediated) stays the safe OOTB
-   default; `static` for S3 backends without STS (GCS interop). Point the STS client at the S3
-   endpoint via `LANCE_S3_STS_ENDPOINT` + `LANCE_S3_ASSUME_ROLE_ARN`.
-6. ⛔ **lance-ray promotion + compaction jobs** (bronze→silver→gold) on the KubeRay cluster,
-   using the Mode-B/vending data plane **and** emitting OpenLineage (template: `services/lineage/seed.py`).
-   This is the medallion flow end-to-end.
-7. ⛔ **OpenBao SecretStore** (KV v2): move catalog base storage cred + OIDC client secret +
-   OpenFGA/AGE DB creds out of env; lineage AGE DB creds. lance-ray = **workload identity** (no Bao).
+5. ✅ **Credential vendor — DONE.** Shipped as `POST /v1/table/{id}/credentials` (OpenFGA-tiered:
+   `can_read_data`→read, `can_write_data`→write; default `mode_b`). Vendors: `StsVendor` (AssumeRole +
+   per-table session policy), `WebIdentityVendor` (AssumeRoleWithWebIdentity — the RustFS-native path,
+   exchanges the caller's OIDC token), `StaticPrefixVendor`, `ModeBVendor`.
+   `services/catalog/core/vending.py`, `services/catalog/api/v1/endpoints/credentials.py`. (Adversarially
+   audited; bearer-seam / 4xx-mapping / client-caching fixes applied.)
+6. ⛔ **lance-ray promotion + compaction jobs** (bronze→silver→gold) on the KubeRay cluster — the REAL Ray
+   Data jobs that write the stages + emit OpenLineage (today the medallion movers are dummy emitters, no
+   data). **This is the ONE in-scope prod gap, and it lands in the rask merge** — see
+   `docs/RASK-INTEGRATION.md` (the lance-ray seam contract). The event-driven cascade + the gold JSONB-lineage
+   demo already prove the seam the real job drops into.
+7. ✅ **OpenBao SecretStore — DONE (two-tier model).** App tier (catalog/lineage/compaction) consumes
+   secrets from OpenBao via the Dapr secret store as the STRICT sole source (fail-closed, no env fallback);
+   infra tier (AGE/RustFS servers, OpenFGA migrate) via `secretKeyRef`. The external-secrets operator syncs
+   the infra Secret from Vault (P2); `secretsViaDapr` keeps apps on Dapr even with an external Vault.
+   lance-ray = workload identity (no Bao). Invariant: 0 plaintext secrets in any prod-render workload.
 8. ✅ **Deploy lineage** — `lineage-api` service (`.docker/docker-compose.governance.yml`, same image)
    + `COPY lineage` in the dockerfile. Bring up the full stack + verify: `scripts/governance_e2e.sh`.
 9. ✅ **Routes-vs-spec conformance test** (DONE 2026-06-30) — `tests/integration/test_spec_conformance.py`

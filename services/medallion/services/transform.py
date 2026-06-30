@@ -18,10 +18,12 @@ from typing import Any
 
 from common import fga
 from dapr.aio.clients import DaprClient
+from fastapi.concurrency import run_in_threadpool
 
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_denied, record_transition
 from medallion.schemas.events import build_run_event
+from medallion.services.compute import transform_stage
 
 log = logging.getLogger(__name__)
 
@@ -64,16 +66,29 @@ async def handle_stage(
             )
             return _DROP
 
-    run_event = build_run_event(
-        operation=settings.operation,
-        author=settings.author,
-        job_namespace=settings.job_namespace,
-        inputs=[(settings.from_namespace, settings.from_dataset)],
-        output_namespace=settings.to_namespace,
-        output_name=settings.to_dataset,
-        run_id=f"{settings.operation}-{token}" if token else None,
-    )
     try:
+        # 0. Fake-Ray compute (opt-in): a REAL in-process Lance write of the downstream dataset, so the
+        # emitted lineage carries the actual version and the cascade produces data, not just provenance.
+        # Blocking Lance/S3 IO → threadpool. Off → version 1 (dummy emit). A compute failure → RETRY below.
+        version = 1
+        if settings.compute_enabled and settings.from_uri and settings.to_uri:
+            version = await run_in_threadpool(
+                transform_stage,
+                settings.from_uri,
+                settings.to_uri,
+                settings.storage_options(),
+                stage=settings.to_namespace,
+            )
+        run_event = build_run_event(
+            operation=settings.operation,
+            author=settings.author,
+            job_namespace=settings.job_namespace,
+            inputs=[(settings.from_namespace, settings.from_dataset)],
+            output_namespace=settings.to_namespace,
+            output_name=settings.to_dataset,
+            version=version,
+            run_id=f"{settings.operation}-{token}" if token else None,
+        )
         # 1. Emit the transform's lineage (-> the lineage service ingests the DERIVED_FROM edge).
         await dapr.publish_event(
             pubsub_name=settings.pubsub,

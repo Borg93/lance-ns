@@ -16,20 +16,28 @@ import logging
 import uuid
 
 from dapr.aio.clients import DaprClient
+from fastapi.concurrency import run_in_threadpool
 
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_transition
 from medallion.schemas.events import build_run_event
+from medallion.services.compute import seed_raw
 
 log = logging.getLogger(__name__)
 
 
 async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, str]:
-    """Ingest (dummy) the raw dataset and fire the first medallion trigger.
+    """Ingest the raw dataset and fire the first medallion trigger.
 
     Emits an OpenLineage event for ``raw_events`` then publishes ``{token, dataset}`` to the raw topic.
-    Best-effort: a sidecar/broker outage logs + still returns (the catalog-style contract)."""
+    With ``compute_enabled`` it FIRST seeds a real ``raw_events`` Lance dataset (the fake lance-ray ingest)
+    so the emitted lineage carries the real version; off → a dummy emit (version 1). Best-effort: a
+    sidecar/broker outage logs + still returns (the catalog-style contract)."""
     token = uuid.uuid4().hex[:12]
+    version = 1
+    if settings.compute_enabled and settings.raw_uri:
+        # Fake-Ray ingest: a REAL Lance write of raw_events (blocking IO → threadpool) → the real version.
+        version = await run_in_threadpool(seed_raw, settings.raw_uri, settings.storage_options())
     raw_event = build_run_event(
         operation=settings.producer_operation,
         author=settings.producer_author,
@@ -37,6 +45,7 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
         inputs=[],
         output_namespace=settings.raw_namespace,
         output_name=settings.raw_dataset,
+        version=version,
         run_id=f"{settings.producer_operation}-{token}",
     )
     trigger = {"token": token, "dataset": settings.raw_dataset, "namespace": settings.raw_namespace}

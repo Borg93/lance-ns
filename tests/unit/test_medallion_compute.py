@@ -1,0 +1,163 @@
+"""Unit tests for the fake-Ray medallion compute (#25 / P1 #6 seam) — real Lance, no S3/Dapr.
+
+Drives the in-process Lance read→transform→write against a temp directory (Lance writes local paths with
+empty ``storage_options``), then proves the mover/producer WIRING carries the REAL Lance version into the
+emitted OpenLineage event — i.e. with compute on, the event-driven cascade produces actual versioned data,
+not just provenance. The async handlers are driven with stdlib ``asyncio.run`` (the project convention).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from typing import Any, cast
+
+import lance
+from dapr.aio.clients import DaprClient
+from medallion.core.config import MedallionSettings
+from medallion.services.compute import seed_raw, transform_stage
+from medallion.services.produce import produce
+from medallion.services.transform import handle_stage
+
+# --------------------------------------------------------------------------- #
+# the compute itself (real Lance read → transform → write)
+# --------------------------------------------------------------------------- #
+
+
+def test_seed_raw_writes_a_real_dataset(tmp_path: Any) -> None:
+    uri = str(tmp_path / "raw")
+    version = seed_raw(uri, {}, rows=5)
+    table = lance.dataset(uri).to_table()
+    assert table.num_rows == 5
+    assert table.column_names == ["id", "payload"]
+    assert version == lance.dataset(uri).version  # the returned version == what lineage will record
+
+
+def test_transform_stage_carries_rows_forward_and_stamps_stage(tmp_path: Any) -> None:
+    raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
+    seed_raw(raw, {}, rows=4)
+    transform_stage(raw, bronze, {}, stage="bronze")
+    out = lance.dataset(bronze).to_table()
+    assert out.num_rows == 4  # real rows flowed forward
+    assert set(out.column("stage").to_pylist()) == {"bronze"}  # provenance column stamped
+
+
+def test_transform_stage_replaces_stage_column_not_duplicates_it(tmp_path: Any) -> None:
+    # Across two hops the upstream is already stamped (bronze); the next hop must SET the column to silver,
+    # not append a second `stage` column (which would collide on the name).
+    raw, bronze, silver = (str(tmp_path / n) for n in ("raw", "bronze", "silver"))
+    seed_raw(raw, {}, rows=3)
+    transform_stage(raw, bronze, {}, stage="bronze")
+    transform_stage(bronze, silver, {}, stage="silver")
+    out = lance.dataset(silver).to_table()
+    assert out.column_names.count("stage") == 1
+    assert set(out.column("stage").to_pylist()) == {"silver"}
+
+
+def test_transform_stage_rerun_bumps_the_version(tmp_path: Any) -> None:
+    # A re-run (overwrite) produces a NEW Lance version — so the emitted lineage advances with the data.
+    raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
+    seed_raw(raw, {}, rows=2)
+    v1 = transform_stage(raw, bronze, {}, stage="bronze")
+    v2 = transform_stage(raw, bronze, {}, stage="bronze")
+    assert v2 > v1
+
+
+def test_storage_options_empty_for_local_and_s3_when_configured() -> None:
+    assert MedallionSettings.model_validate({"compute_enabled": True}).storage_options() == {}
+    s3 = MedallionSettings.model_validate(
+        {"s3_endpoint": "http://rustfs:9000", "s3_access_key_id": "k", "s3_secret_access_key": "s"}
+    )
+    assert s3.storage_options()["endpoint"] == "http://rustfs:9000"
+    assert s3.storage_options()["allow_http"] == "true"
+
+
+# --------------------------------------------------------------------------- #
+# the WIRING — the cascade carries the real version into the emitted lineage
+# --------------------------------------------------------------------------- #
+
+
+class _FakeDapr:
+    """Captures published events (the lineage emit + the next-stage trigger)."""
+
+    def __init__(self) -> None:
+        self.published: list[dict[str, Any]] = []
+
+    async def publish_event(
+        self, *, pubsub_name: str, topic_name: str, data: str, data_content_type: str
+    ) -> None:
+        self.published.append({"topic": topic_name, "data": json.loads(data)})
+
+
+def _mover_settings(raw: str, bronze: str) -> MedallionSettings:
+    return MedallionSettings.model_validate(
+        {
+            "compute_enabled": True,
+            "from_uri": raw,
+            "to_uri": bronze,
+            "from_namespace": "raw",
+            "from_dataset": "raw_events",
+            "to_namespace": "bronze",
+            "to_dataset": "bronze$events",
+            "operation": "ingest_events",
+            "pub_topic": "bronze.ready",
+        }
+    )
+
+
+def test_handle_stage_writes_real_data_and_emits_the_real_version(tmp_path: Any) -> None:
+    raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
+    seed_raw(raw, {}, rows=4)
+    settings = _mover_settings(raw, bronze)
+    dapr = _FakeDapr()
+
+    result = asyncio.run(handle_stage(cast(DaprClient, dapr), settings, {"data": {"token": "t1"}}))
+    assert result == {"status": "SUCCESS"}
+
+    # The downstream Lance dataset really exists with the rows + the stage stamp.
+    out = lance.dataset(bronze).to_table()
+    assert out.num_rows == 4 and set(out.column("stage").to_pylist()) == {"bronze"}
+
+    # The emitted lineage event carries the REAL downstream version (not the hardcoded 1).
+    lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
+    output = lineage["data"]["outputs"][0]
+    assert output["name"] == "bronze$events"
+    assert output["facets"]["version"]["datasetVersion"] == str(lance.dataset(bronze).version)
+    # …and the next-stage trigger fired so the cascade continues.
+    assert any(p["topic"] == "bronze.ready" for p in dapr.published)
+
+
+def test_handle_stage_compute_off_writes_no_data_and_emits_version_one(tmp_path: Any) -> None:
+    # The gate: with compute OFF the mover stays a dummy-emitter — no downstream dataset, version 1.
+    raw, bronze = str(tmp_path / "raw"), str(tmp_path / "bronze")
+    seed_raw(raw, {}, rows=4)
+    settings = _mover_settings(raw, bronze)
+    settings.compute_enabled = False
+    dapr = _FakeDapr()
+
+    asyncio.run(handle_stage(cast(DaprClient, dapr), settings, {"data": {"token": "t1"}}))
+    lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
+    assert lineage["data"]["outputs"][0]["facets"]["version"]["datasetVersion"] == "1"
+    # No write happened — opening the downstream path as a dataset must fail (it was never created).
+    try:
+        lance.dataset(bronze)
+        raise AssertionError("downstream dataset must not exist when compute is off")
+    except ValueError:
+        pass
+
+
+def test_produce_seeds_real_raw_and_emits_its_version(tmp_path: Any) -> None:
+    raw = str(tmp_path / "raw")
+    settings = MedallionSettings.model_validate(
+        {"compute_enabled": True, "raw_uri": raw, "raw_namespace": "raw", "raw_dataset": "raw_events"}
+    )
+    dapr = _FakeDapr()
+
+    result = asyncio.run(produce(cast(DaprClient, dapr), settings))
+    assert result["status"] == "produced"
+    # raw_events really exists, and the emitted lineage records its real version.
+    assert lance.dataset(raw).to_table().num_rows > 0
+    lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
+    assert lineage["data"]["outputs"][0]["facets"]["version"]["datasetVersion"] == str(
+        lance.dataset(raw).version
+    )

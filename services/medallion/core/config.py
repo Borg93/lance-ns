@@ -47,9 +47,41 @@ class MedallionSettings(BaseSettings):
         """The FGA object the mover must be authorized on — the target stage namespace."""
         return f"namespace:{self.to_namespace}"
 
+    # --- Fake-Ray in-process compute (the lance-ray SEAM) — OFF by default (movers stay dummy-emitters).
+    # When on, each stage does a REAL Lance write: the producer seeds raw_events; each mover reads its
+    # upstream Lance dataset, applies a stage transform, and writes the downstream one — so the emitted
+    # lineage carries the REAL version and the whole event-driven loop produces actual versioned data, not
+    # just provenance. Same read→transform→write→version contract a distributed Ray Data job fills at rask;
+    # here it runs in-process so the loop is end-to-end testable without a Ray cluster. (#25 / P1 #6 seam.)
+    compute_enabled: bool = Field(default=False, alias="MEDALLION_COMPUTE_ENABLED")
+    from_uri: str = Field(default="", alias="MEDALLION_FROM_URI")  # upstream Lance dataset (mover input)
+    to_uri: str = Field(default="", alias="MEDALLION_TO_URI")  # downstream Lance dataset (mover output)
+
+    # --- S3 access for the fake-Ray compute (only used when compute_enabled). Empty creds let the
+    # object-store client fall back to its default chain (or a local path needs no creds at all). ---------
+    s3_endpoint: str = Field(default="", alias="MEDALLION_S3_ENDPOINT")
+    s3_access_key_id: str = Field(default="", alias="MEDALLION_S3_ACCESS_KEY_ID")
+    s3_secret_access_key: str = Field(default="", alias="MEDALLION_S3_SECRET_ACCESS_KEY")
+    s3_region: str = Field(default="us-east-1", alias="MEDALLION_S3_REGION")
+
+    def storage_options(self) -> dict[str, str]:
+        """Lance ``storage_options`` for the compute write — empty for a local path; S3 config otherwise."""
+        if not self.s3_endpoint:
+            return {}
+        return {
+            "endpoint": self.s3_endpoint,
+            "access_key_id": self.s3_access_key_id,
+            "secret_access_key": self.s3_secret_access_key,
+            "region": self.s3_region,
+            "allow_http": "true",
+        }
+
     # --- producer (lance-ray) config — produces the raw dataset + the first trigger -------------
     raw_dataset: str = Field(default="raw_events", alias="MEDALLION_RAW_DATASET")
     raw_namespace: str = Field(default="raw", alias="MEDALLION_RAW_NAMESPACE")
+    raw_uri: str = Field(
+        default="", alias="MEDALLION_RAW_URI"
+    )  # where the producer seeds raw_events (compute)
     producer_operation: str = Field(default="lance_ray_ingest", alias="MEDALLION_PRODUCER_OPERATION")
     producer_author: str = Field(default="ray", alias="MEDALLION_PRODUCER_AUTHOR")
     raw_topic: str = Field(default="medallion.raw", alias="MEDALLION_RAW_TOPIC")

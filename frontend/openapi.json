@@ -24,184 +24,6 @@
         }
       }
     },
-    "/lineage-events": {
-      "post": {
-        "tags": [
-          "PubSub"
-        ],
-        "summary": "On Lineage Event",
-        "description": "Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status.",
-        "operationId": "on_lineage_event_lineage_events_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "additionalProperties": true,
-                "type": "object",
-                "title": "Event"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response On Lineage Event Lineage Events Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/livez": {
-      "get": {
-        "tags": [
-          "health"
-        ],
-        "summary": "Livez",
-        "operationId": "livez_livez_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Livez Livez Get"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/v1/lineage": {
-      "post": {
-        "tags": [
-          "ingest"
-        ],
-        "summary": "Ingest Event",
-        "description": "Ingest one OpenLineage ``RunEvent`` into the lineage graph.\n\nThis is the OpenLineage HTTP-transport default path, so any OpenLineage producer\n(our emitter, Airflow, Spark, dbt, \u2026) configured with ``OPENLINEAGE_URL`` pointed\nhere ingests with no glue \u2014 the lightweight-Marquez contract.\n\nWhen OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token\n(401 otherwise) and :func:`~lineage.auth.enforce_author` binds the run author to that\ntoken's subject \u2014 a producer cannot self-assert someone else's identity.",
-        "operationId": "ingest_event_api_v1_lineage_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/RunEvent"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "type": "object",
-                  "title": "Response Ingest Event Api V1 Lineage Post"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/runs": {
-      "get": {
-        "tags": [
-          "query"
-        ],
-        "summary": "Get Runs",
-        "description": "Live run-status board \u2014 each run's current state folded onto its ``(:Run)`` node in Apache AGE.\n\n**Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset\nreads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board\ncan't enumerate dataset names / creators / errors outside the caller's reach. Auth off \u2192 pass-through.",
-        "operationId": "get_runs_runs_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Runs"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
-    "/events": {
-      "get": {
-        "tags": [
-          "query"
-        ],
-        "summary": "Get Events",
-        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)",
-        "operationId": "get_events_events_get",
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Events"
-                }
-              }
-            }
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
-      }
-    },
     "/datasets/{name}/upstream": {
       "get": {
         "tags": [
@@ -458,54 +280,6 @@
         }
       }
     },
-    "/datasets/{name}/reconcile": {
-      "get": {
-        "tags": [
-          "query"
-        ],
-        "summary": "Get Reconcile",
-        "description": "Does the lineage graph agree with the **actual Lance file on storage**? (#23)\n\nOur moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we\nread the real on-disk version and cross-check it against the version the graph recorded on the\n``WROTE`` edge \u2014 surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim\nwith no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the\nLance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.",
-        "operationId": "get_reconcile_datasets__name__reconcile_get",
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "name",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string",
-              "title": "Name"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Successful Response",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ReconcileStatus"
-                }
-              }
-            }
-          },
-          "422": {
-            "description": "Validation Error",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/datasets/{name}/graph": {
       "get": {
         "tags": [
@@ -710,6 +484,204 @@
                 "schema": {
                   "$ref": "#/components/schemas/HTTPValidationError"
                 }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/reconcile": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Reconcile",
+        "description": "Does the lineage graph agree with the **actual Lance file on storage**? (#23)\n\nOur moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we\nread the real on-disk version and cross-check it against the version the graph recorded on the\n``WROTE`` edge \u2014 surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim\nwith no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the\nLance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.",
+        "operationId": "get_reconcile_datasets__name__reconcile_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReconcileStatus"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/runs": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Runs",
+        "description": "Live run-status board \u2014 each run's current state folded onto its ``(:Run)`` node in Apache AGE.\n\n**Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset\nreads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board\ncan't enumerate dataset names / creators / errors outside the caller's reach. Auth off \u2192 pass-through.",
+        "operationId": "get_runs_runs_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Runs"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/events": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Events",
+        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)",
+        "operationId": "get_events_events_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Events"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/api/v1/lineage": {
+      "post": {
+        "tags": [
+          "ingest"
+        ],
+        "summary": "Ingest Event",
+        "description": "Ingest one OpenLineage ``RunEvent`` into the lineage graph.\n\nThis is the OpenLineage HTTP-transport default path, so any OpenLineage producer\n(our emitter, Airflow, Spark, dbt, \u2026) configured with ``OPENLINEAGE_URL`` pointed\nhere ingests with no glue \u2014 the lightweight-Marquez contract.\n\nWhen OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token\n(401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that\ntoken's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`\nrequires ``can_write_data`` on every output dataset (a producer can't record provenance for a table\nit can't write). Both are no-ops when auth is off.",
+        "operationId": "ingest_event_api_v1_lineage_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RunEvent"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Ingest Event Api V1 Lineage Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ]
+      }
+    },
+    "/livez": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Livez",
+        "operationId": "livez_livez_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Livez Livez Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Readyz",
+        "description": "Gate readiness on the AGE pool \u2014 lineage's sole hard dependency \u2014 plus the lifecycle flags, so a pod\nwith an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of serving 500s.",
+        "operationId": "readyz_readyz_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
               }
             }
           }
@@ -1499,6 +1471,47 @@
               }
             ],
             "title": "Error Message"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size Bytes"
+          },
+          "quality_passed": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quality Passed"
+          },
+          "quality_assertions": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "type": "array",
+            "title": "Quality Assertions"
           }
         },
         "type": "object",
@@ -1506,7 +1519,7 @@
           "run_id"
         ],
         "title": "ProducerInfo",
-        "description": "A run that wrote (or attempted to write) a dataset \u2014 who / when / how / version.\n\nA **failed** run (``event_type`` FAIL/ABORT) appears here too, with no\n``dataset_version`` and an ``error_message`` \u2014 it tried but produced no data."
+        "description": "A run that wrote (or attempted to write) a dataset \u2014 who / when / how / version / measured size.\n\nA **failed** run (``event_type`` FAIL/ABORT) appears here too, with no\n``dataset_version`` and an ``error_message`` \u2014 it tried but produced no data.\n\n``row_count`` / ``size_bytes`` are the runtime-measured output statistics the compute recorded for\nthis write (the rows + on-disk bytes it actually produced, from the standard ``outputStatistics``\nfacet); ``None`` when the run was a dummy emit (no compute) or a failure (no data produced).\n\n``quality_passed`` is the validator gate's verdict (all assertions succeeded) and ``quality_assertions``\nthe checks it ran (from the standard ``dataQualityAssertions`` facet); ``quality_passed=False`` with a\nreal ``dataset_version`` is the auditable record of a batch the gate blocked from promotion. Both are\n``None`` / empty when the quality gate did not run."
       },
       "Producers": {
         "properties": {

@@ -11,11 +11,16 @@ from typing import Any
 
 import pyarrow.fs as pafs
 from common import fga
+from opentelemetry import trace
 
 from compaction.core.config import CompactionSettings
 from compaction.core.lineage_emit import MaintenanceEmitter, table_id_from_uri
 from compaction.core.metrics import record_reclaimed, record_run
 from compaction.services.optimize import DatasetResult, compact_one, discover_dataset_uris
+
+# Each compact+GC is blocking Lance/S3 work invisible to auto-instrumentation — a per-dataset INTERNAL
+# span lets a slow or failing compaction be localized in the trace instead of hiding in the cron handler.
+tracer = trace.get_tracer(__name__)
 
 
 def _s3fs(settings: CompactionSettings) -> pafs.S3FileSystem:
@@ -35,7 +40,11 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
     older_than = timedelta(days=settings.older_than_days)
     options = settings.storage_options()
     uris = discover_dataset_uris(_s3fs(settings), settings.s3_bucket)
-    results = [compact_one(uri, options, older_than) for uri in uris]
+    results: list[DatasetResult] = []
+    for uri in uris:
+        with tracer.start_as_current_span("compaction.compact") as span:
+            span.set_attribute("lance.dataset_uri", uri)
+            results.append(compact_one(uri, options, older_than))
     record_run()
     record_reclaimed(
         fragments_removed=sum(r.fragments_removed for r in results),

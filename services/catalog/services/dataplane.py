@@ -12,6 +12,7 @@ Each function takes ``(ns, storage_options, request)`` — except
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 import pyarrow as pa
 from lance_namespace import (
@@ -71,17 +72,34 @@ def _version(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> int
 # needs a real ``pa.DataType``, so we convert. Covers the documented re-types (e.g. float32→float16 on an
 # embedding column); an unsupported/complex type raises a clear 400 instead of a silent Rust-boundary 500.
 _SCALAR_ARROW: dict[str, Callable[[], pa.DataType]] = {
-    "null": pa.null, "bool": pa.bool_, "boolean": pa.bool_,
-    "int8": pa.int8, "int16": pa.int16, "int32": pa.int32, "int64": pa.int64,
-    "uint8": pa.uint8, "uint16": pa.uint16, "uint32": pa.uint32, "uint64": pa.uint64,
-    "float16": pa.float16, "halffloat": pa.float16, "float32": pa.float32, "float": pa.float32,
-    "float64": pa.float64, "double": pa.float64,
-    "string": pa.string, "utf8": pa.string, "large_string": pa.large_string,
-    "binary": pa.binary, "large_binary": pa.large_binary, "date32": pa.date32, "date64": pa.date64,
+    "null": pa.null,
+    "bool": pa.bool_,
+    "boolean": pa.bool_,
+    "int8": pa.int8,
+    "int16": pa.int16,
+    "int32": pa.int32,
+    "int64": pa.int64,
+    "uint8": pa.uint8,
+    "uint16": pa.uint16,
+    "uint32": pa.uint32,
+    "uint64": pa.uint64,
+    "float16": pa.float16,
+    "halffloat": pa.float16,
+    "float32": pa.float32,
+    "float": pa.float32,
+    "float64": pa.float64,
+    "double": pa.float64,
+    "string": pa.string,
+    "utf8": pa.string,
+    "large_string": pa.large_string,
+    "binary": pa.binary,
+    "large_binary": pa.large_binary,
+    "date32": pa.date32,
+    "date64": pa.date64,
 }
 
 
-def _json_arrow_to_pa_type(dt: dict) -> pa.DataType:
+def _json_arrow_to_pa_type(dt: dict[str, Any]) -> pa.DataType:
     """Convert a ``JsonArrowDataType`` dict (``{type, fields?, length?}``) to a ``pyarrow.DataType``.
 
     Handles scalars + fixed-size-list (vector embeddings). An unsupported/complex type raises
@@ -174,7 +192,7 @@ def drop_columns(
 
 
 def update_field_metadata(
-    ns: LanceNamespace, so: StorageOptions, table_id: list[str], updates: list[dict]
+    ns: LanceNamespace, so: StorageOptions, table_id: list[str], updates: list[dict[str, Any]]
 ) -> UpdateFieldMetadataResponse:
     """Merge/replace per-field metadata for the given field paths."""
     field_updates = {u["path"]: dict(u.get("metadata") or {}) for u in updates if u.get("path")}
@@ -189,7 +207,7 @@ def update_field_metadata(
 def list_tags(ns: LanceNamespace, so: StorageOptions, req: ListTableTagsRequest) -> ListTableTagsResponse:
     """List the table's tags as ``{name: TagContents{version, manifest_size, branch}}``."""
     table_id = _table_id(req)
-    tags: dict[str, dict] = {}
+    tags: dict[str, dict[str, Any]] = {}
     for name, tag in open_dataset(ns, so, table_id).tags.list().items():
         # pylance's Tag is a TypedDict (plain dict at runtime), so read by key.
         entry = tag if isinstance(tag, dict) else {"version": getattr(tag, "version", None)}
@@ -260,7 +278,7 @@ def list_branches(
     The native ``DirectoryNamespace`` 501s branch ops, but ``lance.LanceDataset`` implements them, so we
     back them in-process here exactly like tags. A ``Branch`` is a TypedDict (plain dict at runtime).
     """
-    branches: dict[str, dict] = {}
+    branches: dict[str, dict[str, Any]] = {}
     for name, branch in open_dataset(ns, so, _table_id(req)).branches.list().items():
         entry = branch if isinstance(branch, dict) else {}
         branches[name] = {

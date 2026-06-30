@@ -6,6 +6,7 @@ it). Run: ``uvicorn lineage.main:app``. See ``docs/LINEAGE.md``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -16,6 +17,7 @@ from common.dapr_auth import assert_app_token_configured
 from common.exceptions import problem_detail
 from common.oidc import OIDCVerifier
 from fastapi import FastAPI, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from lance_namespace import LanceNamespaceError
@@ -34,6 +36,10 @@ PROBLEM_JSON = "application/problem+json"
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    # Readiness flags (mirrors the catalog): /readyz returns 503 until startup_complete and again once
+    # shutting_down, so k8s pulls the pod from rotation during boot and graceful drain.
+    app.state.startup_complete = False
+    app.state.shutting_down = False
     # Fail closed if Dapr ingest is on but the app-api-token is unset — the ingest route would otherwise be
     # an unauthenticated forgery path (the audit's 'blanked token' residual). No-op in dev (Dapr off).
     assert_app_token_configured(dapr_enabled=settings.dapr_enabled)
@@ -72,9 +78,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         )
     # Durable ingest (#25) is the Dapr subscription wired below (declarative — the sidecar drives it);
     # there is no consumer task to manage here. The HTTP /api/v1/lineage path stays for external producers.
+    app.state.startup_complete = True
     try:
         yield
     finally:
+        app.state.shutting_down = True
         fga_client = getattr(app.state, "fga", None)
         if fga_client is not None:
             await fga_client.close()
@@ -101,9 +109,47 @@ async def handle_domain_error(request: Request, exc: LanceNamespaceError) -> JSO
     return JSONResponse(status_code=status, content=body, media_type=PROBLEM_JSON)
 
 
+@app.exception_handler(RequestValidationError)
+async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+    """A malformed POST /api/v1/lineage body renders as problem+json, like every other error here
+    (and like the catalog) — not FastAPI's default verbose 422 envelope."""
+    return JSONResponse(
+        status_code=422,
+        content={
+            "type": "https://lance.org/problems/validation",
+            "title": "Validation Error",
+            "status": 422,
+            "errors": [
+                {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"], "type": e["type"]}
+                for e in exc.errors()
+            ],
+        },
+        media_type=PROBLEM_JSON,
+    )
+
+
 @app.get("/livez", tags=["health"])
 async def livez() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.get("/readyz", tags=["health"])
+async def readyz(request: Request) -> JSONResponse:
+    """Gate readiness on the AGE pool — lineage's sole hard dependency — plus the lifecycle flags, so a pod
+    with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of serving 500s."""
+    state = request.app.state
+    if getattr(state, "shutting_down", False):
+        return JSONResponse(status_code=503, content={"status": "shutting_down"})
+    if not getattr(state, "startup_complete", False):
+        return JSONResponse(status_code=503, content={"status": "starting"})
+    try:
+        async with asyncio.timeout(2):
+            async with state.pool.connection() as conn:
+                await conn.execute("SELECT 1")
+    except Exception:  # noqa: BLE001 — any pool/DB failure means not-ready; pull the pod from rotation
+        log.warning("readyz_db_unavailable")
+        return JSONResponse(status_code=503, content={"status": "degraded", "database": "unavailable"})
+    return JSONResponse(status_code=200, content={"status": "ready"})
 
 
 # Demo data peek (reads the real Lance datasets on S3) — mounted only when explicitly enabled.

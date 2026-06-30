@@ -21,120 +21,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/lineage-events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * On Lineage Event
-         * @description Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status.
-         */
-        post: operations["on_lineage_event_lineage_events_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/livez": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Livez */
-        get: operations["livez_livez_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/lineage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ingest Event
-         * @description Ingest one OpenLineage ``RunEvent`` into the lineage graph.
-         *
-         *     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
-         *     (our emitter, Airflow, Spark, dbt, …) configured with ``OPENLINEAGE_URL`` pointed
-         *     here ingests with no glue — the lightweight-Marquez contract.
-         *
-         *     When OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token
-         *     (401 otherwise) and :func:`~lineage.auth.enforce_author` binds the run author to that
-         *     token's subject — a producer cannot self-assert someone else's identity.
-         */
-        post: operations["ingest_event_api_v1_lineage_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/runs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Runs
-         * @description Live run-status board — each run's current state folded onto its ``(:Run)`` node in Apache AGE.
-         *
-         *     **Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset
-         *     reads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board
-         *     can't enumerate dataset names / creators / errors outside the caller's reach. Auth off → pass-through.
-         */
-        get: operations["get_runs_runs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/events": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Events
-         * @description The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
-         *
-         *     **Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is
-         *     on the feed is filtered like the per-dataset reads — an event is shown only if the caller
-         *     ``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the
-         *     audit feed never discloses a table outside the caller's reach. Auth off → pass-through. (#22)
-         */
-        get: operations["get_events_events_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/datasets/{name}/upstream": {
         parameters: {
             query?: never;
@@ -242,32 +128,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/reconcile": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Reconcile
-         * @description Does the lineage graph agree with the **actual Lance file on storage**? (#23)
-         *
-         *     Our moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we
-         *     read the real on-disk version and cross-check it against the version the graph recorded on the
-         *     ``WROTE`` edge — surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim
-         *     with no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the
-         *     Lance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.
-         */
-        get: operations["get_reconcile_datasets__name__reconcile_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/datasets/{name}/graph": {
         parameters: {
             query?: never;
@@ -354,6 +214,149 @@ export interface paths {
          *     datasets visible); ``name``'s own columns are always shown (the route gate authorized it).
          */
         get: operations["get_dataset_columns_datasets__name__columns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Reconcile
+         * @description Does the lineage graph agree with the **actual Lance file on storage**? (#23)
+         *
+         *     Our moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we
+         *     read the real on-disk version and cross-check it against the version the graph recorded on the
+         *     ``WROTE`` edge — surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim
+         *     with no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the
+         *     Lance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.
+         */
+        get: operations["get_reconcile_datasets__name__reconcile_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/runs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Runs
+         * @description Live run-status board — each run's current state folded onto its ``(:Run)`` node in Apache AGE.
+         *
+         *     **Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset
+         *     reads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board
+         *     can't enumerate dataset names / creators / errors outside the caller's reach. Auth off → pass-through.
+         */
+        get: operations["get_runs_runs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Events
+         * @description The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
+         *
+         *     **Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is
+         *     on the feed is filtered like the per-dataset reads — an event is shown only if the caller
+         *     ``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the
+         *     audit feed never discloses a table outside the caller's reach. Auth off → pass-through. (#22)
+         */
+        get: operations["get_events_events_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Event
+         * @description Ingest one OpenLineage ``RunEvent`` into the lineage graph.
+         *
+         *     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
+         *     (our emitter, Airflow, Spark, dbt, …) configured with ``OPENLINEAGE_URL`` pointed
+         *     here ingests with no glue — the lightweight-Marquez contract.
+         *
+         *     When OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token
+         *     (401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that
+         *     token's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`
+         *     requires ``can_write_data`` on every output dataset (a producer can't record provenance for a table
+         *     it can't write). Both are no-ops when auth is off.
+         */
+        post: operations["ingest_event_api_v1_lineage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/livez": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Livez */
+        get: operations["livez_livez_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readyz
+         * @description Gate readiness on the AGE pool — lineage's sole hard dependency — plus the lifecycle flags, so a pod
+         *     with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of serving 500s.
+         */
+        get: operations["readyz_readyz_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -710,10 +713,19 @@ export interface components {
         };
         /**
          * ProducerInfo
-         * @description A run that wrote (or attempted to write) a dataset — who / when / how / version.
+         * @description A run that wrote (or attempted to write) a dataset — who / when / how / version / measured size.
          *
          *     A **failed** run (``event_type`` FAIL/ABORT) appears here too, with no
          *     ``dataset_version`` and an ``error_message`` — it tried but produced no data.
+         *
+         *     ``row_count`` / ``size_bytes`` are the runtime-measured output statistics the compute recorded for
+         *     this write (the rows + on-disk bytes it actually produced, from the standard ``outputStatistics``
+         *     facet); ``None`` when the run was a dummy emit (no compute) or a failure (no data produced).
+         *
+         *     ``quality_passed`` is the validator gate's verdict (all assertions succeeded) and ``quality_assertions``
+         *     the checks it ran (from the standard ``dataQualityAssertions`` facet); ``quality_passed=False`` with a
+         *     real ``dataset_version`` is the auditable record of a batch the gate blocked from promotion. Both are
+         *     ``None`` / empty when the quality gate did not run.
          */
         ProducerInfo: {
             /** Run Id */
@@ -730,6 +742,16 @@ export interface components {
             producer?: string | null;
             /** Error Message */
             error_message?: string | null;
+            /** Row Count */
+            row_count?: number | null;
+            /** Size Bytes */
+            size_bytes?: number | null;
+            /** Quality Passed */
+            quality_passed?: boolean | null;
+            /** Quality Assertions */
+            quality_assertions?: {
+                [key: string]: unknown;
+            }[];
         };
         /**
          * Producers
@@ -895,140 +917,6 @@ export interface operations {
             };
         };
     };
-    on_lineage_event_lineage_events_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": {
-                    [key: string]: unknown;
-                };
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    livez_livez_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-        };
-    };
-    ingest_event_api_v1_lineage_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RunEvent"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_runs_runs_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Runs"];
-                };
-            };
-        };
-    };
-    get_events_events_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Events"];
-                };
-            };
-        };
-    };
     get_upstream_datasets__name__upstream_get: {
         parameters: {
             query?: never;
@@ -1186,37 +1074,6 @@ export interface operations {
             };
         };
     };
-    get_reconcile_datasets__name__reconcile_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ReconcileStatus"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
     get_graph_datasets__name__graph_get: {
         parameters: {
             query?: never;
@@ -1339,6 +1196,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_reconcile_datasets__name__reconcile_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconcileStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_runs_runs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Runs"];
+                };
+            };
+        };
+    };
+    get_events_events_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Events"];
+                };
+            };
+        };
+    };
+    ingest_event_api_v1_lineage_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    livez_livez_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    readyz_readyz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };

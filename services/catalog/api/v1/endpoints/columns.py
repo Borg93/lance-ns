@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
 from lance_namespace import (
     AlterTableAddColumnsRequest,
@@ -80,7 +82,7 @@ def update_field_metadata(
 
 @router.post("/{id}/schema_metadata/update", response_model_exclude_none=True)
 def update_table_schema_metadata(
-    id: str, body: dict, ns: NamespaceDep, settings: SettingsDep
+    id: str, body: dict[str, Any], ns: NamespaceDep, settings: SettingsDep
 ) -> UpdateTableSchemaMetadataResponse:
     # REST-only: the spec sends the metadata map directly, or wrapped as {"metadata": {...}}.
     nested = body.get("metadata")

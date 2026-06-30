@@ -44,9 +44,7 @@ def fetch_dapr_secret(
             return {}
         except Exception as exc:  # noqa: BLE001 — store may not be ready yet; retry
             if attempt == retries:
-                log.warning(
-                    "dapr_secret_fetch_failed", extra={"store": store, "key": key, "error": str(exc)}
-                )
+                log.warning("dapr_secret_fetch_failed", extra={"store": store, "key": key, "error": str(exc)})
                 return {}
             time.sleep(backoff)
     return {}

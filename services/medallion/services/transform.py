@@ -21,6 +21,7 @@ from typing import Any
 from common import fga
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
+from opentelemetry import trace
 
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_denied, record_quality_blocked, record_transition
@@ -29,6 +30,9 @@ from medallion.services.compute import transform_stage
 from medallion.services.quality import Assertion, assert_quality, passed
 
 log = logging.getLogger(__name__)
+# The Lance/S3 write runs in a threadpool and is invisible to every auto-instrumentor — a manual INTERNAL
+# span makes the step that dominates wall-clock time visible inside the cascade's distributed trace.
+tracer = trace.get_tracer(__name__)
 
 _SUCCESS = {"status": "SUCCESS"}
 _RETRY = {"status": "RETRY"}
@@ -82,13 +86,18 @@ async def handle_stage(
         result = None
         assertions: list[Assertion] = []
         if settings.compute_enabled and settings.from_uri and settings.to_uri:
-            result = await run_in_threadpool(
-                transform_stage,
-                settings.from_uri,
-                settings.to_uri,
-                settings.storage_options(),
-                stage=settings.to_namespace,
-            )
+            with tracer.start_as_current_span("medallion.transform") as span:
+                span.set_attribute("lance.medallion.transition", transition)
+                result = await run_in_threadpool(
+                    transform_stage,
+                    settings.from_uri,
+                    settings.to_uri,
+                    settings.storage_options(),
+                    stage=settings.to_namespace,
+                )
+                span.set_attribute("lance.version", result.version)
+                span.set_attribute("lance.row_count", result.row_count)
+                span.set_attribute("lance.size_bytes", result.size_bytes)
             if settings.quality_enabled:
                 assertions = await run_in_threadpool(
                     assert_quality,

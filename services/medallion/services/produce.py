@@ -17,6 +17,7 @@ import uuid
 
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
+from opentelemetry import trace
 
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_transition
@@ -24,6 +25,8 @@ from medallion.schemas.events import build_run_event
 from medallion.services.compute import seed_raw
 
 log = logging.getLogger(__name__)
+# Manual INTERNAL span over the threadpool Lance seed — auto-instrumentation can't see the compute step.
+tracer = trace.get_tracer(__name__)
 
 
 async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, str]:
@@ -38,7 +41,11 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
     if settings.compute_enabled and settings.raw_uri:
         # Fake-Ray ingest: a REAL Lance write of raw_events (blocking IO → threadpool) → the real version
         # + the measured output statistics (rows + on-disk bytes) the emit records as outputStatistics.
-        result = await run_in_threadpool(seed_raw, settings.raw_uri, settings.storage_options())
+        with tracer.start_as_current_span("medallion.produce") as span:
+            result = await run_in_threadpool(seed_raw, settings.raw_uri, settings.storage_options())
+            span.set_attribute("lance.version", result.version)
+            span.set_attribute("lance.row_count", result.row_count)
+            span.set_attribute("lance.size_bytes", result.size_bytes)
     raw_event = build_run_event(
         operation=settings.producer_operation,
         author=settings.producer_author,

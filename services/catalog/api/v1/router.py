@@ -23,6 +23,16 @@ from catalog.api.v1.endpoints import (
 # a no-op when both are disabled, enforced per route when enabled.
 api_router = APIRouter(dependencies=[Depends(authorize)])
 for _module in (
-    namespaces, tables, data, columns, indices, tags, branches, versions, transactions, views, credentials
+    namespaces,
+    tables,
+    data,
+    columns,
+    indices,
+    tags,
+    branches,
+    versions,
+    transactions,
+    views,
+    credentials,
 ):
     api_router.include_router(_module.router)

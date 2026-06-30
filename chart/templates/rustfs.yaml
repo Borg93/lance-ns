@@ -13,6 +13,20 @@ spec:
     app.kubernetes.io/component: rustfs
     app.kubernetes.io/instance: {{ .Release.Name }}
 ---
+{{- if .Values.rustfs.persistence.enabled }}
+# Durable storage for the LAKEHOUSE (Lance data) + GreptimeDB's observability bucket — the months-living
+# data asset. Without this RustFS is emptyDir and every pod roll wipes it. Backed by the cluster's default
+# StorageClass (local-path on kind; a real CSI volume in prod, which is snapshot-able / backup-able).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "lance.rustfsHost" . }}-data
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources: { requests: { storage: {{ .Values.rustfs.storage }} } }
+---
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -20,6 +34,9 @@ metadata:
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
   replicas: 1
+  {{- if .Values.rustfs.persistence.enabled }}
+  strategy: { type: Recreate } # RWO PVC: the old pod must release the volume before the new one mounts it
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: rustfs
@@ -62,7 +79,11 @@ spec:
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
       volumes:
         - name: data
-          emptyDir: {}
+          {{- if .Values.rustfs.persistence.enabled }}
+          persistentVolumeClaim: { claimName: {{ include "lance.rustfsHost" . }}-data }
+          {{- else }}
+          emptyDir: {} # ephemeral — throwaway CI only; the lakehouse wipes on every pod roll
+          {{- end }}
 ---
 apiVersion: batch/v1
 kind: Job

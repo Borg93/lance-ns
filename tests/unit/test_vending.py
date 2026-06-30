@@ -106,3 +106,20 @@ def test_make_vendor_selection() -> None:
 def test_make_vendor_sts_requires_arn() -> None:
     with pytest.raises(ValueError):
         make_vendor("sts")
+
+
+def test_sts_vendor_against_a_real_assume_role_implementation() -> None:
+    """End-to-end against moto's STS (a real AssumeRole impl) — proves the default boto3 path vends valid
+    scoped creds, not just the injected-fake path. (RustFS's STS can't AssumeRole — it needs WebIdentity —
+    so a compliant STS like moto/MinIO/AWS/Ceph is what exercises the live boto3 client.)"""
+    moto = pytest.importorskip("moto")
+    with moto.mock_aws():
+        vendor = StsVendor(
+            role_arn="arn:aws:iam::123456789012:role/lance-vend", region="us-east-1", ttl_seconds=900
+        )
+        creds = vendor.vend(table_location="s3://lance-catalog/db$users", tier="read")
+    assert creds is not None
+    opts = creds.storage_options
+    assert opts["access_key_id"] and opts["secret_access_key"] and opts["session_token"]
+    assert opts["region"] == "us-east-1"
+    assert creds.expires_at_millis is not None

@@ -161,9 +161,12 @@ def _expiry_millis(expiration: object, ttl_seconds: int) -> int:
 class StsVendor:
     """STS ``AssumeRole`` + inline session policy → short-TTL, per-table creds.
 
-    The gold-standard plug for S3-family stores (AWS / MinIO / Ceph).
-    ``assume_role`` defaults to a lazily-built boto3 STS client's ``assume_role``
-    and is injectable for tests.
+    The gold-standard plug for S3-family stores that implement the plain ``AssumeRole`` flow (AWS / MinIO /
+    Ceph RGW / moto). NOTE: RustFS (this project's default store) does NOT — its STS verifies SigV4 as the
+    ``s3`` service and rejects plain ``AssumeRole`` with ``InvalidRequest``; it requires
+    ``AssumeRoleWithWebIdentity`` (an OIDC-token flow, a follow-up). So the chart defaults to ``mode_b`` on
+    RustFS. ``assume_role`` defaults to a lazily-built boto3 STS client's ``assume_role`` and is injectable
+    for tests.
     """
 
     mode: VendingMode = "sts"

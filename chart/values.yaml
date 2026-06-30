@@ -13,14 +13,18 @@ auth:
   enabled: false
 
 # --- Data-plane credential vending (Track B). How a client gets storage_options for DIRECT object I/O. ----
-# mode_b (default) = nothing is vended; clients use the catalog's server-mediated Arrow-IPC data endpoints.
-# sts = the catalog calls AssumeRole on the RustFS STS endpoint with a per-table session policy → short-TTL,
-# read/write-scoped creds (POST /v1/table/<id>/credentials?tier=read|write). static = per-bucket keys.
+# mode_b (default) = nothing is vended; clients use the catalog's server-mediated Arrow-IPC data endpoints
+# (POST /v1/table/<id>/credentials returns mode=server_mediated). sts = AssumeRole + a per-table session
+# policy → short-TTL, read/write-scoped creds (tier=read|write). static = per-bucket keys.
+#
+# NOTE on the default: mode_b, because this chart's object store is RustFS, whose STS does NOT implement the
+# plain AssumeRole flow (verified: it signs STS as the `s3` service, then returns InvalidRequest on
+# AssumeRole — it requires AssumeRoleWithWebIdentity, the OIDC-token flow, which is a follow-up). The `sts`
+# vendor IS complete and proven against a compliant STS (AWS / MinIO / Ceph RGW / moto) — point a deployment
+# at one of those (LANCE_S3_STS_ENDPOINT) to use it. Leaving mode=sts against RustFS makes the vend 500.
 vending:
-  mode: mode_b # mode_b | static | sts
+  mode: mode_b # mode_b | static | sts  (sts needs a compliant STS backend — not RustFS; see NOTE above)
   ttlSeconds: 900
-  # RustFS (MinIO-compatible STS) authorizes by the CALLER's creds + the inline session policy; the role ARN
-  # is required by the AssumeRole API shape but not resolved to a configured role. Override per deployment.
   assumeRoleArn: "arn:aws:iam::000000000000:role/lance-vend"
 
 # --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------

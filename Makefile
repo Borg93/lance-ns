@@ -15,11 +15,19 @@ export KUBECONFIG ?= $(HOME)/.kube/config
 
 CLUSTER     := lance
 RELEASE     := lance-ns
-ARCH        := $(shell case $$(uname -m) in x86_64) echo amd64;; aarch64|arm64) echo arm64;; esac)
+# Host OS/arch detection so a fresh clone bootstraps on Linux or macOS, x86_64 or arm64. Each tool names
+# its release assets differently (k9s Title-cases the OS; tilt uses mac/x86_64), hence the derived variants.
+# Done with sed/tr (NOT a shell `case`): a `)` inside $(shell …) prematurely closes make's paren-match.
+OS          := $(shell uname -s | tr '[:upper:]' '[:lower:]')
+OS_TITLE    := $(shell uname -s)
+ARCH        := $(shell uname -m | sed -e 's/x86_64/amd64/' -e 's/aarch64/arm64/')
+TILT_OS     := $(shell uname -s | tr '[:upper:]' '[:lower:]' | sed 's/darwin/mac/')
+TILT_ARCH   := $(shell uname -m | sed 's/aarch64/arm64/')
 KIND_V      := v0.25.0
 KUBECTL_V   := v1.31.3
 K9S_V       := v0.32.7
 TILT_V      := 0.33.21
+FGA_V       := 0.6.4
 CATALOG_IMG := lance-rest-catalog:dev
 WEB_IMG     := lance-lineage-web:dev
 MEDALLION_PORT := 8000
@@ -36,14 +44,18 @@ BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_RE
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
-bootstrap: ## Download kind/kubectl/k9s/tilt into .localbin (idempotent) — helm + docker must be on PATH
+bootstrap: ## Download kind/kubectl/k9s/tilt/fga into .localbin (idempotent, OS+arch-aware) — helm + docker on PATH
 	@mkdir -p $(LOCALBIN)
-	@test -x $(LOCALBIN)/kind    || { echo "↓ kind";    curl -fsSL -o $(LOCALBIN)/kind "https://kind.sigs.k8s.io/dl/$(KIND_V)/kind-linux-$(ARCH)" && chmod +x $(LOCALBIN)/kind; }
-	@test -x $(LOCALBIN)/kubectl || { echo "↓ kubectl"; curl -fsSL -o $(LOCALBIN)/kubectl "https://dl.k8s.io/release/$(KUBECTL_V)/bin/linux/$(ARCH)/kubectl" && chmod +x $(LOCALBIN)/kubectl; }
-	@test -x $(LOCALBIN)/k9s     || { echo "↓ k9s";     curl -fsSL "https://github.com/derailed/k9s/releases/download/$(K9S_V)/k9s_Linux_$(ARCH).tar.gz" | tar xz -C $(LOCALBIN) k9s; }
-	@test -x $(LOCALBIN)/tilt    || { echo "↓ tilt";    curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v$(TILT_V)/tilt.$(TILT_V).linux.x86_64.tar.gz" | tar xz -C $(LOCALBIN) tilt; }
-	@command -v helm >/dev/null || { echo "!! helm not on PATH — install https://helm.sh/docs/intro/install/"; exit 1; }
-	@echo "✓ toolchain ready in .localbin"
+	@test -n "$(ARCH)"     || { echo "!! unsupported CPU '$$(uname -m)' — need x86_64 or arm64"; exit 1; }
+	@test -n "$(OS_TITLE)" || { echo "!! unsupported OS '$$(uname -s)' — need Linux or Darwin"; exit 1; }
+	@test -x $(LOCALBIN)/kind    || { echo "↓ kind";    curl -fsSL -o $(LOCALBIN)/kind "https://kind.sigs.k8s.io/dl/$(KIND_V)/kind-$(OS)-$(ARCH)" && chmod +x $(LOCALBIN)/kind; }
+	@test -x $(LOCALBIN)/kubectl || { echo "↓ kubectl"; curl -fsSL -o $(LOCALBIN)/kubectl "https://dl.k8s.io/release/$(KUBECTL_V)/bin/$(OS)/$(ARCH)/kubectl" && chmod +x $(LOCALBIN)/kubectl; }
+	@test -x $(LOCALBIN)/k9s     || { echo "↓ k9s";     curl -fsSL "https://github.com/derailed/k9s/releases/download/$(K9S_V)/k9s_$(OS_TITLE)_$(ARCH).tar.gz" | tar xz -C $(LOCALBIN) k9s; }
+	@test -x $(LOCALBIN)/tilt    || { echo "↓ tilt";    curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v$(TILT_V)/tilt.$(TILT_V).$(TILT_OS).$(TILT_ARCH).tar.gz" | tar xz -C $(LOCALBIN) tilt; }
+	@test -x $(LOCALBIN)/fga     || { echo "↓ fga";     curl -fsSL "https://github.com/openfga/cli/releases/download/v$(FGA_V)/fga_$(FGA_V)_$(OS)_$(ARCH).tar.gz" | tar xz -C $(LOCALBIN) fga; }
+	@command -v docker >/dev/null || { echo "!! docker not on PATH — install https://docs.docker.com/get-docker/"; exit 1; }
+	@command -v helm   >/dev/null || { echo "!! helm not on PATH — install https://helm.sh/docs/intro/install/"; exit 1; }
+	@echo "✓ toolchain ready in .localbin ($(OS)/$(ARCH))"
 
 kind-up: bootstrap ## Create the kind cluster (idempotent)
 	@kind get clusters 2>/dev/null | grep -qx $(CLUSTER) || kind create cluster --config deploy/kind/kind-config.yaml --wait 150s

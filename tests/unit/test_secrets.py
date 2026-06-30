@@ -5,7 +5,7 @@ behaviour, and that the AGE DB password is spliced into the connection string fr
 from __future__ import annotations
 
 import pytest
-from lineage.config import LineageSettings, _with_db_password, apply_dapr_secrets
+from lineage.core.config import LineageSettings, _with_db_password, apply_dapr_secrets
 
 
 def test_with_db_password_splices_userinfo() -> None:

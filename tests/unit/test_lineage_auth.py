@@ -25,10 +25,9 @@ from fastapi import Request
 from fastapi.routing import APIRoute
 from fastapi.security import HTTPAuthorizationCredentials
 from lance_namespace import PermissionDeniedError, ServiceUnavailableError, UnauthenticatedError
-from lineage import auth
-from lineage.config import LineageSettings
+from lineage.api import fga_deps, security
+from lineage.core.config import LineageSettings
 from lineage.models import RunEvent
-from lineage.repository import LineageRepository
 from lineage.schemas import (
     ColumnEdge,
     ColumnGraph,
@@ -43,6 +42,7 @@ from lineage.schemas import (
     RunStatus,
     SchemaField,
 )
+from lineage.services.repository import LineageRepository
 from openfga_sdk import OpenFgaClient
 from pydantic import ValidationError
 
@@ -107,26 +107,26 @@ def test_full_auth_config_is_valid() -> None:
 
 
 def test_authenticate_disabled_returns_none() -> None:
-    assert auth.authenticate(_request(), _settings(), None) is None
+    assert security.authenticate(_request(), _settings(), None) is None
 
 
 def test_authenticate_enabled_missing_token_raises() -> None:
     settings = _settings(oidc_enabled=True, oidc_issuer=_ISSUER, oidc_audience="lance")
     verifier = SimpleNamespace(verify=lambda _t: _token())
     with pytest.raises(UnauthenticatedError):
-        auth.authenticate(_request(oidc=verifier), settings, None)
+        security.authenticate(_request(oidc=verifier), settings, None)
 
 
 def test_authenticate_enabled_unwired_verifier_fails_closed() -> None:
     settings = _settings(oidc_enabled=True, oidc_issuer=_ISSUER, oidc_audience="lance")
     with pytest.raises(ServiceUnavailableError):
-        auth.authenticate(_request(), settings, _creds())
+        security.authenticate(_request(), settings, _creds())
 
 
 def test_authenticate_enabled_verifies_token() -> None:
     settings = _settings(oidc_enabled=True, oidc_issuer=_ISSUER, oidc_audience="lance")
     verifier = SimpleNamespace(verify=lambda _t: _token("dee"))
-    token = auth.authenticate(_request(oidc=verifier), settings, _creds())
+    token = security.authenticate(_request(oidc=verifier), settings, _creds())
     assert token is not None and token.sub == "dee"
 
 
@@ -137,18 +137,18 @@ def test_authenticate_enabled_verifies_token() -> None:
 
 def test_gate_disabled_allows() -> None:
     # FGA off → no check, no raise (dev/test default, like the catalog).
-    asyncio.run(auth.require_metadata_access("a$b", _request(), _settings(), None))
+    asyncio.run(fga_deps.require_metadata_access("a$b", _request(), _settings(), None))
 
 
 def test_gate_unwired_client_fails_closed() -> None:
     with pytest.raises(ServiceUnavailableError):
-        asyncio.run(auth.require_metadata_access("a$b", _request(), _settings(**_FULL_AUTH), _token()))
+        asyncio.run(fga_deps.require_metadata_access("a$b", _request(), _settings(**_FULL_AUTH), _token()))
 
 
 def test_gate_unauthenticated_raises() -> None:
     with pytest.raises(UnauthenticatedError):
         asyncio.run(
-            auth.require_metadata_access("a$b", _request(fga=object()), _settings(**_FULL_AUTH), None)
+            fga_deps.require_metadata_access("a$b", _request(fga=object()), _settings(**_FULL_AUTH), None)
         )
 
 
@@ -163,7 +163,7 @@ def test_gate_denies_without_permission(monkeypatch: pytest.MonkeyPatch) -> None
     client = cast(OpenFgaClient, object())
     with pytest.raises(PermissionDeniedError):
         asyncio.run(
-            auth.require_metadata_access("a$b", _request(fga=client), _settings(**_FULL_AUTH), _token())
+            fga_deps.require_metadata_access("a$b", _request(fga=client), _settings(**_FULL_AUTH), _token())
         )
     # The denial must be on the right user/object/relation, not just "some" denial.
     assert captured == {"user": "alice", "relation": "can_get_metadata", "obj": "table:a$b"}
@@ -179,7 +179,7 @@ def test_gate_allows_with_permission(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fga, "check", _allow)
     client = cast(OpenFgaClient, object())
     asyncio.run(
-        auth.require_metadata_access("a$b", _request(fga=client), _settings(**_FULL_AUTH), _token("dee"))
+        fga_deps.require_metadata_access("a$b", _request(fga=client), _settings(**_FULL_AUTH), _token("dee"))
     )
     # The dataset name is gated as table:<name> with the catalog's metadata-read relation.
     assert captured == {"user": "dee", "relation": "can_get_metadata", "obj": "table:a$b"}
@@ -203,19 +203,35 @@ def _event(claimed_author: str) -> RunEvent:
 
 def test_enforce_author_overrides_body_claim() -> None:
     event = _event(claimed_author="attacker")
-    auth.enforce_author(event, _token("real-user"))
+    fga_deps.enforce_author(event, _token("real-user"))
     assert event.author == "real-user"  # body claim is overwritten by the verified subject
 
 
 def test_enforce_author_keeps_body_when_unauthenticated() -> None:
     event = _event(claimed_author="claimed")
-    auth.enforce_author(event, None)  # OIDC off (dev) → body author preserved
+    fga_deps.enforce_author(event, None)  # OIDC off (dev) → body author preserved
     assert event.author == "claimed"
 
 
 # --------------------------------------------------------------------------- #
 # Route wiring — the gate is actually attached to the endpoints
 # --------------------------------------------------------------------------- #
+
+
+def _api_routes(app: Any) -> list[APIRoute]:
+    """Flatten the app's routes, resolving starlette 1.3's lazy ``_IncludedRouter`` wrappers — the lineage
+    routes now live under ``include_router``, not directly on ``app.routes`` as when main.py was flat."""
+    out: list[APIRoute] = []
+    stack = list(app.routes)
+    while stack:
+        route = stack.pop()
+        if isinstance(route, APIRoute):
+            out.append(route)
+        elif hasattr(route, "original_router"):
+            stack.extend(route.original_router.routes)
+        elif hasattr(route, "routes"):
+            stack.extend(route.routes)
+    return out
 
 
 def test_read_routes_wire_the_metadata_gate() -> None:
@@ -234,10 +250,10 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         "/datasets/{name}/columns",
     }
     seen = set()
-    for route in app.routes:
-        if isinstance(route, APIRoute) and route.path in gated:
+    for route in _api_routes(app):
+        if route.path in gated:
             calls = [d.call for d in route.dependant.dependencies]
-            assert auth.require_metadata_access in calls, route.path
+            assert fga_deps.require_metadata_access in calls, route.path
             seen.add(route.path)
     assert seen == gated  # every per-dataset read is present and gated
 
@@ -245,9 +261,9 @@ def test_read_routes_wire_the_metadata_gate() -> None:
 def test_ingest_route_requires_authentication() -> None:
     from lineage.main import app
 
-    ingest = next(r for r in app.routes if isinstance(r, APIRoute) and r.path == "/api/v1/lineage")
+    ingest = next(r for r in _api_routes(app) if r.path == "/api/v1/lineage")
     calls = [d.call for d in ingest.dependant.dependencies]
-    assert auth.authenticate in calls
+    assert security.authenticate in calls
 
 
 # --------------------------------------------------------------------------- #
@@ -256,12 +272,12 @@ def test_ingest_route_requires_authentication() -> None:
 
 
 def test_filter_passthrough_when_fga_off() -> None:
-    flt = auth.DatasetFilter(_request(), _settings(), None)
+    flt = fga_deps.DatasetFilter(_request(), _settings(), None)
     assert asyncio.run(flt.visible(["a", "b"])) == {"a", "b"}
 
 
 def test_filter_empty_names_skips_check() -> None:
-    flt = auth.DatasetFilter(_request(fga=object()), _settings(**_FULL_AUTH), _token())
+    flt = fga_deps.DatasetFilter(_request(fga=object()), _settings(**_FULL_AUTH), _token())
     assert asyncio.run(flt.visible([])) == set()
 
 
@@ -272,7 +288,9 @@ async def _batch_allow_a(_client: object, *, objects: list[str], **_kw: object) 
 
 def test_filter_drops_unauthorized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), _settings(**_FULL_AUTH), _token())
+    flt = fga_deps.DatasetFilter(
+        _request(fga=cast(OpenFgaClient, object())), _settings(**_FULL_AUTH), _token()
+    )
     assert asyncio.run(flt.visible(["a", "b"])) == {"a"}
 
 
@@ -329,17 +347,19 @@ class _FakeRepo:
 
 
 def test_get_upstream_drops_unauthorized_related(monkeypatch: pytest.MonkeyPatch) -> None:
-    from lineage.main import get_upstream
+    from lineage.api.v1.endpoints.datasets import get_upstream
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), _settings(**_FULL_AUTH), _token())
+    flt = fga_deps.DatasetFilter(
+        _request(fga=cast(OpenFgaClient, object())), _settings(**_FULL_AUTH), _token()
+    )
     result = asyncio.run(get_upstream("root", cast(LineageRepository, _FakeRepo()), flt))
     assert [ref.name for ref in result.related] == ["a"]  # "b" is filtered out
 
 
 def test_get_events_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     # #22: the durable events feed is governed — drop events referencing a dataset the caller can't see.
-    from lineage.main import get_events
+    from lineage.api.v1.endpoints.runs import get_events
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
     settings = _settings(**_FULL_AUTH)
@@ -348,7 +368,7 @@ def test_get_events_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch)
         EventRecord(seq=2, outputs=["a"], inputs=[], event={}),
         EventRecord(seq=1, outputs=["b"], inputs=[], event={}),  # "b" not visible → dropped
     ]
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
     assert [e.outputs for e in result.events] == [["a"]]  # the "b" event is filtered out
 
@@ -356,13 +376,13 @@ def test_get_events_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch)
 def test_get_events_hides_dataset_less_events_when_governed(monkeypatch: pytest.MonkeyPatch) -> None:
     # #22 audit: a dataset-less event (empty inputs+outputs) must NOT pass the gate vacuously when FGA is
     # on — it would otherwise leak the run/author/full event JSON to a caller with zero grants.
-    from lineage.main import get_events
+    from lineage.api.v1.endpoints.runs import get_events
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)
     settings = _settings(**_FULL_AUTH)
     repo = _FakeRepo()
     repo.events = [EventRecord(seq=1, outputs=[], inputs=[], event={"run": {"runId": "secret"}})]
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
     assert result.events == []  # dataset-less event is hidden under governance
 
@@ -370,26 +390,26 @@ def test_get_events_hides_dataset_less_events_when_governed(monkeypatch: pytest.
 def test_get_column_upstream_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     # #24: column provenance is governed — a related column in a dataset the caller can't see is dropped
     # (a column has no ACL of its own; it inherits its owning table's visibility).
-    from lineage.main import get_column_upstream
+    from lineage.api.v1.endpoints.columns import get_column_upstream
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
     settings = _settings(**_FULL_AUTH)
     repo = _FakeRepo()
     repo.col_related = [ColumnRef(dataset="a", field="x"), ColumnRef(dataset="b", field="y")]
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_column_upstream("a", "root", cast(LineageRepository, repo), flt, settings))
     assert [(r.dataset, r.field) for r in result.related] == [("a", "x")]  # b's column is hidden
 
 
 def test_get_column_downstream_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     # #24: column IMPACT is governed identically to provenance — a related column in a hidden dataset drops.
-    from lineage.main import get_column_downstream
+    from lineage.api.v1.endpoints.columns import get_column_downstream
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
     settings = _settings(**_FULL_AUTH)
     repo = _FakeRepo()
     repo.col_related = [ColumnRef(dataset="a", field="x"), ColumnRef(dataset="b", field="y")]
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_column_downstream("a", "root", cast(LineageRepository, repo), flt, settings))
     assert [(r.dataset, r.field) for r in result.related] == [("a", "x")]  # b's column is hidden
 
@@ -400,7 +420,7 @@ def test_get_dataset_columns_drops_edges_touching_hidden_datasets(
     # #24: the column-graph view drops nodes/edges touching a dataset the caller can't see. An edge needs
     # BOTH endpoints visible — a 3-edge fixture proves selectivity in BOTH leak directions (source-hidden
     # AND target-hidden), not just one — same transitive-disclosure guarantee as /graph, at column res.
-    from lineage.main import get_dataset_columns
+    from lineage.api.v1.endpoints.columns import get_dataset_columns
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
     settings = _settings(**_FULL_AUTH)
@@ -422,7 +442,7 @@ def test_get_dataset_columns_drops_edges_touching_hidden_datasets(
             ),  # target hidden
         ],
     )
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_dataset_columns("a", cast(LineageRepository, repo), flt))
     assert [n.dataset for n in result.columns] == ["a", "a"]  # b's column dropped, a's two kept
     # only the both-endpoints-visible edge survives; both leak directions are dropped.
@@ -432,14 +452,14 @@ def test_get_dataset_columns_drops_edges_touching_hidden_datasets(
 def test_get_reconcile_flags_storage_drift(monkeypatch: pytest.MonkeyPatch) -> None:
     # #23: the endpoint wires graph version + on-disk version → drift status. Here the graph says v1 but
     # storage is at v2 (a write that bypassed lineage) → storage_ahead, not in sync.
-    from lineage.main import get_reconcile
+    from lineage.api.v1.endpoints.reconcile import get_reconcile
     from lineage.schemas import ReconcileState
 
     settings = _settings()  # gating is route-level; the body just compares the two versions
     repo = _FakeRepo()
     repo.write_version = 1
     repo.uri = "s3://lakehouse/silver/features"
-    monkeypatch.setattr("lineage.main.read_storage_version", lambda _uri, _opts: 2)
+    monkeypatch.setattr("lineage.api.v1.endpoints.reconcile.read_storage_version", lambda _uri, _opts: 2)
     result = asyncio.run(get_reconcile("silver$features", cast(LineageRepository, repo), settings))
     assert result.status is ReconcileState.STORAGE_AHEAD
     assert result.in_sync is False
@@ -449,13 +469,13 @@ def test_get_reconcile_flags_storage_drift(monkeypatch: pytest.MonkeyPatch) -> N
 def test_get_reconcile_skips_storage_read_without_uri(monkeypatch: pytest.MonkeyPatch) -> None:
     # No recorded source_uri → we can't read storage, so storage_version is None (graph claims a write
     # with nothing readable behind it) without ever touching the object store.
-    from lineage.main import get_reconcile
+    from lineage.api.v1.endpoints.reconcile import get_reconcile
     from lineage.schemas import ReconcileState
 
     def _boom(_uri: str, _opts: dict[str, str]) -> int:
         raise AssertionError("storage must not be read when no source_uri is recorded")
 
-    monkeypatch.setattr("lineage.main.read_storage_version", _boom)
+    monkeypatch.setattr("lineage.api.v1.endpoints.reconcile.read_storage_version", _boom)
     repo = _FakeRepo()
     repo.write_version = 3
     repo.uri = None
@@ -466,7 +486,7 @@ def test_get_reconcile_skips_storage_read_without_uri(monkeypatch: pytest.Monkey
 
 def test_get_schema_returns_persisted_fields() -> None:
     # #24: the gated /schema endpoint returns the per-version column schema captured at ingest.
-    from lineage.main import get_schema
+    from lineage.api.v1.endpoints.datasets import get_schema
 
     result = asyncio.run(get_schema("silver$features", cast(LineageRepository, _FakeRepo()), version=2))
     assert result.dataset == "silver$features"
@@ -476,19 +496,19 @@ def test_get_schema_returns_persisted_fields() -> None:
 
 def test_get_runs_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
     # #22 audit: /runs is governed like /events — a run is shown only if its output datasets are visible.
-    from lineage.main import get_runs
+    from lineage.api.v1.endpoints.runs import get_runs
 
     monkeypatch.setattr(fga, "batch_check", _batch_allow_a)
     settings = _settings(**_FULL_AUTH)
     repo = _FakeRepo()
     repo.runs = [RunStatus(run_id="r-a", outputs=["a"]), RunStatus(run_id="r-b", outputs=["b"])]
-    flt = auth.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_runs(cast(LineageRepository, repo), flt, settings))
     assert [r.run_id for r in result.runs] == ["r-a"]  # the run that wrote unseen "b" is dropped
 
 
 def test_ingest_handler_binds_verified_author() -> None:
-    from lineage.main import ingest_event
+    from lineage.api.v1.endpoints.ingest import ingest_event
 
     repo = _FakeRepo()
     event = _event(claimed_author="attacker")
@@ -497,7 +517,7 @@ def test_ingest_handler_binds_verified_author() -> None:
 
 
 def test_ingest_handler_keeps_body_author_when_oidc_off() -> None:
-    from lineage.main import ingest_event
+    from lineage.api.v1.endpoints.ingest import ingest_event
 
     repo = _FakeRepo()
     event = _event(claimed_author="claimed")

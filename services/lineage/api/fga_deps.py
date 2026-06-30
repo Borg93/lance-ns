@@ -1,13 +1,12 @@
-"""In-service authn / authz for the lineage read + ingest endpoints.
+"""In-service authz for the lineage read + ingest endpoints.
 
 The lineage service owns the audit graph, so it must protect it itself (in-service, not
-via a gateway). It mirrors the catalog's two-layer guard
-(``app/api/security.py`` + ``app/api/fga_deps.py``) and **reuses the catalog's core** —
-:class:`~app.core.oidc.OIDCVerifier` and :func:`app.core.fga.check` / ``batch_check`` — so
-token verification and the OpenFGA check have one source of truth. The thin FastAPI authn +
-filter dependencies are re-derived here because they bind to ``LineageSettings`` rather than
-the catalog's ``Settings``. (Shared *library* code; the service makes no runtime call to the
-catalog — it talks only to the IdP and the shared OpenFGA store, read-only.)
+via a gateway). It mirrors the catalog's authz guard (``app/api/fga_deps.py``) and **reuses
+the catalog's core** — :func:`common.fga.check` / ``batch_check`` — so the OpenFGA check has
+one source of truth. The thin FastAPI authz + filter dependencies are re-derived here
+because they bind to ``LineageSettings`` rather than the catalog's ``Settings``. (Shared
+*library* code; the service makes no runtime call to the catalog — it talks only to the IdP
+and the shared OpenFGA store, read-only.)
 
 Three holes this closes (audit ``w8u4rc2tg``):
 
@@ -15,58 +14,37 @@ Three holes this closes (audit ``w8u4rc2tg``):
   estate. Each is now gated on OpenFGA ``can_get_metadata`` of ``table:<dataset>`` — the
   same permission the catalog requires to ``describe`` that table.
 * **Transitive disclosure.** A neighbor/graph read also returns *related* dataset names, so
-  :class:`DatasetFilter` batch-checks each and drops the ones the caller may not see —
-  mirroring the catalog's ``list_objects``-filtered enumerations.
+  :class:`DatasetFilter` (and :func:`governed`) batch-check each and drop the ones the caller
+  may not see — mirroring the catalog's ``list_objects``-filtered enumerations.
 * **Ingest** was unauthenticated and the run ``author`` was a producer-supplied facet, so
-  provenance was forgeable. Ingest now requires a verified token and the author is taken
-  from that token (:func:`enforce_author`) — the client-claimed facet is overwritten.
+  provenance was forgeable. The author is taken from the verified token
+  (:func:`enforce_author`) — the client-claimed facet is overwritten.
 
-Default OFF (``LINEAGE_OIDC_ENABLED`` / ``LINEAGE_FGA_ENABLED``), exactly like the catalog;
-production enables both. Fail-closed when enabled-but-unwired (503, never silent allow).
+Default OFF (``LINEAGE_FGA_ENABLED``), exactly like the catalog; production enables it.
+Fail-closed when enabled-but-unwired (503, never silent allow).
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Annotated
+from collections.abc import Callable
+from typing import Annotated, Any
 
 from common import fga
-from common.oidc import IDToken, OIDCVerifier
+from common.oidc import IDToken
 from fastapi import Depends, Request
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from lance_namespace import (
     PermissionDeniedError,
     ServiceUnavailableError,
     UnauthenticatedError,
 )
 
-from lineage.config import LineageSettings, get_settings
+from lineage.api.dependencies import SettingsDep
+from lineage.api.security import CurrentToken
+from lineage.core.config import LineageSettings
 from lineage.models import RunEvent
 
 log = logging.getLogger(__name__)
-
-SettingsDep = Annotated[LineageSettings, Depends(get_settings)]
-
-# auto_error=False: we raise UnauthenticatedError ourselves so 401s render as problem+json.
-_bearer = HTTPBearer(auto_error=False, description="OIDC bearer token")
-_CredentialsDep = Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]
-
-
-def authenticate(request: Request, settings: SettingsDep, credentials: _CredentialsDep) -> IDToken | None:
-    """Authenticate the request, returning the parsed token (or ``None`` when OIDC is off)."""
-    if not settings.oidc_enabled:
-        return None
-    verifier: OIDCVerifier | None = getattr(request.app.state, "oidc", None)
-    if verifier is None:
-        # Enabled but no verifier wired (startup/discovery skew): fail closed, never open.
-        raise ServiceUnavailableError("Authentication is enabled but unavailable")
-    if credentials is None or not credentials.credentials:
-        raise UnauthenticatedError("Missing bearer token")
-    return verifier.verify(credentials.credentials)
-
-
-#: Token of the authenticated caller (``None`` when OIDC is disabled).
-CurrentToken = Annotated[IDToken | None, Depends(authenticate)]
 
 
 async def require_metadata_access(
@@ -144,3 +122,25 @@ def get_dataset_filter(request: Request, settings: SettingsDep, token: CurrentTo
 
 
 FilterDep = Annotated[DatasetFilter, Depends(get_dataset_filter)]
+
+
+async def governed(
+    datasets: DatasetFilter,
+    fga_enabled: bool,
+    items: list[Any],
+    refs: Callable[[Any], set[str]],
+) -> list[Any]:
+    """Drop items the caller may not see: any referencing a non-visible dataset, and — when FGA is on —
+    any dataset-less item (it would otherwise pass vacuously, leaking run/author/error to a caller with
+    no grants). Auth off → ``visible`` is pass-through, so nothing is dropped. (#22 audit)
+    """
+    referenced = {name for item in items for name in refs(item)}
+    visible = await datasets.visible(list(referenced))
+    kept: list[Any] = []
+    for item in items:
+        names = refs(item)
+        if fga_enabled and not names:
+            continue
+        if names <= visible:
+            kept.append(item)
+    return kept

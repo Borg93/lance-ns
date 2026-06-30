@@ -17,7 +17,7 @@ from typing import Any
 import lance
 from fastapi import APIRouter
 
-from lineage.config import get_settings, storage_options
+from lineage.core.config import get_settings, storage_options
 from lineage.schemas import DemoDataset, DemoDatasets, DemoField, DemoVersion
 
 log = logging.getLogger(__name__)

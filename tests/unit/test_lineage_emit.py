@@ -25,7 +25,7 @@ from catalog.core.lineage_emit import (
     make_emitter,
 )
 from lineage.models import RunEvent
-from lineage.repository import _CREATE_TABLE_OP
+from lineage.services.repository import _CREATE_TABLE_OP
 
 
 def test_build_create_event_shape() -> None:

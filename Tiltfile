@@ -20,18 +20,17 @@ helm_repo('openfga-repo', 'https://openfga.github.io/helm-charts', labels=['infr
 docker_build(
     'lance-rest-catalog', '.',
     dockerfile='.docker/rest-catalog.dockerfile',
-    only=['.docker', 'pyproject.toml', 'uv.lock', 'app', 'lineage', 'medallion', 'compaction'],
+    only=['.docker', 'pyproject.toml', 'uv.lock', 'services'],
     live_update=[
-        sync('app', '/app/app'),
-        sync('lineage', '/app/lineage'),
-        sync('medallion', '/app/medallion'),
-        sync('compaction', '/app/compaction'),
+        # All services + common live under services/; the image copies them to /srv/services. Sync the
+        # whole tree so an edit to any service hot-reloads (uvicorn --reload) without a full rebuild.
+        sync('services', '/srv/services'),
     ],
 )
 docker_build(
     'lance-lineage-web', '.',
     dockerfile='.docker/web.dockerfile',
-    only=['.docker', 'web'],
+    only=['.docker', 'frontend'],
 )
 
 # Deploy the umbrella chart via real helm (post-install hooks + subchart CRDs honored — unlike Tilt's

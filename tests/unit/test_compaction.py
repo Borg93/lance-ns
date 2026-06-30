@@ -9,8 +9,8 @@ from __future__ import annotations
 from typing import Any, cast
 
 import pyarrow.fs as pafs
-from compaction.optimize import DatasetResult, discover_dataset_uris
-from compaction.service import summarize
+from compaction.services.optimize import DatasetResult, discover_dataset_uris
+from compaction.services.sweep import summarize
 
 
 class _FakeFS:

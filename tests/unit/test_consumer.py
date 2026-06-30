@@ -10,8 +10,8 @@ from __future__ import annotations
 import asyncio
 from typing import Any, cast
 
-from lineage.consumer import feed_fields, handle_cloud_event
 from lineage.models import RunEvent
+from lineage.services.consumer import feed_fields, handle_cloud_event
 
 _VALID = {
     "eventType": "COMPLETE",

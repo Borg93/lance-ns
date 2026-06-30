@@ -4,7 +4,7 @@
 # --- App images (the catalog + lineage share one image, different uvicorn entrypoint). Per-image
 # repository/tag so Tilt can inject each built image independently (image_keys). ------------------
 image:
-  catalog: { repository: lance-rest-catalog, tag: dev } # catalog (app.main:app) + lineage (lineage.main:app)
+  catalog: { repository: lance-rest-catalog, tag: dev } # catalog (catalog.main:app) + lineage (lineage.main:app)
   web: { repository: lance-lineage-web, tag: dev }
   pullPolicy: IfNotPresent
 
@@ -205,7 +205,7 @@ perses:
 # --- The three app services ------------------------------------------------------------------------
 services:
   catalog:
-    module: app.main:app
+    module: catalog.main:app
     port: 2333
     daprAppId: catalog
   lineage:

@@ -4,9 +4,9 @@
 # ── build: install deps + compile the SvelteKit node build ─────────────────────
 FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS build
 WORKDIR /app
-COPY web/package.json web/bun.lock ./
+COPY frontend/package.json frontend/bun.lock ./
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
-COPY web/ ./
+COPY frontend/ ./
 RUN bun run build
 
 # ── runtime: the node-adapter server only ──────────────────────────────────────

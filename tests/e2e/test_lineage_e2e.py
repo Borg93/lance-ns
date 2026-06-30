@@ -30,10 +30,10 @@ def dsn() -> str:
 
 
 def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
-    from lineage.age import make_pool
+    from lineage.core.age import make_pool
     from lineage.models import RunEvent
-    from lineage.repository import LineageRepository
     from lineage.schemas import LineageGraph, Neighbors, Producers
+    from lineage.services.repository import LineageRepository
 
     events = [RunEvent.model_validate(e) for e in json.loads(_SAMPLE.read_text())]
 
@@ -85,10 +85,10 @@ def test_medallion_column_lineage(dsn: str) -> None:
     AND within one (the same-dataset caption←embedding edge), the typed HAS_COLUMN inventory, and the
     bool/scalar edge props round-tripping through AGE.
     """
-    from lineage.age import make_pool
+    from lineage.core.age import make_pool
     from lineage.models import RunEvent
-    from lineage.repository import LineageRepository
     from lineage.schemas import ColumnGraph, ColumnNeighbors
+    from lineage.services.repository import LineageRepository
 
     events = [RunEvent.model_validate(e) for e in json.loads(_SAMPLE.read_text())]
 

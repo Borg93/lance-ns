@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import pytest
-from lineage.age import _parse, _sql
+from lineage.core.age import _parse, _sql
 from lineage.models import RunEvent
 
 _SAMPLE = Path(__file__).resolve().parent.parent.parent / "services" / "lineage" / "sample_events.json"
@@ -187,7 +187,7 @@ class _FakePool:
 
 def _capture_ingest(monkeypatch: pytest.MonkeyPatch, event_index: int) -> list[tuple[str, dict[str, object]]]:
     """Ingest one seed event against a fake pool, capturing the Cypher calls it issues."""
-    import lineage.repository as repo_mod
+    import lineage.services.repository as repo_mod
     from lineage.seed import events_as_dicts
 
     calls: list[tuple[str, dict[str, object]]] = []
@@ -337,7 +337,7 @@ def test_column_edges_deprecated_fields_level_fallback() -> None:
 
 def test_ingest_persists_masking_bit(monkeypatch: pytest.MonkeyPatch) -> None:
     """#24: the masking bit reaches the DERIVED_FROM_COLUMN edge's SET (the per-edge governance signal)."""
-    import lineage.repository as repo_mod
+    import lineage.services.repository as repo_mod
 
     calls: list[tuple[str, dict[str, object]]] = []
 

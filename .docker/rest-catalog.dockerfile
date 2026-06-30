@@ -43,19 +43,16 @@ RUN apt-get update \
 
 ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PYTHONPATH=/srv/services
 
 WORKDIR /srv
 COPY --from=builder --link /opt/venv /opt/venv
-COPY --link app ./app
-# The lineage service ships in the same image; run it with a different command:
-#   command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000
-COPY --link lineage ./lineage
-# The medallion services (lance-ray producer + the 3 stage movers) also share this image — each runs a
-# different entrypoint: `uvicorn medallion.producer:app` / `uvicorn medallion.mover:app` (env-configured).
-COPY --link medallion ./medallion
-# The compaction/GC service (Dapr cron binding) also shares this image: `uvicorn compaction.service:app`.
-COPY --link compaction ./compaction
+# All services + the shared `common` package live under services/ (PYTHONPATH=/srv/services makes
+# catalog/lineage/medallion/compaction/common importable). One image, many entrypoints — each container
+# runs a different command:  catalog.main:app (2333) · lineage.main:app (8000) · medallion.producer:app /
+# medallion.mover:app · compaction.service:app (env-configured in the chart).
+COPY --link services ./services
 
 # Strip setuid/setgid bits from the whole shipped filesystem (base account tools passwd/chsh/... +
 # anything in the venv) — no use in a container, residual privesc surface. Own RUN so its `|| true`
@@ -63,7 +60,7 @@ COPY --link compaction ./compaction
 RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true
 
 USER app
-# 2333 = catalog (app.main:app); 8000 = lineage service (lineage.main:app) — same image, run with
+# 2333 = catalog (catalog.main:app); 8000 = lineage service (lineage.main:app) — same image, run with
 # `command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000` (see docker-compose.governance.yml).
 EXPOSE 2333 8000
 
@@ -73,4 +70,4 @@ HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
     CMD ["python", "-c", "import socket,sys; s=socket.socket(); s.settimeout(2); s.connect(('127.0.0.1',2333)); s.close()"]
 
 ENTRYPOINT ["tini", "--"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "2333"]
+CMD ["uvicorn", "catalog.main:app", "--host", "0.0.0.0", "--port", "2333"]

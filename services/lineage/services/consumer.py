@@ -21,9 +21,9 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from lineage.metrics import Outcome, record_ingest_duration, record_outcome
+from lineage.core.metrics import Outcome, record_ingest_duration, record_outcome
 from lineage.models import RunEvent
-from lineage.repository import LineageRepository
+from lineage.services.repository import LineageRepository
 
 log = logging.getLogger(__name__)
 

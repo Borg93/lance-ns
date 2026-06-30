@@ -38,7 +38,7 @@ from typing import Any, Final
 import psycopg
 from psycopg_pool import AsyncConnectionPool
 
-from lineage.age import fetch, run_cypher
+from lineage.core.age import fetch, run_cypher
 from lineage.models import Dataset, RunEvent
 from lineage.schemas import (
     ColumnEdge,

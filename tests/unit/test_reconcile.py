@@ -1,4 +1,4 @@
-"""Unit tests for storage-version reconciliation (#23, ``lineage.reconcile``)."""
+"""Unit tests for storage-version reconciliation (#23, ``lineage.core.reconcile``)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import lance
 import pyarrow as pa
 import pytest
-from lineage.reconcile import read_storage_version, reconcile
+from lineage.core.reconcile import read_storage_version, reconcile
 from lineage.schemas import ReconcileState
 
 

@@ -11,11 +11,11 @@ import asyncio
 import json
 from typing import Any, cast
 
-import medallion.mover as mover
-import medallion.producer as producer
+import medallion.services.transform as mover
 import pytest
-from medallion.config import MedallionSettings
-from medallion.events import build_run_event
+from medallion.core.config import MedallionSettings
+from medallion.schemas.events import build_run_event
+from medallion.services.produce import produce
 
 
 class _FakeDapr:
@@ -97,12 +97,10 @@ def test_mover_retries_on_publish_failure() -> None:
     assert status == {"status": "RETRY"}
 
 
-def test_producer_emits_raw_then_first_trigger(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(producer, "get_settings", lambda: MedallionSettings())  # defaults: raw_events
+def test_producer_emits_raw_then_first_trigger() -> None:
     dapr = _FakeDapr()
-    producer.app.state.dapr = dapr
 
-    result = asyncio.run(producer.produce())
+    result = asyncio.run(produce(cast(Any, dapr), MedallionSettings()))
 
     assert result["status"] == "produced"
     assert len(dapr.calls) == 2

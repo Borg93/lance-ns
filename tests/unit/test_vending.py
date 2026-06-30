@@ -7,6 +7,7 @@ the session-policy scoping + storage_options assembly are pinned without boto3.
 from __future__ import annotations
 
 import datetime as dt
+import json
 from typing import Any
 
 import pytest
@@ -14,6 +15,7 @@ from catalog.core.vending import (
     ModeBVendor,
     StaticPrefixVendor,
     StsVendor,
+    WebIdentityVendor,
     build_session_policy,
     make_vendor,
     split_s3_location,
@@ -106,6 +108,40 @@ def test_make_vendor_selection() -> None:
 def test_make_vendor_sts_requires_arn() -> None:
     with pytest.raises(ValueError):
         make_vendor("sts")
+
+
+def test_web_identity_vendor_exchanges_the_token_for_scoped_creds() -> None:
+    captured: dict[str, Any] = {}
+
+    def _fake_assume(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return {
+            "Credentials": {
+                "AccessKeyId": "AK",
+                "SecretAccessKey": "SK",
+                "SessionToken": "ST",
+                "Expiration": dt.datetime(2030, 1, 1, tzinfo=dt.UTC),
+            }
+        }
+
+    vendor = WebIdentityVendor(region="us-east-1", endpoint="http://rustfs:9000", assume=_fake_assume)
+    # No caller token → nothing to exchange → fall back to server-mediated.
+    assert vendor.vend(table_location="s3://b/t", tier="read", web_identity_token=None) is None
+    # With the caller's token → scoped creds; the token + a write-tier session policy are forwarded.
+    creds = vendor.vend(
+        table_location="s3://lance-catalog/db$t", tier="write", web_identity_token="the.jwt.tok"
+    )
+    assert creds is not None
+    assert creds.storage_options["session_token"] == "ST"
+    assert creds.storage_options["endpoint"] == "http://rustfs:9000"
+    assert captured["WebIdentityToken"] == "the.jwt.tok"
+    policy = json.loads(captured["Policy"])
+    actions = policy["Statement"][1]["Action"]
+    assert "s3:PutObject" in actions  # write tier scoped to the table prefix
+
+
+def test_make_vendor_builds_web_identity() -> None:
+    assert isinstance(make_vendor("web_identity"), WebIdentityVendor)
 
 
 def test_sts_vendor_against_a_real_assume_role_implementation() -> None:

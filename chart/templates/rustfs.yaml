@@ -42,6 +42,19 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ include "lance.fullname" . }}-infra-credentials, key: rustfs-secret-key }
             - { name: RUSTFS_ADDRESS, value: ":9000" }
+            {{- if .Values.rustfs.oidc.enabled }}
+            # OIDC identity provider (Dex) for STS AssumeRoleWithWebIdentity — a client presents its Dex
+            # id_token and RustFS mints short-TTL creds bound to ROLE_POLICY, which the catalog's inline
+            # session policy then scopes per-table (Track B / credential vending). MinIO-compatible config.
+            - { name: RUSTFS_IDENTITY_OPENID_ENABLE, value: "on" }
+            - { name: RUSTFS_IDENTITY_OPENID_CONFIG_URL, value: "{{ .Values.dex.issuer }}/.well-known/openid-configuration" }
+            - { name: RUSTFS_IDENTITY_OPENID_CLIENT_ID, value: {{ .Values.dex.clientId | quote }} }
+            - { name: RUSTFS_IDENTITY_OPENID_CLIENT_SECRET, value: {{ .Values.dex.clientSecret | quote }} }
+            - { name: RUSTFS_IDENTITY_OPENID_SCOPES, value: "openid,email" }
+            # The base policy every Dex-authenticated token assumes; the per-request session policy can only
+            # narrow it. `readwrite` is a built-in policy (full S3); narrowing happens in the session policy.
+            - { name: RUSTFS_IDENTITY_OPENID_ROLE_POLICY, value: {{ .Values.rustfs.oidc.rolePolicy | quote }} }
+            {{- end }}
           ports:
             - { name: s3, containerPort: 9000 }
           volumeMounts:

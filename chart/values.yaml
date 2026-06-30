@@ -13,19 +13,18 @@ auth:
   enabled: false
 
 # --- Data-plane credential vending (Track B). How a client gets storage_options for DIRECT object I/O. ----
-# mode_b (default) = nothing is vended; clients use the catalog's server-mediated Arrow-IPC data endpoints
-# (POST /v1/table/<id>/credentials returns mode=server_mediated). sts = AssumeRole + a per-table session
-# policy → short-TTL, read/write-scoped creds (tier=read|write). static = per-bucket keys.
-#
-# NOTE on the default: mode_b, because this chart's object store is RustFS, whose STS does NOT implement the
-# plain AssumeRole flow (verified: it signs STS as the `s3` service, then returns InvalidRequest on
-# AssumeRole — it requires AssumeRoleWithWebIdentity, the OIDC-token flow, which is a follow-up). The `sts`
-# vendor IS complete and proven against a compliant STS (AWS / MinIO / Ceph RGW / moto) — point a deployment
-# at one of those (LANCE_S3_STS_ENDPOINT) to use it. Leaving mode=sts against RustFS makes the vend 500.
+# POST /v1/table/<id>/credentials?tier=read|write returns scoped creds (or mode=server_mediated). Modes:
+#   mode_b        (default) — nothing vended; clients use the server-mediated Arrow-IPC data endpoints.
+#   web_identity  — the RUSTFS-NATIVE path: the caller's Dex id_token is exchanged via
+#                   AssumeRoleWithWebIdentity for creds bound to ROLE_POLICY, narrowed per-table by an inline
+#                   session policy. Requires rustfs.oidc.enabled + auth.enabled (the caller presents a token).
+#   sts           — plain AssumeRole + session policy. Works on a compliant STS (AWS / MinIO / Ceph / moto);
+#                   NOT on RustFS (its STS rejects plain AssumeRole — that's why web_identity exists).
+#   static        — pre-provisioned per-bucket keys.
 vending:
-  mode: mode_b # mode_b | static | sts  (sts needs a compliant STS backend — not RustFS; see NOTE above)
+  mode: mode_b # mode_b | web_identity | sts | static
   ttlSeconds: 900
-  assumeRoleArn: "arn:aws:iam::000000000000:role/lance-vend"
+  assumeRoleArn: "arn:aws:iam::000000000000:role/lance-vend" # RustFS ignores it; boto3 requires the param
 
 # --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------
 dapr:
@@ -107,6 +106,12 @@ rustfs:
   port: 9000
   storage: 2Gi
   mcImage: minio/mc:latest # `mc` speaks plain S3, so it bootstraps the bucket on RustFS too
+  # OIDC identity provider for STS AssumeRoleWithWebIdentity (Track B). When on, RustFS trusts Dex id_tokens
+  # → a client can mint short-TTL creds it scopes per-table via the catalog's vending endpoint (vending.mode=
+  # web_identity). Off by default (plain dev needs no STS). Enabling it rolls RustFS (emptyDir → data wipes).
+  oidc:
+    enabled: false
+    rolePolicy: readwrite # built-in full-S3 base policy; the per-request session policy narrows it per-table
 
 # --- OpenBao (first-party template) — secret store, fronted by Dapr secretstores.* ------------------
 openbao:

@@ -63,7 +63,7 @@ spec:
             # catalog; sts = AssumeRole + per-table session policy against the RustFS STS endpoint (short-TTL
             # scoped creds the client uses for direct object I/O).
             - { name: LANCE_VENDING_MODE, value: {{ .Values.vending.mode | quote }} }
-            {{- if eq .Values.vending.mode "sts" }}
+            {{- if or (eq .Values.vending.mode "sts") (eq .Values.vending.mode "web_identity") }}
             - { name: LANCE_S3_STS_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
             - { name: LANCE_S3_ASSUME_ROLE_ARN, value: {{ .Values.vending.assumeRoleArn | quote }} }
             - { name: LANCE_VENDING_TTL_SECONDS, value: {{ .Values.vending.ttlSeconds | quote }} }

@@ -32,7 +32,7 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel
 
 Tier = Literal["read", "write"]
-VendingMode = Literal["mode_b", "static", "sts"]
+VendingMode = Literal["mode_b", "static", "sts", "web_identity"]
 
 
 class VendedCredentials(BaseModel):
@@ -51,11 +51,14 @@ class VendedCredentials(BaseModel):
 class CredentialVendor(Protocol):
     """Vend scoped storage credentials for one table prefix at one tier."""
 
-    def vend(self, *, table_location: str, tier: Tier) -> VendedCredentials | None:
+    def vend(
+        self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
+    ) -> VendedCredentials | None:
         """Return creds for ``table_location`` at ``tier``.
 
-        ``None`` means "no direct credential" — the caller falls back to the
-        server-mediated (Mode B) data path.
+        ``web_identity_token`` is the caller's OIDC JWT — used ONLY by :class:`WebIdentityVendor` (the store
+        exchanges the token for creds); other vendors ignore it. ``None`` means "no direct credential" — the
+        caller falls back to the server-mediated (Mode B) data path.
         """
         ...
 
@@ -120,7 +123,9 @@ class ModeBVendor:
 
     mode: VendingMode = "mode_b"
 
-    def vend(self, *, table_location: str, tier: Tier) -> VendedCredentials | None:  # noqa: ARG002
+    def vend(
+        self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
+    ) -> VendedCredentials | None:  # noqa: ARG002
         return None
 
 
@@ -142,7 +147,9 @@ class StaticPrefixVendor:
     def __init__(self, keys_by_bucket: dict[str, dict[str, str]]) -> None:
         self._keys = keys_by_bucket
 
-    def vend(self, *, table_location: str, tier: Tier) -> VendedCredentials | None:  # noqa: ARG002
+    def vend(
+        self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
+    ) -> VendedCredentials | None:  # noqa: ARG002
         bucket, _ = split_s3_location(table_location)
         opts = self._keys.get(bucket)
         if opts is None:
@@ -192,7 +199,9 @@ class StsVendor:
         client = boto3.client("sts", region_name=self._region, endpoint_url=self._endpoint)
         return cast(dict[str, object], client.assume_role(**kwargs))
 
-    def vend(self, *, table_location: str, tier: Tier) -> VendedCredentials | None:
+    def vend(
+        self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
+    ) -> VendedCredentials | None:  # noqa: ARG002 — web_identity_token is for WebIdentityVendor
         bucket, prefix = split_s3_location(table_location)
         policy = build_session_policy(bucket, prefix, tier)
         resp = self._assume_role(
@@ -213,6 +222,72 @@ class StsVendor:
         return VendedCredentials(
             storage_options=opts,
             expires_at_millis=_expiry_millis(creds.get("Expiration"), self._ttl),
+        )
+
+
+class WebIdentityVendor:
+    """STS ``AssumeRoleWithWebIdentity`` — the caller's OIDC JWT (e.g. a Dex id_token) is exchanged BY THE
+    STORE for short-TTL creds bound to the provider's ``ROLE_POLICY``, which the inline session policy then
+    narrows per-table. The native flow for RustFS (it trusts the OIDC issuer and does NOT support plain
+    ``AssumeRole``). Token-authenticated, so — unlike ``AssumeRole`` — it needs no SigV4-signed catalog creds
+    (RustFS verifies the JWT, not a request signature); the request goes out UNSIGNED. ``assume`` is the
+    boto3 ``assume_role_with_web_identity`` and is injectable for tests.
+    """
+
+    mode: VendingMode = "web_identity"
+
+    def __init__(
+        self,
+        *,
+        region: str,
+        endpoint: str | None = None,
+        role_arn: str = "arn:aws:iam::000000000000:role/lance-vend",
+        ttl_seconds: int = 900,
+        assume: Callable[..., dict[str, object]] | None = None,
+    ) -> None:
+        self._region = region
+        self._endpoint = endpoint
+        self._role_arn = role_arn  # RustFS ignores it; boto3 requires the param
+        self._ttl = ttl_seconds
+        self._assume = assume or self._default_assume
+
+    def _default_assume(self, **kwargs: object) -> dict[str, object]:
+        import boto3  # lazy: only when web_identity vending is enabled
+        from botocore import UNSIGNED
+        from botocore.config import Config
+
+        client = boto3.client(
+            "sts",
+            region_name=self._region,
+            endpoint_url=self._endpoint,
+            config=Config(signature_version=UNSIGNED),  # token-authenticated, not SigV4
+        )
+        return cast(dict[str, object], client.assume_role_with_web_identity(**kwargs))
+
+    def vend(
+        self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
+    ) -> VendedCredentials | None:
+        if not web_identity_token:  # no caller token to exchange → fall back to server-mediated
+            return None
+        bucket, prefix = split_s3_location(table_location)
+        resp = self._assume(
+            RoleArn=self._role_arn,
+            RoleSessionName="lance-catalog-vend",
+            WebIdentityToken=web_identity_token,
+            Policy=json.dumps(build_session_policy(bucket, prefix, tier)),
+            DurationSeconds=self._ttl,
+        )
+        creds = cast(dict[str, object], resp["Credentials"])
+        opts: dict[str, str] = {
+            "access_key_id": str(creds["AccessKeyId"]),
+            "secret_access_key": str(creds["SecretAccessKey"]),
+            "session_token": str(creds["SessionToken"]),
+            "region": self._region,
+        }
+        if self._endpoint:
+            opts["endpoint"] = self._endpoint
+        return VendedCredentials(
+            storage_options=opts, expires_at_millis=_expiry_millis(creds.get("Expiration"), self._ttl)
         )
 
 
@@ -241,6 +316,13 @@ def make_vendor(
             role_arn=assume_role_arn,
             region=region,
             endpoint=sts_endpoint,
+            ttl_seconds=ttl_seconds,
+        )
+    if mode == "web_identity":
+        return WebIdentityVendor(
+            region=region,
+            endpoint=sts_endpoint,
+            role_arn=assume_role_arn or "arn:aws:iam::000000000000:role/lance-vend",
             ttl_seconds=ttl_seconds,
         )
     assert_never(mode)

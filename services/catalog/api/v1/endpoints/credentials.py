@@ -17,7 +17,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from common import fga
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Header, Query
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import DescribeTableRequest, DescribeTableResponse, PermissionDeniedError
 from pydantic import BaseModel
@@ -48,9 +48,15 @@ async def vend_credentials(
     client: FgaClientDep,
     vendor: VendorDep,
     tier: Annotated[Tier, Query()] = "read",
+    authorization: Annotated[str | None, Header()] = None,
 ) -> CredentialResponse:
     """Vend scoped ``storage_options`` for direct object-store access to this table at ``tier``."""
     segments = parse_identifier(id, settings.delimiter)
+    # The caller's raw bearer JWT, forwarded to the store for the web_identity flow (AssumeRoleWithWebIdentity
+    # exchanges it for creds). Other vendors ignore it. None when unauthenticated (open dev mode).
+    web_identity_token = (
+        authorization.removeprefix("Bearer ").removeprefix("bearer ").strip() if authorization else None
+    )
     # A write-tier vend needs the writer rung on top of the reader rung the router guard enforced.
     if tier == "write" and settings.fga_enabled and token is not None and client is not None:
         obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
@@ -61,8 +67,10 @@ async def vend_credentials(
     )
     if described.location is None:  # no object-store location to scope to → fall back to server-mediated
         return CredentialResponse(mode="server_mediated")
-    # The blocking STS AssumeRole runs in the threadpool so it never stalls the event loop.
-    creds = await run_in_threadpool(vendor.vend, table_location=described.location, tier=tier)
+    # The blocking STS call (AssumeRole / AssumeRoleWithWebIdentity) runs in the threadpool.
+    creds = await run_in_threadpool(
+        vendor.vend, table_location=described.location, tier=tier, web_identity_token=web_identity_token
+    )
     if creds is None:
         return CredentialResponse(mode="server_mediated")
     return CredentialResponse(mode="direct", credentials=creds)

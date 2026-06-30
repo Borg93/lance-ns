@@ -86,7 +86,9 @@ class Settings(BaseSettings):
     # credential leaves the catalog (the simplest, backend-agnostic default). "sts": STS AssumeRole
     # short-TTL per-table scoped tokens (the recommended path; MinIO/Ceph/AWS all implement STS).
     # "static": pre-provisioned per-bucket keys (simple setups / GCS interop).
-    vending_mode: Literal["mode_b", "static", "sts"] = Field(default="mode_b", alias="LANCE_VENDING_MODE")
+    vending_mode: Literal["mode_b", "static", "sts", "web_identity"] = Field(
+        default="mode_b", alias="LANCE_VENDING_MODE"
+    )
     vending_ttl_seconds: int = Field(default=900, ge=60, alias="LANCE_VENDING_TTL_SECONDS")
     s3_assume_role_arn: str | None = Field(default=None, alias="LANCE_S3_ASSUME_ROLE_ARN")
     s3_sts_endpoint: str | None = Field(default=None, alias="LANCE_S3_STS_ENDPOINT")

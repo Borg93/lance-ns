@@ -33,18 +33,18 @@ You **can** run everything in-cluster (the default), but in production the state
 services are better run as managed/external services — disable the in-cluster copy and point the apps at the
 external endpoint:
 
-| Service | Why external in prod | How |
+| Service | Why external in prod | How (wired) |
 |---------|----------------------|-----|
-| **S3 lakehouse** | the permanent ingest+export surface; you want a managed, replicated, lifecycle-policied object store (AWS S3 / a RustFS or MinIO cluster) | `rustfs.enabled=false` + point `LANCE_S3_ENDPOINT` (+ lineage/compaction S3 env) at the external store |
-| **Postgres (AGE)** | a managed DB (RDS/Cloud SQL/CNPG) for backups, HA, PITR | `age.enabled=false` + point `LINEAGE_DATABASE_URL` + the OpenFGA datastore at it |
-| **OpenBao / secrets** | a hardened external Vault / cloud KMS; an operator populates the k8s `infra-credentials` Secret from it (external-secrets / the Vault agent) | ⚠️ **not a safe flip yet** — today `openbao.enabled=false` makes the apps fall back to PLAINTEXT secrets in pod env (re-opens the closed leak); the app branches read `.Values`, not the infra Secret. Needs the secretKeyRef-from-infra-Secret wiring first. |
-| **Observability** (GreptimeDB / Vector / Perses) | you don't want observability to die with the cluster it observes — run it on a separate platform/cluster | `observability.enabled=false` + point OTLP at the external collector/store |
+| **S3 lakehouse** | the permanent ingest+export surface; you want a managed, replicated, lifecycle-policied object store (AWS S3 / a RustFS or MinIO cluster) | `rustfs.enabled=false` + `rustfs.externalEndpoint=…` → catalog/lineage/compaction + vending connect there (also override `greptimedb-standalone.objectStorage.s3.endpoint`) |
+| **Postgres (AGE)** | a managed DB (RDS/Cloud SQL/CNPG) for backups, HA, PITR | `age.enabled=false` + `age.externalHost=…` (+ matching user/password/dbs) → lineage DSN + the OpenFGA datastore Secret point there (also override the openfga subchart's `datastore.uri`) |
+| **OpenBao / secrets** | a hardened external Vault / cloud KMS; an operator populates the k8s `infra-credentials` Secret from it (external-secrets / the Vault agent) | `openbao.externalAddr=…` points the Dapr secret store at the external Vault. ⚠️ Full disable (`openbao.enabled=false`) without re-opening the plaintext-env leak lands with the external-secrets operator — see below. |
+| **Observability** (GreptimeDB / Vector / Perses) | you don't want observability to die with the cluster it observes — run it on a separate platform/cluster | `observability.enabled=false` + `observability.externalOtlpEndpoint=…` → apps + Dapr export OTLP there |
 
-> ⚠️ **The tier-3 rows describe the intended mechanism, not a present-day knob.** Today only the
-> `*.enabled=false` toggle exists; the matching external-endpoint overrides (`LANCE_S3_ENDPOINT`,
-> `LINEAGE_DATABASE_URL`, the OTLP endpoint, the OpenBao address) are **not yet wired** — disabling a
-> component removes the in-cluster copy but the apps still target its in-cluster DNS name. Wiring those
-> overrides is the remaining chart work (mirrored in the EXTERNALIZE note in `values-prod.yaml`).
+> The S3 / Postgres / OTLP overrides are **wired and verified** (a render-check confirms no in-cluster DNS
+> name leaks into app env when externalized). The `values-prod.yaml` EXTERNALIZE block shows the full set.
+> OpenBao is the one nuance: `openbao.enabled=false` currently falls the apps back to plaintext env (the
+> closed leak), so external-Vault use is completed by the external-secrets operator path (P2) rather than a
+> bare `enabled=false`.
 
 ## Data lifecycle — what's permanent vs transient
 The S3 store is permanent **infrastructure**; the *data within it* has a lifecycle:

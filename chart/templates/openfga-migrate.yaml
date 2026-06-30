@@ -20,7 +20,7 @@ spec:
       initContainers:
         - name: wait-age
           image: busybox:1.36
-          command: ["sh", "-c", "until nc -z {{ include "lance.ageHost" . }} {{ .Values.age.port }}; do echo wait-age; sleep 3; done"]
+          command: ["sh", "-c", "until nc -z {{ include "lance.ageConnectHost" . }} {{ .Values.age.port }}; do echo wait-age; sleep 3; done"]
       containers:
         - name: migrate
           # Same tag as the server (values.openfga.image.tag) so the migrated schema matches.

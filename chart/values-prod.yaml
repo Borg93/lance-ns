@@ -54,16 +54,24 @@ ingress:
   host: "" # e.g. lance.example.com
 
 # ===================================================================================================
-# EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Uncomment per service AND point
-# the apps at the external endpoint. NOTE: disabling a component today removes the in-cluster copy but
-# the apps still target the in-cluster DNS name — wiring the external-endpoint overrides is the
-# remaining chart work (LANCE_S3_ENDPOINT / LINEAGE_DATABASE_URL / OTLP endpoint / openbao address).
+# EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Disable the in-cluster component
+# AND set its external endpoint — the apps then connect to the managed service (verified: no in-cluster
+# DNS leaks into app env). Uncomment per service.
 # ---------------------------------------------------------------------------------------------------
-# rustfs:
-#   enabled: false          # use a managed/replicated external S3 for the lakehouse + observability bucket
-# age:
-#   enabled: false          # use a managed Postgres (RDS / Cloud SQL / CNPG) for lineage + OpenFGA
-# openbao:
-#   enabled: false          # use an external Vault / cloud KMS; an operator populates the infra Secret
-# observability:
-#   enabled: false          # run GreptimeDB / Vector / Perses on a separate platform; point OTLP at it
+# rustfs:                                            # managed S3 for the lakehouse + observability bucket
+#   enabled: false
+#   externalEndpoint: https://s3.us-east-1.amazonaws.com
+# age:                                               # managed Postgres (RDS / Cloud SQL / CNPG)
+#   enabled: false
+#   externalHost: my-pg.internal
+#   user: lance                                      # match the managed DB's role/password/dbs
+#   password: REPLACE-ME
+# openfga:                                           # the openfga subchart's datastore points at the same DB
+#   datastore:
+#     uri: postgres://lance:REPLACE-ME@my-pg.internal:5432/openfga?sslmode=require
+# openbao:                                           # external Vault / cloud KMS (operator populates the Secret)
+#   enabled: false
+#   externalAddr: https://vault.internal:8200
+# observability:                                     # ship telemetry to an off-cluster collector
+#   enabled: false
+#   externalOtlpEndpoint: http://otel-collector.observability:4318/v1/otlp

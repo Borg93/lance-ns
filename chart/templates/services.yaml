@@ -1,6 +1,5 @@
 {{- $root := . }}
-{{- $age := include "lance.ageHost" . }}
-{{- $rustfs := include "lance.rustfsHost" . }}
+{{- $age := include "lance.ageConnectHost" . }}
 # Catalog (producer) — creates Lance tables on S3 and PUBLISHES OpenLineage events to the Dapr
 # pubsub.jetstream component. The daprd sidecar (injected by the annotations) carries the publish to NATS.
 apiVersion: apps/v1
@@ -46,7 +45,7 @@ spec:
             - { name: LANCE_REST_IMPL, value: "dir" }
             - { name: LANCE_REST_ROOT, value: "s3://{{ .Values.rustfs.bucket }}" }
             - { name: LANCE_NS_DELIMITER, value: "$" }
-            - { name: LANCE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: LANCE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not .Values.openbao.enabled }}
             - { name: LANCE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
@@ -64,7 +63,7 @@ spec:
             # scoped creds the client uses for direct object I/O).
             - { name: LANCE_VENDING_MODE, value: {{ .Values.vending.mode | quote }} }
             {{- if or (eq .Values.vending.mode "sts") (eq .Values.vending.mode "web_identity") }}
-            - { name: LANCE_S3_STS_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: LANCE_S3_STS_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LANCE_S3_ASSUME_ROLE_ARN, value: {{ .Values.vending.assumeRoleArn | quote }} }
             - { name: LANCE_VENDING_TTL_SECONDS, value: {{ .Values.vending.ttlSeconds | quote }} }
             {{- end }}
@@ -143,12 +142,12 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
             {{- if not .Values.openbao.enabled }}
-            - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
+            - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ include "lance.ageConnectHost" . }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
             {{- else }}
             # OpenBao on → the AGE password is NOT in the connection string in pod env; lineage fetches it
             # from the secret store at boot and splices it into the URL (the audit's 'plaintext still ships'
             # fix). The URL here carries the user/host/db only, no password.
-            - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}@{{ $age }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
+            - { name: LINEAGE_DATABASE_URL, value: "postgresql://{{ .Values.age.user }}@{{ include "lance.ageConnectHost" . }}:{{ .Values.age.port }}/{{ .Values.age.lineageDb }}" }
             - { name: LINEAGE_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}
             - { name: LINEAGE_GRAPH, value: {{ .Values.age.lineageDb | quote }} }
@@ -156,7 +155,7 @@ spec:
             - { name: LINEAGE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
             - { name: LINEAGE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
             - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
-            - { name: LINEAGE_S3_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: LINEAGE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not .Values.openbao.enabled }}
             - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }

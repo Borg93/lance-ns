@@ -28,6 +28,23 @@ later (InvalidImageName), bricking the pod with no obvious signal. */}}
 {{- printf "%s:%s" $i.repository (required "image.web.tag must be set (a release tag in prod; `dev` locally)" $i.tag) -}}
 {{- end -}}
 
+{{/* CONSUMER endpoints — return the EXTERNAL override when set (the in-cluster component is then usually
+disabled, e.g. a managed S3 / Postgres / Vault / collector in prod), else the in-cluster address. The
+component's OWN Service/StatefulSet keeps the plain *Host helper above; only the apps that CONNECT switch.
+This is what makes the docs/DURABILITY.md tier-3 externalization real (values-prod.yaml sets the overrides). */}}
+{{- define "lance.s3Endpoint" -}}
+{{- if .Values.rustfs.externalEndpoint -}}{{ .Values.rustfs.externalEndpoint }}{{- else -}}http://{{ include "lance.rustfsHost" . }}:{{ .Values.rustfs.port }}{{- end -}}
+{{- end -}}
+{{- define "lance.ageConnectHost" -}}
+{{- .Values.age.externalHost | default (include "lance.ageHost" .) -}}
+{{- end -}}
+{{- define "lance.otlpEndpoint" -}}
+{{- if .Values.observability.externalOtlpEndpoint -}}{{ .Values.observability.externalOtlpEndpoint }}{{- else -}}http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/v1/otlp{{- end -}}
+{{- end -}}
+{{- define "lance.vaultAddr" -}}
+{{- if .Values.openbao.externalAddr -}}{{ .Values.openbao.externalAddr }}{{- else -}}http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}{{- end -}}
+{{- end -}}
+
 {{/* OTel SDK env for an app (call: include "lance.otelEnv" (list $root "<service.name>")). The apps run
 under `opentelemetry-instrument` and export all three signals OTLP-direct to GreptimeDB — no Collector
 (mirrors rask). The SDK appends /v1/{traces,metrics,logs} to the /v1/otlp base. GreptimeDB needs the
@@ -38,7 +55,7 @@ table); metrics/logs must NOT carry the pipeline header, so traces get their own
 {{- $svc := index . 1 -}}
 {{- $o := $root.Values.observability -}}
 - { name: OTEL_SERVICE_NAME, value: {{ $svc | quote }} }
-- { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "http://{{ include "lance.greptimeHost" $root }}:{{ $o.greptimePort }}/v1/otlp" }
+- { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "{{ include "lance.otlpEndpoint" $root }}" }
 - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf" }
 - { name: OTEL_EXPORTER_OTLP_HEADERS, value: "x-greptime-db-name={{ $o.dbName }}" }
 - { name: OTEL_EXPORTER_OTLP_TRACES_HEADERS, value: "x-greptime-db-name={{ $o.dbName }},x-greptime-pipeline-name={{ $o.tracePipeline }}" }

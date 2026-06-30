@@ -45,7 +45,7 @@ spec:
   type: secretstores.hashicorp.vault
   version: v1
   metadata:
-    - { name: vaultAddr, value: "http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}" }
+    - { name: vaultAddr, value: "{{ include "lance.vaultAddr" . }}" }
     {{- if .Values.openbao.devMode }}
     - { name: vaultToken, value: {{ .Values.openbao.devToken | quote }} }
     {{- else }}

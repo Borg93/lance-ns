@@ -118,8 +118,18 @@ the scope hard:
   external-secrets operator + secrets-via-Dapr decouple (P2), and the **stale-FGA-tuple revoke** on
   drop/deregister/drop_namespace/rename (closes the privilege-bleed; was P1 `w8u4rc2tg`). All adversarially
   audited + tested.
-- 🟡 In progress: a backend-backed validation (200-vs-501 probe across the 54 ops) + the durable
-  gold/lineage/recovery story + a low-coupling audit (validation `wfefr8vtx`).
+- ✅ **Core validation** (validation `wfefr8vtx`, 6 agents, live probe → adversarial verify; see
+  `docs/COVERAGE.md`). Verdict: the lakehouse + event-driven core is **valid, low-coupled, and mergeable**
+  (zero cross-service imports; fail-closed authz; official OpenLineage idempotent MERGE; resilient cascade).
+  Catalog = **41/54 ops backed (200), 13 spec-correct 501s** (native pylance backend limits: rename,
+  backfill, version-mutation, branches, MV, alter_transaction — not catalog gaps). Stage recovery
+  (`restore_table`) + `/reconcile` validated. The "compaction wipes gold" alarm was **refuted** (current
+  version always kept; only >7d time-travel history GC'd).
+  - **The one in-scope gap (by design = the rask seam):** the deployed pipeline emits **provenance, not
+    data** — the medallion movers are dummy emitters; the durable gold+JSONB-lineage exists only in
+    `medallion_demo.py`. The real gold-writing **lance-ray** (Ray Data job on rask's KubeRay) is P1 #6.
+  - Minor partials (noted, not blockers): compaction time-travel retention is global 7d not per-stage;
+    `can_alter`/`can_commit`/`can_rename` modeled-but-unwired; routes-vs-spec conformance test (P1 #9) absent.
 
 ---
 

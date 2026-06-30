@@ -32,6 +32,9 @@ router = APIRouter(prefix="/v1/table", tags=["version"])
 def batch_create_table_versions(
     body: BatchCreateTableVersionsRequest, ns: NamespaceDep
 ) -> BatchCreateTableVersionsResponse:
+    # Buildable (iterate the now-working CreateTableVersion) but deliberately left a faithful 501: batch
+    # manifest-pointer registration is an external-manifest-store concern this Lance medallion lakehouse
+    # never uses. We don't add code for an op nothing here exercises.
     return native.call(ns, "batch_create_table_versions", body)
 
 

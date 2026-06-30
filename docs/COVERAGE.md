@@ -24,9 +24,23 @@ stubs them. Dispatch: most ops go to `native` (the Rust `DirectoryNamespace`); a
 
 The 13 501s are **backend limits, not catalog gaps** — the native `DirectoryNamespace` doesn't implement
 branch ops, MV ops, version mutation, rename, or backfill. The catalog is a faithful REST surface over what
-pylance provides; if/when pylance backs these (or the in-process dataplane is extended), they flip to 200
+pylance provides; if/when pylance backs these (or the in-cluster dataplane is extended), they flip to 200
 with no route change. `rename_table` 501s at the native call, so its FGA-revoke wiring is defensive (it only
 runs if rename ever succeeds).
+
+**Can the in-process dataplane back them (like it does update/delete/columns/tags)? No — investigated 2026-06-30:**
+the 13 are genuine *upstream* limits, not in-process-fillable:
+- **Version ops** (`create`/`describe`/`delete`/batch) — `create_table_version` has no clean pylance analog
+  (Lance versions are *write-created*, not declared); `cleanup_old_versions` deletes by *age/count*, not the
+  arbitrary version records `BatchDeleteTableVersions` wants; and even `describe_table_version` can't be
+  backed cleanly — the spec's `TableVersion` **requires `manifest_path`**, which pylance's public API does
+  not expose (only `{version, timestamp, metadata}`). Constructing it from Lance's (V2-hash-prefixed)
+  internals would be fragile, so it stays a 501.
+- **Materialized views** + **branches** — no public pylance API.
+- **`rename_table` / `backfill_columns`** — stubbed in the native Rust namespace.
+
+So further catalog completeness needs UPSTREAM work in pylance / the Rust `DirectoryNamespace`, not changes
+in this repo. The catalog is complete **to the limit of its backend**.
 
 ## Durable-artifact + recovery
 - **Gold embeds lineage as JSONB** + sits on the durable S3 tier — but TODAY this is produced **only by the

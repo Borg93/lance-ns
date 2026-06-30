@@ -98,7 +98,8 @@ relational tables, and we drop everything not needed for the medallion flow.
 (:User {name})                                    # an OIDC sub (the verified principal)
 (:Run)-[:OF_JOB]->(:Job)
 (:Run)-[:READ]->(:Dataset)            # inputs
-(:Run)-[:WROTE {version}]->(:Dataset) # outputs; version = the Lance version this run produced
+(:Run)-[:WROTE {version, schema, row_count, size_bytes, quality_passed, quality_assertions}]->(:Dataset)
+                                      # outputs; version = the Lance version this run produced
 (:Dataset)-[:DERIVED_FROM]->(:Dataset)# output ← input (dataset-level lineage)
 (:User)-[:CREATED]->(:Dataset)        # who created the table (catalog create event)
 ```
@@ -155,8 +156,10 @@ Marquez instance — or any OpenLineage consumer — can ingest them unchanged a
 | `author` (custom) → `ownership` | run / job | who ran the job (OIDC sub), standard owner fallback | `Run.author` |
 | `lance` (custom) | run | catalog `operation=create_table` → who-created | `(:User)-[:CREATED]` |
 | `jobType` | job | `processingType` BATCH/STREAMING, `integration=RAY`, `jobType` ETL/TRANSFORMATION | (read; surfaced via job) |
-| `schema` | dataset | column names/types per layer | (emitted; column-level storage is P2 #12b) |
+| `schema` | dataset | column names/types per layer | `WROTE.schema` (per-version) |
 | `version` | dataset | the Lance version a run produced | `WROTE.version` |
+| `outputStatistics` | dataset (output) | runtime-**measured** rows + on-disk bytes the compute wrote | `WROTE.{row_count,size_bytes}` |
+| `dataQualityAssertions` | dataset (output) | the validator gate's checks (`row_count_positive`, `not_null`) | `WROTE.{quality_passed,quality_assertions}` |
 | `dataSource` | dataset | where the table physically lives (S3-compatible URI) | `Dataset.source_uri` |
 | `tags` | dataset | governance labels (`layer`, `pii`, …) | `Dataset.tags` |
 | `errorMessage` | run | failure message on a `FAIL`/`ABORT` run | `Run.error_message` |
@@ -165,6 +168,31 @@ Marquez instance — or any OpenLineage consumer — can ingest them unchanged a
 table. The `jobType` facet records that split: `integration=RAY`, and `jobType` distinguishes the
 **ETL** that lands raw data into bronze from the **TRANSFORMATION** jobs that move data between
 medallion layers.
+
+### Runtime-measured facets — declared → measured lineage (Marquez GOAL 1 + 2)
+
+Most of our lineage is **producer-declared** (the emitter states the topology). Two facets carry what the
+job actually **observed** at runtime — the step from declared toward Marquez-grade measured lineage — and
+both ride the same `WROTE` edge as `version`/`schema`:
+
+- **`outputStatistics`** (GOAL 1) — the **exact** rows + on-disk bytes the compute wrote, read straight off
+  the dataset (`count_rows()` + `DataStatistics.bytes_on_disk`, not estimated). Present only on a real
+  measured write; a dummy emit omits it, so we never claim numbers we didn't measure. Surfaced as
+  `ProducerInfo.{row_count,size_bytes}`.
+- **`dataQualityAssertions`** (GOAL 2) — the **validator gate**'s checks on the produced data
+  (`row_count_positive`, `not_null` on the key column). The medallion mover emits this when
+  `MEDALLION_QUALITY_ENABLED`, and a *failed* assertion **blocks promotion** (the next stage is not
+  triggered) — so a `quality_passed=false` edge *with a real version* is the durable, auditable record of a
+  batch the gate stopped. This composes with the OpenFGA gate: **FGA decides who may promote, quality
+  decides whether the data is good enough to** — both gate movement. Surfaced as
+  `ProducerInfo.{quality_passed,quality_assertions}`.
+
+Because `record_event` stores the **full** event JSON in the durable `event` column, every facet is also
+visible verbatim in the `GET /events` feed — the graph promotes the headline fields, the feed keeps the rest.
+
+> **GOAL 3** (at rask) is to stop *declaring* these and have them emitted **automatically** by the
+> distributed compute — the [lance-ray OpenLineage integration](RASK-INTEGRATION.md) on KubeRay — which is
+> the true auto-instrumented, Marquez-grade path.
 
 ## Closing the loop: gold embeds its lineage as JSONB
 

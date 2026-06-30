@@ -57,6 +57,23 @@ The 3 movers are the **same module**, differing only by `MEDALLION_*` env (from/
 topic, operation, author) — see `chart/values.yaml` `medallion.movers`. Triggers ride a dedicated
 `MEDALLION` JetStream stream (`medallion.>`); the OpenLineage events ride the existing `LINEAGE` stream.
 
+## Promotion gates — who *may* promote, and whether the data is *good enough* to
+
+A stage moves data forward (fires the next trigger) only when it passes **two independent, opt-in gates** —
+the distinction between a *registered validator that gates movement* and the *event-driven transform itself*:
+
+| Gate | Flag | Question | Mechanism | Fail action |
+| ---- | ---- | -------- | --------- | ----------- |
+| **Authorization** | `MEDALLION_FGA_ENABLED` | *May this identity promote?* | the mover CHECKs OpenFGA as its **own service identity** — silver→gold needs `can_promote` (validator rung), the others `can_create_table` (writer) | `DROP` (redelivery won't grant the role) + `medallion.stage.denied` |
+| **Data quality** | `MEDALLION_QUALITY_ENABLED` | *Is the produced data good enough?* | after the compute writes the downstream dataset, the mover runs cheap, exact assertions on it (`row_count_positive`, `not_null` on the key column) via `services/medallion/services/quality.py` | `DROP` (deterministically bad) + `medallion.stage.quality_blocked`; the failed run + its `dataQualityAssertions` facet are **still emitted** so the bad batch is auditable in lineage |
+
+Both gate the **same act** (promotion) from different angles, and both compose: a stage promotes only when
+it is *authorized* **and** the data *passes quality*. The quality gate requires compute (there is no data to
+check otherwise). A quality block is recorded on the `WROTE` edge as `quality_passed=false` *with* the real
+version, so `producers()` shows exactly which batch was stopped and why. This is the automated **validator**
+half of governance the [lineage doc](LINEAGE.md#runtime-measured-facets--declared--measured-lineage-marquez-goal-1--2)
+describes; a future human-approval rung can layer on the same `quality_passed` signal without new plumbing.
+
 ## Run it
 
 ```bash
@@ -72,7 +89,10 @@ make e2e-medallion    # the automated regression test: produce → assert gold d
   `raw-to-bronze`, `bronze-to-silver`, `silver-to-gold`, **and** `lineage` — the event followed across
   every Dapr hop (the gRPC publish injects `traceparent`; each subscriber continues the trace).
 - **Metrics** (PromQL): `medallion_stage_transitions_total{transition}` counts each hop
-  (`source->raw`, `raw->bronze`, `bronze->silver`, `silver->gold`).
+  (`source->raw`, `raw->bronze`, `bronze->silver`, `silver->gold`); `medallion_stage_denied_total` and
+  `medallion_stage_quality_blocked_total` count promotions stopped by the authz and quality gates.
+- **Measured output** (when compute is on): each `WROTE` edge carries the runtime-measured `row_count` +
+  `size_bytes` the stage actually wrote (the `outputStatistics` facet), surfaced in `producers()`.
 
 ## Why event-driven (vs. the old `scripts/medallion_demo.py`)
 

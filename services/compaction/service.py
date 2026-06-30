@@ -33,7 +33,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # dataset records a maintenance run on the lineage graph (#7b). The Dapr client targets the local
     # sidecar, so it's cheap to construct and needs no broker reachability at boot; a no-op emitter when off.
     dapr_client = DaprClient() if settings.lineage_emit_enabled else None
-    app.state.lineage_dapr = dapr_client
     app.state.lineage_emitter = make_emitter(
         enabled=settings.lineage_emit_enabled,
         dapr=dapr_client,

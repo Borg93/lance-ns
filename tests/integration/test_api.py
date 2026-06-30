@@ -218,9 +218,11 @@ def test_request_validation_maps_to_422_problem_json(client: TestClient) -> None
 # --- data-plane request building (our logic; fake dataset) ----------------- #
 
 
-def test_update_builds_updates_dict(client: TestClient, monkeypatch) -> None:
+def test_update_builds_updates_dict_and_reads_real_count_key(client: TestClient, monkeypatch) -> None:
     dataset = MagicMock()
-    dataset.update.return_value = MagicMock(num_updated_rows=2)
+    # pylance's update() returns the UpdateResult dict with key `num_rows_updated` (NOT `num_updated_rows`,
+    # and NOT an attribute) — the response must read that exact key, else updated_rows is always 0.
+    dataset.update.return_value = {"num_rows_updated": 2}
     dataset.version = 5
     monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
 
@@ -250,7 +252,43 @@ def test_create_tag_routes_to_dataset_tags(client: TestClient, monkeypatch) -> N
 
     resp = client.post("/v1/table/db$t/tags/create", json={"tag": "v1", "version": 1})
     assert resp.status_code == 200
-    dataset.tags.create.assert_called_once_with("v1", 1)
+    dataset.tags.create.assert_called_once_with("v1", 1)  # no branch → bare int (current/main branch)
+
+
+def test_create_tag_with_branch_passes_branch_version_tuple(client: TestClient, monkeypatch) -> None:
+    # A branch-scoped tag must pass (branch, version) — a bare int would resolve against main, tagging the
+    # WRONG version. (Was silently dropping `branch`.)
+    dataset = MagicMock()
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    resp = client.post("/v1/table/db$t/tags/create", json={"tag": "rc", "version": 5, "branch": "dev"})
+    assert resp.status_code == 200
+    dataset.tags.create.assert_called_once_with("rc", ("dev", 5))
+
+
+def test_alter_columns_converts_json_arrow_type_to_pyarrow(client: TestClient, monkeypatch) -> None:
+    # A re-type carries `data_type` as a JsonArrowDataType dict; it must reach pylance as a real pa.DataType,
+    # not the JSON dict (which would 500 at the Rust boundary). float32→float16 is the documented vector case.
+    import pyarrow as pa
+
+    dataset = MagicMock()
+    dataset.version = 4
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    resp = client.post(
+        "/v1/table/db$t/alter_columns",
+        json={"alterations": [{"path": "embedding", "data_type": {"type": "float16"}}]},
+    )
+    assert resp.status_code == 200
+    alteration = dataset.alter_columns.call_args.args[0]  # alterations are passed positionally (*alterations)
+    assert alteration["data_type"] == pa.float16()
+
+
+def test_alter_columns_unsupported_type_is_400_not_500(client: TestClient, monkeypatch) -> None:
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: MagicMock())
+    resp = client.post(
+        "/v1/table/db$t/alter_columns",
+        json={"alterations": [{"path": "c", "data_type": {"type": "some_exotic_type"}}]},
+    )
+    assert resp.status_code == 400  # clear InvalidInput, not a silent Rust-boundary 500
 
 
 def test_update_with_empty_updates_is_400(client: TestClient, monkeypatch) -> None:

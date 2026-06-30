@@ -11,6 +11,9 @@ Each function takes ``(ns, storage_options, request)`` — except
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
+import pyarrow as pa
 from lance_namespace import (
     AlterTableAddColumnsRequest,
     AlterTableAddColumnsResponse,
@@ -37,6 +40,7 @@ from lance_namespace import (
     ListTableTagsRequest,
     ListTableTagsResponse,
     TableTagNotFoundError,
+    UnsupportedOperationError,
     UpdateFieldMetadataResponse,
     UpdateTableRequest,
     UpdateTableResponse,
@@ -62,6 +66,38 @@ def _version(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> int
     return open_dataset(ns, so, table_id).version
 
 
+# Scalar Arrow type names → pyarrow factory, for the alter_columns re-type path. A ``JsonArrowDataType``
+# carries a ``type`` name (+ optional ``fields``/``length`` for complex types); pylance's ``alter_columns``
+# needs a real ``pa.DataType``, so we convert. Covers the documented re-types (e.g. float32→float16 on an
+# embedding column); an unsupported/complex type raises a clear 400 instead of a silent Rust-boundary 500.
+_SCALAR_ARROW: dict[str, Callable[[], pa.DataType]] = {
+    "null": pa.null, "bool": pa.bool_, "boolean": pa.bool_,
+    "int8": pa.int8, "int16": pa.int16, "int32": pa.int32, "int64": pa.int64,
+    "uint8": pa.uint8, "uint16": pa.uint16, "uint32": pa.uint32, "uint64": pa.uint64,
+    "float16": pa.float16, "halffloat": pa.float16, "float32": pa.float32, "float": pa.float32,
+    "float64": pa.float64, "double": pa.float64,
+    "string": pa.string, "utf8": pa.string, "large_string": pa.large_string,
+    "binary": pa.binary, "large_binary": pa.large_binary, "date32": pa.date32, "date64": pa.date64,
+}
+
+
+def _json_arrow_to_pa_type(dt: dict) -> pa.DataType:
+    """Convert a ``JsonArrowDataType`` dict (``{type, fields?, length?}``) to a ``pyarrow.DataType``.
+
+    Handles scalars + fixed-size-list (vector embeddings). An unsupported/complex type raises
+    ``InvalidInputError`` (400) rather than letting a dict reach pylance and fail as a 500 at the boundary.
+    """
+    name = str(dt.get("type") or "").lower()
+    factory = _SCALAR_ARROW.get(name)
+    if factory is not None:
+        return factory()
+    if name in ("fixed_size_list", "fixedsizelist"):
+        fields, length = dt.get("fields") or [], dt.get("length")
+        if fields and length:
+            return pa.list_(_json_arrow_to_pa_type(fields[0].get("type") or {}), int(length))
+    raise InvalidInputError(f"unsupported alter_columns data_type: {dt.get('type')!r}")
+
+
 def update_table(ns: LanceNamespace, so: StorageOptions, req: UpdateTableRequest) -> UpdateTableResponse:
     """Apply SQL ``[path, expression]`` updates to matching rows."""
     table_id = _table_id(req)
@@ -69,7 +105,10 @@ def update_table(ns: LanceNamespace, so: StorageOptions, req: UpdateTableRequest
     if not updates:
         raise InvalidInputError("update requires at least one [path, expression] pair")
     result = open_dataset(ns, so, table_id).update(updates, where=req.predicate)
-    updated = getattr(result, "num_updated_rows", None)
+    # pylance's update() returns an UpdateResult TypedDict (a plain dict at runtime); the row count is
+    # `num_rows_updated`. (The previous `getattr(result, "num_updated_rows", ...)` was wrong twice — attr
+    # access on a dict + wrong key — so updated_rows was hard-wired to 0 on every successful update.)
+    updated = result.get("num_rows_updated") if isinstance(result, dict) else None
     return UpdateTableResponse(
         updated_rows=updated if updated is not None else 0, version=_version(ns, so, table_id)
     )
@@ -89,7 +128,13 @@ def add_columns(
 ) -> AlterTableAddColumnsResponse:
     """Add columns computed from per-column SQL expressions."""
     table_id = _table_id(req)
-    transforms = {c.name: c.expression for c in (req.new_columns or []) if c.expression}
+    columns = req.new_columns or []
+    # The spec also allows a `virtual_column` (UDF/Docker-backed) instead of a SQL `expression`. That needs
+    # a UDF execution backend we don't run, so reject it as a spec-correct 501 — not a 400 (it's a valid
+    # request for an unsupported feature, not invalid input).
+    if any(getattr(c, "virtual_column", None) is not None and not c.expression for c in columns):
+        raise UnsupportedOperationError("virtual_column add_columns is not supported by this backend")
+    transforms = {c.name: c.expression for c in columns if c.expression}
     if not transforms:
         raise InvalidInputError("add_columns requires a name and SQL expression per column")
     open_dataset(ns, so, table_id).add_columns(transforms)
@@ -108,8 +153,10 @@ def alter_columns(
             alteration["name"] = entry.rename
         if entry.nullable is not None:
             alteration["nullable"] = entry.nullable
-        if getattr(entry, "data_type", None) is not None:
-            alteration["data_type"] = entry.data_type
+        dt = getattr(entry, "data_type", None)
+        if dt is not None:
+            # data_type is a JsonArrowDataType dict; pylance needs a real pa.DataType, not the JSON dict.
+            alteration["data_type"] = _json_arrow_to_pa_type(dt if isinstance(dt, dict) else dt.model_dump())
         alterations.append(alteration)
     # pylance accepts plain dict alterations at runtime; its stub types them as
     # AlterColumn (a TypedDict), which ty can't match from dict[str, object].
@@ -155,9 +202,15 @@ def list_tags(ns: LanceNamespace, so: StorageOptions, req: ListTableTagsRequest)
     return ListTableTagsResponse.model_validate({"tags": tags})
 
 
+def _tag_reference(branch: str | None, version: int | None) -> int | tuple[str | None, int | None] | None:
+    """Map the spec's optional ``branch`` + ``version`` to a pylance tag ``reference``: a bare int resolves
+    against the CURRENT branch (main), so a branch-scoped tag must pass the ``(branch, version)`` tuple."""
+    return (branch, version) if branch is not None else version
+
+
 def create_tag(ns: LanceNamespace, so: StorageOptions, req: CreateTableTagRequest) -> CreateTableTagResponse:
-    """Tag the given table version with a name."""
-    open_dataset(ns, so, _table_id(req)).tags.create(req.tag, req.version)
+    """Tag the given table version with a name (honoring the request's optional ``branch``)."""
+    open_dataset(ns, so, _table_id(req)).tags.create(req.tag, _tag_reference(req.branch, req.version))
     return CreateTableTagResponse()
 
 
@@ -165,15 +218,18 @@ def get_tag_version(
     ns: LanceNamespace, so: StorageOptions, req: GetTableTagVersionRequest
 ) -> GetTableTagVersionResponse:
     """Return the table version a tag points to."""
-    version = open_dataset(ns, so, _table_id(req)).tags.get_version(req.tag)
+    tags = open_dataset(ns, so, _table_id(req)).tags
+    version = tags.get_version(req.tag)
     if version is None:
         raise TableTagNotFoundError(f"tag {req.tag!r} not found")
-    return GetTableTagVersionResponse(version=version)
+    # Echo the branch the tag lives on (None for main) so a non-main tag isn't reported as main.
+    entry = tags.list().get(req.tag) or {}
+    return GetTableTagVersionResponse(version=version, branch=entry.get("branch"))
 
 
 def update_tag(ns: LanceNamespace, so: StorageOptions, req: UpdateTableTagRequest) -> UpdateTableTagResponse:
-    """Move an existing tag to a new table version."""
-    open_dataset(ns, so, _table_id(req)).tags.update(req.tag, req.version)
+    """Move an existing tag to a new table version (honoring the request's optional ``branch``)."""
+    open_dataset(ns, so, _table_id(req)).tags.update(req.tag, _tag_reference(req.branch, req.version))
     return UpdateTableTagResponse()
 
 

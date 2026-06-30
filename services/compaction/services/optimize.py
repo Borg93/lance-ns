@@ -64,7 +64,11 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
             result.indices_optimized = len(ds.list_indices())
         except Exception as exc:  # noqa: BLE001 — no indices / transient → don't fail the whole sweep
             log.warning("optimize_indices skipped for %s: %s", uri, exc)
-        stats: Any = ds.cleanup_old_versions(older_than=older_than)
+        # error_if_tagged_old_versions=False: tagged versions are EXEMPT from GC (they survive until the tag
+        # is deleted). The default (True) RAISES once any tag ages past older_than — which, since the catalog
+        # creates long-lived promotion tags, would permanently stall GC for that dataset (the raise is caught
+        # and recorded as error, reclaiming nothing). We want GC to skip tagged versions and reclaim the rest.
+        stats: Any = ds.cleanup_old_versions(older_than=older_than, error_if_tagged_old_versions=False)
         result.old_versions_removed = int(getattr(stats, "old_versions", 0))
         result.bytes_removed = int(getattr(stats, "bytes_removed", 0))
     except Exception as exc:  # noqa: BLE001 — maintenance is best-effort per dataset

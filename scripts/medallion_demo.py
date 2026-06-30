@@ -273,7 +273,8 @@ def write_gold() -> None:
     lineage_json = [json.dumps(provenance)] * sv.num_rows
     try:
         lineage_col = pa.array(lineage_json, type=pa.json_())
-    except (pa.ArrowNotImplementedError, TypeError):  # pragma: no cover - older arrow/lance build
+    except (AttributeError, pa.ArrowNotImplementedError, TypeError):  # pragma: no cover - older arrow build
+        # AttributeError: a pre-JSON pyarrow has no pa.json_ at all (the other two cover present-but-unbuilt).
         lineage_col = pa.array(lineage_json, type=pa.string())
     # Carry the keys forward (id, payload_src) so column lineage is visible through to gold; add the
     # embedded provenance JSONB. Only the raw `payload` blob was dropped (at silver, becoming embedding).

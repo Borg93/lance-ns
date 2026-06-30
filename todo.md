@@ -164,9 +164,10 @@ After reading the Lance Namespace spec docs (`lance-namespace/docs`) + an advers
   backfill, version-mutation, branches, MV, alter_transaction — not catalog gaps). Stage recovery
   (`restore_table`) + `/reconcile` validated. The "compaction wipes gold" alarm was **refuted** (current
   version always kept; only >7d time-travel history GC'd).
-  - **The one in-scope gap (by design = the rask seam):** the deployed pipeline emits **provenance, not
-    data** — the medallion movers are dummy emitters; the durable gold+JSONB-lineage exists only in
-    `medallion_demo.py`. The real gold-writing **lance-ray** (Ray Data job on rask's KubeRay) is P1 #6.
+  - **The one in-scope gap (by design = the rask seam):** the movers emit **provenance by default**, and
+    **real Lance data when `MEDALLION_COMPUTE_ENABLED`** (the in-process fake-Ray compute). What's left is
+    the **distributed** producer — **lance-ray** (Ray Data job on rask's KubeRay, P1 #6) — plus the gold
+    whole-history JSONB embed in the deployed path (today only in `medallion_demo.py`).
   - Minor partials (noted, not blockers): compaction time-travel retention is global 7d not per-stage;
     `can_alter`/`can_commit`/`can_rename` modeled-but-unwired; routes-vs-spec conformance test (P1 #9) absent.
 
@@ -208,9 +209,11 @@ After reading the Lance Namespace spec docs (`lance-namespace/docs`) + an advers
    exchanges the caller's OIDC token), `StaticPrefixVendor`, `ModeBVendor`.
    `services/catalog/core/vending.py`, `services/catalog/api/v1/endpoints/credentials.py`. (Adversarially
    audited; bearer-seam / 4xx-mapping / client-caching fixes applied.)
-6. ⛔ **lance-ray promotion + compaction jobs** (bronze→silver→gold) on the KubeRay cluster — the REAL Ray
-   Data jobs that write the stages + emit OpenLineage (today the medallion movers are dummy emitters, no
-   data). **This is the ONE in-scope prod gap, and it lands in the rask merge** — see
+6. ⛔ **DISTRIBUTED lance-ray promotion + compaction** (bronze→silver→gold) on the KubeRay cluster — the REAL
+   Ray Data jobs (`lr.read_lance`/`write_lance`, `lr.compact_database`) that write the stages + emit
+   OpenLineage at scale. (The movers/compaction already do the same read→transform→write→version contract
+   **in-process** via the opt-in fake-Ray compute; the gap is the *distributed* layer.) **It lands in the
+   rask merge** — see
    `docs/RASK-INTEGRATION.md` (the lance-ray seam contract). The event-driven cascade + the gold JSONB-lineage
    demo already prove the seam the real job drops into.
 7. ✅ **OpenBao SecretStore — DONE (two-tier model).** App tier (catalog/lineage/compaction) consumes

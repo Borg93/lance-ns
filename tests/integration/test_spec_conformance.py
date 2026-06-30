@@ -16,7 +16,7 @@ from typing import Any
 import yaml
 from fastapi.testclient import TestClient
 
-_SPEC = Path(__file__).resolve().parents[2] / "lance-namespace" / "docs" / "src" / "spec.yaml"
+_SPEC = Path(__file__).resolve().parents[2] / "lance_docs" / "ns_catalog" / "spec.yaml"
 _METHODS = frozenset({"get", "put", "post", "delete", "patch"})
 
 

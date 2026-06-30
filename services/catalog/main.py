@@ -98,8 +98,6 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         dapr_client = DaprClient()
     elif settings.lineage_emit_enabled and settings.lineage_url:
         lineage_http = httpx.AsyncClient(timeout=settings.lineage_emit_timeout_seconds)
-    app.state.lineage_http = lineage_http
-    app.state.lineage_dapr = dapr_client
     app.state.lineage_emitter = make_emitter(
         enabled=settings.lineage_emit_enabled,
         transport=settings.lineage_transport,

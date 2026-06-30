@@ -50,12 +50,15 @@ Rust `DirectoryNamespace` (rename/backfill/transaction/batch-version) or a real 
 thin in-process fill.
 
 ## Durable-artifact + recovery
-- **Gold embeds lineage as JSONB** + sits on the durable S3 tier — but TODAY this is produced **only by the
-  demo driver** (`medallion_demo.py: write_gold`), **not the deployed service**. The deployed medallion
-  movers are **dummy emitters** (provenance only, no Lance data write). This is **by design**: the real
-  gold-writing producer is **lance-ray** — a Ray Data job that lands when this merges into rask (rask's
-  KubeRay cluster). The deployed pipeline today validates the *event-driven + provenance* seam; the *data*
-  production is the rask integration (`todo.md` P1 #6, lance-ray promotion).
+- **The medallion movers write provenance by default, and real Lance data when `MEDALLION_COMPUTE_ENABLED`.**
+  Off (default): they emit OpenLineage only. On: the in-process **fake-Ray compute** (`compute.transform_stage`)
+  does a real `lance.write_dataset` per stage (incl. gold) — proven by `test_medallion_cascade.py`. What
+  stays demo-only is the **gold whole-history JSONB embed** (`medallion_demo.py: write_gold`); the fake-Ray
+  `compute.py` only stamps a `stage` column, not the JSONB. The genuine remaining gap is the **distributed**
+  producer — **lance-ray** (a Ray Data job; `lr.write_lance`/`read_lance`, the same read→transform→write→
+  version contract the fake-Ray compute fills) — which lands when this merges into rask's KubeRay cluster
+  (`todo.md` P1 #6). So: event-driven + provenance + (opt-in) in-process data are validated here; the
+  distributed compute + the gold-JSONB-in-the-deployed-path are the rask integration.
 - **Stage recovery works** — `restore_table` (v1→v3 verified) on the native backend; the medallion `WROTE`
   edge records the Lance version (`DatasetVersionDatasetFacet`); `/reconcile` anchors gold to the on-disk
   `latest_write_version`.

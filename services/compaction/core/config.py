@@ -17,7 +17,9 @@ class CompactionSettings(BaseSettings):
     # bindings.cron Component's metadata.name). Default matches the chart.
     binding_name: str = Field(default="compaction-cron", alias="COMPACTION_BINDING_NAME")
     # Datasets whose newest version is older than this are eligible for version GC (keep recent history).
-    older_than_days: int = Field(default=7, ge=0, alias="COMPACTION_OLDER_THAN_DAYS")
+    # ge=1 (not 0): timedelta(0) is falsy, so pylance collapses `older_than` to None and silently drops the
+    # threshold — to GC aggressively, use a small positive value, not 0.
+    older_than_days: int = Field(default=7, ge=1, alias="COMPACTION_OLDER_THAN_DAYS")
 
     # --- Lineage emission (opt-in, best-effort) — record a maintenance run on each materially-compacted
     # dataset to the lineage graph via Dapr pub/sub. Publishes to the SAME pubsub component + topic the

@@ -226,9 +226,12 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
     `public.lineage_reads` on every gated per-dataset read (datasets/columns/reconcile routers), AFTER the
     authz gate. Off by default (`LINEAGE_READ_AUDIT_ENABLED`); best-effort (never fails a read).
     `services/lineage/api/fga_deps.py`, `services/lineage/services/repository.py`.
-12b. 🟡 **Column-level lineage** — backend DONE (#24: `(:Column)-[:DERIVED_FROM_COLUMN]->` graph + gated/
-    governed `/columns` queries, 2 live e2e). **Remaining = the Svelte Flow field-to-field UI** (buildable
-    now as demo scaffolding; migrates to rask's microfrontends later).
+12b. ✅ **Column-level lineage** (DONE 2026-06-30, backend + UI) — backend #24 (`(:Column)-[:DERIVED_FROM_COLUMN]->`
+    graph + gated/governed `/columns` queries, 2 live e2e) **and the Svelte Flow field-to-field UI**:
+    `frontend/src/lib/ColumnNode.svelte` (layer palette, masking shield, Arrow type) + a **Columns** graph-view
+    tab in `+page.svelte` (`loadColumns()` → `/datasets/{name}/columns`, live 2s poll, red-dashed masking
+    edges, empty-state guidance). `bun run check` clean (4549 files, 0 errors). Migrates to rask's
+    microfrontends later as a portable component. *(Fast-follow: schema-diffing between Lance versions.)*
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
 14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows · **OTel** traces/metrics.
@@ -368,8 +371,9 @@ an `effect_update_depth_exceeded` infinite loop (untrack the node-reconcile read
     - **Proven live**: `gold$catalog.caption` upstream → bronze.payload(blob)/silver.embedding/silver.caption
       with types; `bronze$events.payload` downstream → silver+gold columns; the `/columns` DAG shows the
       same-dataset `embedding→caption` edge. 163 unit + **2 e2e against live AGE** + 3 curl checks green.
-    - **Remaining sub-task**: the column-lineage **UI** (Svelte Flow field-to-field view) — backend is
-      complete. Also still unblocks **schema-diffing between Lance versions** (#23 fast-follow).
+    - ✅ **UI DONE (2026-06-30)**: the column-lineage **Columns** view (`ColumnNode.svelte` + `+page.svelte`
+      tab, live poll, masking edges) renders the field-to-field DAG; `bun run check` clean. Still unblocks
+      **schema-diffing between Lance versions** (#23 fast-follow).
     (supersedes P2 #12b)
 25. 🔶 **Event-driven runtime — IN PROGRESS (Dapr transport landed).** Phase 1 DONE: the catalog→lineage
     transport is **Dapr pub/sub** (`DaprEmitter` → `pubsub.jetstream` component; `handle_cloud_event`

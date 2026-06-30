@@ -296,3 +296,28 @@ async def seed_ownership(
             resource, segments, delimiter=settings.delimiter, root_object=settings.fga_root_object
         ),
     )
+
+
+async def revoke_ownership(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    *,
+    resource: str,
+    segments: list[str],
+) -> None:
+    """Delete every FGA tuple on a just-dropped / renamed-away object (the revoke counterpart of
+    :func:`seed_ownership`).
+
+    No-op when FGA is off or the client is unwired — so lifecycle endpoints call it with one line.
+    Removes the owner grant, the ``parent`` edge, AND any later reader/writer/validator grants, so
+    a reused id can never inherit a stale grant (privilege bleed). Unlike :func:`seed_ownership`
+    this needs no token: the drop was already authorized by :func:`authorize` (owner tier), and the
+    cleanup deletes every subject's tuple regardless of who. Ids come from ``fga`` so the object
+    matches what :func:`seed_ownership` wrote byte-for-byte.
+    """
+    if not (settings.fga_enabled and client is not None):
+        return
+    obj = f"{resource}:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    removed = await fga.revoke_object_tuples(client, obj)
+    if removed:
+        log.info("fga_tuples_revoked", extra={"object": obj, "removed": removed})

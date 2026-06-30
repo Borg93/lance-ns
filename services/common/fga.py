@@ -44,6 +44,7 @@ from openfga_sdk.client.models import (
 from openfga_sdk.configuration import RetryParams
 from openfga_sdk.exceptions import ApiException
 from openfga_sdk.models.create_store_request import CreateStoreRequest
+from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
 from openfga_sdk.models.write_authorization_model_request import WriteAuthorizationModelRequest
 from tenacity import (
     RetryCallState,
@@ -85,6 +86,15 @@ _FAIL_CLOSED: tuple[type[BaseException], ...] = (ApiException, *_TRANSIENT_NETWO
 # mentions that the tuple already exists. We treat that as success (idempotent
 # grant), since the desired post-condition — the tuple is present — already holds.
 _DUPLICATE_WRITE_MARKERS = ("already exists", "write_failed_due_to_invalid_input")
+
+# The symmetric case on the revoke path: deleting an already-absent tuple (a concurrent revoke)
+# surfaces as the same 400 validation error. Treat it as success — the tuple being gone IS the goal.
+_MISSING_DELETE_MARKERS = ("cannot delete", "does not exist", "write_failed_due_to_invalid_input")
+
+# Reading every tuple on one object (revoke-on-delete) is paginated; bound the page loop so a
+# pathological store / continuation-token bug can't spin forever. One object's grants are few, so
+# this ceiling is never reached in practice.
+_MAX_REVOKE_PAGES = 100
 
 
 def load_model() -> dict[str, Any]:
@@ -366,8 +376,45 @@ async def list_objects(
         raise ServiceUnavailableError("authorization service unavailable") from exc
 
 
+async def read_object_tuples(
+    client: OpenFgaClient,
+    obj: str,
+    *,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    retry_max_backoff_seconds: float = DEFAULT_RETRY_MAX_BACKOFF_SECONDS,
+) -> list[ClientTuple]:
+    """Return EVERY tuple whose object is ``obj`` (e.g. all grants on ``table:db1$t``).
+
+    Paginated under the hood so the COMPLETE set comes back, not just the first page — the
+    revoke-on-delete caller must see every stale grant to remove it. Read-only/idempotent, so it
+    gets the same bounded retry + fail-closed treatment as :func:`check` (outage → 503).
+    """
+
+    @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
+    async def _do_read() -> list[ClientTuple]:
+        collected: list[ClientTuple] = []
+        token: str | None = None
+        for _ in range(_MAX_REVOKE_PAGES):
+            options = {"continuation_token": token} if token else None
+            response = await client.read(ReadRequestTupleKey(object=obj), options=options)
+            for t in response.tuples or []:
+                key = t.key
+                collected.append(ClientTuple(user=key.user, relation=key.relation, object=key.object))
+            token = response.continuation_token or None
+            if not token:
+                break
+        return collected
+
+    try:
+        return await _do_read()
+    except _FAIL_CLOSED as exc:
+        log.error("openfga_read_unavailable", extra={"object": obj}, exc_info=True)
+        raise ServiceUnavailableError("authorization service unavailable") from exc
+
+
 # --------------------------------------------------------------------------- #
-# Writes (post-create grants)
+# Writes (post-create grants) + deletes (revoke-on-delete)
 # --------------------------------------------------------------------------- #
 
 
@@ -448,3 +495,81 @@ async def grant_on_create(
         retry_backoff_seconds=retry_backoff_seconds,
         retry_max_backoff_seconds=retry_max_backoff_seconds,
     )
+
+
+def _is_missing_delete(exc: ApiException) -> bool:
+    """True if a delete failed only because the tuple was already absent (idempotent revoke)."""
+    if exc.status is not None and exc.status != 400:
+        return False
+    body = (str(exc) + " " + (exc.error_message or "")).lower()
+    return any(marker in body for marker in _MISSING_DELETE_MARKERS)
+
+
+async def delete_tuples(
+    client: OpenFgaClient,
+    tuples: list[ClientTuple],
+    *,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    retry_max_backoff_seconds: float = DEFAULT_RETRY_MAX_BACKOFF_SECONDS,
+) -> None:
+    """Delete relationship tuples (the revoke counterpart of :func:`write_tuples`).
+
+    Idempotent: deleting an already-absent tuple (a concurrent revoke) is swallowed, since the
+    desired post-condition — the tuple is gone — already holds. Transient failures are retried;
+    on outage we fail closed with ``ServiceUnavailableError`` so the caller does not believe a
+    revoke succeeded when it did not (stale grants would silently linger).
+    """
+    if not tuples:
+        return
+
+    @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
+    async def _do_delete() -> None:
+        await client.write(ClientWriteRequest(deletes=tuples))
+
+    try:
+        await _do_delete()
+    except _FAIL_CLOSED as exc:
+        if isinstance(exc, ApiException) and _is_missing_delete(exc):
+            log.debug("openfga_delete_absent_skipped")
+            return
+        log.error("openfga_delete_unavailable", exc_info=True)
+        raise ServiceUnavailableError("authorization service unavailable") from exc
+
+
+async def revoke_object_tuples(
+    client: OpenFgaClient,
+    obj: str,
+    *,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    retry_max_backoff_seconds: float = DEFAULT_RETRY_MAX_BACKOFF_SECONDS,
+) -> int:
+    """Delete EVERY tuple on ``obj`` — the revoke-on-delete cleanup. Returns the count removed.
+
+    A dropped/renamed object's grants (owner, the parent edge, AND any later reader/writer/
+    validator grants) must not linger: if the id is later reused, those stale tuples would
+    silently re-grant the old subjects on the NEW object (stale-grant privilege bleed). Reads the
+    full tuple set, then deletes it. No-op (0) when the object has none.
+
+    Scope: this revokes the object's OWN tuples. Cascading a namespace drop to its children's
+    tuples is out of scope — the native ``drop_namespace`` requires the namespace be empty, so it
+    has no surviving child grants to strand.
+    """
+    tuples = await read_object_tuples(
+        client,
+        obj,
+        retry_attempts=retry_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        retry_max_backoff_seconds=retry_max_backoff_seconds,
+    )
+    if not tuples:
+        return 0
+    await delete_tuples(
+        client,
+        tuples,
+        retry_attempts=retry_attempts,
+        retry_backoff_seconds=retry_backoff_seconds,
+        retry_max_backoff_seconds=retry_max_backoff_seconds,
+    )
+    return len(tuples)

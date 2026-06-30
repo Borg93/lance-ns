@@ -68,12 +68,20 @@ def describe_namespace(id: str, ns: NamespaceDep, settings: SettingsDep) -> Desc
 
 
 @router.post("/{id}/drop", response_model_exclude_none=True)
-def drop_namespace(
-    id: str, ns: NamespaceDep, settings: SettingsDep, body: DropNamespaceRequest | None = None
+async def drop_namespace(
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    client: FgaClientDep,
+    body: DropNamespaceRequest | None = None,
 ) -> DropNamespaceResponse:
+    segments = parse_identifier(id, settings.delimiter)
     req = body or DropNamespaceRequest()
-    req.id = parse_identifier(id, settings.delimiter)
-    return native.call(ns, "drop_namespace", req)
+    req.id = segments
+    response: DropNamespaceResponse = await run_in_threadpool(native.call, ns, "drop_namespace", req)
+    # Revoke the namespace's FGA tuples so a reused id can't inherit stale grants.
+    await fga_deps.revoke_ownership(client, settings, resource="namespace", segments=segments)
+    return response
 
 
 @router.post("/{id}/exists", status_code=204)

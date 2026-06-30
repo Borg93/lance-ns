@@ -100,14 +100,28 @@ def table_exists(id: str, ns: NamespaceDep, settings: SettingsDep) -> None:
 
 
 @router.post("/{id}/drop", response_model_exclude_none=True)
-def drop_table(id: str, ns: NamespaceDep, settings: SettingsDep) -> DropTableResponse:
-    return native.call(ns, "drop_table", DropTableRequest(id=parse_identifier(id, settings.delimiter)))
+async def drop_table(
+    id: str, ns: NamespaceDep, settings: SettingsDep, client: FgaClientDep
+) -> DropTableResponse:
+    segments = parse_identifier(id, settings.delimiter)
+    response: DropTableResponse = await run_in_threadpool(
+        native.call, ns, "drop_table", DropTableRequest(id=segments)
+    )
+    # Revoke the table's FGA tuples so a later table reusing this id can't inherit stale grants.
+    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+    return response
 
 
 @router.post("/{id}/deregister", response_model_exclude_none=True)
-def deregister_table(id: str, ns: NamespaceDep, settings: SettingsDep) -> DeregisterTableResponse:
-    req = DeregisterTableRequest(id=parse_identifier(id, settings.delimiter))
-    return native.call(ns, "deregister_table", req)
+async def deregister_table(
+    id: str, ns: NamespaceDep, settings: SettingsDep, client: FgaClientDep
+) -> DeregisterTableResponse:
+    segments = parse_identifier(id, settings.delimiter)
+    response: DeregisterTableResponse = await run_in_threadpool(
+        native.call, ns, "deregister_table", DeregisterTableRequest(id=segments)
+    )
+    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+    return response
 
 
 @router.post("/{id}/register", response_model_exclude_none=True)
@@ -143,6 +157,9 @@ async def rename_table(
     # grant ownership on the destination so the caller retains access under the new id.
     dest_parent = list(body.new_namespace_id) if body.new_namespace_id else segments[:-1]
     new_segments = [*dest_parent, body.new_table_name]
+    # Revoke the SOURCE id's tuples (it no longer names a table) then seed the destination — so no
+    # stale grant survives under the old id and the caller keeps ownership under the new one.
+    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=new_segments)
     return response
 

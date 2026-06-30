@@ -280,8 +280,8 @@ def test_create_namespace_seeds_owner_and_parent_link(
 def test_create_top_level_namespace_links_to_catalog_root(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:
-    """CONTRACT: a TOP-LEVEL namespace seeds its ``parent`` as the catalog root object, so a
-    catalog-level grant (the medallion ``project`` catalog) cascades into it."""
+    """CONTRACT: a TOP-LEVEL namespace seeds its ``parent`` as the FGA root object (the warehouse
+    root), so a warehouse-/project-level grant cascades into it."""
     fake_ns.create_namespace.return_value = CreateNamespaceResponse(properties={})
     _wire(client)
     monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
@@ -294,7 +294,7 @@ def test_create_top_level_namespace_links_to_catalog_root(
     assert call is not None
     kwargs = call.kwargs
     assert kwargs["obj_id"] == "bronze"
-    assert kwargs["parent_object"] == "catalog:lance"  # default fga_root_object
+    assert kwargs["parent_object"] == "warehouse:lance_catalog"  # default fga_root_object
 
 
 # --------------------------------------------------------------------------- #

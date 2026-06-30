@@ -54,7 +54,9 @@ _FGA_TYPE: dict[str, str] = {
 
 # Read-only trailing actions (reader rung). ``query``/``count_rows`` read DATA; the rest
 # read metadata — split so list_objects(can_read_data) is meaningful (both are reader).
-_DATA_READ_ACTIONS = frozenset({"query", "count_rows"})
+# ``credentials`` (vending) is a DATA read at minimum — the router guard requires can_read_data; the
+# endpoint additionally requires can_write_data for a write-tier vend.
+_DATA_READ_ACTIONS = frozenset({"query", "count_rows", "credentials"})
 _META_READ_ACTIONS = frozenset(
     {"describe", "exists", "list", "stats", "explain_plan", "analyze_plan", "version"}
 )

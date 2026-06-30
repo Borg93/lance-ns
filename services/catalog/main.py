@@ -28,6 +28,7 @@ from catalog.api.v1.router import api_router
 from catalog.core.config import get_settings
 from catalog.core.lineage_emit import make_emitter
 from catalog.core.namespace import build_namespace
+from catalog.core.vending import make_vendor
 
 log = logging.getLogger(__name__)
 
@@ -77,6 +78,17 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.fga = fga.make_client(
             settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
         )
+    # Credential vending (data plane): turn an authorized (table location, tier) into the scoped
+    # storage_options a client uses to reach object storage DIRECTLY. mode_b (default) vends nothing —
+    # clients use the server-mediated Arrow-IPC endpoints; sts (AssumeRole + per-table session policy) /
+    # static delegate short-TTL or per-bucket creds. Built once from config (see core/vending.py).
+    app.state.vendor = make_vendor(
+        settings.vending_mode,
+        region=settings.s3_region,
+        sts_endpoint=settings.s3_sts_endpoint,
+        assume_role_arn=settings.s3_assume_role_arn,
+        ttl_seconds=settings.vending_ttl_seconds,
+    )
     # Lineage emission (opt-in, best-effort). Build the chosen transport: a Dapr pub/sub publisher (the
     # sidecar persists to NATS) or a direct-HTTP client. The Dapr client targets the local sidecar, so
     # it's cheap to construct and needs no broker reachability at boot.

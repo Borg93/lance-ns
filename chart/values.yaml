@@ -12,6 +12,17 @@ image:
 auth:
   enabled: false
 
+# --- Data-plane credential vending (Track B). How a client gets storage_options for DIRECT object I/O. ----
+# mode_b (default) = nothing is vended; clients use the catalog's server-mediated Arrow-IPC data endpoints.
+# sts = the catalog calls AssumeRole on the RustFS STS endpoint with a per-table session policy → short-TTL,
+# read/write-scoped creds (POST /v1/table/<id>/credentials?tier=read|write). static = per-bucket keys.
+vending:
+  mode: mode_b # mode_b | static | sts
+  ttlSeconds: 900
+  # RustFS (MinIO-compatible STS) authorizes by the CALLER's creds + the inline session policy; the role ARN
+  # is required by the AssumeRole API shape but not resolved to a configured role. Override per deployment.
+  assumeRoleArn: "arn:aws:iam::000000000000:role/lance-vend"
+
 # --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------
 dapr:
   enabled: true

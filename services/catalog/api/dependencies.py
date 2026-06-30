@@ -10,6 +10,7 @@ from openfga_sdk import OpenFgaClient
 
 from catalog.core.config import Settings, get_settings
 from catalog.core.lineage_emit import LineageEmitter, NoopEmitter
+from catalog.core.vending import CredentialVendor, ModeBVendor
 
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 
@@ -50,3 +51,12 @@ def get_lineage_emitter(request: Request) -> LineageEmitter:
 
 
 LineageEmitterDep = Annotated[LineageEmitter, Depends(get_lineage_emitter)]
+
+
+def get_vendor(request: Request) -> CredentialVendor:
+    """The credential vendor built in the app lifespan — Mode B (no direct creds) by default."""
+    vendor = getattr(request.app.state, "vendor", None)
+    return vendor if vendor is not None else ModeBVendor()
+
+
+VendorDep = Annotated[CredentialVendor, Depends(get_vendor)]

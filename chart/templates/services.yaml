@@ -59,6 +59,15 @@ spec:
             - { name: LANCE_S3_REGION, value: "us-east-1" }
             - { name: LANCE_S3_ALLOW_HTTP, value: "true" }
             - { name: LANCE_S3_VIRTUAL_HOSTED, value: "false" }
+            # Data-plane credential vending (Track B). mode_b (default) = server-mediated, no creds leave the
+            # catalog; sts = AssumeRole + per-table session policy against the RustFS STS endpoint (short-TTL
+            # scoped creds the client uses for direct object I/O).
+            - { name: LANCE_VENDING_MODE, value: {{ .Values.vending.mode | quote }} }
+            {{- if eq .Values.vending.mode "sts" }}
+            - { name: LANCE_S3_STS_ENDPOINT, value: "http://{{ $rustfs }}:{{ .Values.rustfs.port }}" }
+            - { name: LANCE_S3_ASSUME_ROLE_ARN, value: {{ .Values.vending.assumeRoleArn | quote }} }
+            - { name: LANCE_VENDING_TTL_SECONDS, value: {{ .Values.vending.ttlSeconds | quote }} }
+            {{- end }}
             - { name: LANCE_LINEAGE_EMIT_ENABLED, value: "true" }
             - { name: LANCE_LINEAGE_TRANSPORT, value: "dapr" }
             - { name: LANCE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }

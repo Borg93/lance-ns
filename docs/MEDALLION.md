@@ -29,8 +29,20 @@ and produces bronze. So:
 ```
 
 `lance-ray` does **not** produce bronze itself — it produces `raw_events` and *triggers* the `raw→bronze`
-mover, which produces bronze. (In production `lance-ray` is a real Ray Data job writing a Lance table +
-emitting lineage; here it's a dummy emitter — no heavy compute — which is all the event-driven demo needs.)
+mover, which produces bronze.
+
+### Does the cascade produce real data, or just lineage?
+
+Both modes, by a flag. **Default off** (`MEDALLION_COMPUTE_ENABLED` unset): the producer + movers are
+pure **emitters** — they grow the lineage DAG but write no data (all the event-driven *choreography* demo
+needs). **On**: each stage runs the **fake-Ray compute** (`services/medallion/services/compute.py`) — a
+REAL in-process Lance write: `lance-ray` seeds `raw_events`, then each mover reads its upstream Lance
+dataset, stamps a `stage` provenance column, and writes the downstream dataset — so the whole loop produces
+**actual versioned data** and the emitted OpenLineage carries the **real** Lance version (not a hardcoded
+`1`). This is the **lance-ray seam**: the exact `read → transform → write → version` contract a
+distributed Ray Data job (`lance-ray` on rask's KubeRay) swaps into in production; in-process here so the
+loop is end-to-end testable without a Ray cluster (`tests/unit/test_medallion_cascade.py` runs the full
+raw→gold cascade and asserts both the data and the `DERIVED_FROM` chain).
 
 ## The services (all share the catalog image; different entrypoint)
 

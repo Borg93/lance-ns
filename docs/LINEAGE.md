@@ -130,6 +130,18 @@ emitted by `catalog.core.lineage_emit`), the verified author is also recorded as
 Datasets are MERGEd on `{name}` only, then `namespace` is `SET`, so a dataset referenced by
 several runs is never duplicated.
 
+**The full write surface emits, not just create.** The catalog emits a versioned `WROTE` run for
+`insert`/`merge_insert`/`update`/`delete` and a **versionless `drop_table`** run (the Dataset node
+persists as history — a reader can tell it was deleted, not just last-written). The **compaction
+service** emits a versionless `operation=compaction` maintenance run per materially-compacted dataset
+(`services/compaction/core/lineage_emit.py`), so a GC/compaction shows up in `producers()` next to the
+data writes. All of these are awaited **inline** on the durable Dapr/JetStream transport (not FastAPI
+`BackgroundTasks` — no retry, dies with the worker), so a lineage outage never loses provenance.
+
+**Read-audit (`#6`, default OFF — `LINEAGE_READ_AUDIT_ENABLED`).** Complementing the write provenance,
+every gated per-dataset read appends a `public.lineage_reads` row (WHO read WHICH dataset) *after* the
+authz gate — best-effort, so an audit-write failure never fails a read.
+
 ## OpenLineage facets we capture (and Marquez reuse)
 
 We emit events **only via the official `openlineage-python` client classes**, so they are

@@ -6,8 +6,10 @@ subscribes to its upstream stage's trigger topic, emits a standard OpenLineage t
 stage's trigger. So a single producer event cascades raw→bronze→silver→gold, and because every hop is a
 Dapr publish over the instrumented gRPC client, the W3C trace context propagates → one distributed trace.
 
-Idempotent + best-effort: the transform is a dummy emit (no heavy compute), the graph MERGEs on run_id,
-and a publish outage returns ``RETRY`` so the Dapr sidecar redelivers. Run: ``uvicorn medallion.mover:app``.
+Idempotent + best-effort: with ``MEDALLION_COMPUTE_ENABLED`` each stage does a REAL in-process Lance write
+(the fake-Ray compute) so the cascade produces data, not just provenance; off, it's a pure lineage emit.
+The graph MERGEs on run_id, and a compute/publish outage returns ``RETRY`` so the Dapr sidecar redelivers.
+Run: ``uvicorn medallion.mover:app``.
 """
 
 from __future__ import annotations

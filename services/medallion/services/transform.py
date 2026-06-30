@@ -4,8 +4,10 @@
 transform's OpenLineage event (``inputs=[from_dataset]`` -> ``outputs=[to_dataset]`` — the ``DERIVED_FROM``
 edge) and publishes the next stage's trigger, so a single producer event cascades raw->bronze->silver->gold.
 
-Idempotent + best-effort: the transform is a dummy emit (no heavy compute), the graph MERGEs on run_id,
-and a publish outage returns ``RETRY`` so the Dapr sidecar redelivers. When the FGA gate is on, the mover
+Idempotent + best-effort: with ``compute_enabled`` the transform does a REAL in-process Lance write (the
+fake-Ray compute) and the emit carries the real version; off, it's a pure lineage emit (version 1). The
+graph MERGEs on run_id, and a compute/publish outage returns ``RETRY`` so the Dapr sidecar redelivers.
+When the FGA gate is on, the mover
 CHECKS it is authorized to produce the target stage as its own service identity before emitting — an
 unauthorized mover returns ``DROP`` (redelivery won't grant the role), so the cascade enforces the ReBAC.
 """

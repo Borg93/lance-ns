@@ -14,18 +14,25 @@ from common.dapr_auth import require_dapr_token
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 
-from compaction.api.dependencies import SettingsDep
+from compaction.api.dependencies import LineageEmitterDep, SettingsDep
 from compaction.core.config import get_settings
-from compaction.services.sweep import run_sweep, summarize
+from compaction.services.sweep import emit_sweep_lineage, run_sweep, summarize
 
 log = logging.getLogger(__name__)
 
 router = APIRouter()
 
 
-async def on_cron(settings: SettingsDep) -> dict[str, Any]:
-    """One maintenance sweep, triggered by a Dapr cron tick (POST /<binding-name>)."""
-    summary = summarize(await run_in_threadpool(run_sweep, settings))
+async def on_cron(settings: SettingsDep, emitter: LineageEmitterDep) -> dict[str, Any]:
+    """One maintenance sweep, triggered by a Dapr cron tick (POST /<binding-name>).
+
+    The blocking discover + compact/GC runs in the threadpool; then each materially-compacted dataset
+    records a maintenance run on the lineage graph (#7b) — awaited inline so the publish reaches the
+    durable Dapr/JetStream transport before we return, and best-effort so it never fails the sweep.
+    """
+    results = await run_in_threadpool(run_sweep, settings)
+    await emit_sweep_lineage(emitter, results, delimiter=settings.delimiter)
+    summary = summarize(results)
     log.info("compaction_sweep", extra=summary)
     return summary
 

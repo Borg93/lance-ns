@@ -19,6 +19,19 @@ class CompactionSettings(BaseSettings):
     # Datasets whose newest version is older than this are eligible for version GC (keep recent history).
     older_than_days: int = Field(default=7, ge=0, alias="COMPACTION_OLDER_THAN_DAYS")
 
+    # --- Lineage emission (opt-in, best-effort) — record a maintenance run on each materially-compacted
+    # dataset to the lineage graph via Dapr pub/sub. Publishes to the SAME pubsub component + topic the
+    # catalog publishes to and the lineage service subscribes to, so a compaction shows up in producers()
+    # next to the writes. Off by default; the sidecar owns retry/DLQ, so a publish never fails a sweep.
+    lineage_emit_enabled: bool = Field(default=False, alias="COMPACTION_LINEAGE_EMIT_ENABLED")
+    lineage_pubsub: str = Field(default="lineage-pubsub", alias="COMPACTION_LINEAGE_PUBSUB")
+    lineage_topic: str = Field(default="lineage.events.v1", alias="COMPACTION_LINEAGE_TOPIC")
+    lineage_job_namespace: str = Field(default="compaction", alias="COMPACTION_LINEAGE_JOB_NAMESPACE")
+    # The catalog id delimiter — to derive a dataset's parent namespace from its table id (matches the
+    # catalog's LANCE_DELIMITER default). The catalog lays tables out as <uuid>_<table_id>; table_id is the
+    # canonical lineage Dataset name == OpenFGA object id, and its parent is all-but-the-last segment.
+    delimiter: str = Field(default="$", alias="COMPACTION_DELIMITER")
+
     # --- S3 access to the Lance lakehouse bucket ----------------------------------------------------
     s3_endpoint: str = Field(default="http://localhost:9000", alias="COMPACTION_S3_ENDPOINT")
     s3_access_key_id: str = Field(default="rustfsadmin", alias="COMPACTION_S3_ACCESS_KEY_ID")

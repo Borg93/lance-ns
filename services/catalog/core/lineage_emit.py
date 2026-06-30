@@ -28,6 +28,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
+from common import fga
 from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
@@ -40,6 +41,10 @@ INSERT = "insert"
 MERGE_INSERT = "merge_insert"
 UPDATE = "update"
 DELETE = "delete"
+#: A table drop — recorded as a versionless run on the dataset (it has no version after the drop). The
+#: Dataset node PERSISTS in the graph as a historical provenance record (Marquez keeps dropped datasets too);
+#: the operation names it a drop so a reader can tell it was deleted, not just last-written.
+DROP_TABLE = "drop_table"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
 #: and what a Marquez-style consumer records as the event source).
@@ -374,3 +379,33 @@ def make_emitter(
     if transport == "http" and url and client is not None:
         return HttpLineageEmitter(client, url, job_namespace=job_namespace)
     return NoopEmitter()
+
+
+async def emit_write_event(
+    emitter: LineageEmitter,
+    segments: list[str],
+    *,
+    delimiter: str,
+    author: str | None,
+    version: int | None,
+    operation: str,
+    authorization: str | None,
+) -> None:
+    """Publish a best-effort lineage ``WROTE`` event for a catalog mutation, awaited INLINE in the handler.
+
+    Awaited (not queued via FastAPI ``BackgroundTasks``) so the event reaches the durable Dapr/JetStream
+    transport BEFORE the response returns — ``BackgroundTasks`` have no retry and die with the worker
+    (fastapi anti-pattern). ``emit_write`` is best-effort (it swallows a publish failure), so awaiting it
+    never fails the catalog write; JetStream message-durability + the lineage consumer's idempotent
+    MERGE-on-``run_id`` give the at-least-once delivery. ``version=None`` records the run without a version.
+    Ids come from ``fga`` so the lineage Dataset == the OpenFGA object == the catalog table id.
+    """
+    await emitter.emit_write(
+        table_id=fga.canonical_object_id(segments, delimiter=delimiter),
+        namespace=fga.parent_namespace_id(segments, delimiter=delimiter) or "",
+        author=author,
+        version=version,
+        operation=operation,
+        run_id=str(uuid.uuid4()),
+        authorization=authorization,
+    )

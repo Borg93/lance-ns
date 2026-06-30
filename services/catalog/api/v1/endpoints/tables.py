@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+from typing import Annotated
+
 from common import fga
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     DeclareTableRequest,
@@ -28,9 +30,10 @@ from lance_namespace import (
 )
 
 from catalog.api import fga_deps
-from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
+from catalog.api.dependencies import FgaClientDep, LineageEmitterDep, NamespaceDep, SettingsDep
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
+from catalog.core.lineage_emit import DROP_TABLE, emit_write_event
 from catalog.services import native
 
 router = APIRouter(prefix="/v1/table", tags=["table"])
@@ -101,7 +104,13 @@ def table_exists(id: str, ns: NamespaceDep, settings: SettingsDep) -> None:
 
 @router.post("/{id}/drop", response_model_exclude_none=True)
 async def drop_table(
-    id: str, ns: NamespaceDep, settings: SettingsDep, client: FgaClientDep
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    client: FgaClientDep,
+    emitter: LineageEmitterDep,
+    token: CurrentToken,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> DropTableResponse:
     segments = parse_identifier(id, settings.delimiter)
     response: DropTableResponse = await run_in_threadpool(
@@ -109,6 +118,18 @@ async def drop_table(
     )
     # Revoke the table's FGA tuples so a later table reusing this id can't inherit stale grants.
     await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+    # Record the drop as best-effort lineage — provenance of the deletion (the dataset node persists in the
+    # graph, named a `drop_table` run). Inline-awaited (NOT BackgroundTasks) → reaches the durable
+    # Dapr/JetStream transport before the response; best-effort, so it never fails the drop.
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=None,
+        operation=DROP_TABLE,
+        authorization=authorization,
+    )
     return response
 
 

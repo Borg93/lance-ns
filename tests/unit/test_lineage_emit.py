@@ -15,13 +15,16 @@ from typing import Any, cast
 import httpx
 from catalog.core.lineage_emit import (
     CREATE_TABLE,
+    DROP_TABLE,
     INSERT,
     MERGE_INSERT,
     DaprEmitter,
     HttpLineageEmitter,
+    LineageEmitter,
     NoopEmitter,
     build_create_event,
     build_write_event,
+    emit_write_event,
     make_emitter,
 )
 from lineage.models import RunEvent
@@ -154,6 +157,82 @@ def test_http_emitter_forwards_authorization() -> None:
         )
     )
     assert client.headers == {"Authorization": "Bearer xyz"}
+
+
+# --------------------------------------------------------------------------- #
+# emit_write_event — the shared INLINE-await helper (durability: not BackgroundTasks)
+# --------------------------------------------------------------------------- #
+
+
+class _RecordingEmitter:
+    """Records the emit_write call kwargs (stands in for the real emitter)."""
+
+    def __init__(self) -> None:
+        self.writes: list[dict[str, Any]] = []
+
+    async def emit_write(self, **kwargs: Any) -> None:
+        self.writes.append(kwargs)
+
+
+def test_emit_write_event_maps_segments_to_canonical_ids_and_awaits_inline() -> None:
+    em = _RecordingEmitter()
+    asyncio.run(
+        emit_write_event(
+            cast(LineageEmitter, em),
+            ["db1", "users"],
+            delimiter="$",
+            author="alice",
+            version=3,
+            operation="update",
+            authorization="Bearer x",
+        )
+    )
+    # Awaited inline → exactly one recorded call (not deferred via BackgroundTasks, not dropped).
+    assert len(em.writes) == 1
+    w = em.writes[0]
+    assert w["table_id"] == "db1$users"  # canonical delimited id == the OpenFGA object id == the catalog id
+    assert w["namespace"] == "db1"  # parent namespace
+    assert w["operation"] == "update"
+    assert w["version"] == 3
+    assert w["author"] == "alice"
+    assert w["authorization"] == "Bearer x"
+    assert w["run_id"]  # a fresh run id is generated per emit
+
+
+def test_emit_write_event_root_table_has_empty_namespace() -> None:
+    # Boundary: a top-level (single-segment) table has no parent namespace → "".
+    em = _RecordingEmitter()
+    asyncio.run(
+        emit_write_event(
+            cast(LineageEmitter, em),
+            ["t"],
+            delimiter="$",
+            author=None,
+            version=None,
+            operation=INSERT,
+            authorization=None,
+        )
+    )
+    assert em.writes[0]["namespace"] == ""
+    assert em.writes[0]["version"] is None
+
+
+def test_build_write_event_drop_is_versionless_and_named_drop_table() -> None:
+    # #7a: a drop records a VERSIONLESS run named drop_table — the dataset node persists as history
+    # (Marquez keeps dropped datasets too), so a reader can tell it was deleted, not just last-written.
+    event = build_write_event(
+        table_id="db$t",
+        namespace="db",
+        author="alice",
+        version=None,
+        operation=DROP_TABLE,
+        run_id="r1",
+        event_time="2026-01-01T00:00:00+00:00",
+        job_namespace="lance-catalog",
+    )
+    assert "version" not in event["outputs"][0].get("facets", {})  # no version facet for a drop
+    assert event["run"]["facets"]["lance"] == {"operation": "drop_table"}
+    assert event["job"]["name"] == "drop_table"
 
 
 def test_http_emitter_omits_auth_header_when_absent() -> None:

@@ -135,6 +135,20 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
   **#2** output-scoped ingest authz (`can_write_data` on every claimed output); **#4** dropped unused FGA
   relations; **#5** `/events` retention; **#6** read-audit log; **#7a** drop-table lineage; **#7b**
   compaction maintenance lineage. Every item has valuable unit tests; full suite + ruff + ty green.
+
+#### Track F (spec-completeness) — verdict: not buildable here (upstream pylance limits)
+Investigated against `docs/COVERAGE.md` (the P5 501-vs-backed audit). These are **backend limits, not catalog
+gaps**, so they are closed here rather than built:
+- **F1 (MV `base_objects` view-dependency index)** — ⛔ BLOCKED: materialized-view `create`/`refresh` are
+  spec-correct 501s (no public pylance MV API), so there's no working MV-create to attach a dependency index
+  to. Needs a different backend / upstream pylance MV support.
+- **F2 (`table_version_management` flag → version endpoints run)** — ⛔ INFEASIBLE: version-mutation 501s
+  because pylance's public API doesn't expose what the spec needs (`create_table_version` has no analog —
+  Lance versions are *write-created*, not declared; `describe_table_version` needs `manifest_path` pylance
+  doesn't expose). A flag would surface broken endpoints, not working ones.
+- **F3 (Partitioned Namespace family)** — 🔶 DEFERRED: greenfield spec-completeness over the catalog's own
+  `__manifest`, not a production blocker; out of scope for spin-up-per-workload (like multi-warehouse /
+  soft-delete). Revisit only if partitioned namespaces become a real requirement.
 - ✅ **Core validation** (validation `wfefr8vtx`, 6 agents, live probe → adversarial verify; see
   `docs/COVERAGE.md`). Verdict: the lakehouse + event-driven core is **valid, low-coupled, and mergeable**
   (zero cross-service imports; fail-closed authz; official OpenLineage idempotent MERGE; resilient cascade).

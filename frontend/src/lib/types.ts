@@ -22,6 +22,11 @@ export type ColumnRef = S['ColumnRef'];
 export type ColumnNode = S['ColumnNode'];
 export type ColumnEdge = S['ColumnEdge'];
 export type ColumnGraph = S['ColumnGraph'];
+export type DatasetSummary = S['DatasetSummary'];
+export type Datasets = S['Datasets'];
+export type JobSummary = S['JobSummary'];
+export type Jobs = S['Jobs'];
+export type Namespaces = S['Namespaces'];
 
 // The medallion datasets, in flow order (raw -> bronze -> silver -> gold). Domain knowledge, not schema.
 export const KNOWN = ['raw_events', 'bronze$events', 'silver$features', 'gold$catalog'] as const;

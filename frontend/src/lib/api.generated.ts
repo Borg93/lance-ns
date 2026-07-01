@@ -151,6 +151,75 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/datasets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Datasets
+         * @description Browse every dataset the caller may see — the lineage catalog's landing list.
+         *
+         *     Governed (a dataset is shown only if the caller ``can_get_metadata`` on it), optionally filtered by
+         *     ``?namespace=`` / ``?tag=``, and paginated over the *visible* set. This is the entry point the graph
+         *     reads (``/datasets/{name}/...``) needed but could not provide — you no longer must know a name first.
+         */
+        get: operations["list_datasets_datasets_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/jobs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Jobs
+         * @description The jobs (compute identities) that have run — governed by the datasets each wrote.
+         *
+         *     A job is shown only if the caller can see every dataset it wrote (a read-only / output-less job is
+         *     hidden when auth is on, mirroring how ``/events`` drops a dataset-less row). Auth off → pass-through.
+         */
+        get: operations["list_jobs_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/namespaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Namespaces
+         * @description The namespaces containing at least one dataset the caller may see (for a namespace-tree browse).
+         *
+         *     Derived from the governed dataset set, so a namespace the caller can see no dataset in never appears.
+         */
+        get: operations["list_namespaces_namespaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/datasets/{name}/columns/{field}/upstream": {
         parameters: {
             query?: never;
@@ -539,6 +608,30 @@ export interface components {
             fields?: components["schemas"]["SchemaField"][];
         };
         /**
+         * DatasetSummary
+         * @description A dataset as it appears in the browse list — its id, namespace, and governance tags.
+         */
+        DatasetSummary: {
+            /** Name */
+            name: string;
+            /** Namespace */
+            namespace?: string | null;
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * Datasets
+         * @description A governed, paginated page of datasets the caller may see (the lineage catalog landing list).
+         *
+         *     ``total`` is the count of *visible* datasets before the page slice — so a UI can show "X–Y of total".
+         */
+        Datasets: {
+            /** Datasets */
+            datasets: components["schemas"]["DatasetSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * DemoDataset
          * @description A peek at a real Lance dataset on S3 — what's actually in storage and how it evolved.
          */
@@ -687,6 +780,28 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * JobSummary
+         * @description A job (compute identity) that has run, with the datasets it wrote — its governance handle.
+         */
+        JobSummary: {
+            /** Namespace */
+            namespace?: string | null;
+            /** Name */
+            name: string;
+            /** Outputs */
+            outputs?: string[];
+        };
+        /**
+         * Jobs
+         * @description The jobs the caller may see (governed by the datasets each wrote).
+         */
+        Jobs: {
+            /** Jobs */
+            jobs: components["schemas"]["JobSummary"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * LineageGraph
          * @description The connected lineage subgraph around ``root`` — nodes + edges for a DAG view.
          *
@@ -700,6 +815,14 @@ export interface components {
             nodes: components["schemas"]["GraphNode"][];
             /** Edges */
             edges: components["schemas"]["GraphEdge"][];
+        };
+        /**
+         * Namespaces
+         * @description The namespaces containing at least one dataset the caller may see.
+         */
+        Namespaces: {
+            /** Namespaces */
+            namespaces: string[];
         };
         /**
          * Neighbors
@@ -1101,6 +1224,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_datasets_datasets_get: {
+        parameters: {
+            query?: {
+                namespace?: string | null;
+                tag?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Datasets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jobs"];
+                };
+            };
+        };
+    };
+    list_namespaces_namespaces_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Namespaces"];
                 };
             };
         };

@@ -34,6 +34,11 @@ test.beforeEach(async ({ page }) => {
 			if (m[2] === 'graph') return json(route, { root: id, nodes: NODES, edges: EDGES });
 			return json(route, { root: id, columns: [], edges: [] }); // columns
 		}
+		if (path === '/datasets')
+			return json(route, {
+				datasets: NODES.map((n) => ({ name: n.id, namespace: n.namespace, tags: n.tags })),
+				total: NODES.length
+			});
 		if (path === '/events') return json(route, { events: [] });
 		if (path === '/runs') return json(route, { runs: [] });
 		if (path === '/demo/datasets') return json(route, { datasets: [] });
@@ -44,10 +49,12 @@ test.beforeEach(async ({ page }) => {
 test('renders the medallion DAG at /lineage', async ({ page }) => {
 	await page.goto('/lineage');
 	// SvelteFlow wraps each custom node in .svelte-flow__node — the 4 medallion datasets.
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-	// exact:true — the node's URI div (s3://lakehouse/raw_events) also contains "raw_events".
-	await expect(page.getByText('raw_events', { exact: true })).toBeVisible();
-	await expect(page.getByText('gold$catalog', { exact: true })).toBeVisible();
+	const nodes = page.locator('.svelte-flow__node');
+	await expect(nodes).toHaveCount(4, { timeout: 15_000 });
+	// Scope to graph nodes — the browse-panel list also renders these names (the node's URI div also
+	// contains the name, so filter by the node, not exact text).
+	await expect(nodes.filter({ hasText: 'raw_events' })).toBeVisible();
+	await expect(nodes.filter({ hasText: 'gold$catalog' })).toBeVisible();
 });
 
 test('clicking a dataset node shows its upstream + downstream in the detail panel', async ({ page }) => {
@@ -67,4 +74,24 @@ test('clicking a dataset node shows its upstream + downstream in the detail pane
 	// The upstream chip reselects that dataset — the panel follows.
 	await page.getByRole('button', { name: 'bronze$events' }).click();
 	await expect(page.getByRole('heading', { name: 'bronze$events' })).toBeVisible();
+});
+
+test('browse landing lists datasets from /datasets, filters, and focuses on click', async ({ page }) => {
+	await page.goto('/lineage');
+	// Browse is the default aside tab — the governed /datasets catalog renders as a filterable list, so a
+	// visitor can start with no dataset name in hand (GOAL 4 A3).
+	const rows = page.locator('.browse-row');
+	await expect(rows).toHaveCount(4, { timeout: 15_000 });
+	await expect(page.locator('.browse-name', { hasText: 'raw_events' })).toBeVisible();
+
+	// Filtering narrows the list to matches (by name / namespace / tag).
+	await page.getByLabel('Filter datasets').fill('silver');
+	await expect(rows).toHaveCount(1);
+	await expect(page.locator('.browse-name')).toHaveText('silver$features');
+
+	// Clicking a dataset focuses it — the row is marked selected and Details reflects it.
+	await rows.first().click();
+	await expect(page.locator('.browse-row.on')).toHaveCount(1);
+	await page.getByRole('tab', { name: 'Details' }).click();
+	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
 });

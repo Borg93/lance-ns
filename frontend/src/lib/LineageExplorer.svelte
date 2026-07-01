@@ -25,10 +25,23 @@
 
 	// Which graph plane is shown — Datasets / Jobs (like Marquez) + Columns (field-to-field, #24).
 	let graphView = $state<'datasets' | 'jobs' | 'columns'>('datasets');
+	// Browse (GOAL 4 A3): filter the governed /datasets catalog by name / namespace / tag, then click a
+	// row to focus that dataset — the browsable entry point that replaces the hardcoded name list.
+	let browseQuery = $state('');
 
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
 	const eventCount = $derived(store.events.length);
+	const browseResults = $derived.by(() => {
+		const q = browseQuery.trim().toLowerCase();
+		if (!q) return store.catalog;
+		return store.catalog.filter(
+			(d) =>
+				d.name.toLowerCase().includes(q) ||
+				(d.namespace ?? '').toLowerCase().includes(q) ||
+				(d.tags ?? []).some((t) => t.toLowerCase().includes(q))
+		);
+	});
 
 	let nodes = $state.raw<FlowNode[]>([]);
 	let edges = $state.raw<
@@ -291,12 +304,44 @@
 		</section>
 
 		<aside {@attach enter({ delay: 0.12 })}>
-			<Tabs.Root value="status">
+			<Tabs.Root value="browse">
 				<Tabs.List class="tablist">
+					<Tabs.Trigger value="browse" class="tab">Browse ({store.catalog.length})</Tabs.Trigger>
 					<Tabs.Trigger value="status" class="tab">Status ({store.runs.length})</Tabs.Trigger>
 					<Tabs.Trigger value="events" class="tab">Events ({store.events.length})</Tabs.Trigger>
 					<Tabs.Trigger value="details" class="tab">Details</Tabs.Trigger>
 				</Tabs.List>
+
+				<Tabs.Content value="browse" class="tabbody">
+					<p class="hint board-intro">
+						Every dataset the lineage graph knows — search by <b>name</b>, <b>namespace</b>, or
+						<b>tag</b>, then click one to focus it. No need to know a name in advance.
+					</p>
+					<input
+						class="browse-input mono"
+						type="search"
+						placeholder="filter datasets…"
+						bind:value={browseQuery}
+						aria-label="Filter datasets"
+					/>
+					<ul class="browse-list">
+						{#each browseResults as d (d.name)}
+							<li>
+								<button
+									class="browse-row"
+									class:on={store.selected === d.name}
+									onclick={() => (store.selected = d.name)}
+								>
+									<span class="browse-name mono">{d.name}</span>
+									{#if d.namespace}<span class="browse-ns">{d.namespace}</span>{/if}
+									{#each d.tags ?? [] as t (t)}<span class="browse-tag">{t}</span>{/each}
+								</button>
+							</li>
+						{:else}
+							<p class="hint">No datasets match “{browseQuery}”.</p>
+						{/each}
+					</ul>
+				</Tabs.Content>
 
 				<Tabs.Content value="status" class="tabbody">
 					<p class="hint board-intro">
@@ -850,5 +895,72 @@
 	h2 {
 		font-size: 13px;
 		margin: 0 0 2px;
+	}
+	/* Browse panel (GOAL 4 A3) — the governed /datasets list + filter */
+	.browse-input {
+		width: 100%;
+		box-sizing: border-box;
+		margin: 6px 0 8px;
+		padding: 6px 10px;
+		font-size: 12px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		background: var(--panel);
+		color: var(--ink);
+	}
+	.browse-input:focus {
+		outline: none;
+		border-color: var(--accent);
+	}
+	.browse-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.browse-row {
+		display: flex;
+		align-items: center;
+		flex-wrap: wrap;
+		gap: 6px;
+		width: 100%;
+		padding: 6px 8px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		background: var(--panel);
+		color: var(--ink);
+		cursor: pointer;
+		text-align: left;
+		transition:
+			border-color 0.2s var(--ease),
+			background 0.2s var(--ease);
+	}
+	.browse-row:hover {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 10%, transparent);
+	}
+	.browse-row.on {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 20%, transparent);
+	}
+	.browse-name {
+		font-size: 12px;
+		font-weight: 600;
+	}
+	.browse-ns {
+		font-size: 10px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		background: color-mix(in srgb, var(--accent) 16%, transparent);
+		color: var(--ink);
+	}
+	.browse-tag {
+		font-size: 10px;
+		padding: 1px 6px;
+		border-radius: 999px;
+		border: 1px solid var(--line);
+		color: var(--mut);
 	}
 </style>

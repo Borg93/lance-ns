@@ -1,7 +1,16 @@
-import { fetchColumnGraph, fetchDemo, fetchEvents, fetchGraph, fetchProducers, fetchRuns } from './api';
+import {
+	fetchColumnGraph,
+	fetchDatasets,
+	fetchDemo,
+	fetchEvents,
+	fetchGraph,
+	fetchProducers,
+	fetchRuns
+} from './api';
 import {
 	KNOWN,
 	type ColumnGraph,
+	type DatasetSummary,
 	type DemoDataset,
 	type EventRecord,
 	type GraphEdge,
@@ -17,6 +26,7 @@ export class LineageState {
 	producers = $state<Record<string, ProducerInfo[]>>({});
 	events = $state<EventRecord[]>([]);
 	datasets = $state<DemoDataset[]>([]);
+	catalog = $state<DatasetSummary[]>([]);
 	runs = $state<RunStatus[]>([]);
 	lastUpdated = $state('');
 	online = $state(false);
@@ -29,9 +39,16 @@ export class LineageState {
 	}
 
 	async poll(): Promise<void> {
+		// Discover the datasets to render from the governed /datasets catalog (GOAL 4 A1) rather than a
+		// hardcoded list; fall back to the known medallion names when discovery is empty/unavailable so the
+		// demo still renders offline.
+		const cat = await fetchDatasets({ limit: 500 });
+		this.catalog = cat?.datasets ?? [];
+		const names = this.catalog.length ? this.catalog.map((d) => d.name) : [...KNOWN];
+
 		const producers: Record<string, ProducerInfo[]> = {};
 		const present: string[] = [];
-		for (const id of KNOWN) {
+		for (const id of names) {
 			const p = await fetchProducers(id);
 			producers[id] = p?.producers ?? [];
 			if (producers[id].length) present.push(id);

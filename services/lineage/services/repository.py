@@ -97,6 +97,15 @@ _CREATE_EVENTS_TABLE: Final = (
     "seq bigserial PRIMARY KEY, run_id text, event_type text, event_time text, "
     "job text, author text, inputs jsonb, outputs jsonb, event jsonb)"
 )
+# A pre-existing table (created before this index) may already hold redelivered duplicates that would make
+# CREATE UNIQUE INDEX fail — remove them first, keeping the earliest row (min seq) per natural key, so the
+# index can always be established. NULL event_type/event_time never match (SQL NULL ≠ NULL), matching the
+# unique index's NULLs-are-distinct semantics. Idempotent (a no-op once deduped).
+_DEDUP_EVENTS: Final = (
+    "DELETE FROM public.lineage_events a USING public.lineage_events b "
+    "WHERE a.seq > b.seq AND a.run_id = b.run_id "
+    "AND a.event_type = b.event_type AND a.event_time = b.event_time"
+)
 # A natural key over the OpenLineage lifecycle identity — so an at-least-once REDELIVERY of the same event
 # (Dapr re-drives after a lost ack) doesn't append a duplicate /events row. Idempotent on existing tables.
 _CREATE_EVENTS_INDEX: Final = (
@@ -648,6 +657,10 @@ class LineageRepository:
         try:
             async with self._pool.connection() as conn:
                 await conn.execute(_CREATE_EVENTS_TABLE)
+                # Remove any pre-existing redelivered duplicates BEFORE the unique index, else CREATE UNIQUE
+                # INDEX fails on a table populated before the dedup landed (the events feed is a diagnostic
+                # projection, so dropping duplicate rows loses nothing but the duplication).
+                await conn.execute(_DEDUP_EVENTS)
                 await conn.execute(_CREATE_EVENTS_INDEX)
         except psycopg.errors.DuplicateTable:
             pass

@@ -186,6 +186,28 @@ class Job(BaseModel):
     name: str
     facets: dict[str, Any] = Field(default_factory=dict)
 
+    @property
+    def source_location(self) -> dict[str, str] | None:
+        """Where the job's code lives, from the standard ``sourceCodeLocation`` facet — ``{type, url,
+        path?, branch?, …}``.
+
+        A here-dummy from the medallion emitter today (the ``services/medallion`` git location); rask's
+        runner will auto-derive it (its git repo + pipeline path) when lance-ray OpenLineage lands. ``None``
+        when the event carries no such facet. ``type`` + ``url`` are required; other string keys pass through.
+        """
+        facet = (self.facets or {}).get("sourceCodeLocation")
+        if not isinstance(facet, dict):
+            return None
+        typ, url = facet.get("type"), facet.get("url")
+        if not (isinstance(typ, str) and typ and isinstance(url, str) and url):
+            return None
+        out = {"type": typ, "url": url}
+        for key in ("repoUrl", "path", "branch", "tag", "version"):
+            value = facet.get(key)
+            if isinstance(value, str) and value:
+                out[key] = value
+        return out
+
 
 class Run(BaseModel):
     """A single run of a job. ``facets.author`` carries the OIDC sub when present."""

@@ -67,6 +67,12 @@ def _version(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> int
     return open_dataset(ns, so, table_id).version
 
 
+def current_version(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> int:
+    """The table's current Lance version — for stamping lineage after a native op whose response omits it
+    (``insert`` returns only a ``transaction_id``, so we reopen the dataset like update/delete)."""
+    return _version(ns, so, table_id)
+
+
 # Scalar Arrow type names → pyarrow factory, for the alter_columns re-type path. A ``JsonArrowDataType``
 # carries a ``type`` name (+ optional ``fields``/``length`` for complex types); pylance's ``alter_columns``
 # needs a real ``pa.DataType``, so we convert. Covers the documented re-types (e.g. float32→float16 on an

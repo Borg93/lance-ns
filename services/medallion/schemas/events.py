@@ -16,6 +16,16 @@ from typing import Any
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event.
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/medallion"
 
+#: The repo the medallion services live in — the ``sourceCodeLocation`` job facet's git URL.
+_REPO_URL = "https://github.com/Borg93/lance-ns"
+#: Standard ``SourceCodeLocationJobFacet`` schema URL → *where the job's code lives* (git repo + path).
+#: A HERE-DUMMY of what rask's runner will auto-derive from its git + pipeline once lance-ray OpenLineage
+#: is wired (GOAL 3-real); today the medallion emitter asserts it from the known service location.
+_SOURCE_LOCATION_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-1-0/SourceCodeLocationJobFacet.json"
+    "#/$defs/SourceCodeLocationJobFacet"
+)
+
 #: Standard ``DatasetVersionDatasetFacet`` schema URL → the lineage WROTE edge records the Lance version.
 _VERSION_FACET_SCHEMA = (
     "https://openlineage.io/spec/facets/1-0-1/DatasetVersionDatasetFacet.json"
@@ -72,6 +82,24 @@ def _dataset(
     return ds
 
 
+def _job_source_location() -> dict[str, Any]:
+    """The standard ``sourceCodeLocation`` job facet — where this job's code lives.
+
+    A HERE-DUMMY (like the ``outputStatistics`` / ``dataQualityAssertions`` facets): the medallion services
+    all live in this repo under ``services/medallion``, so the emitter asserts that git location directly.
+    rask's runner will auto-derive the real value (its git repo + pipeline path) when lance-ray OpenLineage
+    lands (GOAL 3-real) — same facet, measured instead of declared.
+    """
+    return {
+        "_producer": _PRODUCER,
+        "_schemaURL": _SOURCE_LOCATION_FACET_SCHEMA,
+        "type": "git",
+        "url": _REPO_URL,
+        "path": "services/medallion",
+        "branch": "main",
+    }
+
+
 def build_run_event(
     *,
     operation: str,
@@ -103,7 +131,11 @@ def build_run_event(
         "eventTime": datetime.now(UTC).isoformat(),
         "producer": _PRODUCER,
         "run": {"runId": run_id or str(uuid.uuid4()), "facets": run_facets},
-        "job": {"namespace": job_namespace, "name": operation},
+        "job": {
+            "namespace": job_namespace,
+            "name": operation,
+            "facets": {"sourceCodeLocation": _job_source_location()},
+        },
         "inputs": [_dataset(ns, name) for ns, name in inputs],
         "outputs": [_dataset(output_namespace, output_name, version, row_count, size_bytes, assertions)],
     }

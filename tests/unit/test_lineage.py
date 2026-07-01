@@ -93,6 +93,38 @@ def test_quality_assertions_absent_when_no_facet() -> None:
     assert _output_with_stats({"version": {"datasetVersion": "1"}}).quality_assertions == []
 
 
+def test_job_source_location_parses_facet() -> None:
+    """The job's code location is read from the standard sourceCodeLocation facet (type+url required)."""
+    from lineage.models import Job
+
+    job = Job.model_validate(
+        {
+            "namespace": "lance-medallion",
+            "name": "embed_features",
+            "facets": {
+                "sourceCodeLocation": {
+                    "type": "git",
+                    "url": "https://github.com/Borg93/lance-ns",
+                    "path": "services/medallion",
+                    "branch": "main",
+                }
+            },
+        }
+    )
+    assert job.source_location == {
+        "type": "git",
+        "url": "https://github.com/Borg93/lance-ns",
+        "path": "services/medallion",
+        "branch": "main",
+    }
+
+
+def test_job_source_location_absent_is_none() -> None:
+    from lineage.models import Job
+
+    assert Job.model_validate({"namespace": "j", "name": "n"}).source_location is None
+
+
 _JOBS = ["ingest_events", "embed_features", "embed_features", "caption_features", "aggregate_gold"]
 
 
@@ -268,6 +300,44 @@ def test_ingest_records_version_and_skips_self_derived_from(monkeypatch: pytest.
     # the standard dataSource + tags facets are persisted onto the dataset node.
     assert any("source_uri" in q for q, _ in calls)
     assert any("d.tags" in q for q, _ in calls)
+
+
+def test_ingest_records_job_source_location(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An event whose job carries a sourceCodeLocation facet stores it (as JSON) on the (:Job) node."""
+    import lineage.services.repository as repo_mod
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+        calls.append((query, params))
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _capture)
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-07-01T09:00:00Z",
+            "run": {"runId": "embed-1"},
+            "job": {
+                "namespace": "lance-medallion",
+                "name": "embed_features",
+                "facets": {
+                    "sourceCodeLocation": {
+                        "type": "git",
+                        "url": "https://github.com/Borg93/lance-ns",
+                        "path": "services/medallion",
+                    }
+                },
+            },
+            "inputs": [],
+            "outputs": [{"namespace": "silver", "name": "silver$features"}],
+        }
+    )
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    asyncio.run(repo.ingest_event(event))
+
+    set_src = [p for q, p in calls if "SET j.source_location" in q]
+    assert set_src and set_src[0]["nm"] == "embed_features"
+    assert json.loads(cast(str, set_src[0]["src"]))["path"] == "services/medallion"
 
 
 def test_ingest_records_output_statistics_on_wrote_edge(monkeypatch: pytest.MonkeyPatch) -> None:

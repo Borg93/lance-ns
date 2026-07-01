@@ -166,6 +166,30 @@ def test_delete_branch_routes_to_dataset(client: TestClient, monkeypatch) -> Non
     dataset.branches.delete.assert_called_once_with("exp")
 
 
+def test_insert_stamps_the_real_version_on_lineage(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # Insert's native response carries only a transaction_id; the endpoint reopens the dataset for the
+    # version it produced (like update/delete) and stamps it on the WROTE edge — it used to emit version=None.
+    from lance_namespace import InsertIntoTableResponse
+
+    fake_ns.insert_into_table.return_value = InsertIntoTableResponse(transaction_id="tx1")
+    dataset = MagicMock()
+    dataset.version = 7
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+
+    captured: dict[str, object] = {}
+
+    async def _capture(_emitter: object, _segments: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("catalog.api.v1.endpoints.data.emit_write_event", _capture)
+
+    resp = client.post("/v1/table/db$t/insert", content=b"ARROWSTREAM", headers=ARROW_STREAM)
+    assert resp.status_code == 200
+    assert captured["version"] == 7  # the real Lance version, not None
+
+
 # --- version ops: the native bindings are `request: dict`-typed; native.call must marshal the pydantic ---
 # --- request to a dict, else a TypeError surfaces as a fake 501. These guard that fix (audit finding). ---
 

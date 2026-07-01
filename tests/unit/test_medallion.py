@@ -61,6 +61,13 @@ def test_build_run_event_records_the_transform_edge() -> None:
     assert event["outputs"][0]["facets"]["version"]["datasetVersion"] == "2"
     assert event["run"]["facets"]["author"]["sub"] == "data_eng"
     assert event["job"]["name"] == "embed_features"
+    # The standard sourceCodeLocation job facet — where the job's code lives (a here-dummy of what rask's
+    # runner will auto-derive). type=git + the repo URL + the service path.
+    source = event["job"]["facets"]["sourceCodeLocation"]
+    assert source["type"] == "git"
+    assert source["url"] == "https://github.com/Borg93/lance-ns"
+    assert source["path"] == "services/medallion"
+    assert "SourceCodeLocationJobFacet" in source["_schemaURL"]
 
 
 def test_mover_emits_lineage_then_triggers_next_stage() -> None:

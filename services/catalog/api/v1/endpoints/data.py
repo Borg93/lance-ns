@@ -126,6 +126,7 @@ async def insert_into_table(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    so: StorageOptionsDep,
     token: CurrentToken,
     emitter: LineageEmitterDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
@@ -137,13 +138,15 @@ async def insert_into_table(
     response: InsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "insert_into_table", req, data
     )
-    # Insert's response carries no Lance version → record the run + operation without a version facet.
+    # Insert's response carries only a transaction_id, not the Lance version it produced — reopen the
+    # dataset to read it (like update/delete) so the WROTE edge records the real version, not null.
+    version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
     await emit_write_event(
         emitter,
         segments,
         delimiter=settings.delimiter,
         author=token.sub if token is not None else None,
-        version=None,
+        version=version,
         operation=INSERT,
         authorization=authorization,
     )

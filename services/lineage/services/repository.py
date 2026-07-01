@@ -66,6 +66,9 @@ from lineage.schemas import (
 _CREATE_TABLE_OP: Final = "create_table"
 
 _MERGE_JOB: Final = "MERGE (j:Job {namespace:$ns, name:$nm}) RETURN 1"
+# Where the job's code lives (the standard sourceCodeLocation facet), as a JSON string scalar on the Job
+# node — SET only when the event carries it, so an event that omits it never clobbers a prior value.
+_SET_JOB_SOURCE: Final = "MATCH (j:Job {namespace:$ns, name:$nm}) SET j.source_location=$src RETURN 1"
 # The (:Run) node folds the whole lifecycle so /runs is durable (survives restart, replica-shared)
 # instead of folding an in-memory buffer: event_type IS the current state and event_time IS
 # updated_at (both last-event-wins via the repeated SET); started_at keeps the first event's time;
@@ -300,6 +303,14 @@ class LineageRepository:
                 _MERGE_JOB,
                 {"ns": event.job.namespace, "nm": event.job.name},
             )
+            source_location = event.job.source_location
+            if source_location:
+                await run_cypher(
+                    conn,
+                    self._graph,
+                    _SET_JOB_SOURCE,
+                    {"ns": event.job.namespace, "nm": event.job.name, "src": json.dumps(source_location)},
+                )
             await run_cypher(
                 conn,
                 self._graph,

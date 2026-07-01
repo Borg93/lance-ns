@@ -1,5 +1,5 @@
 <script lang="ts">
-	// The lineage graph explorer lives in a reusable $lib component so both `/` and `/lineage` render it.
+	// `/lineage` — the same interactive lineage-graph explorer as `/` (shared $lib component).
 	import LineageExplorer from '$lib/LineageExplorer.svelte';
 </script>
 

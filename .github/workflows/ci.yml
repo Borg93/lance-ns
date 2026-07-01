@@ -20,11 +20,11 @@ jobs:
 
       - name: Lint (ruff)
         run: |
-          uvx ruff check app tests
-          uvx ruff format --check app tests
+          uvx ruff check services tests
+          uvx ruff format --check services tests
 
       - name: Type-check (ty)
-        run: uvx ty check app
+        run: uvx ty check
 
       # Unit + integration tests (our logic only) + the moto-S3 round-trip.
       # No external infra needed — moto runs an in-process S3 server, and the
@@ -37,6 +37,25 @@ jobs:
           paths="tests/integration"
           [ -d tests/unit ] && paths="tests/unit $paths"
           uv run --no-sync pytest $paths -q -m "not e2e"
+
+      # The Helm chart is a first-class deliverable (the whole stack deploys from it), so lint + a full
+      # template render gate on every push — a broken template or values reference fails here, not at deploy.
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Helm lint + render
+        run: |
+          helm lint chart
+          helm template chart >/dev/null
+
+      # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
+      # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.
+      - name: OpenFGA model test
+        run: |
+          FGA_V=0.6.4
+          curl -fsSL "https://github.com/openfga/cli/releases/download/v${FGA_V}/fga_${FGA_V}_linux_amd64.tar.gz" \
+            | tar xz -C /usr/local/bin fga
+          fga model test --tests services/common/auth/model.fga.yaml
 
   # Gated live auth end-to-end: brings up the SQLite OpenFGA + Dex stack via
   # docker compose and runs scripts/auth_e2e.sh, which asserts APP-SIDE SEEDING

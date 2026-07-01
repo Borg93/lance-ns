@@ -60,9 +60,7 @@ def test_apply_dapr_secrets_keeps_db_url_when_store_lacks_password(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # S3 secret present (so it doesn't fail closed) but no DB password in the bundle → URL unchanged.
-    monkeypatch.setattr(
-        "common.secrets.fetch_dapr_secret", lambda *_a, **_k: {"rustfs-secret-key": "x"}
-    )
+    monkeypatch.setattr("common.secrets.fetch_dapr_secret", lambda *_a, **_k: {"rustfs-secret-key": "x"})
     settings = LineageSettings.model_validate(
         {"secrets_from_dapr": True, "database_url": "postgresql://lance:envpw@age:5432/lineage"}
     )

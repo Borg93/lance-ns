@@ -75,8 +75,14 @@ markers = [
 python-version = "3.13"
 root = ["services", "."]
 
+[tool.ty.src]
+# The Dagger CI module (.dagger/) is a self-contained project with its OWN pyproject/uv.lock + the dagger
+# SDK — it isn't part of the app venv, so the root type-check must skip it (it type-checks itself).
+exclude = [".dagger"]
+
 [tool.ruff]
 line-length = 110
+extend-exclude = [".dagger"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "C4"]

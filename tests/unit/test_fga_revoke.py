@@ -140,9 +140,7 @@ class _MissingDeleteClient:
     """read returns one tuple; the delete raises the 400 'tuple does not exist' (concurrent revoke)."""
 
     async def read(self, *_a: object, **_k: object) -> SimpleNamespace:
-        return SimpleNamespace(
-            tuples=[_tuple("user:alice", "owner", "table:t")], continuation_token=""
-        )
+        return SimpleNamespace(tuples=[_tuple("user:alice", "owner", "table:t")], continuation_token="")
 
     async def write(self, *_a: object, **_k: object) -> None:
         raise ApiException(status=400, reason="cannot delete a tuple which does not exist")
@@ -222,9 +220,7 @@ def test_revoke_ownership_noop_when_client_unwired(monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(fga, "revoke_object_tuples", _spy)
     asyncio.run(
-        fga_deps.revoke_ownership(
-            None, _settings(fga_enabled=True), resource="table", segments=["db", "t"]
-        )
+        fga_deps.revoke_ownership(None, _settings(fga_enabled=True), resource="table", segments=["db", "t"])
     )
     assert called is False
 

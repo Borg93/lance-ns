@@ -270,3 +270,47 @@ class Runs(BaseModel):
     """Live run-status board (most-recently-active first)."""
 
     runs: list[RunStatus]
+
+
+# --- Discovery / browse — the "what exists?" lists a caller reaches for with no dataset name in hand.
+# The per-``{name}`` graph reads answer "tell me about X"; these answer "what is there?" — the browsable
+# catalog a bare graph store lacks. Each is governed: rows referencing a non-visible dataset are dropped.
+
+
+class DatasetSummary(BaseModel):
+    """A dataset as it appears in the browse list — its id, namespace, and governance tags."""
+
+    name: str
+    namespace: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class Datasets(BaseModel):
+    """A governed, paginated page of datasets the caller may see (the lineage catalog landing list).
+
+    ``total`` is the count of *visible* datasets before the page slice — so a UI can show "X–Y of total".
+    """
+
+    datasets: list[DatasetSummary]
+    total: int
+
+
+class JobSummary(BaseModel):
+    """A job (compute identity) that has run, with the datasets it wrote — its governance handle."""
+
+    namespace: str | None = None
+    name: str
+    outputs: list[str] = Field(default_factory=list)
+
+
+class Jobs(BaseModel):
+    """The jobs the caller may see (governed by the datasets each wrote)."""
+
+    jobs: list[JobSummary]
+    total: int
+
+
+class Namespaces(BaseModel):
+    """The namespaces containing at least one dataset the caller may see."""
+
+    namespaces: list[str]

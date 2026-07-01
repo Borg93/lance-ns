@@ -49,9 +49,11 @@ from lineage.schemas import (
     Creator,
     DatasetRef,
     DatasetSchema,
+    DatasetSummary,
     EventRecord,
     GraphEdge,
     GraphNode,
+    JobSummary,
     LineageGraph,
     Neighbors,
     ProducerInfo,
@@ -90,6 +92,16 @@ _SET_RUN_OUTPUTS: Final = "MATCH (r:Run {run_id:$rid}) SET r.outputs=$outs RETUR
 _LIST_RUNS: Final = (
     "MATCH (r:Run) RETURN r.run_id, r.job, r.author, r.event_type, r.progress_done, r.progress_total, "
     "r.error_message, r.started_at, r.event_time, r.events_count, r.outputs"
+)
+# Discovery / browse — the "what exists?" lists. Like _LIST_RUNS these fetch every node and are governed +
+# paginated in Python (the graph's node count is modest), so a caller can browse the estate without already
+# knowing an exact name. Tags ride the Dataset node as a comma-joined string (_tags_from splits them back).
+_LIST_DATASETS: Final = "MATCH (d:Dataset) RETURN d.name, d.namespace, d.tags"
+# One row per (job, written-dataset); d.name is null for a job that has only read (OPTIONAL MATCH keeps the
+# job row). Folded into per-job output sets in Python — avoids parsing an agtype array from collect().
+_LIST_JOBS: Final = (
+    "MATCH (j:Job) OPTIONAL MATCH (j)<-[:OF_JOB]-(:Run)-[:WROTE]->(d:Dataset) "
+    "RETURN j.namespace, j.name, d.name"
 )
 
 # Durable events feed — a plain table in the SAME Postgres that hosts AGE (qualified ``public.`` so it
@@ -657,6 +669,50 @@ class LineageRepository:
         ]
         runs.sort(key=lambda run: run.updated_at or "", reverse=True)
         return Runs(runs=runs)
+
+    async def list_datasets(
+        self, namespace: str | None = None, tag: str | None = None
+    ) -> list[DatasetSummary]:
+        """Every dataset node (optionally filtered by namespace / tag), name-sorted — the browse list.
+
+        Fetch-all + filter/sort in Python, mirroring :meth:`list_runs` (the graph's dataset count is
+        modest). Governance and pagination are applied by the endpoint over this full list, so a page is
+        taken from the *visible* set rather than truncating before the visibility filter has run.
+        """
+        rows = await fetch(self._pool, self._graph, _LIST_DATASETS, columns=3)
+        out: list[DatasetSummary] = []
+        for name, ns, raw_tags in rows:
+            if not name:
+                continue
+            tags = _tags_from(raw_tags)
+            if namespace is not None and (ns or None) != namespace:
+                continue
+            if tag is not None and tag not in tags:
+                continue
+            out.append(DatasetSummary(name=name, namespace=(ns or None), tags=tags))
+        out.sort(key=lambda d: d.name)
+        return out
+
+    async def list_jobs(self) -> list[JobSummary]:
+        """Every job node with the set of datasets it wrote (its governance handle), name-sorted.
+
+        One row per (job, written-dataset) is folded into per-job output sets; a job that has only read
+        has an empty output set (and is dropped by :func:`governed` when auth is on, like a dataset-less
+        ``/events`` row).
+        """
+        rows = await fetch(self._pool, self._graph, _LIST_JOBS, columns=3)
+        outputs: dict[tuple[str | None, str], set[str]] = {}
+        for ns, name, out_ds in rows:
+            if not name:
+                continue
+            outs = outputs.setdefault((ns or None, name), set())
+            if out_ds:
+                outs.add(out_ds)
+        jobs = [
+            JobSummary(namespace=ns, name=name, outputs=sorted(outs)) for (ns, name), outs in outputs.items()
+        ]
+        jobs.sort(key=lambda j: j.name)
+        return jobs
 
     async def ensure_events_table(self) -> None:
         """Create the durable events-feed table if absent (idempotent; called once at startup).

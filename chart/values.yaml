@@ -319,6 +319,13 @@ medallion:
   # consumers, safe). producer (lance-ray) is request-triggered. Both stateless.
   producerReplicas: 1
   moverReplicas: 1
+  # When true, every stage does a REAL in-process Lance read->transform->write (the fake-Ray compute) so the
+  # event-driven cascade produces actual versioned data on RustFS, not just provenance — the lineage graph
+  # then reflects what storage holds and outputStatistics carry real rows/bytes. Off by default (the demo
+  # ships as a pure lineage-emit). Each stage's FROM_URI/TO_URI derive from rustfs.bucket + its namespace, so
+  # the chain lines up (producer raw -> raw->bronze -> bronze->silver -> silver->gold). The S3 secret follows
+  # the catalog's two-tier rule (plaintext only when OpenBao is off); compute + OpenBao isn't a shipped combo.
+  compute: false
   producer:
     daprAppId: lance-ray
     rawDataset: raw_events

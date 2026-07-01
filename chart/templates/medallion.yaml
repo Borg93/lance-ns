@@ -54,6 +54,18 @@ spec:
             - { name: MEDALLION_PRODUCER_OPERATION, value: {{ .Values.medallion.producer.operation | quote }} }
             - { name: MEDALLION_PRODUCER_AUTHOR, value: {{ .Values.medallion.producer.author | quote }} }
             - { name: MEDALLION_RAW_TOPIC, value: {{ .Values.medallion.producer.rawTopic | quote }} }
+            {{- if .Values.medallion.compute }}
+            # Real fake-Ray compute: the producer seeds the raw Lance dataset (so the cascade writes actual
+            # versioned data on RustFS). S3 secret follows the catalog's two-tier rule (plaintext only when
+            # OpenBao is off — compute + OpenBao is not a shipped combo).
+            - { name: MEDALLION_COMPUTE_ENABLED, value: "true" }
+            - { name: MEDALLION_RAW_URI, value: "s3://{{ .Values.rustfs.bucket }}/medallion/{{ .Values.medallion.producer.rawNamespace }}" }
+            - { name: MEDALLION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
+            - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
+            {{- if not (include "lance.secretsViaDapr" .) }}
+            - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            {{- end }}
+            {{- end }}
           readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
 ---
@@ -128,6 +140,20 @@ spec:
             - { name: MEDALLION_AUTHOR, value: {{ .author | quote }} }
             - { name: MEDALLION_SUB_TOPIC, value: {{ .subTopic | quote }} }
             - { name: MEDALLION_PUB_TOPIC, value: {{ .pubTopic | quote }} }
+            {{- if $root.Values.medallion.compute }}
+            # Real fake-Ray compute: read the upstream stage's Lance dataset, transform, write the downstream
+            # one — so the emitted lineage carries the REAL version + rows/bytes and the cascade produces
+            # actual data. FROM/TO URIs derive from the stage namespaces, so the chain lines up. S3 secret
+            # follows the catalog's two-tier rule (plaintext only when OpenBao is off).
+            - { name: MEDALLION_COMPUTE_ENABLED, value: "true" }
+            - { name: MEDALLION_FROM_URI, value: "s3://{{ $root.Values.rustfs.bucket }}/medallion/{{ .fromNamespace }}" }
+            - { name: MEDALLION_TO_URI, value: "s3://{{ $root.Values.rustfs.bucket }}/medallion/{{ .toNamespace }}" }
+            - { name: MEDALLION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" $root }}" }
+            - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ $root.Values.rustfs.accessKey | quote }} }
+            {{- if not (include "lance.secretsViaDapr" $root) }}
+            - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ $root.Values.rustfs.secretKey | quote }} }
+            {{- end }}
+            {{- end }}
             {{- if $root.Values.medallion.fgaEnabled }}
             - { name: MEDALLION_FGA_ENABLED, value: "true" }
             - { name: MEDALLION_FGA_API_URL, value: {{ $root.Values.medallion.fgaApiUrl | quote }} }

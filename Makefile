@@ -173,7 +173,7 @@ tilt-ci: ## One-shot: build + deploy via Tilt and wait for all workloads healthy
 	@tilt ci --timeout 900s
 
 ci: ## Run the full CI gate (ruff + ty + unit/integration tests) hermetically in containers via Dagger
-	@dagger call ci --source=.
+	@dagger call ci
 
 clean: ## helm uninstall the release (keep the cluster)
 	@helm uninstall $(RELEASE) 2>/dev/null || true

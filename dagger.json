@@ -2,7 +2,7 @@
   "name": "lance-ns",
   "engineVersion": "v0.20.3",
   "sdk": {
-    "source": "python"
+    "source": "go"
   },
   "source": ".dagger"
 }

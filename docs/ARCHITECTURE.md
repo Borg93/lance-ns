@@ -222,8 +222,8 @@ flowchart LR
 `describe`(bronze) [authz `can_read_data` + get location/creds] → read → transform →
 `create`/`insert`(silver) [authz `can_create_table`/`can_write_data`] → commit a new
 Lance version. The catalog authorizes + locates + records; the engine moves bytes. **You
-can do this today with the existing endpoints** — what's missing is the *job*, not catalog
-code (see §7).
+can do this today with the existing endpoints** — and the promotion *job* is now built too: the
+event-driven medallion movers (see §7, [`FLOW.md`](FLOW.md)).
 
 ---
 
@@ -240,10 +240,10 @@ code (see §7).
 | Medallion model + tests (bronze/silver/gold + persona roles) | ✅ done (model + `model.fga.yaml`) |
 | **Promotion pipeline** (bronze→silver→gold; event-driven Dapr movers + opt-in authz + quality gates) | ✅ built & tested — see [`FLOW.md`](FLOW.md), [`MEDALLION.md`](MEDALLION.md) |
 | Distributed promotion at scale (real lance-ray Ray Data job on KubeRay) | 🔶 rask integration — the in-process fake-Ray compute fills the same contract today ([`FLOW.md` §7](FLOW.md#7-future--the-distributed-variants)) |
-| `project` type + 3-axis governance (teams × projects × layers) | 🔶 P1, planned |
-| Orchestration (cron → NATS → Dapr Workflow) | 🔶 deferred |
-| Lineage (OpenLineage ingest + graph queries over Apache AGE; producer-side emitter) | ✅ service built & e2e-verified; UI/authz next (see §9, `docs/LINEAGE.md`) |
-| OTel observability | 🔶 deferred |
+| `project` type + 3-axis governance (teams × projects × layers) | ✅ modeled (`model.fga`: project/warehouse/team/validator) + fga-tested; app-side auto-seed of the full hierarchy is partial (see `DEPLOY.md`) |
+| Orchestration (cron → NATS → Dapr) | ✅ Dapr cron binding (compaction) + NATS/Dapr pub-sub built & deployed; Dapr **Workflow** still deferred |
+| Lineage (OpenLineage ingest + graph queries over Apache AGE; producer-side emitter) | ✅ service built & deployed; read-side authz implemented + SvelteKit UI (see §9, `docs/LINEAGE.md`) |
+| OTel observability (GreptimeDB + Vector + Perses, OTLP-direct) | ✅ built, deployed, `make e2e-obs`-verified |
 
 ---
 

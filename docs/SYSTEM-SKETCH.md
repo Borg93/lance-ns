@@ -75,9 +75,14 @@ emit an OpenLineage event. Layers are **separate Lance tables** (namespaces); pr
 | OpenBao SecretStore | secrets out of env | ✅ built + deployed (two-tier; app services fail-closed on it) |
 | medallion movers + lance-ray producer | the medallion movement (promotion) + compaction | ✅ built & deployed — event-driven Dapr movers; distributed lance-ray (Ray Data) is the rask future ([`FLOW.md`](FLOW.md)) |
 | Governance P1 | `project` type + 3-axis (teams×projects×layers) | 🔶 planned |
-| OTel / NATS / Dapr | observability / events / durable workflows | 🔶 deferred |
+| OTel / NATS / Dapr | observability / events / durable workflows | ✅ built & deployed (OTLP→GreptimeDB; Dapr pub/sub over NATS JetStream; Dapr **Workflow** still deferred) |
 
 ## 3. Holes / what's missing (gap register)
+
+> ⚠️ **Historical (pre-build) register — most of these are now RESOLVED.** Since this was written, lineage
+> read+ingest authz (#1/#2), OpenBao secrets (#5), the medallion movement + compaction (#6), lineage
+> deployment (#7), 3-axis governance model (#11), and OTel/NATS/Dapr (#12) are all built & deployed. See
+> [`FLOW.md`](FLOW.md) + [`DEPLOY.md`](DEPLOY.md) for current status; the Lakekeeper study below remains valid reference.
 
 | # | Gap | Plane/axis | Risk if left | Priority |
 |---|---|---|---|---|

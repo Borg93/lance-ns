@@ -266,5 +266,10 @@ curl -X POST "http://localhost:2333/v1/table/myns\$t/count_rows"    -H "Authoriz
 # Tear down: docker compose -f .docker/docker-compose.yml -f .docker/docker-compose.auth.sqlite.yml -f .docker/docker-compose.local.yml down -v
 ```
 
-Local dev (no Docker): `uv sync` then `uv run pytest` (60 unit/integration tests; auth e2e is gated).
-Quality gates: `uvx ruff check` · `uvx ty check`.
+Local dev (no Docker): `uv sync` then `uv run pytest` (287 unit/integration tests; e2e is gated).
+Quality gates: `uvx ruff check services tests` · `uvx ty check` · `make ci` (hermetic, via Dagger).
+
+> The commands above are the **standalone-catalog** dev path (docker-compose, still runnable). The **canonical
+> full system** — the event-driven medallion lakehouse (lance-ray producer + raw→bronze→silver→gold Dapr
+> movers, lineage→AGE, OpenFGA, compaction, OpenBao, GreptimeDB observability) — deploys to **kind + Helm**
+> via `make up`. Read [`docs/FLOW.md`](docs/FLOW.md) for the end-to-end flow and [`docs/DEPLOY.md`](docs/DEPLOY.md) to run it.

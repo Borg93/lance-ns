@@ -112,13 +112,13 @@ The toggle is the *credential-delivery* shape — both modes run on the **same**
 3. **Job → Object store** — read only the **new bronze versions** — the version range *is* the change feed.
 4. **Job → Catalog** — `merge_insert` silver with an `Idempotency-Key` (authorizes `can_write_data`; retry-safe).
 5. **Job → Object store** — write the new silver dataset version (immutable; old versions stay for time-travel).
-6. **Job → Lineage** — emit an OpenLineage run event: inputs=[bronze], outputs=[silver], `author` = **self-asserted producer facet, NOT token-verified** (server-side verification + ingest authz are planned, P0).
+6. **Job → Lineage** — emit an OpenLineage run event: inputs=[bronze], outputs=[silver]. Ingest **binds the verified author** on the authenticated path (implemented; the open HTTP `/api/v1/lineage` guards forgery via `enforce_author`).
 7. **Lineage → AGE** — `MERGE` Run/Job/Dataset + `WROTE`/`DERIVED_FROM` edges; dataset name = `table:<id>`.
 
 ### 4. Lineage query — `GET /datasets/{id}/upstream`
 1. **Client → Lineage** — ask "where did gold come from?"
-2. **Lineage → OIDC** *(planned, P0)* — verify JWT. **Today reads are unauthenticated — a P0 gap.**
-3. **Lineage → OpenFGA** *(planned, P0)* — `check can_get_metadata` (same right as describe-table); reuses the shared store, read-only.
+2. **Lineage → OIDC** *(implemented, default off)* — verify JWT (`LINEAGE_OIDC_ENABLED`); no/invalid token → 401.
+3. **Lineage → OpenFGA** *(implemented, default off)* — `check can_get_metadata` (same right as describe-table); reuses the shared store, read-only.
 4. **Lineage → AGE** — openCypher `DERIVED_FROM*1..` traversal; the dataset name is an **agtype bind param**, never interpolated (injection-safe).
 5. **Lineage → Client** — `200` with the transitive upstream set.
 

@@ -34,7 +34,7 @@ service recovers via JetStream buffer + replay on restart.
    the catalog crashes (or its sidecar is down) **between the S3 write and the publish**, the data exists
    on storage but **the lineage event is lost** — the graph under-reports that write. No corruption, but a
    provenance hole. *Fix:* a transactional outbox, or make the **Ray job the durable producer** (it owns
-   the write + the emit) — already the documented direction (`microservices.md`, the lineage memory).
+   the write + the emit) — already the documented direction ([`FLOW.md`](FLOW.md) §7, [`RASK-INTEGRATION.md`](RASK-INTEGRATION.md)).
 
 2. **No dead-letter queue; `maxDeliver=5`.** A genuinely poison message (always `RETRY`, not malformed)
    is dropped from the *consumer* after 5 deliveries (~106s of backOff) with **no DLQ**. Limits retention

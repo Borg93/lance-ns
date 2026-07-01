@@ -71,7 +71,7 @@ The dummy producer/movers define the contract the real Ray Data jobs must reprod
 - **Each mover:** subscribe to its upstream trigger → transform (read the from-stage Lance version-range as a
   CDF, write the to-stage) → emit the **`DERIVED_FROM`** OpenLineage edge → publish the next trigger.
 - **Gold mover (terminal):** write the gold dataset **with the embedded `lineage` JSONB column** (per
-  `services/.../medallion_demo.py: write_gold`) → no next trigger. This is the durable, exportable artifact.
+  `scripts/medallion_demo.py: write_gold`) → no next trigger. This is the durable, exportable artifact.
 - **Authz:** when `MEDALLION_FGA_ENABLED`, the mover checks `can_create_table` (writer) / `can_promote`
   (validator, silver→gold) as its **service identity** before emitting; unauthorized → `DROP`.
 - **Creds:** the job authenticates with **workload identity** (KubeRay projected SA / OIDC token) and vends

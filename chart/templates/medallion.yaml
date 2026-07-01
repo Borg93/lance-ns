@@ -161,6 +161,13 @@ spec:
             - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ $root.Values.rustfs.secretKey | quote }} }
             {{- end }}
             {{- end }}
+            {{- if $root.Values.medallion.quality }}
+            # Validator gate: after the compute write, assert the stage's data is good enough to promote
+            # (row_count > 0, key column non-null); a failure emits the dataQualityAssertions facet but does
+            # NOT trigger the next stage. Needs medallion.compute on (it opens the just-written dataset).
+            - { name: MEDALLION_QUALITY_ENABLED, value: "true" }
+            - { name: MEDALLION_QUALITY_KEY_COLUMN, value: {{ $root.Values.medallion.qualityKeyColumn | quote }} }
+            {{- end }}
             {{- if $root.Values.medallion.fgaEnabled }}
             - { name: MEDALLION_FGA_ENABLED, value: "true" }
             - { name: MEDALLION_FGA_API_URL, value: {{ $root.Values.medallion.fgaApiUrl | quote }} }

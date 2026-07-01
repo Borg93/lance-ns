@@ -326,6 +326,14 @@ medallion:
   # the chain lines up (producer raw -> raw->bronze -> bronze->silver -> silver->gold). The S3 secret follows
   # the catalog's two-tier rule (plaintext only when OpenBao is off); compute + OpenBao isn't a shipped combo.
   compute: false
+  # When true, after the compute writes a stage's Lance dataset the mover runs data-quality assertions on it
+  # (row_count > 0, key column non-null) and BLOCKS promotion on failure — the failed run + its
+  # dataQualityAssertions facet are still emitted (auditable in lineage), but the next stage is NOT
+  # triggered, so a bad batch can't cascade. The automated *validator* half of governance (FGA decides who
+  # MAY promote; quality decides if the DATA is good enough). Requires medallion.compute (no data to check
+  # otherwise). Off by default.
+  quality: false
+  qualityKeyColumn: id
   producer:
     daprAppId: lance-ray
     rawDataset: raw_events

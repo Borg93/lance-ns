@@ -127,31 +127,6 @@ def build_write_event(
     }
 
 
-def build_create_event(
-    *,
-    table_id: str,
-    namespace: str,
-    author: str | None,
-    version: int,
-    run_id: str,
-    event_time: str,
-    job_namespace: str,
-    source_uri: str | None = None,
-) -> dict[str, Any]:
-    """The ``RunEvent`` for a table creation — :func:`build_write_event` with ``operation=create_table``."""
-    return build_write_event(
-        table_id=table_id,
-        namespace=namespace,
-        author=author,
-        version=version,
-        operation=CREATE_TABLE,
-        run_id=run_id,
-        event_time=event_time,
-        job_namespace=job_namespace,
-        source_uri=source_uri,
-    )
-
-
 @runtime_checkable
 class LineageEmitter(Protocol):
     """Emits catalog write events to the lineage service (best-effort)."""

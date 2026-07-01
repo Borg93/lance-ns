@@ -22,7 +22,6 @@ from catalog.core.lineage_emit import (
     HttpLineageEmitter,
     LineageEmitter,
     NoopEmitter,
-    build_create_event,
     build_write_event,
     emit_write_event,
     make_emitter,
@@ -32,11 +31,14 @@ from lineage.services.repository import _CREATE_TABLE_OP
 
 
 def test_build_create_event_shape() -> None:
-    event = build_create_event(
+    # The create event is build_write_event with operation=create_table (the real production path —
+    # emit_create → emit_write → build_write_event); this pins that shape.
+    event = build_write_event(
         table_id="alpha$bronze$images",
         namespace="alpha$bronze",
         author="alice",
         version=1,
+        operation=CREATE_TABLE,
         run_id="r1",
         event_time="2026-06-24T00:00:00+00:00",
         job_namespace="lance-catalog",
@@ -53,11 +55,12 @@ def test_build_create_event_shape() -> None:
 
 
 def test_build_create_event_without_author_omits_facet() -> None:
-    event = build_create_event(
+    event = build_write_event(
         table_id="t",
         namespace="",
         author=None,
         version=1,
+        operation=CREATE_TABLE,
         run_id="r1",
         event_time="t",
         job_namespace="lance-catalog",
@@ -73,11 +76,12 @@ def test_create_table_operation_string_is_shared() -> None:
 
 def test_emitted_event_round_trips_into_lineage_model() -> None:
     """The event the catalog emits must parse in the lineage service's RunEvent model."""
-    event = build_create_event(
+    event = build_write_event(
         table_id="alpha$bronze$images",
         namespace="alpha$bronze",
         author="alice",
         version=1,
+        operation=CREATE_TABLE,
         run_id="r1",
         event_time="2026-06-24T00:00:00+00:00",
         job_namespace="lance-catalog",
@@ -356,23 +360,6 @@ def test_build_write_event_merge_carries_version() -> None:
     assert event["run"]["facets"]["lance"] == {"operation": "merge_insert", "version": 4}
     assert event["outputs"][0]["facets"]["version"]["datasetVersion"] == "4"
     assert "author" not in event["run"]["facets"]
-
-
-def test_create_event_is_a_write_event_with_create_operation() -> None:
-    via_create = build_create_event(
-        table_id="t", namespace="", author="a", version=1, run_id="r", event_time="t", job_namespace="j"
-    )
-    via_write = build_write_event(
-        table_id="t",
-        namespace="",
-        author="a",
-        version=1,
-        operation=CREATE_TABLE,
-        run_id="r",
-        event_time="t",
-        job_namespace="j",
-    )
-    assert via_create == via_write
 
 
 def test_write_event_round_trips_into_lineage_model() -> None:

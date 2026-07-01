@@ -38,21 +38,39 @@ def urls() -> tuple[str, str]:
     return LANCERAY.rstrip("/"), LINEAGE.rstrip("/")
 
 
+def _run_count(lineage: str) -> int:
+    """How many runs the lineage graph has recorded — the freshness baseline for the cascade."""
+    resp = requests.get(f"{lineage}/runs?limit=1000", timeout=8)
+    resp.raise_for_status()
+    return len(resp.json().get("runs", []))
+
+
 def test_produce_cascades_raw_to_gold(urls: tuple[str, str]) -> None:
     lance_ray, lineage = urls
+
+    # Snapshot the run count FIRST. gold's upstream set may already exist from earlier produces, so
+    # set-membership alone can't prove THIS trigger did anything — the graph would look identical if the
+    # cascade silently no-op'd. A fresh produce mints a new run per stage (producer + 3 movers = +4), so a
+    # strictly rising run count is the real "the cascade fired just now" signal.
+    before = _run_count(lineage)
 
     # ACT — one trigger at the head of the pipeline.
     produced = requests.post(f"{lance_ray}/produce", timeout=8)
     assert produced.status_code == 202 and produced.json()["status"] == "produced", produced.text
 
-    # ASSERT — the cascade reached gold: its transitive upstream includes every prior stage.
+    # ASSERT — the cascade reached gold (its transitive upstream is the full chain) AND it did so from THIS
+    # produce: all four stages emitted a fresh run, so the count grew by the producer + 3 movers.
+    chain = {"raw_events", "bronze$events", "silver$features"}
     deadline = time.monotonic() + 60.0
     upstream: list[str] = []
     while time.monotonic() < deadline:
         resp = requests.get(f"{lineage}/datasets/gold$catalog/upstream", timeout=8)
         if resp.status_code == 200:
             upstream = [ref["name"] for ref in resp.json().get("related", [])]
-            if {"raw_events", "bronze$events", "silver$features"} <= set(upstream):
+            if chain <= set(upstream) and _run_count(lineage) >= before + 4:
                 return
         time.sleep(3)
-    pytest.fail(f"gold$catalog never derived from the full chain within 60s (saw upstream={upstream})")
+    pytest.fail(
+        f"gold$catalog cascade did not complete within 60s "
+        f"(upstream={upstream}, runs {before}->{_run_count(lineage)}, expected >= {before + 4})"
+    )

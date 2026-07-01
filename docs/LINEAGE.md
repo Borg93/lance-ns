@@ -240,12 +240,15 @@ Layered like the catalog (`api/` · `core/` · `services/` + a thin entrypoint),
 | Method / path | Purpose |
 |---|---|
 | `POST /api/v1/lineage` | Ingest one OpenLineage `RunEvent` (OpenLineage HTTP-transport default path) |
+| `GET /datasets` | **Browse** every dataset the caller may see (governed), `?namespace=` / `?tag=` filters + pagination — the discovery entry point, so you no longer need a name in advance |
+| `GET /jobs` | The jobs that have run (governed by the datasets each wrote) |
+| `GET /namespaces` | The namespaces containing ≥1 visible dataset |
 | `GET /datasets/{name}/upstream` | What `name` was derived from (provenance) |
 | `GET /datasets/{name}/downstream` | What derives from `name` (impact) |
 | `GET /datasets/{name}/producers` | The runs that wrote `name` — who / when / how |
 | `GET /datasets/{name}/creator` | **Who created** `name` (the verified catalog principal) |
 | `GET /datasets/{name}/graph` | Connected lineage subgraph (`nodes` + `edges`) for a DAG view |
-| `GET /datasets/{name}/reconcile` | **Graph vs storage** — cross-checks the `WROTE`-edge version against the *actual on-disk Lance version* and flags drift (`in_sync` / `storage_ahead` / `graph_ahead` / `untracked` / `missing_on_storage` / `absent`). Format-aware; Marquez/Lakekeeper can't do this |
+| `GET /datasets/{name}/reconcile` | **Graph vs storage** — cross-checks the `WROTE`-edge version against the *actual on-disk Lance version* and flags drift (`in_sync` / `storage_ahead` / `graph_ahead` / `untracked` / `missing_on_storage` / `absent`). Format-aware; Marquez/Lakekeeper can't do this. A periodic Dapr-cron sweep (`services.lineage.reconcile`, off by default) **back-fills** the lost-write states — the buildable half of the outbox problem, so a write whose lineage event was dropped is recovered onto the graph |
 | `GET /datasets/{name}/schema` | The persisted **column schema** for `name` (at `?version=N`, else latest) — captured from the standard `SchemaDatasetFacet` per-version on the `WROTE` edge. Prerequisite for column-level lineage |
 | `GET /datasets/{name}/columns/{field}/upstream` | **Column-level provenance** — the columns `name.field` was transitively derived from (field-to-field). Our deepest moat; neither Marquez nor Lakekeeper derives it |
 | `GET /datasets/{name}/columns/{field}/downstream` | **Column-level impact** — the columns transitively derived from `name.field` |

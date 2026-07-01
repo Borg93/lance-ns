@@ -130,7 +130,7 @@ def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
     """
     import lance
     import pyarrow as pa
-    from lineage.core.age import make_pool
+    from lineage.core.age import make_pool, run_cypher
     from lineage.core.reconcile import read_storage_version, reconcile_all
     from lineage.models import RunEvent
     from lineage.schemas import ReconcileState
@@ -165,6 +165,15 @@ def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
         await pool.open()
         try:
             repo = LineageRepository(pool, "lineage")
+            # The AGE graph persists across runs — clear this test's dataset + runs so it starts clean
+            # (else a prior back-fill leaves recon$t at v2 and the "graph behind storage" premise breaks).
+            async with pool.connection() as conn:
+                await run_cypher(conn, "lineage", "MATCH (d:Dataset {name:'recon$t'}) DETACH DELETE d")
+                await run_cypher(
+                    conn,
+                    "lineage",
+                    "MATCH (r:Run) WHERE r.run_id IN ['recon-w1', 'reconcile-recon$t-v2'] DETACH DELETE r",
+                )
             await repo.ingest_event(event)
             before = await repo.latest_write_version("recon$t")
             statuses = await reconcile_all(repo, read_only_recon, backfill=True)

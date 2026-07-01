@@ -330,8 +330,10 @@ medallion:
   # event-driven cascade produces actual versioned data on RustFS, not just provenance — the lineage graph
   # then reflects what storage holds and outputStatistics carry real rows/bytes. Off by default (the demo
   # ships as a pure lineage-emit). Each stage's FROM_URI/TO_URI derive from rustfs.bucket + its namespace, so
-  # the chain lines up (producer raw -> raw->bronze -> bronze->silver -> silver->gold). The S3 secret follows
-  # the catalog's two-tier rule (plaintext only when OpenBao is off); compute + OpenBao isn't a shipped combo.
+  # the chain lines up (producer raw -> raw->bronze -> bronze->silver -> silver->gold). REQUIRES OpenBao off
+  # (`--set openbao.enabled=false`): the medallion is a dummy producer with no OpenBao secret-fetch (unlike
+  # the catalog), so with OpenBao on the plaintext S3 secret is withheld and it fails fast at boot. Real
+  # compute is a Ray job at rask.
   compute: false
   # When true, after the compute writes a stage's Lance dataset the mover runs data-quality assertions on it
   # (row_count > 0, key column non-null) and BLOCKS promotion on failure — the failed run + its

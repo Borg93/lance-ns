@@ -32,13 +32,17 @@ are design sketches, **not** the current mechanism.
 `lance-ns-lance-ray` pod running `medallion.producer:app`). On **`POST /produce`** it:
 
 1. (compute on) seeds a real `raw_events` Lance dataset — the fake-Ray ingest;
-2. emits an OpenLineage `RunEvent` for `raw_events` (no inputs — raw is the source);
-3. publishes the **first trigger**, `medallion.raw`, carrying a `token` that correlates the run across
-   every hop.
+2. emits an OpenLineage `RunEvent` for `raw_events` (no inputs — raw is the source).
 
-A failed trigger publish is the cascade head failing, so `/produce` returns **503** (the caller retries) —
-not a silent 202. This is the "a job registered at ingest that the event-driven services pick up": the
-`token` + the `medallion.raw` message *are* the registered run; each mover downstream picks it up.
+It does **not** itself publish `medallion.raw`. `lance-ray` also *subscribes* to the lineage topic
+(`/raw-arrival`) and — only for a raw-dataset write — publishes the first trigger `medallion.raw`. So the
+cascade is driven by the raw-data **arrival event**, not the call (GOAL 4 B2); any raw writer (this dummy,
+or the catalog) that emits a raw-write event drives it, and the head is a subscriber like every other stage.
+Loop-guarded so the movers' own downstream events can't re-fire it.
+
+A failed raw-write emit is the cascade head failing, so `/produce` returns **503** (the caller retries) —
+not a silent 202. The raw-write event *is* the registered run; `/raw-arrival` turns it into `medallion.raw`,
+and each mover downstream picks that up.
 
 → [`MEDALLION.md`](MEDALLION.md) · code: `services/medallion/{producer.py,services/produce.py}`
 

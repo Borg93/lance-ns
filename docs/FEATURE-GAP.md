@@ -67,13 +67,14 @@ dataQualityAssertions facets. We are **at or above Marquez** on the high-value a
 | Job versioning | `MERGE (:Job)` only, no JobVersion nodes | Missing, low value (fixed medallion jobs) |
 | Job source-code / context (`sourceCodeLocation`/`sql`) | `sourceCodeLocation` **now ingested** as a GOAL 3 here-dummy (git repo + path, on `Job.source_location`) | Partly there — the *auto-derived* value (rask runner's git + pipeline) lands with lance-ray (GOAL 3-real); `sql` still N/A (no SQL engine) |
 | Full standard facet set | high-value ones present | Missing & worth adding: `parent` (run hierarchies), `dataQualityMetrics` (column null/distinct/min-max); low-value: `nominalTime`, `processing_engine`, `symlinks`, `storage`, `inputStatistics` |
-| Search / list / namespaces API | none (must know the dataset name; `/events`+`/runs` give some browsability) | **Missing + moderately valuable** for discovery |
+| Search / list / namespaces API | ✅ **list shipped (GOAL 4 A1/A2)** — governed `GET /datasets` (`?namespace=`/`?tag=` + pagination), `/jobs`, `/namespaces`; the frontend Browse landing renders them. Full-text/**vector search** still deferred (reuses rask's Lance FTS/vector) | On par for *browse*; semantic search deferred to the query-engine phase |
 | SQL-parse-based lineage | rely on producers emitting `columnLineage` | **N/A** (no SQL engine); minor: could derive edges from `add_columns`/`update` SQL |
 | Backfill detection | Lance `add_columns` recorded as versioned WROTE; not *classified* as backfill | Low value (no partitions) |
 | Graph UI | ✅ **shipped (GOAL 3)** — the SvelteKit Svelte-Flow explorer at `/lineage` + `/` (`$lib/LineageExplorer.svelte`): Datasets/Jobs/Columns planes, click-node → upstream/downstream/producers + column-lineage panel | On par — a production graph explorer now exists |
 
 **Moats over Marquez** (it structurally cannot do these): **storage-version reconcile** (`in_sync`/`storage_ahead`/
-`graph_ahead` vs the on-disk Lance version), **FGA-governed reads** (per-object authz + transitive-disclosure
+`graph_ahead` vs the on-disk Lance version — plus a periodic **back-fill** of writes whose lineage event was
+lost, GOAL 4 B4), **FGA-governed reads** (per-object authz + transitive-disclosure
 filtering + read-audit), **verified creator** (OIDC `sub` stamped, not self-asserted), **durable idempotent
 at-least-once ingest** (Dapr/JetStream + MERGE-on-run_id + natural-key dedup).
 
@@ -87,9 +88,13 @@ real version), ✅ `sourceCodeLocation` job-context facet as a here-dummy (rask'
 one later), ✅ production graph UI (the SvelteKit explorer at `/lineage` + `/`, `$lib/LineageExplorer.svelte`
 with the upstream/downstream/producers/column-lineage detail panel).
 
+**Also shipped (GOAL 4):** ✅ discovery *list* API (`/datasets`, `/jobs`, `/namespaces`, governed + filtered)
++ the Browse landing; ✅ a truly event-driven cascade head (lance-ray subscribes to the raw-write event);
+✅ storage→graph reconciliation **back-fill** for dropped writes; ✅ compute-on + quality-gate chart toggles.
+
 Remaining, by value:
-1. **Discovery API** (search / list-all / `/namespaces`) — but note rask already has Lance-native FTS+vector
-   search; a bespoke lineage-graph browse is low-value given lineage-in-gold. Defer.
+1. **Semantic search** (`/search?q=`) — the *list* API now covers browse; typo-tolerant/vector search reuses
+   rask's Lance FTS+vector and lands with the query-engine phase. Defer.
 2. **`dataQualityMetrics`** — column null/distinct/min-max; costly on Lance (stats live outside the file). Low.
 3. **Job-context auto-instrumentation** — the *real* `sourceCodeLocation` + run `parent` facets, emitted from
    rask's runner when lance-ray OpenLineage lands (GOAL 3-real). Supersedes the here-dummy.

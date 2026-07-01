@@ -5,18 +5,23 @@ microservices** on Dapr pub/sub (over NATS JetStream), not a script. One trigger
 chain, each hop emits OpenLineage (so the graph grows the DAG), and Dapr propagates the trace context
 so the whole cascade is **one distributed trace**.
 
-## Is `lance-ray` the first trigger to bronze? — Yes.
+## Is `lance-ray` the head of the pipeline? — Yes, and it's event-driven.
 
-`lance-ray` is the **head of the pipeline** (a dummy Ray ingest job). It is **one hop upstream of
-bronze**: on `POST /produce` it (1) emits the OpenLineage event for the `raw_events` source dataset and
-(2) publishes the **first trigger**, `medallion.raw`. The `raw→bronze` mover subscribes to that trigger
-and produces bronze. So:
+`lance-ray` is the **head of the pipeline** (a dummy Ray ingest job), **one hop upstream of bronze**. It is
+NOT poked by a manual RPC: `POST /produce` (with compute) seeds `raw_events` and emits ONE OpenLineage event
+*announcing that write*. `lance-ray` also **subscribes** to the shared lineage topic (`/raw-arrival`) and —
+only for a write to the raw dataset — publishes the first trigger `medallion.raw`. So the cascade is driven
+by the raw-data **arrival event**, not the call; any raw writer (this dummy, or the catalog) that emits a
+raw-write event drives it. Loop-guarded: the movers' own bronze/silver/gold events on that same topic are
+ignored, so the head can't self-trigger. `raw→bronze` subscribes to `medallion.raw` and produces bronze:
 
 ```
-                        emits raw_events lineage
-   POST /produce ─▶ lance-ray ──────────────────────▶ (lineage svc → AGE)
-   (you/cron)         │  publishes medallion.raw  (the FIRST trigger)
-                      ▼
+   POST /produce ─▶ lance-ray ──emits raw_events write event──▶ lineage.events.v1 ─▶ (lineage svc → AGE)
+   (any raw writer)     ▲                                              │
+                        └────────── /raw-arrival subscription ◀────────┘   (reacts ONLY to a RAW write)
+                                     publishes medallion.raw  (the FIRST trigger)
+                                          │
+                                          ▼
               ┌─────────────────┐   medallion.bronze   ┌───────────────────┐   medallion.silver   ┌─────────────────┐
               │  raw→bronze     │ ───────────────────▶ │  bronze→silver    │ ───────────────────▶ │  silver→gold    │
               │  (ingest_events)│                      │  (embed_features) │                      │ (aggregate_gold)│
@@ -28,14 +33,17 @@ and produces bronze. So:
    resulting lineage DAG:   raw_events ─▶ bronze$events ─▶ silver$features ─▶ gold$catalog
 ```
 
-`lance-ray` does **not** produce bronze itself — it produces `raw_events` and *triggers* the `raw→bronze`
-mover, which produces bronze.
+`lance-ray` does **not** produce bronze itself — it produces `raw_events`; its `/raw-arrival` subscription
+then *triggers* the `raw→bronze` mover, which produces bronze. Because the head is now a subscriber like
+every other stage, the pipeline is event-driven end to end — nothing polls or waits on a timer (GOAL 4 B2).
 
 ### Does the cascade produce real data, or just lineage?
 
-Both modes, by a flag. **Default off** (`MEDALLION_COMPUTE_ENABLED` unset): the producer + movers are
-pure **emitters** — they grow the lineage DAG but write no data (all the event-driven *choreography* demo
-needs). **On**: each stage runs the **fake-Ray compute** (`services/medallion/services/compute.py`) — a
+Both modes, by a flag (`MEDALLION_COMPUTE_ENABLED`, chart toggle `medallion.compute`, **off by default**).
+Off: the producer + movers are pure **emitters** — they grow the lineage DAG but write no data (all the
+event-driven *choreography* demo needs), so the graph asserts datasets that aren't on disk (`#23` reconcile
+would flag them `missing_on_storage`). **On** (`--set medallion.compute=true`): each stage runs the
+**fake-Ray compute** (`services/medallion/services/compute.py`) — a
 REAL in-process Lance write: `lance-ray` seeds `raw_events`, then each mover reads its upstream Lance
 dataset, stamps a `stage` provenance column, and writes the downstream dataset — so the whole loop produces
 **actual versioned data** and the emitted OpenLineage carries the **real** Lance version (not a hardcoded
@@ -44,11 +52,16 @@ distributed Ray Data job (`lance-ray` on rask's KubeRay) swaps into in productio
 loop is end-to-end testable without a Ray cluster (`tests/unit/test_medallion_cascade.py` runs the full
 raw→gold cascade and asserts both the data and the `DERIVED_FROM` chain).
 
+> **Compute + OpenBao:** compute-on writes to RustFS with the plaintext S3 secret, so it **requires OpenBao
+> off** (`--set openbao.enabled=false medallion.compute=true`). The medallion is a dummy producer with no
+> OpenBao secret-fetch (unlike the catalog), so with OpenBao on it **fails fast at boot** rather than 403'ing
+> at first write. The event-driven choreography (below) runs identically with compute off.
+
 ## The services (all share the catalog image; different entrypoint)
 
 | Service | App-id | Module | Subscribes | Publishes |
 | ------- | ------ | ------ | ---------- | --------- |
-| **lance-ray** (producer) | `lance-ray` | `medallion.producer:app` | — (`POST /produce`) | `medallion.raw` + raw lineage |
+| **lance-ray** (producer) | `lance-ray` | `medallion.producer:app` | `lineage.events.v1` (raw filter, `/raw-arrival`) + `POST /produce` | raw-write lineage → then `medallion.raw` on a raw arrival |
 | **raw→bronze** | `raw-to-bronze` | `medallion.mover:app` | `medallion.raw` | `medallion.bronze` + lineage |
 | **bronze→silver** | `bronze-to-silver` | `medallion.mover:app` | `medallion.bronze` | `medallion.silver` + lineage |
 | **silver→gold** | `silver-to-gold` | `medallion.mover:app` | `medallion.silver` | — (terminal) + lineage |
@@ -65,7 +78,7 @@ the distinction between a *registered validator that gates movement* and the *ev
 | Gate | Flag | Question | Mechanism | Fail action |
 | ---- | ---- | -------- | --------- | ----------- |
 | **Authorization** | `MEDALLION_FGA_ENABLED` | *May this identity promote?* | the mover CHECKs OpenFGA as its **own service identity** — silver→gold needs `can_promote` (validator rung), the others `can_create_table` (writer) | `DROP` (redelivery won't grant the role) + `medallion.stage.denied` |
-| **Data quality** | `MEDALLION_QUALITY_ENABLED` | *Is the produced data good enough?* | after the compute writes the downstream dataset, the mover runs cheap, exact assertions on it (`row_count_positive`, `not_null` on the key column) via `services/medallion/services/quality.py` | `DROP` (deterministically bad) + `medallion.stage.quality_blocked`; the failed run + its `dataQualityAssertions` facet are **still emitted** so the bad batch is auditable in lineage |
+| **Data quality** | `MEDALLION_QUALITY_ENABLED` (chart `medallion.quality`) | *Is the produced data good enough?* | after the compute writes the downstream dataset, the mover runs cheap, exact assertions on it (`row_count_positive`, `not_null` on the key column) via `services/medallion/services/quality.py` | `DROP` (deterministically bad) + `medallion.stage.quality_blocked`; the failed run + its `dataQualityAssertions` facet are **still emitted** so the bad batch is auditable in lineage |
 
 Both gate the **same act** (promotion) from different angles, and both compose: a stage promotes only when
 it is *authorized* **and** the data *passes quality*. The quality gate requires compute (there is no data to

@@ -185,6 +185,17 @@ def test_raw_arrival_retries_on_publish_failure() -> None:
     assert status == {"status": "RETRY"}
 
 
+def test_compute_with_s3_endpoint_but_no_secret_fails_fast() -> None:
+    # The OpenBao-on footgun: compute writes to S3 but the plaintext secret is withheld → fail at config
+    # load with a clear message, not at first write with a cryptic S3 SignatureDoesNotMatch.
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError, match="OpenBao off"):
+        MedallionSettings.model_validate(
+            {"compute_enabled": True, "s3_endpoint": "http://rustfs:9000", "s3_secret_access_key": ""}
+        )
+
+
 async def _allow(*_a: Any, **_k: Any) -> bool:
     return True
 

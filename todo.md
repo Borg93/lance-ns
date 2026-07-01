@@ -21,6 +21,17 @@
 ---
 
 ## Done (built + tested)
+- ✅ **GOAL 4 — lineage discovery + a truly event-driven cascade** (lance-ns only):
+  - **A1/A2** governed `GET /datasets` (`?namespace=`/`?tag=` + pagination), `/jobs`, `/namespaces` — the
+    graph is now browsable, not just walkable (unit + AGE-backed integration tests).
+  - **A3** frontend **Browse** landing backed by `/datasets` (replaces the hardcoded name list); Playwright.
+  - **B1** `medallion.compute` toggle → the cascade writes real Lance data (requires OpenBao off; fail-fast
+    boot guard otherwise). **B3** `medallion.quality` toggle wires the validator gate into the chart.
+  - **B2** event-driven cascade **head**: lance-ray subscribes (`/raw-arrival`) and fires `medallion.raw`
+    from the raw-write event — no manual trigger, no cron (verified live: +4 runs per produce).
+  - **B4** storage→graph reconciliation **back-fill** (repository + `reconcile_all` + a Dapr-cron route) for
+    writes whose lineage event was lost — the buildable half of the outbox problem (AGE-backed test).
+  - Deferred to the query-engine/rask phase: semantic `/search`, DuckDB SQL, MVs, control-plane API.
 - ✅ Lance Namespace REST catalog — FastAPI over native pylance `DirectoryNamespace` (MinIO/S3).
 - ✅ OIDC authn (PyJWT/JWKS), **fail-closed**.
 - ✅ OpenFGA authz — op→`can_*` actions, concentric owner⊇writer⊇reader, parent cascade

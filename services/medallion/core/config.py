@@ -9,8 +9,9 @@ shared Dapr ``pubsub.jetstream`` component the catalog/lineage already use.
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Self
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -90,7 +91,27 @@ class MedallionSettings(BaseSettings):
             "secret_access_key": self.s3_secret_access_key,
             "region": self.s3_region,
             "allow_http": "true",
+            # RustFS/MinIO require PATH-style addressing; without this lance signs the request
+            # virtual-hosted-style and RustFS returns 403 SignatureDoesNotMatch (mirrors the catalog).
+            "virtual_hosted_style_request": "false",
         }
+
+    @model_validator(mode="after")
+    def _compute_needs_s3_secret(self) -> Self:
+        """Fail fast when compute writes to S3 but the secret is missing — else Lance 403s cryptically.
+
+        The medallion is a dummy producer (the real compute is a Ray Data job at rask), so it has no OpenBao
+        secret-fetch path like the catalog. When OpenBao is on (the chart default) the plaintext S3 secret is
+        deliberately withheld from pod env, so turning compute on there leaves no secret and every Lance
+        write fails with S3 ``SignatureDoesNotMatch``. Surface it at boot instead of at first produce.
+        """
+        if self.compute_enabled and self.s3_endpoint and not self.s3_secret_access_key:
+            raise ValueError(
+                "MEDALLION_COMPUTE_ENABLED with an S3 endpoint but no MEDALLION_S3_SECRET_ACCESS_KEY. The "
+                "medallion does not fetch S3 creds from OpenBao (unlike the catalog), so compute-on requires "
+                "OpenBao off (helm --set openbao.enabled=false). The production compute is a Ray job at rask."
+            )
+        return self
 
     # --- producer (lance-ray) config — produces the raw dataset + the first trigger -------------
     raw_dataset: str = Field(default="raw_events", alias="MEDALLION_RAW_DATASET")

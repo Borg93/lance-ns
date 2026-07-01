@@ -1,10 +1,11 @@
-"""The lance-ray producer's ingest business logic — the HEAD of the medallion pipeline.
+"""The lance-ray producer's ingest business logic — the dummy raw writer at the head of the pipeline.
 
-:func:`produce` is the **first trigger**: it (1) emits an OpenLineage event for the ``raw_events`` dataset
-it "ingested" (no inputs — raw is the source) and (2) publishes the first stage trigger to ``medallion.raw``.
-The ``raw->bronze`` mover subscribes to that trigger, so lance-ray is one hop upstream of bronze. In
-production this is a real Ray Data job writing a Lance table + emitting lineage; here it is a dummy emitter
-(no heavy compute), which is all the event-driven demo needs.
+:func:`produce` (with ``compute_enabled``) seeds a real ``raw_events`` Lance dataset, then emits ONE
+OpenLineage event announcing that write. It does NOT itself trigger the cascade — lance-ray's own
+``/raw-arrival`` subscription (:mod:`medallion.services.ingest_trigger`) reacts to that raw-write event and
+publishes the ``medallion.raw`` trigger, so the pipeline is driven by the raw-data-arrival EVENT, not this
+call (GOAL 4 B2). In production this is a real Ray Data job; here it is a dummy emitter, which is all the
+event-driven demo needs.
 
 Best-effort: a sidecar/broker outage logs + still returns (never 500s the producer) — the catalog contract.
 """
@@ -20,7 +21,6 @@ from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
 
 from medallion.core.config import MedallionSettings
-from medallion.core.metrics import record_transition
 from medallion.schemas.events import build_run_event
 from medallion.services.compute import seed_raw
 
@@ -30,12 +30,13 @@ tracer = trace.get_tracer(__name__)
 
 
 async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, str]:
-    """Ingest the raw dataset and fire the first medallion trigger.
+    """Ingest the raw dataset and emit its write event (the event-driven cascade head).
 
-    Emits an OpenLineage event for ``raw_events`` then publishes ``{token, dataset}`` to the raw topic.
     With ``compute_enabled`` it FIRST seeds a real ``raw_events`` Lance dataset (the fake lance-ray ingest)
-    so the emitted lineage carries the real version; off → a dummy emit (version 1). Best-effort: a
-    sidecar/broker outage logs + still returns (the catalog-style contract)."""
+    so the emitted lineage carries the real version; off → a dummy emit (version 1). It then emits ONE
+    OpenLineage event for ``raw_events``. It does NOT publish ``medallion.raw`` — lance-ray's ``/raw-arrival``
+    subscription reacts to this raw-write event and fires the trigger, so the cascade is event-driven.
+    Best-effort: a sidecar/broker outage logs + still returns (the catalog-style contract)."""
     token = uuid.uuid4().hex[:12]
     result = None
     if settings.compute_enabled and settings.raw_uri:
@@ -58,21 +59,16 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
         size_bytes=result.size_bytes if result else None,
         run_id=f"{settings.producer_operation}-{token}",
     )
-    trigger = {"token": token, "dataset": settings.raw_dataset, "namespace": settings.raw_namespace}
     try:
+        # The cascade HEAD is this raw-write lineage event: lance-ray's own /raw-arrival subscription reacts
+        # to it and publishes the medallion.raw trigger, so the pipeline is driven by the arrival EVENT, not
+        # by this call directly (event-driven head — the trigger publish moved to ingest_trigger.py).
         await dapr.publish_event(
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
             data=json.dumps(raw_event),
             data_content_type="application/json",
         )
-        await dapr.publish_event(
-            pubsub_name=settings.pubsub,
-            topic_name=settings.raw_topic,
-            data=json.dumps(trigger),
-            data_content_type="application/json",
-        )
-        record_transition(f"source->{settings.raw_namespace}")
     except Exception as exc:  # noqa: BLE001 — best-effort: a publish outage must not 500 the producer
         log.warning("medallion_produce_failed", extra={"token": token, "error": str(exc)})
         return {"status": "publish_failed", "token": token}

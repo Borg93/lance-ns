@@ -27,6 +27,7 @@ spec:
         dapr.io/app-id: {{ .Values.medallion.producer.daprAppId | quote }}
         dapr.io/app-port: {{ $port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}
@@ -47,6 +48,12 @@ spec:
             {{- include "lance.otelEnv" (list $root .Values.medallion.producer.daprAppId) | nindent 12 }}
             {{- end }}
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }
+            # Fail-closed at boot if behind a sidecar but the app-token is unset — /raw-arrival would
+            # otherwise be an open forged-trigger path (symmetric with the movers).
+            - { name: MEDALLION_DAPR_ENABLED, value: {{ .Values.dapr.sidecars | quote }} }
+            - name: APP_API_TOKEN  # verify the Dapr-stamped header on /raw-arrival (forged-trigger guard)
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
             - { name: MEDALLION_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
             - { name: MEDALLION_LINEAGE_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
             - { name: MEDALLION_RAW_DATASET, value: {{ .Values.medallion.producer.rawDataset | quote }} }

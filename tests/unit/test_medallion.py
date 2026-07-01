@@ -2,7 +2,8 @@
 
 Infra-free: no sidecar, no broker. A fake Dapr client records publishes; we pin the contract each
 service must honor — the mover emits the transform's lineage (inputs→outputs) AND the next stage's
-trigger, returns SUCCESS (RETRY on a publish outage), and the producer emits raw + the first trigger.
+trigger, returns SUCCESS (RETRY on a publish outage), the producer emits ONLY the raw-write event, and the
+event-driven head (/raw-arrival) fires the medallion.raw trigger for a raw write while ignoring others.
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ import medallion.services.transform as mover
 import pytest
 from medallion.core.config import MedallionSettings
 from medallion.schemas.events import build_run_event
+from medallion.services.ingest_trigger import handle_raw_arrival
 from medallion.services.produce import produce
 
 
@@ -104,19 +106,83 @@ def test_mover_retries_on_publish_failure() -> None:
     assert status == {"status": "RETRY"}
 
 
-def test_producer_emits_raw_then_first_trigger() -> None:
+def test_producer_emits_only_the_raw_write_event() -> None:
+    # Event-driven head (B2): produce() emits ONLY the raw-write lineage event — it no longer publishes the
+    # medallion.raw trigger. The /raw-arrival subscription reacts to this event and fires the trigger.
     dapr = _FakeDapr()
 
     result = asyncio.run(produce(cast(Any, dapr), MedallionSettings()))
 
     assert result["status"] == "produced"
-    assert len(dapr.calls) == 2
-    raw_lineage, trigger = dapr.calls
+    assert len(dapr.calls) == 1
+    (raw_lineage,) = dapr.calls
     assert raw_lineage["topic"] == "lineage.events.v1"
     assert raw_lineage["data"]["outputs"][0]["name"] == "raw_events"
     assert raw_lineage["data"]["inputs"] == []  # raw is the source — no upstream
+    assert all(c["topic"] != "medallion.raw" for c in dapr.calls)  # the trigger is the subscription's job
+
+
+def _raw_write_cloudevent(run_id: str = "lance_ray_ingest-tok123") -> dict[str, Any]:
+    """A Dapr CloudEvent whose data is a raw-dataset write (what /raw-arrival reacts to)."""
+    return {
+        "data": build_run_event(
+            operation="lance_ray_ingest",
+            author="ray",
+            job_namespace="lance-medallion",
+            inputs=[],
+            output_namespace="raw",
+            output_name="raw_events",
+            version=1,
+            run_id=run_id,
+        )
+    }
+
+
+def test_raw_arrival_fires_the_cascade() -> None:
+    # A raw-dataset write event drives the head: publish the medallion.raw trigger (event-driven B2).
+    dapr = _FakeDapr()
+
+    status = asyncio.run(handle_raw_arrival(cast(Any, dapr), MedallionSettings(), _raw_write_cloudevent()))
+
+    assert status == {"status": "SUCCESS"}
+    assert len(dapr.calls) == 1
+    (trigger,) = dapr.calls
     assert trigger["topic"] == "medallion.raw"
-    assert trigger["data"]["dataset"] == "raw_events"
+    assert trigger["data"] == {
+        "token": "lance_ray_ingest-tok123",
+        "dataset": "raw_events",
+        "namespace": "raw",
+    }
+
+
+def test_raw_arrival_ignores_non_raw_event() -> None:
+    # Loop guard: a mover's bronze write on the SAME topic is acked and drives nothing — the head can't
+    # self-trigger off the cascade it started.
+    dapr = _FakeDapr()
+    bronze = {
+        "data": build_run_event(
+            operation="ingest_events",
+            author="alice",
+            job_namespace="lance-medallion",
+            inputs=[("raw", "raw_events")],
+            output_namespace="bronze",
+            output_name="bronze$events",
+            version=1,
+            run_id="ingest_events-tok456",
+        )
+    }
+
+    status = asyncio.run(handle_raw_arrival(cast(Any, dapr), MedallionSettings(), bronze))
+
+    assert status == {"status": "SUCCESS"}
+    assert dapr.calls == []  # nothing published
+
+
+def test_raw_arrival_retries_on_publish_failure() -> None:
+    status = asyncio.run(
+        handle_raw_arrival(cast(Any, _FakeDapr(fail=True)), MedallionSettings(), _raw_write_cloudevent())
+    )
+    assert status == {"status": "RETRY"}
 
 
 async def _allow(*_a: Any, **_k: Any) -> bool:

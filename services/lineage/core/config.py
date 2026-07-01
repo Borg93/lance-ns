@@ -53,6 +53,10 @@ class LineageSettings(BaseSettings):
     dapr_enabled: bool = Field(default=False, alias="LINEAGE_DAPR_ENABLED")
     dapr_pubsub: str = Field(default="lineage-pubsub", alias="LINEAGE_DAPR_PUBSUB")
     dapr_topic: str = Field(default="lineage.events.v1", alias="LINEAGE_DAPR_TOPIC")
+    # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<name> on a schedule to
+    # back-fill Lance writes whose lineage event was lost (the outbox gap). Empty = the cron route isn't
+    # mounted (the /datasets/{name}/reconcile read endpoint is always available regardless).
+    reconcile_binding_name: str = Field(default="", alias="LINEAGE_RECONCILE_BINDING_NAME")
 
     # --- Demo data peek (DEMO ONLY) — reads the real Lance datasets on S3 so the UI can show
     # what is changing in storage (schema/versions/rows). Off by default; never enable in prod.

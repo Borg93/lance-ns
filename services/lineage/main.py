@@ -173,6 +173,12 @@ async def readyz(request: Request) -> JSONResponse:
 if get_settings().demo_data_enabled:
     app.include_router(demo.router)
 
+# Periodic storage->graph reconciliation cron route (B4) — mounted only when a Dapr cron binding names it.
+if get_settings().reconcile_binding_name:
+    from lineage.api.reconcile_cron import build_reconcile_cron_router
+
+    app.include_router(build_reconcile_cron_router(get_settings().reconcile_binding_name))
+
 # Thin demo UI — a single self-contained page that polls the query endpoints to render the live
 # medallion DAG (see scripts/medallion_demo.py). Mounted last so it never shadows an API route.
 _STATIC = Path(__file__).resolve().parent / "static"

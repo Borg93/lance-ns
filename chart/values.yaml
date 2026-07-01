@@ -278,6 +278,13 @@ services:
     port: 8000
     daprAppId: lineage
     replicas: 1 # Dapr load-balances event delivery across replicas; ingest is idempotent (MERGE on run_id)
+    # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<bindingName> on `schedule`
+    # to back-fill Lance writes whose lineage event was lost (the outbox gap). Off by default (the demo ships
+    # without it); the /datasets/{name}/reconcile read endpoint is available regardless.
+    reconcile:
+      enabled: false
+      bindingName: lineage-reconcile-cron
+      schedule: "@every 300s" # demo cadence (prod: e.g. "0 */15 * * * *")
 
 # Web (SvelteKit UI) replica count — stateless. (Demo scaffolding; rask supplies the real frontends.)
 web:

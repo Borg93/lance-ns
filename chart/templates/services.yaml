@@ -92,6 +92,25 @@ spec:
   ports: [{ name: http, port: {{ .Values.services.catalog.port }}, targetPort: http }]
   selector: { app.kubernetes.io/component: catalog, app.kubernetes.io/instance: {{ .Release.Name }} }
 ---
+{{- if and .Values.dapr.sidecars .Values.services.lineage.reconcile.enabled }}
+# Dapr cron INPUT binding — the sidecar POSTs to /<bindingName> on `schedule` to run the periodic
+# storage->graph reconciliation (B4), back-filling Lance writes whose lineage event was lost. Config lives
+# here, not in app code (no scheduler thread). Scoped to the lineage app; the route mounts only when
+# LINEAGE_RECONCILE_BINDING_NAME matches this name.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Values.services.lineage.reconcile.bindingName }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+    - { name: schedule, value: {{ .Values.services.lineage.reconcile.schedule | quote }} }
+scopes:
+  - {{ .Values.services.lineage.daprAppId }}
+---
+{{- end }}
 # Lineage (consumer) — SUBSCRIBES (via its daprd sidecar) to the lineage topic and ingests into AGE.
 apiVersion: apps/v1
 kind: Deployment
@@ -157,6 +176,10 @@ spec:
             - { name: LINEAGE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
             - { name: LINEAGE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
             - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
+            {{- if .Values.services.lineage.reconcile.enabled }}
+            # Mounts the cron reconcile route at this binding name (matches the bindings.cron component above).
+            - { name: LINEAGE_RECONCILE_BINDING_NAME, value: {{ .Values.services.lineage.reconcile.bindingName | quote }} }
+            {{- end }}
             - { name: LINEAGE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LINEAGE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" .) }}

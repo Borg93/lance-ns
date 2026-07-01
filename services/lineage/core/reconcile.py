@@ -9,9 +9,12 @@ The endpoint that exposes it (gated on ``can_get_metadata``) wires these to the 
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
+from typing import Protocol
+
 import lance
 
-from lineage.schemas import ReconcileState, ReconcileStatus
+from lineage.schemas import DatasetSummary, ReconcileState, ReconcileStatus
 
 
 def read_storage_version(uri: str, storage_options: dict[str, str]) -> int | None:
@@ -46,3 +49,48 @@ def reconcile(*, dataset: str, graph_version: int | None, storage_version: int |
         in_sync=state is ReconcileState.IN_SYNC,
         status=state,
     )
+
+
+class _ReconcileRepo(Protocol):
+    """The repository surface :func:`reconcile_all` needs (kept structural so the core stays testable)."""
+
+    async def list_datasets(
+        self, namespace: str | None = ..., tag: str | None = ...
+    ) -> list[DatasetSummary]: ...
+    async def source_uri(self, name: str) -> str | None: ...
+    async def latest_write_version(self, name: str) -> int | None: ...
+    async def backfill_write(self, name: str, version: int) -> None: ...
+
+
+# The drift states that mean a real write's lineage event was LOST — storage has data the graph doesn't fully
+# record. Only these are back-filled; GRAPH_AHEAD / MISSING_ON_STORAGE / IN_SYNC are not lost writes.
+_BACKFILLABLE = (ReconcileState.STORAGE_AHEAD, ReconcileState.UNTRACKED)
+
+
+async def reconcile_all(
+    repository: _ReconcileRepo,
+    read_version: Callable[[str], Awaitable[int | None]],
+    *,
+    backfill: bool,
+) -> list[ReconcileStatus]:
+    """Reconcile every dataset the graph knows against storage; optionally back-fill dropped writes (B4).
+
+    For each dataset carrying a dataSource URI, read the on-disk Lance version (via the injected
+    ``read_version``, which the endpoint runs in a threadpool so object-store I/O never stalls the loop) and
+    classify drift. When ``backfill`` and storage is AHEAD of — or UNTRACKED by — the graph (the outbox-gap
+    signature), stamp the real version onto the graph and re-classify to in-sync. Read-only otherwise.
+    """
+    results: list[ReconcileStatus] = []
+    for summary in await repository.list_datasets():
+        uri = await repository.source_uri(summary.name)
+        if uri is None:
+            continue
+        graph_version = await repository.latest_write_version(summary.name)
+        storage_version = await read_version(uri)
+        status = reconcile(dataset=summary.name, graph_version=graph_version, storage_version=storage_version)
+        if backfill and storage_version is not None and status.status in _BACKFILLABLE:
+            # Fix the drift as a side effect but keep the found status in the report — a subsequent sweep
+            # will show it in_sync, proving the back-fill took.
+            await repository.backfill_write(summary.name, storage_version)
+        results.append(status)
+    return results

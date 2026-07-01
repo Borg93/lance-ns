@@ -122,6 +122,64 @@ def test_discovery_lists_against_age(dsn: str) -> None:
     assert jobs and any("silver$features" in j.outputs for j in jobs)
 
 
+def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
+    """B4: a write whose lineage event was LOST (storage ahead of the graph) is back-filled by reconcile.
+
+    Simulates the outbox gap end-to-end against real AGE + real Lance: record a write at v1, land a second
+    version on disk WITHOUT its lineage event, then reconcile — the graph must catch up to the on-disk v2.
+    """
+    import lance
+    import pyarrow as pa
+    from lineage.core.age import make_pool
+    from lineage.core.reconcile import read_storage_version, reconcile_all
+    from lineage.models import RunEvent
+    from lineage.schemas import ReconcileState
+    from lineage.services.repository import LineageRepository
+
+    uri = str(tmp_path / "recon.lance")
+    lance.write_dataset(pa.table({"id": [1]}), uri)  # storage v1
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-07-01T00:00:00Z",
+            "run": {"runId": "recon-w1"},
+            "job": {"namespace": "lance-medallion", "name": "recon_ingest"},
+            "inputs": [],
+            "outputs": [
+                {
+                    "namespace": "recon",
+                    "name": "recon$t",
+                    "facets": {"dataSource": {"uri": uri}, "version": {"datasetVersion": "1"}},
+                }
+            ],
+        }
+    )
+    # A SECOND write lands on disk but its lineage event is DROPPED (the outbox gap): storage=2, graph=1.
+    lance.write_dataset(pa.table({"id": [2]}), uri, mode="append")
+
+    async def read_only_recon(u: str) -> int | None:
+        return read_storage_version(u, {}) if u == uri else None  # skip other datasets' (s3) reads
+
+    async def run() -> tuple[int | None, ReconcileState, int | None]:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            await repo.ingest_event(event)
+            before = await repo.latest_write_version("recon$t")
+            statuses = await reconcile_all(repo, read_only_recon, backfill=True)
+            after = await repo.latest_write_version("recon$t")
+            recon = next(s for s in statuses if s.dataset == "recon$t")
+            return before, recon.status, after
+        finally:
+            await pool.close()
+
+    before, status, after = asyncio.run(run())
+    assert before == 1  # the graph recorded v1 from the event
+    assert status == ReconcileState.STORAGE_AHEAD  # storage v2 > graph v1 — the dropped write
+    assert after == 2  # reconcile back-filled the real on-disk version
+
+
 def test_medallion_column_lineage(dsn: str) -> None:
     """#24: field-to-field lineage ingested into real AGE then traversed (the high-risk cypher path).
 

@@ -33,6 +33,7 @@ so a dataset referenced by several runs is never duplicated.
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime
 from typing import Any, Final
 
 import psycopg
@@ -167,6 +168,13 @@ _LINK_WROTE: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERG
 # is written in its own statement — mirroring how dataSource/tags are set on the Dataset node.
 _SET_WROTE_VERSION: Final = (
     "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) SET w.version=$ver RETURN 1"
+)
+# Storage->graph reconciliation back-fill (B4) — a synthetic 'reconcile' run recording a Lance write whose
+# lineage event was lost (the outbox gap). Idempotent (MERGE on the reconcile run id), so re-running the
+# reconcile never duplicates; the WROTE version is stamped in its own statement (the AGE MERGE+SET quirk).
+_BACKFILL_RUN: Final = (
+    "MERGE (r:Run {run_id:$rid}) SET r.event_type='RECONCILED', r.author='reconcile', r.event_time=$tm, "
+    "r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 RETURN 1"
 )
 # The per-version column schema rides the same WROTE edge as the version (#24 prerequisite). Stored as
 # a JSON **string** scalar — params are JSON-encoded and ``_parse`` json.loads each cell, so a scalar
@@ -713,6 +721,25 @@ class LineageRepository:
         ]
         jobs.sort(key=lambda j: j.name)
         return jobs
+
+    async def backfill_write(self, name: str, version: int) -> None:
+        """Stamp the actual on-disk version onto the graph when a write's lineage event was lost (B4).
+
+        The buildable half of the outbox problem: a crash between a Lance write and the sidecar publish drops
+        the event, so the graph under-counts real writes. Reconciliation reads storage and, on drift, MERGEs
+        a synthetic ``reconcile-<name>-v<version>`` run + a versioned ``WROTE`` edge to the dataset —
+        idempotent (MERGE on the run id), so re-running never duplicates. The recovered provenance is minimal
+        (``author='reconcile'``, no inputs): it records THAT the write happened + its version, not the lost
+        details. The dataset node must already exist (it has the dataSource URI reconciliation read from).
+        """
+        rid = f"reconcile-{name}-v{version}"
+        params = {"rid": rid, "name": name}
+        async with self._pool.connection() as conn:
+            await run_cypher(
+                conn, self._graph, _BACKFILL_RUN, {"rid": rid, "tm": datetime.now(UTC).isoformat()}
+            )
+            await run_cypher(conn, self._graph, _LINK_WROTE, params)
+            await run_cypher(conn, self._graph, _SET_WROTE_VERSION, {**params, "ver": str(version)})
 
     async def ensure_events_table(self) -> None:
         """Create the durable events-feed table if absent (idempotent; called once at startup).

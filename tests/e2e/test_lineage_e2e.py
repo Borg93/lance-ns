@@ -78,6 +78,50 @@ def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
     assert ("silver$features", "silver$features") not in edges
 
 
+def test_discovery_lists_against_age(dsn: str) -> None:
+    """GOAL 4 A1/A2: the browse lists run their REAL Cypher against AGE (not a mocked ``run_cypher``).
+
+    Ingest the medallion sample, then exercise ``list_datasets`` (all + namespace / tag filters) and
+    ``list_jobs`` (the job -> written-datasets fold) — the discovery reads a normal ``uv run pytest``
+    otherwise never executes against a database.
+    """
+    from lineage.core.age import make_pool
+    from lineage.models import RunEvent
+    from lineage.services.repository import LineageRepository
+
+    events = [RunEvent.model_validate(e) for e in json.loads(_SAMPLE.read_text())]
+
+    async def run() -> tuple[list, list, list, list]:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            for event in events:
+                await repo.ingest_event(event)
+            all_ds = await repo.list_datasets()
+            silver = await repo.list_datasets(namespace="silver")
+            tagged = await repo.list_datasets(tag="layer=silver")
+            jobs = await repo.list_jobs()
+            return all_ds, silver, tagged, jobs
+        finally:
+            await pool.close()
+
+    all_ds, silver, tagged, jobs = asyncio.run(run())
+
+    # /datasets — every medallion dataset is listed, name-sorted, with its namespace + tags carried.
+    names = [d.name for d in all_ds]
+    assert {"raw_events", "bronze$events", "silver$features", "gold$catalog"} <= set(names)
+    assert names == sorted(names)
+    # ?namespace= filter — only silver-namespace datasets (silver$features lives there).
+    assert silver and all(d.namespace == "silver" for d in silver)
+    assert "silver$features" in {d.name for d in silver}
+    # ?tag= filter — exact tag membership picks up the silver dataset.
+    assert "silver$features" in {d.name for d in tagged}
+    assert all("layer=silver" in d.tags for d in tagged)
+    # /jobs — a job's WROTE edges are folded into its output set; some job wrote silver$features.
+    assert jobs and any("silver$features" in j.outputs for j in jobs)
+
+
 def test_medallion_column_lineage(dsn: str) -> None:
     """#24: field-to-field lineage ingested into real AGE then traversed (the high-risk cypher path).
 

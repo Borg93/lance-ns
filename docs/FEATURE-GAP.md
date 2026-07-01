@@ -1,0 +1,90 @@
+# Implementation confidence + feature gaps (vs Lakekeeper & Marquez)
+
+A thorough cross-read of `lance_docs/` (guide.md, file_format.md, ray.md, the full `ns_catalog/spec.yaml`)
+against the implementation in `services/catalog` and `services/lineage`. Answers: (1) are we using the
+Lance / lance-namespace APIs **correctly**? (2) what do we **lack** vs Lakekeeper (Iceberg REST catalog)
+and Marquez (OpenLineage reference server) — and does it matter for a *Lance* lakehouse?
+
+## 1. Implementation confidence — HIGH
+
+The catalog is a faithful "Lance Catalog adapter" in the spec's own terms: a FastAPI REST server over the
+native `DirectoryNamespace`, with the pylance data plane filling ops the backend stubs. Verified correct:
+
+- **Backend construction** (`connect(impl, {root, storage.*})`) matches `supported-catalogs/lance-dir.md`.
+- **Error model** — numeric `ErrorCode` → HTTP status + `code` in the problem+json body — matches `errors.md`.
+- **Arrow-IPC ops** (create/insert/merge/query/count/explain) match `catalog/rest/index.md` content types.
+- **Tags / branches / versions** — `ds.tags` reference mapping (int vs `(branch, version)`), `ds.branches`,
+  and the `_DICT_REQUEST_METHODS` version-marshalling fix — all match `guide.md` / `spec.yaml`.
+- **Schema evolution** — `add_columns` / `alter_columns` (JSON-Arrow→`pa.DataType`) / `drop_columns`,
+  `update()` reading `num_rows_updated`, `virtual_column` rejected as 501 — all correct.
+- **The known 501s are spec-legitimate** (`operations/index.md` frames everything beyond the 8 basic ops as
+  optional / SDK-fulfillable): `rename_table`, `backfill_columns`, `alter_transaction`,
+  `batch_create/commit_table_versions`, materialized views.
+- **Lineage emission** uses genuine standard OpenLineage facets with correct schema URLs; `outputStatistics`
+  measured at compute time is the *right* approach — `file_format.md` confirms Lance deliberately keeps
+  column stats out of the file, and `ray.md` confirms `write_lance` returns no version/stats.
+
+### Minor deviations (none are correctness bugs; listed for a conscious decision)
+| # | Deviation | Spec says | Impact |
+|---|-----------|-----------|--------|
+| 1 | Path/body `id` mismatch silently overrides (uses path id) | 400 when both present **and differ** | benign; missing a validation |
+| 2 | Unsupported → HTTP **501** | `UnsupportedOperationErrorResponse` is **406** | body `code:0` is correct; only the HTTP status diverges (501 is arguably cleaner) |
+| 3 | `exists` → **204** | 200 no-content | cosmetic |
+| 4 | CreateTable ignores `x-lance-table-location` + `storage_options` | caller-chosen location/options | fine for single-root; completeness gap |
+| 5 | MergeInsert omits optional filters/`timeout`/`use_index`; `on` not enforced required | full param set | minor |
+| 6 | List ops omit `delimiter` / `include_declared` | those params | minor |
+| 7 | `insert` emits **versionless** lineage | insert bumps a Lance version | **worth fixing** — `update`/`delete` already reopen for the version; `insert` could too (lineage completeness) |
+
+## 2. vs Lakekeeper (Iceberg REST catalog)
+
+We govern a **Lance** lakehouse (single-writer directory namespace, immutable versions + native time-travel),
+not Iceberg — so many Lakekeeper features are structurally N/A.
+
+| Capability | Us | Verdict |
+|-----------|-----|---------|
+| Multi-warehouse data plane | FGA **models** team→project→warehouse→namespace→table, but the runtime binds ONE `LANCE_REST_ROOT` bucket | **Genuinely missing** — valuable only for multi-tenant SaaS (needs a per-warehouse namespace-backend router). N/A for single-org. |
+| Control-plane management API | Declarative config (env + Helm + FGA at boot); Lakekeeper-style **read-only maintenance mode** built | Missing but low-value given GitOps |
+| Soft-delete / undrop | `DeregisterTable` (`.lance-deregistered` marker) + `RestoreTable` + version time-travel | **Have — arguably stronger**; only a timed-expiration queue is N/A-by-design |
+| User/role admin API | External OIDC (Dex) + OpenFGA tuples seeded on create + `.localbin/fga` | Missing *API*, not *capability* (ReBAC exceeds Lakekeeper's roles) |
+| Task/job queue | Separate `compaction` service + Dapr/NATS JetStream | Reasonable split; a unified maintenance scheduler is missing |
+| Storage-profile + credential vending | ModeB / Static / STS / **WebIdentity** with per-table session policies (`core/vending.py`) | **Have — on par or ahead**; multiple storage profiles missing (only matters with multi-warehouse) |
+| Table / partition statistics | `GetTableStats` (Lance `total_bytes`/`num_rows`/fragment stats) + lineage `outputStatistics` | **Have (table)**; partition stats **N/A** — Lance clusters, doesn't partition |
+| Views / materialized views | Endpoints exist → native 501 | **Genuinely missing + valuable**, but a **native-Lance gap** (`base_objects` is "reserved for future view deps"), not ours to fill yet. The medallion gold layer is our MV equivalent today. |
+
+**Net:** genuinely-missing-and-valuable = multi-warehouse/multi-storage-profile (multi-tenant only) + working views/MVs (blocked on native Lance). Everything else is present-or-better or N/A-by-design. And Lakekeeper has **no lineage at all**.
+
+## 3. vs Marquez (OpenLineage reference server)
+
+We ingest OpenLineage into Apache AGE with version/schema/columnLineage/dataSource/tags/outputStatistics/
+dataQualityAssertions facets. We are **at or above Marquez** on the high-value axes.
+
+| Capability | Us | Verdict |
+|-----------|-----|---------|
+| Run-state lifecycle (START…FAIL/ABORT) | `(:Run)` folds lifecycle; `/runs` shows state+progress+error; custom `progress` facet Marquez lacks | **On par** |
+| Dataset versioning | `WROTE` edge carries the **real Lance version** (not a synthetic UUID), storage-cross-checkable | **Exceeds** |
+| Column-level lineage | field-to-field `DERIVED_FROM_COLUMN` + transformation kind + **`masking`** bit, FGA-gated | **On par or better** |
+| Dataset schema history | per-version schema on the `WROTE` edge; `/schema?version=N` | **On par** |
+| Job versioning | `MERGE (:Job)` only, no JobVersion nodes | Missing, low value (fixed medallion jobs) |
+| Job source-code / context (`sourceCode`/`sql`) | not ingested | **Missing + moderately valuable** — git location + script/SQL is real Ray-job provenance |
+| Full standard facet set | high-value ones present | Missing & worth adding: `parent` (run hierarchies), `dataQualityMetrics` (column null/distinct/min-max); low-value: `nominalTime`, `processing_engine`, `symlinks`, `storage`, `inputStatistics` |
+| Search / list / namespaces API | none (must know the dataset name; `/events`+`/runs` give some browsability) | **Missing + moderately valuable** for discovery |
+| SQL-parse-based lineage | rely on producers emitting `columnLineage` | **N/A** (no SQL engine); minor: could derive edges from `add_columns`/`update` SQL |
+| Backfill detection | Lance `add_columns` recorded as versioned WROTE; not *classified* as backfill | Low value (no partitions) |
+| Graph UI | API + demo-grade static UI; production SvelteKit `frontend/` is the target | Missing a production graph explorer |
+
+**Moats over Marquez** (it structurally cannot do these): **storage-version reconcile** (`in_sync`/`storage_ahead`/
+`graph_ahead` vs the on-disk Lance version), **FGA-governed reads** (per-object authz + transitive-disclosure
+filtering + read-audit), **verified creator** (OIDC `sub` stamped, not self-asserted), **durable idempotent
+at-least-once ingest** (Dapr/JetStream + MERGE-on-run_id + natural-key dedup).
+
+**Net:** genuinely-missing-and-valuable = (a) job-context facets + job versioning, (b) a search/list/namespaces
+discovery API + tag management, (c) run `parent` facet, (d) `dataQualityMetrics`, (e) a production graph UI,
+(f) the versioned-insert lineage gap (§1 #7). N/A-by-design: SQL-parse lineage, partition-backfill.
+
+## Recommended next (by value)
+1. **Versioned-insert lineage** (§1 #7) — small, pure correctness/completeness win.
+2. **Job-context facets** (`sourceCode`/`sourceCodeLocation`/`sql`) — real Ray-job provenance (lands with GOAL 3 lance-ray).
+3. **Discovery API** (search / list-all / `/namespaces`) — the biggest Marquez usability gap.
+4. **`dataQualityMetrics`** — column null/distinct/min-max, complements the GOAL 2 assertions.
+5. **Production graph UI** in `frontend/` — the demo UI → the real explorer.
+6. Multi-warehouse routing + working views — **only when** multi-tenant SaaS / native Lance views arrive.

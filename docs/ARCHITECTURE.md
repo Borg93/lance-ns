@@ -6,6 +6,9 @@ where we are right now, and what's next**. Skim the diagrams; read the section y
 > 🧭 **Want the end-to-end pipeline in order — ingest → movers → gates → lineage → compaction?** Read
 > **[`FLOW.md`](FLOW.md)**: the single coherent narrative of the *implemented* flow, with the distributed
 > (KubeRay / Ray Data) variants clearly marked as the rask future.
+>
+> 🔬 **Are we correct, and what do we lack vs Lakekeeper / Marquez?** See **[`FEATURE-GAP.md`](FEATURE-GAP.md)** —
+> a docs-grounded confidence review (HIGH) + an honest feature-gap map.
 
 > 🖱️ **Prefer to click through it?** Open [`system-diagram.html`](system-diagram.html) — an
 > interactive walk-through of the four core flows (create / read / promote / lineage), with the

@@ -32,6 +32,9 @@ scopes:
   - {{ .daprAppId }}
 {{- end }}
 {{- end }}
+{{- if .Values.compaction.lineageEmit }}
+  - {{ .Values.compaction.daprAppId }} {{/* compaction publishes maintenance lineage only when lineageEmit is on */}}
+{{- end }}
 {{- if include "lance.secretsViaDapr" . }}
 ---
 # Dapr secret store fronting OpenBao / an external Vault (Vault-API compatible). Apps read secrets via

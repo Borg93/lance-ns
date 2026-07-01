@@ -137,5 +137,14 @@ def build_run_event(
             "facets": {"sourceCodeLocation": _job_source_location()},
         },
         "inputs": [_dataset(ns, name) for ns, name in inputs],
-        "outputs": [_dataset(output_namespace, output_name, version, row_count, size_bytes, assertions)],
+        "outputs": [
+            _dataset(
+                output_namespace,
+                output_name,
+                version=version,
+                row_count=row_count,
+                size_bytes=size_bytes,
+                assertions=assertions,
+            )
+        ],
     }

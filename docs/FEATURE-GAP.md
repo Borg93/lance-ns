@@ -33,7 +33,7 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 | 4 | CreateTable ignores `x-lance-table-location` + `storage_options` | caller-chosen location/options | fine for single-root; completeness gap |
 | 5 | MergeInsert omits optional filters/`timeout`/`use_index`; `on` not enforced required | full param set | minor |
 | 6 | List ops omit `delimiter` / `include_declared` | those params | minor |
-| 7 | `insert` emits **versionless** lineage | insert bumps a Lance version | **worth fixing** — `update`/`delete` already reopen for the version; `insert` could too (lineage completeness) |
+| 7 | ~~`insert` emits **versionless** lineage~~ | insert bumps a Lance version | ✅ **fixed (GOAL 3)** — `insert` now reopens the dataset and stamps the real version on the WROTE edge, like update/delete |
 
 ## 2. vs Lakekeeper (Iceberg REST catalog)
 
@@ -65,12 +65,12 @@ dataQualityAssertions facets. We are **at or above Marquez** on the high-value a
 | Column-level lineage | field-to-field `DERIVED_FROM_COLUMN` + transformation kind + **`masking`** bit, FGA-gated | **On par or better** |
 | Dataset schema history | per-version schema on the `WROTE` edge; `/schema?version=N` | **On par** |
 | Job versioning | `MERGE (:Job)` only, no JobVersion nodes | Missing, low value (fixed medallion jobs) |
-| Job source-code / context (`sourceCode`/`sql`) | not ingested | **Missing + moderately valuable** — git location + script/SQL is real Ray-job provenance |
+| Job source-code / context (`sourceCodeLocation`/`sql`) | `sourceCodeLocation` **now ingested** as a GOAL 3 here-dummy (git repo + path, on `Job.source_location`) | Partly there — the *auto-derived* value (rask runner's git + pipeline) lands with lance-ray (GOAL 3-real); `sql` still N/A (no SQL engine) |
 | Full standard facet set | high-value ones present | Missing & worth adding: `parent` (run hierarchies), `dataQualityMetrics` (column null/distinct/min-max); low-value: `nominalTime`, `processing_engine`, `symlinks`, `storage`, `inputStatistics` |
 | Search / list / namespaces API | none (must know the dataset name; `/events`+`/runs` give some browsability) | **Missing + moderately valuable** for discovery |
 | SQL-parse-based lineage | rely on producers emitting `columnLineage` | **N/A** (no SQL engine); minor: could derive edges from `add_columns`/`update` SQL |
 | Backfill detection | Lance `add_columns` recorded as versioned WROTE; not *classified* as backfill | Low value (no partitions) |
-| Graph UI | API + demo-grade static UI; production SvelteKit `frontend/` is the target | Missing a production graph explorer |
+| Graph UI | ✅ **shipped (GOAL 3)** — the SvelteKit Svelte-Flow explorer at `/lineage` + `/` (`$lib/LineageExplorer.svelte`): Datasets/Jobs/Columns planes, click-node → upstream/downstream/producers + column-lineage panel | On par — a production graph explorer now exists |
 
 **Moats over Marquez** (it structurally cannot do these): **storage-version reconcile** (`in_sync`/`storage_ahead`/
 `graph_ahead` vs the on-disk Lance version), **FGA-governed reads** (per-object authz + transitive-disclosure
@@ -82,9 +82,15 @@ discovery API + tag management, (c) run `parent` facet, (d) `dataQualityMetrics`
 (f) the versioned-insert lineage gap (§1 #7). N/A-by-design: SQL-parse lineage, partition-backfill.
 
 ## Recommended next (by value)
-1. **Versioned-insert lineage** (§1 #7) — small, pure correctness/completeness win.
-2. **Job-context facets** (`sourceCode`/`sourceCodeLocation`/`sql`) — real Ray-job provenance (lands with GOAL 3 lance-ray).
-3. **Discovery API** (search / list-all / `/namespaces`) — the biggest Marquez usability gap.
-4. **`dataQualityMetrics`** — column null/distinct/min-max, complements the GOAL 2 assertions.
-5. **Production graph UI** in `frontend/` — the demo UI → the real explorer.
-6. Multi-warehouse routing + working views — **only when** multi-tenant SaaS / native Lance views arrive.
+**Shipped since this was written (GOAL 3):** ✅ versioned-insert lineage (§1 #7 — `insert` now stamps the
+real version), ✅ `sourceCodeLocation` job-context facet as a here-dummy (rask's runner auto-derives the real
+one later), ✅ production graph UI (the SvelteKit explorer at `/lineage` + `/`, `$lib/LineageExplorer.svelte`
+with the upstream/downstream/producers/column-lineage detail panel).
+
+Remaining, by value:
+1. **Discovery API** (search / list-all / `/namespaces`) — but note rask already has Lance-native FTS+vector
+   search; a bespoke lineage-graph browse is low-value given lineage-in-gold. Defer.
+2. **`dataQualityMetrics`** — column null/distinct/min-max; costly on Lance (stats live outside the file). Low.
+3. **Job-context auto-instrumentation** — the *real* `sourceCodeLocation` + run `parent` facets, emitted from
+   rask's runner when lance-ray OpenLineage lands (GOAL 3-real). Supersedes the here-dummy.
+4. Multi-warehouse routing + working views — **only when** multi-tenant SaaS / native Lance views arrive.

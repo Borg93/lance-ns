@@ -18,6 +18,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 from common import fga
+from common.dapr_auth import assert_app_token_configured
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
 
@@ -30,6 +31,9 @@ _settings = get_settings()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    # Fail closed if behind a Dapr sidecar but the app-token is unset — /medallion-event would otherwise be
+    # an open forged-trigger path (symmetric with the lineage service). No-op in dev (dapr_enabled off).
+    assert_app_token_configured(dapr_enabled=_settings.dapr_enabled)
     app.state.dapr = DaprClient()  # local sidecar; persists publishes to NATS JetStream
     app.state.fga = None
     settings = get_settings()

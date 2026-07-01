@@ -166,6 +166,7 @@ externalSecrets:
 # GreptimeDB's Prometheus-compatible API (:4000/v1/prometheus).
 observability:
   enabled: true
+  environment: kind # deployment.environment.name resource attr — override per deploy (kind / staging / prod)
   # Externalize: when set, the apps + Dapr export OTLP to THIS collector/endpoint instead of the in-cluster
   # GreptimeDB — pair with observability.enabled=false to ship telemetry off-cluster (a separate platform).
   externalOtlpEndpoint: "" # e.g. http://otel-collector.observability:4318/v1/otlp
@@ -329,9 +330,11 @@ medallion:
   # requiredAction/serviceIdentity gate each hop when fgaEnabled: silver→gold needs `can_promote`
   # (validator-only); the others `can_create_table` (writer). Each mover checks as its own identity.
   movers:
-    - { name: raw-to-bronze, daprAppId: raw-to-bronze, fromNamespace: raw, fromDataset: raw_events, toNamespace: bronze, toDataset: bronze$events, operation: ingest_events, author: alice, subTopic: medallion.raw, pubTopic: medallion.bronze, requiredAction: can_create_table, serviceIdentity: "user:service-raw-to-bronze" }
-    - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver, requiredAction: can_create_table, serviceIdentity: "user:service-bronze-to-silver" }
-    - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "", requiredAction: can_promote, serviceIdentity: "user:service-silver-to-gold" }
+    # serviceIdentity is a BARE subject — common.fga.check prefixes `user:` itself (a `user:` here would
+    # double-prefix and always deny). The seeded FGA tuples grant these `user:service-*` identities.
+    - { name: raw-to-bronze, daprAppId: raw-to-bronze, fromNamespace: raw, fromDataset: raw_events, toNamespace: bronze, toDataset: bronze$events, operation: ingest_events, author: alice, subTopic: medallion.raw, pubTopic: medallion.bronze, requiredAction: can_create_table, serviceIdentity: "service-raw-to-bronze" }
+    - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver, requiredAction: can_create_table, serviceIdentity: "service-bronze-to-silver" }
+    - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "", requiredAction: can_promote, serviceIdentity: "service-silver-to-gold" }
 
 # --- Compaction/GC microservice (Dapr cron binding) -----------------------------------------------
 # A bindings.cron component POSTs /<bindingName> on `schedule`; the service compacts small Lance
@@ -343,6 +346,9 @@ compaction:
   bindingName: compaction-cron
   schedule: "@every 120s" # demo cadence (prod: e.g. "0 */30 * * * *")
   olderThanDays: 7 # version GC keeps this much history
+  # Emit a maintenance lineage event per materially-compacted dataset (shows GC in produc() next to writes).
+  # Off by default (opt-in, like the medallion toggles); on → compaction joins the pubsub scope + publishes.
+  lineageEmit: false
 
 # --- Backups — a FALLBACK for the SELF-CONTAINED in-cluster path only. OFF by default. When you run the
 # managed/operator path (CloudNativePG for AGE, rustfs-operator for S3 — the rask deployment), DISABLE these

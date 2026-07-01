@@ -23,6 +23,10 @@ class MedallionSettings(BaseSettings):
     pubsub: str = Field(default="lineage-pubsub", alias="MEDALLION_PUBSUB")
     lineage_topic: str = Field(default="lineage.events.v1", alias="MEDALLION_LINEAGE_TOPIC")
     job_namespace: str = Field(default="lance-medallion", alias="MEDALLION_JOB_NAMESPACE")
+    # Behind a Dapr sidecar? — when true, a mover fails closed at boot if the app-token is unset (its
+    # /medallion-event route would otherwise be an open forged-trigger path). Symmetric with the lineage
+    # service. Off in dev (no sidecar); the producer's plain-HTTP /produce carries no such route.
+    dapr_enabled: bool = Field(default=False, alias="MEDALLION_DAPR_ENABLED")
 
     # --- mover stage config (the 3 movers share medallion.mover:app, differ only by these) ------
     from_dataset: str = Field(default="raw_events", alias="MEDALLION_FROM_DATASET")
@@ -40,7 +44,10 @@ class MedallionSettings(BaseSettings):
     # is DENIED — the cascade then ENFORCES the model, not just describes it. Off by default. -------------
     fga_enabled: bool = Field(default=False, alias="MEDALLION_FGA_ENABLED")
     fga_api_url: str = Field(default="http://openfga:8080", alias="MEDALLION_FGA_API_URL")
-    fga_service_identity: str = Field(default="user:service-mover", alias="MEDALLION_FGA_SERVICE_IDENTITY")
+    # BARE subject (no ``user:`` prefix) — ``common.fga.check`` adds ``user:`` itself, so ``user:service-*``
+    # here would double-prefix (``user:user:service-*``) and the gate would always deny. Matches the
+    # catalog's convention (it passes the bare OIDC sub to fga.check).
+    fga_service_identity: str = Field(default="service-mover", alias="MEDALLION_FGA_SERVICE_IDENTITY")
     fga_required_action: str = Field(default="can_create_table", alias="MEDALLION_FGA_REQUIRED_ACTION")
 
     def fga_object(self) -> str:

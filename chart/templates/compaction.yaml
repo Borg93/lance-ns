@@ -60,9 +60,17 @@ spec:
             {{- include "lance.otelEnv" (list $root .Values.compaction.daprAppId) | nindent 12 }}
             {{- end }}
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }
+            # Fail-closed at boot if behind a Dapr sidecar but the app-token is unset (open forgery path) —
+            # symmetric with the lineage service (the audit's consistency fix).
+            - { name: COMPACTION_DAPR_ENABLED, value: {{ .Values.dapr.sidecars | quote }} }
             - name: APP_API_TOKEN  # verify the Dapr-stamped header on the cron route (forged-sweep guard)
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
+            {{- if .Values.compaction.lineageEmit }}
+            - { name: COMPACTION_LINEAGE_EMIT_ENABLED, value: "true" }
+            - { name: COMPACTION_LINEAGE_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
+            - { name: COMPACTION_LINEAGE_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            {{- end }}
             - { name: COMPACTION_BINDING_NAME, value: {{ .Values.compaction.bindingName | quote }} }
             - { name: COMPACTION_OLDER_THAN_DAYS, value: {{ .Values.compaction.olderThanDays | quote }} }
             - { name: COMPACTION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }

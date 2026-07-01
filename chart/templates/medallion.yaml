@@ -113,6 +113,8 @@ spec:
             {{- include "lance.otelEnv" (list $root .daprAppId) | nindent 12 }}
             {{- end }}
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ $root.Values.dapr.apiTimeoutSeconds | quote }} }
+            # Fail-closed at boot if behind a sidecar but the app-token is unset (open forged-trigger path).
+            - { name: MEDALLION_DAPR_ENABLED, value: {{ $root.Values.dapr.sidecars | quote }} }
             - { name: MEDALLION_PUBSUB, value: {{ $root.Values.pubsub.name | quote }} }
             - { name: MEDALLION_LINEAGE_TOPIC, value: {{ $root.Values.pubsub.topic | quote }} }
             - name: APP_API_TOKEN  # verify the Dapr-stamped header on /medallion-event (forged-trigger guard)

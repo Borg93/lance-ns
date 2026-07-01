@@ -128,6 +128,23 @@ async def handle_validation_error(request: Request, exc: RequestValidationError)
     )
 
 
+@app.exception_handler(Exception)
+async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+    """Any unhandled error renders as problem+json (parity with the catalog) — internals leak via logs
+    only, never the body."""
+    log.exception("unhandled_error", extra={"method": request.method, "path": request.url.path})
+    return JSONResponse(
+        status_code=500,
+        content={
+            "type": "https://lance.org/problems/internal",
+            "title": "InternalError",
+            "status": 500,
+            "detail": "Internal Server Error",
+        },
+        media_type=PROBLEM_JSON,
+    )
+
+
 @app.get("/livez", tags=["health"])
 async def livez() -> dict[str, str]:
     return {"status": "ok"}

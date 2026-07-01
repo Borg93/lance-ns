@@ -4,8 +4,9 @@ The catalog already links a table to its lineage by a convention — the canonic
 ``Dataset`` name and the ``WROTE`` edge carries the Lance version. But nothing is written *into the
 data*, so a copied/moved Lance dataset loses its lineage coordinates. Here we stamp those coordinates
 onto the Arrow **schema metadata** of the create payload, so the Lance file is **self-describing**:
-``lineage.dataset_id`` / ``lineage.namespace`` / ``lineage.create_run_id`` / ``lineage.created_by`` can
-be read straight off the table and reconciled to the lineage graph without the catalog.
+``lineage.dataset_id`` / ``lineage.namespace`` / ``lineage.create_run_id`` can be read straight off the
+table and reconciled to the lineage graph without the catalog. (The creator's identity is deliberately
+NOT embedded — see below — but stays recoverable via the run id.)
 
 ``create_run_id`` is the *same* run id the catalog emits in the OpenLineage create event, so the file
 points at its exact creating run in the graph — and the **creator stays recoverable** from that run via

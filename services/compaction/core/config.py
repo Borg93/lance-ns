@@ -20,6 +20,9 @@ class CompactionSettings(BaseSettings):
     # ge=1 (not 0): timedelta(0) is falsy, so pylance collapses `older_than` to None and silently drops the
     # threshold — to GC aggressively, use a small positive value, not 0.
     older_than_days: int = Field(default=7, ge=1, alias="COMPACTION_OLDER_THAN_DAYS")
+    # Behind a Dapr sidecar? — when true, boot fails closed if the app-token is unset (the cron route would
+    # otherwise be an open forged-sweep path). Symmetric with the lineage service. Off in dev (no sidecar).
+    dapr_enabled: bool = Field(default=False, alias="COMPACTION_DAPR_ENABLED")
 
     # --- Lineage emission (opt-in, best-effort) — record a maintenance run on each materially-compacted
     # dataset to the lineage graph via Dapr pub/sub. Publishes to the SAME pubsub component + topic the

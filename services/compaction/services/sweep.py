@@ -12,6 +12,7 @@ from typing import Any
 import pyarrow.fs as pafs
 from common import fga
 from opentelemetry import trace
+from opentelemetry.trace import StatusCode
 
 from compaction.core.config import CompactionSettings
 from compaction.core.lineage_emit import MaintenanceEmitter, table_id_from_uri
@@ -44,7 +45,12 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
     for uri in uris:
         with tracer.start_as_current_span("compaction.compact") as span:
             span.set_attribute("lance.dataset_uri", uri)
-            results.append(compact_one(uri, options, older_than))
+            result = compact_one(uri, options, older_than)
+            results.append(result)
+            # compact_one never raises (it captures the per-dataset error), so reflect a failure on the
+            # span explicitly — else a failed dataset looks identical to a clean one in the trace.
+            if result.error is not None:
+                span.set_status(StatusCode.ERROR, result.error)
     record_run()
     record_reclaimed(
         fragments_removed=sum(r.fragments_removed for r in results),

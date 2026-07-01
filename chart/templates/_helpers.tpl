@@ -81,6 +81,6 @@ SDK) into `lance_logs`. Each pod's logs land in exactly one table; `make e2e-obs
 {{/* Don't trace the k8s probe endpoints — they're hit every 10s and bury real request spans (otel
 signals.md § Exclude noisy endpoints). Launcher-driven instrumentation → the env var is the only lever. */}}
 - { name: OTEL_PYTHON_FASTAPI_EXCLUDED_URLS, value: "/livez,/readyz,/metrics" }
-- { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=lance-ns,deployment.environment.name=kind,service.version={{ $root.Chart.AppVersion }}" }
+- { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=lance-ns,deployment.environment.name={{ $o.environment | default "kind" }},service.version={{ $root.Chart.AppVersion }}" }
 {{- end -}}
 

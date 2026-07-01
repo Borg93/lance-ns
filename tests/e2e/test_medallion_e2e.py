@@ -23,7 +23,7 @@ import requests
 LANCERAY = os.environ.get("LANCE_E2E_LANCERAY_URL", "")
 LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
 
-pytestmark = pytest.mark.medallion
+pytestmark = [pytest.mark.e2e, pytest.mark.medallion]
 
 
 @pytest.fixture(scope="module")

@@ -26,7 +26,7 @@ COMPACTION = os.environ.get("LANCE_E2E_COMPACTION_URL", "")
 GREPTIME = os.environ.get("LANCE_E2E_GREPTIME_URL", "")
 BINDING = os.environ.get("LANCE_E2E_COMPACTION_BINDING", "compaction-cron")
 
-pytestmark = pytest.mark.compaction
+pytestmark = [pytest.mark.e2e, pytest.mark.compaction]
 
 
 def _prom_sum(query: str) -> float:

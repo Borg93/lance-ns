@@ -20,7 +20,7 @@ import requests
 
 GATEWAY = os.environ.get("LANCE_E2E_GATEWAY_URL", "")
 
-pytestmark = pytest.mark.gateway
+pytestmark = [pytest.mark.e2e, pytest.mark.gateway]
 
 
 @pytest.fixture(scope="module")

@@ -12,7 +12,7 @@ after ``app`` exists (the import-order constraint the split must preserve).
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
 from common.dapr_auth import require_dapr_token
 from dapr.ext.fastapi import DaprApp
@@ -23,7 +23,7 @@ from lineage.services.consumer import handle_cloud_event
 
 
 async def on_lineage_event(
-    event: dict[str, Any], request: Request, _: None = Depends(require_dapr_token)
+    event: dict[str, Any], request: Request, _: Annotated[None, Depends(require_dapr_token)]
 ) -> dict[str, str]:
     """Ingest one Dapr-delivered OpenLineage CloudEvent into the graph; returns the Dapr ack status.
 

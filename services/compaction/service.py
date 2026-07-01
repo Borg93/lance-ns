@@ -14,6 +14,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+from common.dapr_auth import assert_app_token_configured
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
 
@@ -25,6 +26,9 @@ from compaction.core.lineage_emit import make_emitter
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()
+    # Fail closed if behind a Dapr sidecar but the app-token is unset — the cron route would otherwise be an
+    # open forged-sweep path (symmetric with the lineage service). No-op in dev (dapr_enabled off).
+    assert_app_token_configured(dapr_enabled=settings.dapr_enabled)
     # Consume the S3 secret from the Dapr secret store (OpenBao) before the first cron sweep, so the
     # sweep's S3 access uses a store-sourced key and the plaintext secret never ships in pod env — the
     # audit's secret-consumption fix. Mutates the cached settings in place; fails closed if unavailable.

@@ -183,15 +183,15 @@ tests:
       - user: user:dave # plain writer on the bucket
         object: warehouse:acme_bucket
         assertions: { can_create_namespace: true }
-      - user: user:dave # writer cascades down the namespace parent chain
+      - user: user:dave # writer cascades down the namespace parent chain (namespace→namespace AND namespace→table)
         object: namespace:acme_silver
-        assertions: { can_create_namespace: true }
+        assertions: { can_create_namespace: true, can_create_table: true }
       - user: user:eve
         object: warehouse:acme_bucket
         assertions: { can_create_namespace: false }
       - user: user:eve
         object: namespace:acme_silver
-        assertions: { can_create_namespace: false }
+        assertions: { can_create_namespace: false, can_create_table: false }
 
   - name: who can promote into gold? (list_users) — owners + validators, never plain writers
     list_users:

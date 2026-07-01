@@ -38,7 +38,7 @@ LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
 GREPTIME = os.environ.get("LANCE_E2E_GREPTIME_URL", "")
 ARROW = {"content-type": "application/vnd.apache.arrow.stream"}
 
-pytestmark = pytest.mark.observability
+pytestmark = [pytest.mark.e2e, pytest.mark.observability]
 
 
 def _eventually(fn: Callable[[], Any], *, timeout: float = 60.0, interval: float = 3.0) -> Any:

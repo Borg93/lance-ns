@@ -1,11 +1,15 @@
 // Dagger CI module for lance-ns — reproducible lint / type-check / test in containers.
 //
-// Runs the SAME gates as .github/workflows/ci.yml, hermetically (identical locally and in CI):
+// Runs the CONTAINER-HERMETIC SUBSET of .github/workflows/ci.yml (ruff lint + ty type-check + unit/
+// integration pytest), identical locally and in CI:
 //
 //	dagger call ci          # lint + type-check + unit/integration tests
 //	dagger call lint        # ruff check + format --check
 //	dagger call typecheck   # ty
 //	dagger call test        # pytest -m "not e2e"
+//
+// NOT covered here (ci.yml runs them separately, as they need non-Python tooling): the Helm lint/render
+// gate and the OpenFGA `fga model test` gate. So `make ci` green ⊂ CI green — CI is the full gate.
 //
 // The base image is the project's uv image (pylance ships a Linux-only wheel, so the lockfile is
 // Linux-only — matching the container). A uv cache volume makes re-runs fast. The e2e tests are

@@ -92,7 +92,7 @@ relational tables, and we drop everything not needed for the medallion flow.
 ## Graph model (Apache AGE)
 
 ```
-(:Job {namespace, name})                          # the compute job — Ray (Ray runs jobs, Lance is the data)
+(:Job {namespace, name, source_location})         # the compute job — Ray (Ray runs jobs, Lance is the data); source_location = where its code lives
 (:Run {run_id, author, event_type, event_time, producer, error_message})
 (:Dataset {name, namespace, source_uri, tags})    # name = catalog table id; MERGEd on name only
 (:User {name})                                    # an OIDC sub (the verified principal)
@@ -156,6 +156,7 @@ Marquez instance — or any OpenLineage consumer — can ingest them unchanged a
 | `author` (custom) → `ownership` | run / job | who ran the job (OIDC sub), standard owner fallback | `Run.author` |
 | `lance` (custom) | run | catalog `operation=create_table` → who-created | `(:User)-[:CREATED]` |
 | `jobType` | job | `processingType` BATCH/STREAMING, `integration=RAY`, `jobType` ETL/TRANSFORMATION | (read; surfaced via job) |
+| `sourceCodeLocation` | job | where the job's code lives (git url + path) — a here-dummy (GOAL 3), auto-derived by rask's runner later | `Job.source_location` |
 | `schema` | dataset | column names/types per layer | `WROTE.schema` (per-version) |
 | `version` | dataset | the Lance version a run produced | `WROTE.version` |
 | `outputStatistics` | dataset (output) | runtime-**measured** rows + on-disk bytes the compute wrote | `WROTE.{row_count,size_bytes}` |
@@ -169,11 +170,11 @@ table. The `jobType` facet records that split: `integration=RAY`, and `jobType` 
 **ETL** that lands raw data into bronze from the **TRANSFORMATION** jobs that move data between
 medallion layers.
 
-### Runtime-measured facets — declared → measured lineage (Marquez GOAL 1 + 2)
+### Runtime-measured facets — declared → measured lineage (Marquez GOAL 1 + 2 + 3)
 
-Most of our lineage is **producer-declared** (the emitter states the topology). Two facets carry what the
-job actually **observed** at runtime — the step from declared toward Marquez-grade measured lineage — and
-both ride the same `WROTE` edge as `version`/`schema`:
+Most of our lineage is **producer-declared** (the emitter states the topology). Three facets carry what the
+job actually **observed** at runtime — the step from declared toward Marquez-grade measured lineage. The
+first two ride the same `WROTE` edge as `version`/`schema`; the third rides the `(:Job)` node:
 
 - **`outputStatistics`** (GOAL 1) — the **exact** rows + on-disk bytes the compute wrote, read straight off
   the dataset (`count_rows()` + `DataStatistics.bytes_on_disk`, not estimated). Present only on a real
@@ -186,13 +187,19 @@ both ride the same `WROTE` edge as `version`/`schema`:
   batch the gate stopped. This composes with the OpenFGA gate: **FGA decides who may promote, quality
   decides whether the data is good enough to** — both gate movement. Surfaced as
   `ProducerInfo.{quality_passed,quality_assertions}`.
+- **`sourceCodeLocation`** (GOAL 3, job facet) — **where the job's code lives** (`type=git`, repo url, path,
+  branch). A here-dummy the medallion emitter asserts from the known `services/medallion` git location;
+  stored on the `(:Job)` node as `source_location`. This is the declared dummy of what rask's runner will
+  auto-derive (its git repo + pipeline path) once lance-ray OpenLineage lands. *(Also in GOAL 3: `insert`
+  now stamps the real Lance version on its `WROTE` edge — it used to emit versionless.)*
 
 Because `record_event` stores the **full** event JSON in the durable `event` column, every facet is also
 visible verbatim in the `GET /events` feed — the graph promotes the headline fields, the feed keeps the rest.
 
-> **GOAL 3** (at rask) is to stop *declaring* these and have them emitted **automatically** by the
-> distributed compute — the [lance-ray OpenLineage integration](RASK-INTEGRATION.md) on KubeRay — which is
-> the true auto-instrumented, Marquez-grade path.
+> **GOAL 3-real** (at rask) is to stop *declaring* these (incl. the `sourceCodeLocation` dummy above) and
+> have them emitted **automatically** by the distributed compute — the
+> [lance-ray OpenLineage integration](RASK-INTEGRATION.md) on KubeRay — the true auto-instrumented,
+> Marquez-grade path that supersedes the here-dummies.
 
 ## Closing the loop: gold embeds its lineage as JSONB
 
@@ -282,12 +289,14 @@ events): it **executes** the medallion flow against the real docker-compose stac
 evolving real Lance datasets on **RustFS** (S3-compatible; the driver is storage-agnostic, so
 MinIO/Ceph/AWS work by changing the creds) **and** emitting a real OpenLineage event after each step.
 
-The UI is a **SvelteKit app** (`frontend/` — Svelte Flow + bits-ui on Bun) with three live views polled
-every 2s: the **Graph** (the medallion DAG — version chips silver v1→v2, the failed run in red, each
-node's S3 `source_uri` + tags), the **Events** feed (Marquez-style, full facets per event from
-`GET /events`), and **Storage (S3)** (`GET /demo/datasets` — each real Lance dataset's schema *at
-every version*, so you watch `embedding` then `caption` appear, plus gold's embedded JSONB lineage).
-A zero-dependency fallback (`services/lineage/static/index.html`) is also served at `/ui/`.
+The UI is a **SvelteKit app** (`frontend/` — Svelte Flow + bits-ui on Bun; the explorer is
+`$lib/LineageExplorer.svelte`, rendered at both `/` and `/lineage`) with three live views polled
+every 2s: the **Graph** (the medallion DAG across Datasets / Jobs / Columns planes — version chips silver
+v1→v2, the failed run in red, each node's S3 `source_uri` + tags; **click a node** → a detail panel with its
+**upstream / downstream / producing runs**, and a jump to its **column lineage**), the **Events** feed
+(Marquez-style, full facets per event from `GET /events`), and **Storage (S3)** (`GET /demo/datasets` — each
+real Lance dataset's schema *at every version*, so you watch `embedding` then `caption` appear, plus gold's
+embedded JSONB lineage). A zero-dependency fallback (`services/lineage/static/index.html`) is served at `/ui/`.
 
 ```bash
 # bring up RustFS + lineage + the SvelteKit UI (host ports overridable to avoid clashes):

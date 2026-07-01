@@ -5,8 +5,10 @@ signals you'd actually alert on — how many lineage events we ingest vs. drop v
 ingest takes. They go out via the OTel SDK (activated by ``opentelemetry-instrument``) **OTLP-direct to
 GreptimeDB** (no Collector — mirrors rask), queryable in PromQL / Perses.
 
-Cardinality is bounded on purpose (the otel skill's #1 cost driver): the only attribute is the bounded
-``outcome`` — per-run / per-table identifiers belong on spans and logs, never on metric attributes.
+Cardinality is bounded on purpose (the otel skill's #1 cost driver): the only attribute is the bounded,
+namespaced ``lance.lineage.outcome`` — per-run / per-table identifiers belong on spans and logs, never on
+metric attributes. (Custom attributes are namespaced per the otel skill; in PromQL the dots become
+underscores → ``lance_lineage_outcome``.)
 ``metrics.get_meter`` returns a proxy that binds lazily, so creating the instruments at import time
 (before ``opentelemetry-instrument`` installs the real MeterProvider) is safe.
 """
@@ -41,7 +43,7 @@ class Outcome(StrEnum):
 
 def record_outcome(outcome: Outcome) -> None:
     """Increment the processed-events counter for ``outcome``."""
-    _events_processed.add(1, {"outcome": outcome.value})
+    _events_processed.add(1, {"lance.lineage.outcome": outcome.value})
 
 
 def record_ingest_duration(seconds: float) -> None:

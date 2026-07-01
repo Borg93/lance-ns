@@ -202,6 +202,12 @@ vector:
     sources:
       pod_logs:
         type: kubernetes_logs
+        # Skip pods that already ship structured, trace-correlated logs via the OTel SDK (OTLP → the
+        # `opentelemetry_logs` table): the 7 Python app services carry `lance.dev/logs=otlp`. This is the
+        # "one SDK, three signals, all OTLP" path (otel skill) — Vector tails only the INFRA pods (nats,
+        # age, openbao, dapr, dex, rustfs, greptimedb, perses, gateway, web) that have no OTel SDK, so app
+        # logs are NOT double-ingested. (A pod without the label matches `!=otlp` → included.)
+        extra_label_selector: "lance.dev/logs!=otlp"
         # GreptimeDB's logs sink is schema-on-write — every distinct enrichment key becomes a PERMANENT
         # column, so disable the noisy node/namespace/pod-annotation enrichments (rask learned this the
         # hard way: node labels alone added ~107 columns). Keep the core pod/container/namespace fields.

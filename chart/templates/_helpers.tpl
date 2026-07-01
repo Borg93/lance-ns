@@ -68,13 +68,12 @@ table); metrics/logs must NOT carry the pipeline header, so traces get their own
 - { name: OTEL_EXPORTER_OTLP_TRACES_HEADERS, value: "x-greptime-db-name={{ $o.dbName }},x-greptime-pipeline-name={{ $o.tracePipeline }}" }
 - { name: OTEL_TRACES_EXPORTER, value: "otlp" }
 - { name: OTEL_METRICS_EXPORTER, value: "otlp" }
-{{/* DELIBERATE two-stream logging (NOT accidental double-ingest): the OTLP exporter ships structured,
-trace-correlated app logs to GreptimeDB's `opentelemetry_logs`, while the Vector DaemonSet tails pod stdout
-into `lance_logs` — a different table capturing the FULL raw stream (bootstrap/crash/non-Python lines the
-OTLP path misses, what `kubectl logs` shows). `make e2e-obs` (test_observability_e2e.test_logs_populated)
-asserts BOTH tables populate, so they are intentionally complementary, not duplicates in one sink. Tradeoff:
-app log *lines* appear in both tables (≈2× app-log storage). To collapse to Vector-only, set
-OTEL_LOGS_EXPORTER=none + restore correlation via OTEL_PYTHON_LOG_CORRELATION=true and drop that e2e assert. */}}
+{{/* Logs go out via the OTel SDK (OTLP → GreptimeDB `opentelemetry_logs`) — the "three signals, one SDK,
+all OTLP" path. NO double-ingest: the app pods carry `lance.dev/logs=otlp`, and Vector's kubernetes_logs
+source excludes that label (values.yaml `vector.customConfig`), so Vector tails only the INFRA pods (no OTel
+SDK) into `lance_logs`. Each pod's logs land in exactly one table; `make e2e-obs` still sees both populated
+(apps → opentelemetry_logs, infra → lance_logs). Tradeoff: an app crash BEFORE the SDK inits is only in
+`kubectl logs`, not GreptimeDB — acceptable for the OTLP-native path. */}}
 - { name: OTEL_LOGS_EXPORTER, value: "otlp" }
 {{/* Default metric export interval is 60s — too slow to observe in a demo/test. Push every 5s. */}}
 - { name: OTEL_METRIC_EXPORT_INTERVAL, value: "5000" }

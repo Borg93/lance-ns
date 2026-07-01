@@ -33,8 +33,8 @@ data:
               "display": { "name": "Lineage events /s by outcome" },
               "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
               "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
-                "query": "sum by (outcome) (rate(lineage_events_processed_total[5m]))",
-                "seriesNameFormat": {{ "{{outcome}}" | quote }} } } } } ]
+                "query": "sum by (lance_lineage_outcome) (rate(lineage_events_processed_total[5m]))",
+                "seriesNameFormat": {{ "{{lance_lineage_outcome}}" | quote }} } } } } ]
             }
           },
           "ingestP95": {
@@ -98,8 +98,8 @@ data:
               "display": { "name": "Medallion cascade /s (raw→bronze→silver→gold edges)" },
               "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
               "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
-                "query": "sum by (transition) (rate(medallion_stage_transitions_total[5m]))",
-                "seriesNameFormat": {{ "{{transition}}" | quote }} } } } } ]
+                "query": "sum by (lance_medallion_transition) (rate(medallion_stage_transitions_total[5m]))",
+                "seriesNameFormat": {{ "{{lance_medallion_transition}}" | quote }} } } } } ]
             }
           },
           "activeServices": {
@@ -118,8 +118,8 @@ data:
               "display": { "name": "Lineage ingest /s by outcome" },
               "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
               "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
-                "query": "sum by (outcome) (rate(lineage_events_processed_total[5m]))",
-                "seriesNameFormat": {{ "{{outcome}}" | quote }} } } } } ]
+                "query": "sum by (lance_lineage_outcome) (rate(lineage_events_processed_total[5m]))",
+                "seriesNameFormat": {{ "{{lance_lineage_outcome}}" | quote }} } } } } ]
             }
           },
           "compactionSweeps": {

@@ -88,7 +88,7 @@ make e2e-medallion    # the automated regression test: produce → assert gold d
 - **One distributed trace** (GreptimeDB `opentelemetry_traces`): a single `trace_id` spans `lance-ray`,
   `raw-to-bronze`, `bronze-to-silver`, `silver-to-gold`, **and** `lineage` — the event followed across
   every Dapr hop (the gRPC publish injects `traceparent`; each subscriber continues the trace).
-- **Metrics** (PromQL): `medallion_stage_transitions_total{transition}` counts each hop
+- **Metrics** (PromQL): `medallion_stage_transitions_total{lance_medallion_transition}` counts each hop
   (`source->raw`, `raw->bronze`, `bronze->silver`, `silver->gold`); `medallion_stage_denied_total` and
   `medallion_stage_quality_blocked_total` count promotions stopped by the authz and quality gates.
 - **Measured output** (when compute is on): each `WROTE` edge carries the runtime-measured `row_count` +

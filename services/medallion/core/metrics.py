@@ -2,7 +2,9 @@
 
 The golden signal for the cascade: how many stage transitions each mover completed. Exported via the
 OTel SDK (``opentelemetry-instrument``) over OTLP to GreptimeDB, queryable in PromQL / Perses. Bounded
-cardinality — only the ``transition`` label (e.g. ``raw->bronze``); per-run ids stay on spans/logs.
+cardinality — only the namespaced ``lance.medallion.transition`` label (e.g. ``raw->bronze``); per-run ids
+stay on spans/logs. (Namespaced per the otel skill; in PromQL the dots become underscores →
+``lance_medallion_transition``.)
 """
 
 from __future__ import annotations
@@ -30,14 +32,14 @@ _stage_quality_blocked = _meter.create_counter(
 
 def record_transition(transition: str) -> None:
     """Increment the stage-transition counter for ``transition`` (``"<from>-><to>"``)."""
-    _stage_transitions.add(1, {"transition": transition})
+    _stage_transitions.add(1, {"lance.medallion.transition": transition})
 
 
 def record_denied(transition: str) -> None:
     """Increment the denied counter (the mover was not authorized to produce the target stage)."""
-    _stage_denied.add(1, {"transition": transition})
+    _stage_denied.add(1, {"lance.medallion.transition": transition})
 
 
 def record_quality_blocked(transition: str) -> None:
     """Increment the quality-blocked counter (the produced data failed a quality assertion → not promoted)."""
-    _stage_quality_blocked.add(1, {"transition": transition})
+    _stage_quality_blocked.add(1, {"lance.medallion.transition": transition})

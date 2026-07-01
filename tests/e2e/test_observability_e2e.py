@@ -6,9 +6,9 @@ the four things that make this system trustworthy — exercising the *deployed* 
 GreptimeDB store, not mocks:
 
   1. Durable graph data in Apache AGE       — the dataset node landed (the pipeline actually works)
-  2. The custom domain metric in GreptimeDB — lineage_events_processed_total{outcome=ingested} went UP
+  2. The custom domain metric in GreptimeDB — lineage_events_processed_total by lance_lineage_outcome went UP
   3. A distributed trace in GreptimeDB      — ONE trace spans catalog → Dapr publish → lineage → AGE
-  4. Logs in GreptimeDB                      — app OTLP logs AND Vector pod logs are both populated
+  4. Logs in GreptimeDB                      — apps via OTLP; infra via Vector (both tables populate)
 
 Run (port-forward the three services first), or `make e2e-obs`:
 
@@ -108,7 +108,7 @@ def pipeline_run() -> dict[str, Any]:
     token = uuid.uuid4().hex[:8]
     namespace = f"obsns{token}"
     table_id = f"{namespace}${namespace}tbl"  # catalog id == lineage Dataset == OpenFGA object id
-    metric_query = 'sum(lineage_events_processed_total{outcome="ingested"})'
+    metric_query = 'sum(lineage_events_processed_total{lance_lineage_outcome="ingested"})'
     before = _gt_promql_sum(metric_query)
 
     _create_table(table_id, namespace)

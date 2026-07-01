@@ -68,7 +68,7 @@ dashboards it over GreptimeDB's Prometheus-compatible API. Verified end-to-end (
   publish; the lineage FastAPI extracts it). Dapr's `lance-tracing` Configuration keeps `samplingRate=1`
   so the W3C context always propagates — it has **no** otel exporter (Dapr's own spans can't carry
   GreptimeDB's required headers; the apps do all export).
-- **Metrics** → PromQL. Custom **domain** golden signals `lineage_events_processed_total{outcome}` +
+- **Metrics** → PromQL. Custom **domain** golden signals `lineage_events_processed_total{lance_lineage_outcome}` +
   `lineage_ingest_duration_seconds_*` (recorded in the consumer), plus FastAPI RED
   (`http_server_duration_milliseconds_*`). Export interval is 5s (`OTEL_METRIC_EXPORT_INTERVAL`).
 - **Logs** → app OTLP logs (`opentelemetry_logs`) **and** Vector pod logs (`lance_logs`).

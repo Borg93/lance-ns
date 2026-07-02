@@ -13,8 +13,9 @@ fail a catalog write. Two transports sit behind the same :class:`LineageEmitter`
   event is lost if the lineage service is down when we POST). Good for dev / external producers.
 * :class:`DaprEmitter` — publish to the **Dapr** ``pubsub.jetstream`` component (the production
   transport, ``LANCE_LINEAGE_TRANSPORT=dapr``). We publish to our local Dapr sidecar; the sidecar
-  persists to NATS JetStream and owns retry/backoff/trace-propagation (no DLQ — docs/RESILIENCE.md gap #2) as **component config** (no
-  broker client in app code) — the decoupled microservice path. The lineage service subscribes via its
+  persists to NATS JetStream and owns retry/backoff/trace-propagation (no DLQ — docs/RESILIENCE.md gap #2)
+  as **component config** (no broker client in app code) — the decoupled microservice path. The lineage
+  service subscribes via its
   own sidecar. The outbox gap (crash between the Lance write and publish) remains: the catalog has no
   DB for a transactional outbox; the durable producer is the Ray job (future), per microservices.md.
 """
@@ -29,6 +30,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from common import fga
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
 from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
@@ -91,12 +93,12 @@ def build_write_event(
     ``WROTE`` edge records the run without asserting a version. ``run_id`` / ``event_time`` are injected
     so the builder is pure and deterministically testable.
     """
-    lance_facet: dict[str, Any] = {"operation": operation}
+    lance_fields: dict[str, Any] = {"operation": operation}
     if version is not None:
-        lance_facet["version"] = version
-    run_facets: dict[str, Any] = {"lance": lance_facet}
+        lance_fields["version"] = version
+    run_facets: dict[str, Any] = {"lance": custom_facet(_PRODUCER, **lance_fields)}
     if author is not None:
-        run_facets["author"] = {"name": author, "sub": author}
+        run_facets["author"] = custom_facet(_PRODUCER, name=author, sub=author)
     output: dict[str, Any] = {"namespace": namespace, "name": table_id}
     facets: dict[str, Any] = {}
     if version is not None:
@@ -120,8 +122,13 @@ def build_write_event(
         "eventType": "COMPLETE",
         "eventTime": event_time,
         "producer": _PRODUCER,
+        "schemaURL": RUN_EVENT_SCHEMA_URL,
         "run": {"runId": run_id, "facets": run_facets},
-        "job": {"namespace": job_namespace, "name": operation},
+        # Job identity is per-TABLE (``<operation>.<table_id>``), not the bare op — else every table's
+        # writes lump into one Job node (``insert``), which the /jobs governance fold then makes visible
+        # to anyone who can see ANY of those tables. Per-table keeps the Job's output set — its access
+        # handle — scoped to the one table it wrote.
+        "job": {"namespace": job_namespace, "name": f"{operation}.{table_id}"},
         "inputs": [],
         "outputs": [output],
     }
@@ -261,7 +268,8 @@ class DaprEmitter:
     """Publishes OpenLineage events to a **Dapr** ``pubsub.jetstream`` component.
 
     We publish to the local Dapr **sidecar** (``DaprClient.publish_event``); the sidecar persists to NATS
-    JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation as *component config*, so the
+    JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation
+    as *component config*, so the
     app holds no broker client (the decoupled microservice path — microservices.md). The topic is
     versioned (``lineage.events.v1``). Publish stays best-effort: a sidecar/broker outage logs + drops
     rather than failing the catalog write. ``authorization`` is unused — the pub/sub topic is an internal

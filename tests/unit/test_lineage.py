@@ -65,10 +65,11 @@ def test_statistics_absent_when_no_facet() -> None:
     assert _output_with_stats({"version": {"datasetVersion": "1"}}).statistics is None
 
 
-def test_statistics_partial_facet_fills_absent_half_with_minus_one() -> None:
-    # Both fields are spec-optional; a facet with only rowCount still records what was measured.
-    assert _output_with_stats({"outputStatistics": {"rowCount": 5}}).statistics == (5, -1)
-    assert _output_with_stats({"outputStatistics": {"size": 64}}).statistics == (-1, 64)
+def test_statistics_partial_facet_reports_none_for_the_absent_half() -> None:
+    # Both fields are spec-optional; a facet with only one records what was measured and reports None for
+    # the other — never a fabricated -1 that producers() would serve as a real measurement.
+    assert _output_with_stats({"outputStatistics": {"rowCount": 5}}).statistics == (5, None)
+    assert _output_with_stats({"outputStatistics": {"size": 64}}).statistics == (None, 64)
 
 
 def test_quality_assertions_parses_facet() -> None:

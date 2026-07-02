@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextlib import suppress
 from typing import Any
 
 from common import fga
@@ -126,8 +127,11 @@ async def handle_stage(
             version=result.version if result else 1,
             row_count=result.row_count if result else None,
             size_bytes=result.size_bytes if result else None,
-            assertions=[a.model_dump() for a in assertions] or None,
-            run_id=f"{settings.operation}-{token}" if token else None,
+            source_uri=settings.to_uri if result else None,
+            # exclude_none: an assertion with no column omits the key entirely — a serialized
+            # ``"column": null`` fails strict DataQualityAssertionsDatasetFacet validation (column: string).
+            assertions=[a.model_dump(exclude_none=True) for a in assertions] or None,
+            token=token,
         )
         # 1. Emit the transform's lineage (-> the lineage service ingests the DERIVED_FROM edge). This runs
         # even on a quality failure, so the failed assertions are recorded and the bad batch is auditable.
@@ -151,10 +155,32 @@ async def handle_stage(
                 ),
                 data_content_type="application/json",
             )
-    except Exception as exc:  # noqa: BLE001 — transient publish failure → let Dapr redeliver
+    except Exception as exc:  # noqa: BLE001 — transient compute/publish failure → let Dapr redeliver
         log.warning(
             "medallion_stage_failed", extra={"transition": transition, "token": token, "error": str(exc)}
         )
+        # Record the failed run in lineage (the "record failed runs without fabricating lineage" contract):
+        # a FAIL RunEvent with NO version + NO output dataset, carrying the errorMessage facet. Best-effort
+        # + suppressed — a FAIL-emit failure must not mask the original error or the RETRY. Idempotent on the
+        # deterministic run_id, so re-emits across redeliveries re-MERGE the same (:Run) rather than pile up.
+        with suppress(Exception):
+            fail_event = build_run_event(
+                operation=settings.operation,
+                author=settings.author,
+                job_namespace=settings.job_namespace,
+                inputs=[(settings.from_namespace, settings.from_dataset)],
+                output_namespace=settings.to_namespace,
+                output_name=settings.to_dataset,
+                token=token,
+                event_type="FAIL",
+                error_message=str(exc),
+            )
+            await dapr.publish_event(
+                pubsub_name=settings.pubsub,
+                topic_name=settings.lineage_topic,
+                data=json.dumps(fail_event),
+                data_content_type="application/json",
+            )
         return _RETRY
     if quality_blocked:
         record_quality_blocked(transition)

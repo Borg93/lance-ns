@@ -5,7 +5,8 @@ A maintenance sweep compacts small fragments + GCs old versions of each Lance da
 ``RunEvent`` (output = the dataset, ``operation=compaction``) published to the **Dapr**
 ``pubsub.jetstream`` component — the SAME pubsub component + topic the catalog publishes to and the
 lineage service subscribes to, so a compaction run shows up in ``producers()`` alongside the writes.
-The sidecar owns retry/backoff + trace-propagation (no DLQ — see docs/RESILIENCE.md gap #2) as component config (no broker client here).
+The sidecar owns retry/backoff + trace-propagation (no DLQ — see docs/RESILIENCE.md gap #2) as component
+config (no broker client here).
 
 Self-contained: the compaction service never imports the catalog (zero cross-service imports — the
 mergeability invariant). The only shared code is ``common.fga`` for the id↔namespace derivation, so the
@@ -32,6 +33,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
 from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
@@ -74,8 +76,11 @@ def build_maintenance_event(
         "eventType": "COMPLETE",
         "eventTime": event_time,
         "producer": _PRODUCER,
-        "run": {"runId": run_id, "facets": {"lance": {"operation": COMPACTION}}},
-        "job": {"namespace": job_namespace, "name": COMPACTION},
+        "schemaURL": RUN_EVENT_SCHEMA_URL,
+        "run": {"runId": run_id, "facets": {"lance": custom_facet(_PRODUCER, operation=COMPACTION)}},
+        # Per-table job identity (like the catalog write emitter) — else every dataset's compaction lumps
+        # into one ``compaction`` Job node whose output set spans the whole lakehouse.
+        "job": {"namespace": job_namespace, "name": f"{COMPACTION}.{table_id}"},
         "inputs": [],
         "outputs": [{"namespace": namespace, "name": table_id}],
     }
@@ -99,7 +104,8 @@ class DaprMaintenanceEmitter:
     """Publishes maintenance events to a **Dapr** ``pubsub.jetstream`` component (the production path).
 
     Publishes to the local Dapr sidecar (``DaprClient.publish_event``); the sidecar persists to NATS
-    JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation as component config, so the app
+    JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation
+    as component config, so the app
     holds no broker client. Best-effort: a sidecar/broker outage logs + drops rather than failing the sweep.
     """
 

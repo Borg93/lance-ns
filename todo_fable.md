@@ -76,40 +76,33 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 - Also fixed here: false “sidecar owns DLQ / dead-letters” claims corrected across 7 docstrings +
   DEPLOY.md (no `deadLetterTopic` exists — RESILIENCE.md gap #2 is the honest statement).
 
-## 3 · P1 — OpenLineage spec fidelity (breaks the Marquez-reuse goal)
+## 3 · P1 — OpenLineage spec fidelity — ✅ ALL FIXED (2026-07-02; verified vs installed openlineage-python)
 
-- ⛔ **Run IDs are not UUIDs** (`{operation}-{token}`) — violates the spec’s `run.runId` format; Marquez
-  rejects them outright. Mint UUIDs, keep the token as a run facet for correlation.
-  `services/medallion/services/produce.py:60` (+ transform.py, lineage_emit.py run-id sites)
-- ⛔ **Top-level `schemaURL` missing from both hand-built RunEvent builders** — spec marks it REQUIRED on every
-  event. `services/catalog/core/lineage_emit.py:119` (+ `services/medallion/schemas/events.py`)
-- ⛔ **Custom `lance` + `author` run facets lack `_producer`/`_schemaURL`** — REQUIRED on every facet, standard
-  or custom. `services/catalog/core/lineage_emit.py:97`
-- ⛔ **Medallion events never emit the `dataSource` facet** → compute-written datasets carry no `source_uri`,
-  so the B4 reconcile back-fill silently skips exactly the datasets the cascade writes. Emit it when compute
-  is on (the URI is known). `services/medallion/schemas/events.py:56`
-- ⛔ **Cascade head ignores `eventType`** — any raw-output event (incl. a spec-standard producer’s START or
-  FAIL) fires the pipeline off data never (yet) written. Filter on COMPLETE.
-  `services/medallion/services/ingest_trigger.py:35`
-- ⛔ **A mover’s compute failure never emits a FAIL RunEvent** — once redelivery exhausts, the failed run is
-  unrecorded in lineage (violates “record failed runs”). `services/medallion/services/transform.py:143`
-- ⛔ **Quality assertions serialize `"column": null`** — fails strict validation against
-  `DataQualityAssertionsDatasetFacet` (column is `string`); omit the key instead.
-  `services/medallion/services/transform.py:118`
-- ⛔ **Partial outputStatistics persists `-1` for the missing half** — producers() then serves a fabricated
-  measurement; store None/omit. `services/lineage/models.py:128`
-- ⛔ **Catalog job identity is the bare operation name** (`insert`, `create_table`) — every table’s writes lump
-  into one Job node, which the /jobs governance rule then hides from nearly everyone. Namespace the job name
-  per table (e.g. `create_table.bronze$events`). `services/catalog/core/lineage_emit.py:124`
-- ⛔ **Synthetic RECONCILED back-fill run diverges across views** — written without `r.job`/`r.outputs` and
-  never inserted into the events feed: /runs (governed) hides it, producers() shows it, /events never knows
-  it. Stamp job/outputs + insert a feed row. `services/lineage/services/repository.py:176`
-- ⛔ **Re-emitted duplicates defeat the /events natural key** — `build_run_event` stamps a fresh `eventTime`
-  per attempt, so RETRY-after-partial-success inserts duplicate feed rows despite same run_id. Derive
-  eventTime deterministically or widen the dedup key. `services/medallion/schemas/events.py:131`
-- ⛔ **“Any raw writer (this dummy, or the catalog) can drive the head” claim is false as shipped** — a catalog
-  write to the raw table can never match the loop-guard filter (namespace/dataset mismatch). Fix the filter or
-  the claim. `services/medallion/producer.py:7`
+New shared helper `services/common/openlineage.py` (`run_id_for` uuid5, `RUN_EVENT_SCHEMA_URL`,
+`custom_facet`) — the single place that keeps the three hand-built builders spec-true. Spec claims
+verified against the INSTALLED `openlineage-python` (RunEvent carries schemaURL; BaseFacet requires
+_producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.RunEvent`.
+
+- ✅ **Run IDs not UUIDs** — FIXED: `run_id_for("<op>-<token>")` = deterministic uuid5 (spec-valid AND stable
+  for idempotent MERGE); the readable token now rides the `lance` run facet. medallion produce+transform,
+  reconcile back-fill. Catalog/compaction already used uuid4.
+- ✅ **Top-level `schemaURL` missing** — FIXED on all three builders (`RUN_EVENT_SCHEMA_URL`).
+- ✅ **Custom `lance`/`author` facets lack `_producer`/`_schemaURL`** — FIXED via `custom_facet(...)` on all three.
+- ✅ **Medallion never emits `dataSource`** — FIXED: emitted from the stage TO_URI/raw URI when compute is on
+  (unblocks the B4 reconcile for cascade-written datasets — a real functional bug, not just fidelity).
+- ✅ **Cascade head ignores `eventType`** — FIXED: `_writes_raw` requires `eventType == COMPLETE`.
+- ✅ **No FAIL RunEvent on compute failure** — FIXED: the except path best-effort emits a FAIL (no version, no
+  outputs, standard `errorMessage` facet), suppressed so it can't mask the RETRY; idempotent on the run id.
+- ✅ **`"column": null` in quality assertions** — FIXED: `Assertion.model_dump(exclude_none=True)` omits the key.
+- ✅ **Partial outputStatistics persists `-1`** — FIXED: `statistics` returns `None` for the absent half.
+- ✅ **Catalog job identity = bare op** — FIXED: `<operation>.<table_id>` (compaction too: `compaction.<id>`).
+- ✅ **Synthetic RECONCILED run diverges across views** — FIXED: stamps `r.job` + `r.outputs` AND inserts a feed
+  row (a spec-shaped RECONCILED event), so /runs, producers(), and /events agree. Deterministic uuid5 id.
+- ✅ **Re-emitted duplicates defeat the /events key** — FIXED: a partial unique index on `(run_id, event_type)`
+  for terminal types + targetless `ON CONFLICT DO NOTHING` dedups a redelivered terminal event regardless of
+  its fresh eventTime, while RUNNING events keep the 3-col key so their progress trail survives.
+- ✅ **False “any raw writer incl. the catalog” claim** — FIXED: `producer.py` docstring now states the head
+  reacts specifically to a COMPLETE write matching `raw_namespace`/`raw_dataset` (not any catalog write).
 
 ## 4 · P1 — reliability / ACID
 

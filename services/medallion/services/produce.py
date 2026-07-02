@@ -57,7 +57,8 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
         version=result.version if result else 1,
         row_count=result.row_count if result else None,
         size_bytes=result.size_bytes if result else None,
-        run_id=f"{settings.producer_operation}-{token}",
+        source_uri=settings.raw_uri if result else None,
+        token=token,
     )
     try:
         # The cascade HEAD is this raw-write lineage event: lance-ray's own /raw-arrival subscription reacts

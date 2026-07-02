@@ -14,6 +14,7 @@ from typing import Any, cast
 
 import medallion.services.transform as mover
 import pytest
+from common.openlineage import run_id_for
 from medallion.core.config import MedallionSettings
 from medallion.schemas.events import build_run_event
 from medallion.services.ingest_trigger import handle_raw_arrival
@@ -56,7 +57,7 @@ def test_build_run_event_records_the_transform_edge() -> None:
         output_namespace="silver",
         output_name="silver$features",
         version=2,
-        run_id="embed-1",
+        token="embed1",
     )
     assert event["inputs"][0]["name"] == "bronze$events"
     assert event["outputs"][0]["name"] == "silver$features"
@@ -84,7 +85,9 @@ def test_mover_emits_lineage_then_triggers_next_stage() -> None:
     assert lineage["topic"] == "lineage.events.v1"
     assert lineage["data"]["inputs"][0]["name"] == "bronze$events"
     assert lineage["data"]["outputs"][0]["name"] == "silver$features"
-    assert lineage["data"]["run"]["runId"] == "embed_features-abc123"  # run correlated to the token
+    # runId is a spec-valid UUID (deterministic on operation+token); the readable token rides the facet.
+    assert lineage["data"]["run"]["runId"] == run_id_for("embed_features-abc123")
+    assert lineage["data"]["run"]["facets"]["lance"]["token"] == "abc123"
     assert trigger["topic"] == "medallion.silver"
     assert trigger["data"] == {"token": "abc123", "dataset": "silver$features", "namespace": "silver"}
 
@@ -122,7 +125,7 @@ def test_producer_emits_only_the_raw_write_event() -> None:
     assert all(c["topic"] != "medallion.raw" for c in dapr.calls)  # the trigger is the subscription's job
 
 
-def _raw_write_cloudevent(run_id: str = "lance_ray_ingest-tok123") -> dict[str, Any]:
+def _raw_write_cloudevent(token: str = "tok123") -> dict[str, Any]:
     """A Dapr CloudEvent whose data is a raw-dataset write (what /raw-arrival reacts to)."""
     return {
         "data": build_run_event(
@@ -133,7 +136,7 @@ def _raw_write_cloudevent(run_id: str = "lance_ray_ingest-tok123") -> dict[str, 
             output_namespace="raw",
             output_name="raw_events",
             version=1,
-            run_id=run_id,
+            token=token,
         )
     }
 
@@ -149,7 +152,7 @@ def test_raw_arrival_fires_the_cascade() -> None:
     (trigger,) = dapr.calls
     assert trigger["topic"] == "medallion.raw"
     assert trigger["data"] == {
-        "token": "lance_ray_ingest-tok123",
+        "token": "tok123",  # threaded from the raw event's lance.token facet, not its (now-UUID) runId
         "dataset": "raw_events",
         "namespace": "raw",
     }
@@ -168,7 +171,7 @@ def test_raw_arrival_ignores_non_raw_event() -> None:
             output_namespace="bronze",
             output_name="bronze$events",
             version=1,
-            run_id="ingest_events-tok456",
+            token="tok456",
         )
     }
 

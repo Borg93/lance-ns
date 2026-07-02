@@ -30,7 +30,14 @@ _RETRY = {"status": "RETRY"}
 
 
 def _writes_raw(event: dict[str, Any], settings: MedallionSettings) -> bool:
-    """True iff this OpenLineage event records a write to the raw dataset (the cascade's entry point)."""
+    """True iff this event is a COMPLETED write to the raw dataset (the cascade's entry point).
+
+    Filters on ``eventType == COMPLETE``: a START or FAIL raw event announces intent / failure, not a
+    landed batch, so firing the cascade off one would kick the pipeline over data that isn't there (yet).
+    Only a terminal-success raw write is a real arrival.
+    """
+    if str(event.get("eventType", "")).upper() != "COMPLETE":
+        return False
     outputs = event.get("outputs") or []
     return any(
         isinstance(o, dict)
@@ -38,6 +45,23 @@ def _writes_raw(event: dict[str, Any], settings: MedallionSettings) -> bool:
         and o.get("name") == settings.raw_dataset
         for o in outputs
     )
+
+
+def _cascade_token(event: dict[str, Any]) -> str:
+    """The correlation token that threads one cascade — the raw-write event's ``lance.token`` run facet.
+
+    The run ``runId`` is now an opaque UUID (spec fix), so the human-readable token that ties all four
+    stages together rides the ``lance`` facet instead. Fall back to the ``runId`` (still a stable
+    per-run handle), then to a fresh id, so an external raw writer that omits the facet still cascades.
+    """
+    run = event.get("run")
+    if isinstance(run, dict):
+        lance = (run.get("facets") or {}).get("lance")
+        if isinstance(lance, dict) and lance.get("token"):
+            return str(lance["token"])
+        if run.get("runId"):
+            return str(run["runId"])
+    return uuid.uuid4().hex[:12]
 
 
 async def handle_raw_arrival(dapr: DaprClient, settings: MedallionSettings, event: Any) -> dict[str, str]:
@@ -51,8 +75,7 @@ async def handle_raw_arrival(dapr: DaprClient, settings: MedallionSettings, even
     data = event.get("data") if isinstance(event, dict) else None
     if not isinstance(data, dict) or not _writes_raw(data, settings):
         return _SUCCESS  # not a raw write — ack so Dapr doesn't redeliver, but drive nothing
-    run = data.get("run")
-    token = str(run.get("runId")) if isinstance(run, dict) and run.get("runId") else uuid.uuid4().hex[:12]
+    token = _cascade_token(data)
     trigger = {"token": token, "dataset": settings.raw_dataset, "namespace": settings.raw_namespace}
     try:
         await dapr.publish_event(

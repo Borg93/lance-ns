@@ -49,9 +49,17 @@ def test_build_create_event_shape() -> None:
     assert output["name"] == "alpha$bronze$images"
     # #20: the standard version facet rides the output so the WROTE edge carries the Lance version.
     assert output["facets"]["version"]["datasetVersion"] == "1"
-    assert event["run"]["facets"]["author"] == {"name": "alice", "sub": "alice"}
-    assert event["run"]["facets"]["lance"] == {"operation": "create_table", "version": 1}
-    assert event["job"] == {"namespace": "lance-catalog", "name": "create_table"}
+    # Custom facets carry the spec-required _producer + _schemaURL alongside their payload.
+    author = event["run"]["facets"]["author"]
+    assert author["name"] == "alice" and author["sub"] == "alice"
+    assert author["_producer"] and author["_schemaURL"]
+    lance = event["run"]["facets"]["lance"]
+    assert lance["operation"] == "create_table" and lance["version"] == 1
+    assert lance["_producer"] and lance["_schemaURL"]
+    # Top-level schemaURL is present (spec-required on every RunEvent).
+    assert event["schemaURL"]
+    # Per-table job identity (not the bare op) so one table's writes don't lump into a shared Job node.
+    assert event["job"] == {"namespace": "lance-catalog", "name": "create_table.alpha$bronze$images"}
 
 
 def test_build_create_event_without_author_omits_facet() -> None:
@@ -235,8 +243,9 @@ def test_build_write_event_drop_is_versionless_and_named_drop_table() -> None:
         job_namespace="lance-catalog",
     )
     assert "version" not in event["outputs"][0].get("facets", {})  # no version facet for a drop
-    assert event["run"]["facets"]["lance"] == {"operation": "drop_table"}
-    assert event["job"]["name"] == "drop_table"
+    assert event["run"]["facets"]["lance"]["operation"] == "drop_table"
+    assert "version" not in event["run"]["facets"]["lance"]
+    assert event["job"]["name"] == "drop_table.db$t"
 
 
 def test_http_emitter_omits_auth_header_when_absent() -> None:
@@ -341,8 +350,9 @@ def test_build_write_event_insert_omits_version_facet() -> None:
         event_time="t",
         job_namespace="lance-catalog",
     )
-    assert event["job"]["name"] == "insert"
-    assert event["run"]["facets"]["lance"] == {"operation": "insert"}  # no version key
+    assert event["job"]["name"] == "insert.a$b"
+    assert event["run"]["facets"]["lance"]["operation"] == "insert"
+    assert "version" not in event["run"]["facets"]["lance"]  # no version key on a version-less insert
     assert "facets" not in event["outputs"][0]  # no version facet asserted when version is None
 
 
@@ -357,7 +367,8 @@ def test_build_write_event_merge_carries_version() -> None:
         event_time="t",
         job_namespace="lance-catalog",
     )
-    assert event["run"]["facets"]["lance"] == {"operation": "merge_insert", "version": 4}
+    assert event["run"]["facets"]["lance"]["operation"] == "merge_insert"
+    assert event["run"]["facets"]["lance"]["version"] == 4
     assert event["outputs"][0]["facets"]["version"]["datasetVersion"] == "4"
     assert "author" not in event["run"]["facets"]
 
@@ -390,6 +401,6 @@ def test_http_emitter_emit_write_posts_operation_and_version() -> None:
         )
     )
     assert client.posted is not None
-    assert client.posted["job"]["name"] == "merge_insert"
+    assert client.posted["job"]["name"] == "merge_insert.a$b"
     assert client.posted["run"]["runId"] == "r-9"
     assert client.posted["outputs"][0]["facets"]["version"]["datasetVersion"] == "4"

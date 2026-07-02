@@ -130,11 +130,15 @@ def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
     """
     import lance
     import pyarrow as pa
+    from common.openlineage import run_id_for
     from lineage.core.age import make_pool, run_cypher
     from lineage.core.reconcile import read_storage_version, reconcile_all
     from lineage.models import RunEvent
     from lineage.schemas import ReconcileState
     from lineage.services.repository import LineageRepository
+
+    # The back-fill run id is now a deterministic UUID (spec fix), not the readable seed string.
+    backfill_rid = run_id_for("reconcile-recon$t-v2")
 
     uri = str(tmp_path / "recon.lance")
     lance.write_dataset(pa.table({"id": [1]}), uri)  # storage v1
@@ -160,11 +164,12 @@ def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
     async def read_only_recon(u: str) -> int | None:
         return read_storage_version(u, {}) if u == uri else None  # skip other datasets' (s3) reads
 
-    async def run() -> tuple[int | None, ReconcileState, int | None]:
+    async def run() -> tuple[int | None, ReconcileState, int | None, list, list]:
         pool = make_pool(dsn)
         await pool.open()
         try:
             repo = LineageRepository(pool, "lineage")
+            await repo.ensure_events_table()  # the back-fill now writes a feed row too
             # The AGE graph persists across runs — clear this test's dataset + runs so it starts clean
             # (else a prior back-fill leaves recon$t at v2 and the "graph behind storage" premise breaks).
             async with pool.connection() as conn:
@@ -172,21 +177,39 @@ def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
                 await run_cypher(
                     conn,
                     "lineage",
-                    "MATCH (r:Run) WHERE r.run_id IN ['recon-w1', 'reconcile-recon$t-v2'] DETACH DELETE r",
+                    "MATCH (r:Run) WHERE r.run_id IN ['recon-w1', $rid] DETACH DELETE r",
+                    {"rid": backfill_rid},
                 )
             await repo.ingest_event(event)
             before = await repo.latest_write_version("recon$t")
             statuses = await reconcile_all(repo, read_only_recon, backfill=True)
             after = await repo.latest_write_version("recon$t")
             recon = next(s for s in statuses if s.dataset == "recon$t")
-            return before, recon.status, after
+            # Cross-view parity (#10): the back-fill run must carry job + outputs (so /runs sees it, not
+            # just producers()), and land a feed row (so /events sees it too). Read both back.
+            async with pool.connection() as conn:
+                rows = await run_cypher(
+                    conn,
+                    "lineage",
+                    "MATCH (r:Run {run_id:$rid}) RETURN r.job, r.outputs",
+                    {"rid": backfill_rid},
+                    columns=2,
+                )
+                feed = await conn.execute(
+                    "SELECT event_type, outputs FROM public.lineage_events WHERE run_id = %s", (backfill_rid,)
+                )
+                feed_rows = await feed.fetchall()
+            return before, recon.status, after, rows, feed_rows
         finally:
             await pool.close()
 
-    before, status, after = asyncio.run(run())
+    before, status, after, run_rows, feed_rows = asyncio.run(run())
     assert before == 1  # the graph recorded v1 from the event
     assert status == ReconcileState.STORAGE_AHEAD  # storage v2 > graph v1 — the dropped write
     assert after == 2  # reconcile back-filled the real on-disk version
+    # The back-fill run is now consistent across views: job + outputs on the graph node, and a feed row.
+    assert run_rows and run_rows[0][0] and run_rows[0][1] == "recon$t"
+    assert feed_rows and feed_rows[0][0] == "RECONCILED"
 
 
 def test_medallion_column_lineage(dsn: str) -> None:

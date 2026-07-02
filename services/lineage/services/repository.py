@@ -37,6 +37,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 import psycopg
+from common.openlineage import RUN_EVENT_SCHEMA_URL, run_id_for
 from psycopg_pool import AsyncConnectionPool
 
 from lineage.core.age import fetch, run_cypher
@@ -128,11 +129,27 @@ _CREATE_EVENTS_INDEX: Final = (
     "CREATE UNIQUE INDEX IF NOT EXISTS lineage_events_natural_key "
     "ON public.lineage_events (run_id, event_type, event_time)"
 )
+# The 3-col key alone can't dedup a REDELIVERED TERMINAL event: a RETRY-after-partial-success re-emits the
+# same run's COMPLETE/FAIL with a FRESH eventTime, so the triple differs and a duplicate row lands. A run
+# has at most ONE terminal state, so a partial unique on (run_id, event_type) for terminal types dedups
+# them REGARDLESS of eventTime — while RUNNING events keep only the 3-col key, so their progress trail
+# (many RUNNINGs at different times) is preserved. NULL event_type is excluded by the WHERE (NULL IN → not
+# true), so it falls back to the 3-col key. The INSERT uses a TARGETLESS ON CONFLICT so it fires on EITHER.
+_TERMINAL_TYPES: Final = "('COMPLETE','FAIL','ABORT','RECONCILED')"
+_DEDUP_TERMINAL: Final = (
+    "DELETE FROM public.lineage_events a USING public.lineage_events b "
+    "WHERE a.seq > b.seq AND a.run_id = b.run_id AND a.event_type = b.event_type "
+    f"AND a.event_type IN {_TERMINAL_TYPES}"
+)
+_CREATE_TERMINAL_INDEX: Final = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS lineage_events_terminal_key "
+    f"ON public.lineage_events (run_id, event_type) WHERE event_type IN {_TERMINAL_TYPES}"
+)
 _INSERT_EVENT: Final = (
     "INSERT INTO public.lineage_events "
     "(run_id, event_type, event_time, job, author, inputs, outputs, event) "
     "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb) "
-    "ON CONFLICT (run_id, event_type, event_time) DO NOTHING"
+    "ON CONFLICT DO NOTHING"
 )
 _LIST_EVENTS: Final = (
     "SELECT seq, event_type, event_time, job, author, inputs, outputs, event "
@@ -174,6 +191,7 @@ _SET_WROTE_VERSION: Final = (
 # reconcile never duplicates; the WROTE version is stamped in its own statement (the AGE MERGE+SET quirk).
 _BACKFILL_RUN: Final = (
     "MERGE (r:Run {run_id:$rid}) SET r.event_type='RECONCILED', r.author='reconcile', r.event_time=$tm, "
+    "r.job=$job, r.outputs=$outs, "
     "r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 RETURN 1"
 )
 # The per-version column schema rides the same WROTE edge as the version (#24 prerequisite). Stored as
@@ -732,14 +750,42 @@ class LineageRepository:
         (``author='reconcile'``, no inputs): it records THAT the write happened + its version, not the lost
         details. The dataset node must already exist (it has the dataSource URI reconciliation read from).
         """
-        rid = f"reconcile-{name}-v{version}"
+        # Spec-valid UUID runId, deterministic on the (name, version) seed so re-running reconcile MERGEs
+        # the same (:Run) instead of duplicating it — the readable seed is not the id.
+        rid = run_id_for(f"reconcile-{name}-v{version}")
+        tm = datetime.now(UTC).isoformat()
+        job = f"lance-reconcile/reconcile.{name}"
         params = {"rid": rid, "name": name}
         async with self._pool.connection() as conn:
+            # Stamp job + outputs on the run so it appears CONSISTENTLY across views — /runs (governed by
+            # the run's outputs) showed nothing for a job/outputs-less run while producers() showed it.
             await run_cypher(
-                conn, self._graph, _BACKFILL_RUN, {"rid": rid, "tm": datetime.now(UTC).isoformat()}
+                conn, self._graph, _BACKFILL_RUN, {"rid": rid, "tm": tm, "job": job, "outs": name}
             )
             await run_cypher(conn, self._graph, _LINK_WROTE, params)
             await run_cypher(conn, self._graph, _SET_WROTE_VERSION, {**params, "ver": str(version)})
+        # A feed row too, so /events also knows the reconcile (the third view). A synthetic but spec-shaped
+        # RECONCILED event — the repair is auditable next to the ingested writes it recovered.
+        synthetic = {
+            "eventType": "RECONCILED",
+            "eventTime": tm,
+            "producer": "https://github.com/Borg93/lance-ns/tree/main/services/lineage",
+            "schemaURL": RUN_EVENT_SCHEMA_URL,
+            "run": {"runId": rid, "facets": {"lance": {"operation": "reconcile", "version": version}}},
+            "job": {"namespace": "lance-reconcile", "name": f"reconcile.{name}"},
+            "inputs": [],
+            "outputs": [{"namespace": "", "name": name}],
+        }
+        await self.record_event(
+            run_id=rid,
+            event_type="RECONCILED",
+            event_time=tm,
+            job=job,
+            author="reconcile",
+            inputs=[],
+            outputs=[name],
+            event=synthetic,
+        )
 
     async def ensure_events_table(self) -> None:
         """Create the durable events-feed table if absent (idempotent; called once at startup).
@@ -751,11 +797,13 @@ class LineageRepository:
         try:
             async with self._pool.connection() as conn:
                 await conn.execute(_CREATE_EVENTS_TABLE)
-                # Remove any pre-existing redelivered duplicates BEFORE the unique index, else CREATE UNIQUE
+                # Remove any pre-existing redelivered duplicates BEFORE each unique index, else CREATE UNIQUE
                 # INDEX fails on a table populated before the dedup landed (the events feed is a diagnostic
                 # projection, so dropping duplicate rows loses nothing but the duplication).
                 await conn.execute(_DEDUP_EVENTS)
                 await conn.execute(_CREATE_EVENTS_INDEX)
+                await conn.execute(_DEDUP_TERMINAL)
+                await conn.execute(_CREATE_TERMINAL_INDEX)
         except psycopg.errors.DuplicateTable:
             pass
 

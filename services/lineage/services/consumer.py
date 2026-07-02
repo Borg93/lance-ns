@@ -8,7 +8,8 @@ stream retains it and this consumer's ``deliverPolicy: all`` re-sees it on resta
 malformed payload that redelivery can't fix). Redelivery is safe: the authoritative graph is idempotent
 (nodes/edges MERGE on ``run_id``) and the durable events feed dedups on its ``(run_id, event_type,
 event_time)`` natural key — only the ``Run.events_count`` is a plain delivery counter (so a redelivery
-bumps it). The sidecar owns retry/backoff/trace-propagation (no DLQ — docs/RESILIENCE.md gap #2) as component config, not app code (the
+bumps it). The sidecar owns retry/backoff/trace-propagation (no DLQ — docs/RESILIENCE.md gap #2) as
+component config, not app code (the
 decoupled microservice path — microservices.md).
 
 Trust model: the topic is an internal, catalog-only channel, so the handler **trusts the verified

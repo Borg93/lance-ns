@@ -145,10 +145,13 @@ authz gate — best-effort, so an audit-write failure never fails a read.
 
 ## OpenLineage facets we capture (and Marquez reuse)
 
-We emit events **only via the official `openlineage-python` client classes**, so they are
-spec-correct by construction (canonical facet keys, `_producer`/`_schemaURL` on every facet) and a
-Marquez instance — or any OpenLineage consumer — can ingest them unchanged at the same
-`/api/v1/lineage` path. Our ingest tolerates *every* facet (`extra="allow"`) and reads these:
+The demo producer (`seed.py`) emits via the official `openlineage-python` client classes; the runtime
+services (catalog / medallion / compaction) build the `RunEvent` **by hand** and keep it spec-true through
+one shared helper (`common.openlineage`, verified against the installed `openlineage-python`): a **UUID**
+`runId` (deterministic where the cascade needs idempotency), the required top-level `schemaURL`, and
+`_producer`/`_schemaURL` on every facet — standard or custom. So a Marquez instance — or any OpenLineage
+consumer — can ingest them unchanged at the same `/api/v1/lineage` path. Our ingest tolerates *every* facet
+(`extra="allow"`) and reads these:
 
 | Facet | Kind | What it gives us | Where it lands |
 |---|---|---|---|

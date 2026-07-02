@@ -13,8 +13,17 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
+
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event.
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/medallion"
+
+#: OpenLineage standard ``DatasourceDatasetFacet`` schema URL — the physical Lance URI on the output,
+#: so the B4 reconcile back-fill can read the on-disk version of a dataset the CASCADE wrote (without
+#: it, every compute-written medallion dataset looks ``missing_on_storage`` and reconcile skips it).
+_DATASOURCE_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
+)
 
 #: The repo the medallion services live in — the ``sourceCodeLocation`` job facet's git URL.
 _REPO_URL = "https://github.com/Borg93/lance-ns"
@@ -52,6 +61,7 @@ def _dataset(
     row_count: int | None = None,
     size_bytes: int | None = None,
     assertions: list[dict[str, Any]] | None = None,
+    source_uri: str | None = None,
 ) -> dict[str, Any]:
     ds: dict[str, Any] = {"namespace": namespace, "name": name}
     facets: dict[str, Any] = {}
@@ -60,6 +70,16 @@ def _dataset(
             "_producer": _PRODUCER,
             "_schemaURL": _VERSION_FACET_SCHEMA,
             "datasetVersion": str(version),
+        }
+    # dataSource is an OUTPUT facet — the physical Lance URI, present only when the compute knows it (the
+    # medallion stage's TO_URI). Without it the B4 reconcile can't read the on-disk version of a dataset
+    # the cascade wrote → it'd look missing_on_storage and be skipped.
+    if source_uri:
+        facets["dataSource"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _DATASOURCE_FACET_SCHEMA,
+            "name": source_uri,
+            "uri": source_uri,
         }
     # outputStatistics is an OUTPUT facet — present only when the compute actually measured a write (the
     # raw producer / dummy emit omits it). Inputs never pass row_count, so they never carry it.
@@ -112,32 +132,48 @@ def build_run_event(
     row_count: int | None = None,
     size_bytes: int | None = None,
     assertions: list[dict[str, Any]] | None = None,
-    run_id: str | None = None,
+    source_uri: str | None = None,
+    token: str | None = None,
+    event_type: str = "COMPLETE",
+    error_message: str | None = None,
 ) -> dict[str, Any]:
     """Build the OpenLineage ``RunEvent`` (wire JSON) for one medallion transform.
 
     ``inputs`` is a list of ``(namespace, name)`` upstream datasets (empty for the raw producer, which has
     no upstream). The single output carries the standard version facet so the ``WROTE`` edge records the
     Lance version, plus — when the compute measured the write (``row_count`` / ``size_bytes`` set) — the
-    standard ``outputStatistics`` facet with the rows + on-disk bytes it produced, plus — when the quality
-    gate validated the write (``assertions`` set) — the standard ``dataQualityAssertions`` facet. ``run_id``
-    is injected so the producer can correlate the run across the cascade.
+    standard ``outputStatistics`` facet, when the compute knows the URI (``source_uri``) the standard
+    ``dataSource`` facet, and when the quality gate validated the write (``assertions`` set) the standard
+    ``dataQualityAssertions`` facet. The ``runId`` is a DETERMINISTIC UUID derived from
+    ``<operation>-<token>`` (spec-valid + stable across redelivery); the raw ``token`` rides the ``lance``
+    run facet for cascade correlation. ``event_type='FAIL'`` + ``error_message`` records a failed run
+    (no version, no outputs asserted); the standard ``errorMessage`` run facet carries the reason.
     """
-    run_facets: dict[str, Any] = {"lance": {"operation": operation, "version": version}}
+    lance_fields: dict[str, Any] = {"operation": operation, "version": version}
+    if token:
+        lance_fields["token"] = token
+    run_facets: dict[str, Any] = {"lance": custom_facet(_PRODUCER, **lance_fields)}
     if author:
-        run_facets["author"] = {"name": author, "sub": author}
-    return {
-        "eventType": "COMPLETE",
-        "eventTime": datetime.now(UTC).isoformat(),
-        "producer": _PRODUCER,
-        "run": {"runId": run_id or str(uuid.uuid4()), "facets": run_facets},
-        "job": {
-            "namespace": job_namespace,
-            "name": operation,
-            "facets": {"sourceCodeLocation": _job_source_location()},
-        },
-        "inputs": [_dataset(ns, name) for ns, name in inputs],
-        "outputs": [
+        run_facets["author"] = custom_facet(_PRODUCER, name=author, sub=author)
+    if error_message:
+        # Standard errorMessage run facet — records WHY a FAIL run failed (its own published schema).
+        run_facets["errorMessage"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json"
+            "#/$defs/ErrorMessageRunFacet",
+            "message": error_message,
+            "programmingLanguage": "PYTHON",
+        }
+    # Deterministic UUID keyed on operation+token → stable across redelivery (idempotent MERGE); a
+    # token-less call (defensive fallback — the cascade always threads one) gets a fresh random UUID.
+    run_id = run_id_for(f"{operation}-{token}") if token else str(uuid.uuid4())
+    # A FAIL run produced no data: it must not assert a version or an output dataset (record failed runs
+    # WITHOUT fabricating lineage — the failed run node + its errorMessage are the audit trail).
+    failed = event_type.upper() in {"FAIL", "ABORT"}
+    outputs = (
+        []
+        if failed
+        else [
             _dataset(
                 output_namespace,
                 output_name,
@@ -145,6 +181,21 @@ def build_run_event(
                 row_count=row_count,
                 size_bytes=size_bytes,
                 assertions=assertions,
+                source_uri=source_uri,
             )
-        ],
+        ]
+    )
+    return {
+        "eventType": event_type,
+        "eventTime": datetime.now(UTC).isoformat(),
+        "producer": _PRODUCER,
+        "schemaURL": RUN_EVENT_SCHEMA_URL,
+        "run": {"runId": run_id, "facets": run_facets},
+        "job": {
+            "namespace": job_namespace,
+            "name": operation,
+            "facets": {"sourceCodeLocation": _job_source_location()},
+        },
+        "inputs": [_dataset(ns, name) for ns, name in inputs],
+        "outputs": outputs,
     }

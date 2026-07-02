@@ -110,14 +110,15 @@ class Dataset(BaseModel):
         return edges
 
     @property
-    def statistics(self) -> tuple[int, int] | None:
+    def statistics(self) -> tuple[int | None, int | None] | None:
         """Observed ``(row_count, size_bytes)`` from the standard ``outputStatistics`` facet, else ``None``.
 
         Present only on a real measured write (the medallion fake-Ray / lance-ray compute reads the exact
         rows + on-disk bytes it produced); a dummy emit or an input dataset omits the facet. These are the
         runtime-measured numbers that move our lineage from producer-declared toward Marquez-grade. Both
-        fields are optional in the spec, so a partial facet (only one present) is filled with ``-1`` for the
-        absent half rather than dropped — the WROTE edge still records what was measured.
+        fields are optional in the spec, so a partial facet (only one present) reports ``None`` for the
+        absent half — never a fabricated ``-1`` that ``producers()`` would serve as a real measurement.
+        Returns ``None`` (the whole tuple) only when NEITHER field is present.
         """
         facet = (self.facets or {}).get("outputStatistics")
         if not isinstance(facet, dict):
@@ -126,8 +127,8 @@ class Dataset(BaseModel):
         if not isinstance(row_count, int) and not isinstance(size, int):
             return None
         return (
-            row_count if isinstance(row_count, int) else -1,
-            size if isinstance(size, int) else -1,
+            row_count if isinstance(row_count, int) else None,
+            size if isinstance(size, int) else None,
         )
 
     @property

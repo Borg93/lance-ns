@@ -4,9 +4,12 @@ Event-driven head (GOAL 4 B2): ``POST /produce`` (with ``compute_enabled``) seed
 Lance dataset and emits ONE OpenLineage event for it. It does NOT itself publish ``medallion.raw`` — this
 app also *subscribes* to the shared lineage topic (``/raw-arrival``), reacts to a raw-dataset write event,
 and publishes the trigger the ``raw→bronze`` mover consumes. So the cascade is driven by the raw-data
-*arrival event*, not the call: every stage, the head included, reacts to an event on the bus. Any raw writer
-(this dummy, or the catalog) that emits a raw-write event drives it. In production the head is a real Ray
-Data job emitting the same event; here it is a dummy emitter, which is all the event-driven demo needs.
+*arrival event*, not the call: every stage, the head included, reacts to an event on the bus. What drives
+it is specifically a COMPLETE write whose output matches ``raw_namespace``/``raw_dataset`` (``raw`` /
+``raw_events``) — this dummy today, or a real Ray raw-ingest job that writes that same dataset. (An
+ordinary catalog table write does NOT: its output namespace/name won't match the raw filter — the head
+reacts to the *raw* dataset, not to any write.) In production the head is a real Ray Data job emitting the
+same event; here it is a dummy emitter, which is all the event-driven demo needs.
 
 Run: ``uvicorn medallion.producer:app``. Publishes/subscribes through the local Dapr sidecar (best-effort).
 """

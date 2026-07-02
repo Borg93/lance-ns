@@ -204,9 +204,13 @@ visible verbatim in the `GET /events` feed — the graph promotes the headline f
 > [lance-ray OpenLineage integration](RASK-INTEGRATION.md) on KubeRay — the true auto-instrumented,
 > Marquez-grade path that supersedes the here-dummies.
 
-## Closing the loop: gold embeds its lineage as JSONB
+## Closing the loop: gold embeds its lineage as JSONB (demo driver only)
 
-The final `aggregate_gold` job writes the **whole upstream provenance** **into the gold Lance file
+> **Scope:** this is done by the **demo driver** (`scripts/medallion_demo.py: write_gold`), NOT by the
+> deployed event-driven cascade — the `silver→gold` mover emits provenance to the graph but does not (yet)
+> embed the JSONB column. Making the mover embed it when `medallion.compute` is on is a tracked follow-up.
+
+The final `aggregate_gold` step writes the **whole upstream provenance** **into the gold Lance file
 itself** as a JSONB `lineage` column (Lance's `pa.json_()` / `lance.json` extension type — stored as
 binary JSONB). Crucially this is **pulled live from the AGE graph at write time** (the driver GETs
 `/runs` + `silver$features`'s `/graph` + each node's `/producers`), not a hand-typed snapshot — so it

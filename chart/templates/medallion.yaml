@@ -3,8 +3,9 @@
 {{- $port := .Values.medallion.port }}
 {{- $img := include "lance.catalogImage" . }}
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
-# lance-ray — the dummy producer / HEAD of the medallion pipeline. POST /produce emits the raw_events
-# OpenLineage event + publishes the first trigger (medallion.raw) that the raw→bronze mover consumes.
+# lance-ray — the dummy producer / HEAD of the medallion pipeline. POST /produce emits ONLY the raw_events
+# OpenLineage event; lance-ray's OWN /raw-arrival subscription reacts to that event and publishes the first
+# trigger (medallion.raw) the raw→bronze mover consumes — the event-driven head (B2), not a direct publish.
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 apiVersion: apps/v1
 kind: Deployment

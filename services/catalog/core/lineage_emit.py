@@ -5,8 +5,9 @@ the authoritative source of "who created/changed a table". On a table create it 
 OpenLineage ``RunEvent`` (output = the table, ``author`` = the token sub, plus a ``lance`` run
 facet naming the operation + version) to the lineage service's ingest endpoint.
 
-Emission is **fire-and-forget + best-effort**: it runs in a FastAPI background task (after the
-response) and swallows every error, so the lineage service being down/slow can never block or
+Emission is **inline-awaited + best-effort**: the write endpoints ``await`` it (NOT a FastAPI
+BackgroundTasks fire-and-forget — that dies with the worker + can't reach the durable transport before
+the response) but it swallows every error, so the lineage service being down/slow can never block or
 fail a catalog write. Two transports sit behind the same :class:`LineageEmitter` interface:
 
 * :class:`HttpLineageEmitter` — direct HTTP POST (the OpenLineage default transport; simple, but the

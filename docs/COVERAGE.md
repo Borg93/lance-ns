@@ -6,7 +6,7 @@ this measures which are **backend-backed (200)** vs **spec-correct 501** because
 genuinely stubs them. Dispatch: most ops go to `native` (the Rust `DirectoryNamespace`); several go to the
 in-process `dataplane` (pylance, always 200) — see `services/catalog/services/{native,dataplane}.py`.
 
-**Tally: 47 / 54 backed (200), 7 spec-correct 501.** `uv run pytest` → 269 passed, 15 skipped.
+**Tally: 47 / 54 backed (200), 7 spec-correct 501.** `uv run pytest tests/unit tests/integration` → 320 passed (e2e suites skipped unless their live backends are set).
 
 > **Correction (2026-06-30):** an earlier version of this doc reported 41/54 and listed version + branch
 > ops as "upstream-blocked / no pylance analog". That was **wrong**, and reading the Lance Namespace spec

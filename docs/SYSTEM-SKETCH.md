@@ -4,6 +4,12 @@
 > (catalog) and [`LINEAGE.md`](LINEAGE.md) (provenance). Roadmap: [`../todo.md`](../todo.md).
 > This file = the sketch of everything + the gap register + the Lakekeeper diff.
 >
+> ⚠️ **Point-in-time markers.** Some ✅/⛔ status cells below are historical. Since this was written,
+> **credential vending** (4 modes incl. RustFS-native web_identity), **the OpenBao/Dapr secret store**,
+> **read-side lineage authz**, and **the event-driven medallion cascade** are all built + deployed —
+> defer to [`ARCHITECTURE.md`](ARCHITECTURE.md), [`DEPLOY.md`](DEPLOY.md), and [`COVERAGE.md`](COVERAGE.md)
+> for authoritative current state.
+>
 > 🖱️ **Interactive version:** [`system-diagram.html`](system-diagram.html) — click-through
 > diagram of the four flows with per-mode payloads (Mode B server-mediated vs STS vending).
 > Text companion: [`system-diagram.md`](system-diagram.md). The ASCII below is the static fallback.
@@ -69,7 +75,7 @@ emit an OpenLineage event. Layers are **separate Lance tables** (namespaces); pr
 | OIDC authn | PyJWT/JWKS, fail-closed | ✅ built |
 | OpenFGA authz | op→`can_*`, concentric+cascade, roles-as-`#assignee`, `grant_on_create` | ✅ built |
 | Resilience | transient-aware retries; network → 503 (never 500) | ✅ built |
-| `CredentialVendor` | pluggable ModeB / StaticPrefix / Sts (`services/catalog/core/vending.py`) | ✅ scaffolded, ⛔ not wired |
+| `CredentialVendor` | pluggable modes: mode_b / web_identity / sts / static (`services/catalog/core/vending.py`) | ✅ built + wired (`POST /v1/table/{id}/credentials`) |
 | Maintenance read-only | 503+Retry-After middleware (`services/catalog/api/maintenance.py`) | ✅ built (default off) |
 | Lineage service | OpenLineage ingest → AGE graph (`services/lineage/`) | ✅ built, deployed (`chart/`), in-service authz gate (default off) |
 | OpenBao SecretStore | secrets out of env | ✅ built + deployed (two-tier; app services fail-closed on it) |

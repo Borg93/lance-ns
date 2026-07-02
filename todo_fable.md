@@ -221,7 +221,19 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 - ⛔ **Live medallion e2e covers only the happy path** — FGA-gate DROP and quality-block never validated with
   real Dapr/NATS/AGE. `tests/e2e/test_medallion_e2e.py:48`
 
-## 8 · P1/P3 — docs staleness (each would mislead a reader today)
+## 8 · P1/P3 — docs staleness — ✅ ALL FIXED (2026-07-02)
+
+All 13 addressed: RASK-INTEGRATION double-fire trap (the seam contract now warns the real Ray job must
+NOT publish `medallion.raw` — the `/raw-arrival` subscription does) + "dummy emitters" claim; the same
+double-fire trap in the `medallion.yaml` chart comment; ARCHITECTURE `add_columns_from`→`add_columns`
+(nonexistent API, fixed everywhere incl. the .html), the vending endpoint + 4-modes + web_identity/RustFS
+correction, and the lineage-deferred contradiction; RESILIENCE gap #1 (inline-awaited not
+fire-and-forget, + the shipped B4 back-fill mitigation) + the matching `lineage_emit.py` docstring; the
+LINEAGE gold-JSONB "demo-driver-only" scope note; the COVERAGE tally (320); DEPLOY RustFS-STS (web_identity
+IS built); the DLQ wording (already done in §2); and the two big planning docs (system-diagram,
+SYSTEM-SKETCH) got point-in-time banners pointing at the authoritative current-state docs + their specific
+flagged contradiction fixed (CredentialVendor wired). Detail below.
+
 
 - ⛔ **`docs/RASK-INTEGRATION.md:69` — the seam contract tells the future Ray job to publish `medallion.raw`
   itself → post-B2 that DOUBLE-FIRES the cascade.** Highest-stakes doc bug for the merge.

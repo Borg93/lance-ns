@@ -126,4 +126,6 @@ isolated (one bucket per project; a team can own many). See `services/common/aut
 ⚠️ Deployed-not-wired: the app auto-seeding of the project/team/warehouse hierarchy on create (the
 namespace→warehouse parent + creator-owner are seeded; project/team/validator grants are set out-of-band
 for now); the end-to-end Dex-token → catalog → OpenFGA request demo (auth is `--set auth.enabled=true`).
-❌ Not built: RustFS STS.
+✅ Built: RustFS-native scoped STS via `vending.mode=web_identity` (Dex id_token →
+`AssumeRoleWithWebIdentity` + inline per-table session policy). Plain `AssumeRole` STS (`vending.mode=sts`)
+works on AWS/MinIO/Ceph but NOT RustFS (it rejects plain AssumeRole — that's why web_identity exists).

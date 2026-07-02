@@ -41,7 +41,9 @@ The externalization hooks added in this repo make this a **values flip**, not a 
 - **Add the databases** to CNPG: `lineage` + `openfga`. ⚠️ **AGE caveat** — the lineage graph needs the Apache **AGE extension**; CNPG runs stock Postgres, so either (a) point CNPG at a **custom Postgres image with AGE**, (b) keep AGE as a separate operand, or (c) execute the `todo.md` open decision to move lineage to a **Lance-native graph** (drops the AGE/Postgres dependency entirely). Decide before the fold-in.
 
 ### 2. lance-ray → a real Ray Data job (the one in-scope gap)
-Today `services/medallion/producer.py` + the movers are **dummy emitters** (provenance only, no data). On rask
+Today `services/medallion/producer.py` + the movers are **dummy Ray jobs** — pure lineage emitters by
+default, but with `medallion.compute=true` (the B1 toggle) each stage does a real in-process Lance
+read→transform→write, so the cascade already produces versioned data, not just provenance. On rask
 they become **real Ray Data jobs on KubeRay** (Kueue-admitted, `ray-kit`/orchestrator-submitted). The seam
 contract they must honor (so they drop in with no rewiring) — see **§ lance-ray seam contract** below.
 
@@ -64,10 +66,13 @@ secret).
 ## lance-ray seam contract (so the real job drops in)
 The dummy producer/movers define the contract the real Ray Data jobs must reproduce **exactly**:
 
-- **Producer (head):** write the raw Lance dataset, then (1) **publish an OpenLineage run event** to the Dapr
+- **Producer (head):** write the raw Lance dataset, then **publish ONE OpenLineage run event** to the Dapr
   pubsub `lineage-pubsub` / topic `lineage.events.v1` — `inputs=[]` → `outputs=[raw_events]`, the `WROTE` edge
-  carrying the **Lance version** facet (`DatasetVersionDatasetFacet`) — and (2) **publish the first stage
-  trigger** to `medallion.raw` with `{token, dataset, namespace}`.
+  carrying the **Lance version** facet (`DatasetVersionDatasetFacet`). **That is all the real Ray job does.**
+  ⚠️ **It must NOT publish `medallion.raw` itself** — post-B2 the deployed lance-ray app *subscribes* to the
+  lineage topic (`/raw-arrival`) and publishes the first `medallion.raw` trigger when it sees a raw-namespace
+  write. A job that also published `medallion.raw` would **double-fire the cascade**. The head is event-driven:
+  emit the raw-write event; the arrival subscription does the triggering.
 - **Each mover:** subscribe to its upstream trigger → transform (read the from-stage Lance version-range as a
   CDF, write the to-stage) → emit the **`DERIVED_FROM`** OpenLineage edge → publish the next trigger.
 - **Gold mover (terminal):** write the gold dataset **with the embedded `lineage` JSONB column** (per

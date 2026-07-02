@@ -37,7 +37,7 @@ Lakekeeper, but for Lance (multimodal: vectors + blobs + columns)."
    ┌─────────────────────────────────────┐   ┌──────────────────────────────┐
    │  FastAPI REST catalog                │   │  lance-ray / pylance / a job │
    │  - namespaces & tables CRUD          │   │  - read_lance / write_lance  │
-   │  - describe -> location + creds      │──▶│  - add_columns_from (ETL)    │
+   │  - describe -> location + creds      │──▶│  - add_columns (ETL)    │
    │  - OIDC authn + OpenFGA authz        │   │  - compaction / vector search│
    │  - seeds ownership tuples on create  │   │  - commits new Lance versions│
    └─────────────────────────────────────┘   └──────────────────────────────┘
@@ -53,9 +53,9 @@ authorizes, locates, and records. Compute is a **client** of the catalog. This i
 
 ### Credential vending & STS — how, and why it matters for the lakehouse
 
-When a client opens a table, `describe_table?vend_credentials=true` returns the table's
-**location** plus a **credential** to reach object storage directly. Three pluggable shapes
-(`services/catalog/core/vending.py`), strongest first:
+A client opens a table, then calls `POST /v1/table/{id}/credentials?tier=read|write` to get a
+**credential** to reach object storage directly. Four pluggable modes (`chart` `vending.mode`;
+`services/catalog/core/vending.py`), strongest first:
 
 1. **STS vending (`StsVendor`) — recommended.** The catalog calls the S3 backend's STS
    `AssumeRole` with an **inline session policy** scoped to *just this table's bucket/prefix and
@@ -63,9 +63,11 @@ When a client opens a table, `describe_table?vend_credentials=true` returns the 
    client reads/writes the bytes directly with that token. Works on **MinIO, Ceph RGW, AWS**.
 2. **Mode B (`ModeBVendor`) — safe default.** No credential is vended; the client uses the
    catalog's server-mediated Arrow-IPC endpoints. Backend-agnostic; nothing is delegated.
-3. **Static (`StaticPrefixVendor`).** A long-lived per-bucket key — for S3 backends without STS
-   *policy scoping* (e.g. GCS interop, or **RustFS** today: it has `AssumeRole` but not yet
-   ARN/inline policies, so temp creds inherit the user's perms).
+3. **Web-identity (`web_identity`) — the RustFS-native path.** RustFS rejects plain `AssumeRole`, so
+   the caller's Dex id_token is exchanged via `AssumeRoleWithWebIdentity` for creds bound to a role
+   policy, narrowed per-table by an inline session policy. This is what makes scoped STS work on RustFS.
+4. **Static (`StaticPrefixVendor`).** A long-lived per-bucket key — for S3 backends without STS
+   *policy scoping* (e.g. GCS interop).
 
 **Why STS is the right default for a *governed* lakehouse:**
 
@@ -210,14 +212,14 @@ flowchart LR
   IMG[images] --> ING
   ING -->|write_lance append, via catalog| B[bronze tables — raw, append-only]
   B -->|read version-range = Change Data Feed| ETL1[lance-ray ETL]
-  ETL1 -->|append + add_columns_from| S[silver tables — cleaned + features]
+  ETL1 -->|append + add_columns| S[silver tables — cleaned + features]
   S --> ETL2[lance-ray aggregate] --> G[gold tables — curated, read-mostly]
   ROLES[per-layer OpenFGA roles] -. gate .- B & S & G
 ```
 
 - **Bronze** = raw (images/events) appended as-is. Lance is blob/vector-native.
 - **Silver** = cleaned + enriched via `lance-ray` (`write_lance(mode="append")`,
-  `add_columns_from` for distributed backfill like embeddings). Read only the **new
+  `add_columns` for distributed backfill like embeddings). Read only the **new
   bronze versions** since last run — Lance's version history *is* the Change Data Feed.
 - **Gold** = curated/aggregated, analysts get reader.
 
@@ -260,7 +262,7 @@ version/batch-commit). In a governed catalog you want a commit to be **(a) autho
 |---|---|---|---|
 | **(a) Authorization** | "May this caller commit to this table?" | **OpenFGA** — `authorize` checks `can_write_data` (or `can_commit`) on the table before the handler runs | ✅ already wired |
 | **(b) Audit trail** | "What versions exist; what changed?" | **Lance versioning** — every commit is an immutable, time-travelable version | ✅ free from the format |
-| **(c) Lineage** | "Where did this data come from?" | **OpenLineage** (emit on commit) → a lineage backend | 🔶 deferred (§9) |
+| **(c) Lineage** | "Where did this data come from?" | **OpenLineage** (emit on commit) → the in-service Apache AGE graph | ✅ built & deployed (see §9 + `docs/LINEAGE.md`) |
 
 So **commit auth already exists**: committing goes through the same `authorize` dependency
 that gates every write, checking `can_write_data` on `table:<id>`. **It does NOT need

@@ -40,12 +40,16 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
 
 ## Where it CAN bite — the real gaps (honest)
 
-1. **The catalog outbox gap (the #1 weakness).** The catalog emits lineage as a **fire-and-forget,
-   best-effort** background task *after* the Lance write commits to S3 (`services/catalog/core/lineage_emit.py`). If
-   the catalog crashes (or its sidecar is down) **between the S3 write and the publish**, the data exists
-   on storage but **the lineage event is lost** — the graph under-reports that write. No corruption, but a
-   provenance hole. *Fix:* a transactional outbox, or make the **Ray job the durable producer** (it owns
-   the write + the emit) — already the documented direction ([`FLOW.md`](FLOW.md) §7, [`RASK-INTEGRATION.md`](RASK-INTEGRATION.md)).
+1. **The catalog outbox gap (the #1 weakness).** The catalog emits lineage **inline-awaited + best-effort**
+   *after* the Lance write commits to S3 (`services/catalog/core/lineage_emit.py`) — awaited (not a
+   BackgroundTasks fire-and-forget) so the event reaches the durable Dapr/JetStream transport before the
+   response returns, but its errors are swallowed so a lineage outage never fails the write. If the catalog
+   crashes (or its sidecar is down) **between the S3 write and the publish**, the data exists on storage but
+   **the lineage event is lost** — the graph under-reports that write. No corruption, but a provenance hole.
+   *Mitigation (shipped):* the **B4 storage→graph reconcile** back-fills exactly this loss mode — a Dapr-cron
+   sweep reads on-disk Lance versions and stamps any write the graph is missing (`/datasets/{name}/reconcile`
+   + `services.lineage.reconcile`). *Full fix:* a transactional outbox, or make the **Ray job the durable
+   producer** (it owns the write + the emit) — the documented direction ([`FLOW.md`](FLOW.md) §7, [`RASK-INTEGRATION.md`](RASK-INTEGRATION.md)).
 
 2. **No dead-letter queue; `maxDeliver=5`.** A genuinely poison message (always `RETRY`, not malformed)
    is dropped from the *consumer* after 5 deliveries (~8.5 min of backOff) with **no DLQ**. Limits

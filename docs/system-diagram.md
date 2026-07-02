@@ -1,5 +1,10 @@
 # Lance Namespace Catalog — Interactive System Diagram
 
+> ⚠️ **Point-in-time snapshot.** Some "planned / still open" markers below are stale — insert/delete +
+> compaction lineage emit, read-side lineage authz, the OpenBao/Dapr secret store, and credential vending
+> are all built + deployed now. Defer to [`ARCHITECTURE.md`](ARCHITECTURE.md), [`DEPLOY.md`](DEPLOY.md),
+> and [`COVERAGE.md`](COVERAGE.md) for authoritative current state.
+
 Companion to **[`system-diagram.html`](./system-diagram.html)** — a single-file, click-through
 diagram of the catalog. Open it in a browser:
 

@@ -955,7 +955,7 @@ Authorization: Bearer <workload-identity token>`, chips:["lance-ray job","worklo
 }`, chips:["role#assignee"] },
       { from:"ray", to:"store", color:"--c-vector", title:"Read bronze (version delta)", route:"read_lance",
         desc:"Read only the new bronze versions — Lance's version range <em>is</em> the change feed.",
-        payload:`read_lance("bronze$images", version=last..latest)`, chips:["CDF","add_columns_from"] },
+        payload:`read_lance("bronze$images", version=last..latest)`, chips:["CDF","add_columns"] },
       { from:"ray", to:"catalog", color:"--c-compute", title:"Create / insert silver", route:"POST merge_insert",
         desc:"Authorize write on silver, then commit the transformed (e.g. embedded) rows. Idempotency-Key makes a retried job safe.",
         payload:`POST /v1/table/alpha$silver$features/merge_insert

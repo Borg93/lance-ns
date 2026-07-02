@@ -196,13 +196,14 @@ class NoopEmitter:
         return None
 
 
-class HttpLineageEmitter:
-    """POSTs OpenLineage events to the lineage service, swallowing every failure."""
+class _BaseLineageEmitter:
+    """Shared emit logic; subclasses implement only the transport (``_send``).
 
-    def __init__(self, client: httpx.AsyncClient, url: str, *, job_namespace: str) -> None:
-        self._client = client
-        self._url = url
-        self._job_namespace = job_namespace
+    ``emit_create`` is ``emit_write`` with ``operation=create_table``; ``emit_write`` builds the standard
+    OpenLineage RunEvent (identical for every transport) and hands it to ``_send``. Both transports are
+    best-effort — ``_send`` swallows failures so a lineage outage never breaks a catalog write."""
+
+    _job_namespace: str
 
     async def emit_create(
         self,
@@ -251,29 +252,44 @@ class HttpLineageEmitter:
             job_namespace=self._job_namespace,
             source_uri=source_uri,
         )
-        # Forward the caller's bearer so ingest accepts the event when the lineage service has OIDC
-        # on (else the event 401s and is silently dropped). The lineage side then binds the author to
-        # this same verified principal.
+        await self._send(event, operation=operation, table_id=table_id, authorization=authorization)
+
+    async def _send(
+        self, event: dict[str, Any], *, operation: str, table_id: str, authorization: str | None
+    ) -> None:  # pragma: no cover — abstract
+        raise NotImplementedError
+
+
+class HttpLineageEmitter(_BaseLineageEmitter):
+    """POSTs OpenLineage events to the lineage service, swallowing every failure."""
+
+    def __init__(self, client: httpx.AsyncClient, url: str, *, job_namespace: str) -> None:
+        self._client = client
+        self._url = url
+        self._job_namespace = job_namespace
+
+    async def _send(
+        self, event: dict[str, Any], *, operation: str, table_id: str, authorization: str | None
+    ) -> None:
+        # Forward the caller's bearer so ingest accepts the event when the lineage service has OIDC on
+        # (else the event 401s and is silently dropped). Lineage binds the author to this verified principal.
         headers = {"Authorization": authorization} if authorization else None
         try:
             response = await self._client.post(self._url, json=event, headers=headers)
             response.raise_for_status()
         except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
             log.warning(
-                "lineage_emit_failed",
-                extra={"operation": operation, "table": table_id, "error": str(exc)},
+                "lineage_emit_failed", extra={"operation": operation, "table": table_id, "error": str(exc)}
             )
 
 
-class DaprEmitter:
+class DaprEmitter(_BaseLineageEmitter):
     """Publishes OpenLineage events to a **Dapr** ``pubsub.jetstream`` component.
 
     We publish to the local Dapr **sidecar** (``DaprClient.publish_event``); the sidecar persists to NATS
     JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation
-    as *component config*, so the
-    app holds no broker client (the decoupled microservice path — microservices.md). The topic is
-    versioned (``lineage.events.v1``). Publish stays best-effort: a sidecar/broker outage logs + drops
-    rather than failing the catalog write. ``authorization`` is unused — the pub/sub topic is an internal
+    as *component config*, so the app holds no broker client (the decoupled microservice path). The topic
+    is versioned (``lineage.events.v1``). ``authorization`` is unused — the pub/sub topic is an internal
     catalog-only channel, so the subscriber trusts the verified ``author`` the catalog stamped (the
     anti-forgery ``enforce_author`` guard is only for the open HTTP endpoint).
     """
@@ -284,51 +300,9 @@ class DaprEmitter:
         self._topic = topic
         self._job_namespace = job_namespace
 
-    async def emit_create(
-        self,
-        *,
-        table_id: str,
-        namespace: str,
-        author: str | None,
-        version: int,
-        run_id: str | None = None,
-        authorization: str | None = None,
-        source_uri: str | None = None,
+    async def _send(  # noqa: ARG002 — authorization unused on the trusted internal channel
+        self, event: dict[str, Any], *, operation: str, table_id: str, authorization: str | None
     ) -> None:
-        await self.emit_write(
-            table_id=table_id,
-            namespace=namespace,
-            author=author,
-            version=version,
-            operation=CREATE_TABLE,
-            run_id=run_id,
-            authorization=authorization,
-            source_uri=source_uri,
-        )
-
-    async def emit_write(  # noqa: ARG002 — authorization is unused on the trusted internal channel
-        self,
-        *,
-        table_id: str,
-        namespace: str,
-        author: str | None,
-        version: int | None,
-        operation: str,
-        run_id: str | None = None,
-        authorization: str | None = None,
-        source_uri: str | None = None,
-    ) -> None:
-        event = build_write_event(
-            table_id=table_id,
-            namespace=namespace,
-            author=author,
-            version=version,
-            operation=operation,
-            run_id=run_id or str(uuid.uuid4()),
-            event_time=datetime.now(UTC).isoformat(),
-            job_namespace=self._job_namespace,
-            source_uri=source_uri,
-        )
         try:
             await self._client.publish_event(
                 pubsub_name=self._pubsub,
@@ -338,8 +312,7 @@ class DaprEmitter:
             )
         except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
             log.warning(
-                "lineage_publish_failed",
-                extra={"operation": operation, "table": table_id, "error": str(exc)},
+                "lineage_publish_failed", extra={"operation": operation, "table": table_id, "error": str(exc)}
             )
 
 

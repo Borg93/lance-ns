@@ -123,7 +123,9 @@ dex:
   clientId: lance-catalog
   clientSecret: lance-catalog-secret
   staticUser: alice@example.com
-  staticPassword: password # bcrypt set in the dex template
+  # NOTE: the demo password is NOT set here — Dex needs a bcrypt HASH, which Helm can't compute at render.
+  # It's hardcoded in templates/dex.yaml (staticPasswords[].hash = bcrypt of "password"). To change it,
+  # regenerate the hash (e.g. `htpasswd -bnBC 10 "" <pw> | tr -d ':\n'`) and edit that template.
 
 # --- RustFS (first-party template) — S3 for the Lance lakehouse (the project's chosen store) --------
 rustfs:

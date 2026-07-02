@@ -184,18 +184,21 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 
 ## 6 · P2 — dead config / dead exports / orphans
 
-- ⛔ `values.yaml` **`dex.staticPassword` never read** — dex config hardcodes the bcrypt hash; changing the key
-  silently does nothing. `chart/values.yaml:105`
+- ✅ `values.yaml` **`dex.staticPassword` never read** — FIXED: removed the dead key; the comment now points
+  at the real bcrypt hash in `templates/dex.yaml` + how to regenerate it (Helm can't bcrypt at render).
 - ✅ `values.yaml` **`pubsub.route` never read** — FIXED with the §2 sweep: the dead key is removed; the
   pubsub comment now names where the routes actually live (app code) and the gateway block regex derives
   from the `lance.lineageSidecarOnlyRoutes` helper (§1), so there is no silently-diverging copy left.
-- ⛔ **Orphan scripts** — `scripts/seed_demo.sh` (its one mention, a config.py comment, misdescribes it) and
-  `scripts/medallion_reset.sh` (referenced nowhere). Wire into Makefile/docs or delete.
-- ⛔ **8 unused frontend type aliases** — DemoField, DemoVersion, ColumnRef, ColumnNode, ColumnEdge,
-  JobSummary, Jobs, Namespaces (`frontend/src/lib/types.ts:15-29`). Note: JobSummary/Jobs/Namespaces are
-  unused because **/jobs + /namespaces are not wired into the UI yet** — wire them into Browse (small win)
-  or drop the aliases.
-- ⛔ `RunEventEnvelope.is_failure` referenced only by tests. `services/lineage/models.py:281`
+- ✅ **Orphan scripts** — FIXED: `seed_demo.sh` was superseded by `governance_demo.py` (the docs-referenced
+  authz demo) and its only mention was a *wrong* config comment → deleted the script + corrected the comment
+  (the warehouse root is admin-bootstrapped, not seeded by that script). `medallion_reset.sh` is a current,
+  useful companion to `medallion_demo` (reads `.medallion-demo.env`, still produced) → wired into the
+  LINEAGE.md demo section, so it's discoverable, not orphan.
+- ✅ **8 "unused" frontend type aliases** — STALE (nothing to do): all 8 (DemoField/DemoVersion/ColumnRef/
+  ColumnNode/ColumnEdge/JobSummary/Jobs/Namespaces) are now used 3–8× — they got wired into the Browse /
+  jobs / column-graph UI in GOAL 3/4, *after* the audit. Verified by grep across `frontend/src`.
+- ✅ `RunEventEnvelope.is_failure` referenced only by tests — FIXED: dropped the unused property; its 2 test
+  assertions now check `event_type` directly (keeps the FAIL-parse coverage). `is_success` stays (used 3×).
 
 ## 7 · P1/P2 — test coverage holes (add these tests)
 

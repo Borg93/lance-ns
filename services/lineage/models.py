@@ -279,11 +279,6 @@ class RunEvent(BaseModel):
         return self.event_type.upper() == "COMPLETE"
 
     @property
-    def is_failure(self) -> bool:
-        """A terminal *failed* run (FAIL/ABORT) — recorded, but it produced no data."""
-        return self.event_type.upper() in {"FAIL", "ABORT"}
-
-    @property
     def operation(self) -> str | None:
         """The catalog operation (e.g. ``create_table``) from the ``lance`` run facet, if any.
 

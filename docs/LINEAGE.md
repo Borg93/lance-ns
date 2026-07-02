@@ -325,6 +325,9 @@ S3_ENDPOINT=http://localhost:9100 LINEAGE_URL=http://localhost:8001 \
   uv run scripts/medallion_demo.py --step 3         # embed -> silver v1
   uv run scripts/medallion_demo.py --step 4         # caption -> silver v2 (in place)
   uv run scripts/medallion_demo.py --step 5         # aggregate -> gold (+lineage JSONB)
+
+# reset to a clean slate to re-run from empty (wipes the Lance tables + AGE graph + events feed):
+./scripts/medallion_reset.sh
 ```
 
 `--emit-only` skips the Lance write and just emits the OpenLineage event (pure producer

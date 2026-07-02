@@ -143,7 +143,7 @@ def test_emitter_output_parses_in_service_model() -> None:
     assert events[0].author == "alice"  # custom AuthorRunFacet read through
     assert events[0].outputs[0].name == "bronze$events"
     # events[1] is the FAILED embed attempt, events[2] the successful retry.
-    assert events[1].author == "data_eng" and events[1].is_failure
+    assert events[1].author == "data_eng" and events[1].event_type.upper() == "FAIL"
     assert events[2].author == "data_eng" and events[2].is_success
 
 
@@ -164,7 +164,7 @@ def test_failed_run_exposes_producer_error_and_standard_dataset_facets() -> None
     from lineage.seed import events_as_dicts
 
     failed = RunEvent.model_validate(events_as_dicts()[1])
-    assert failed.is_failure and not failed.is_success
+    assert failed.event_type.upper() == "FAIL" and not failed.is_success
     assert failed.producer and failed.producer.startswith("https://")
     assert failed.error_message and "OOM" in failed.error_message
     out = failed.outputs[0]

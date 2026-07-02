@@ -27,7 +27,7 @@ into `.localbin/` (gitignored).
 | **web** | app (SvelteKit) | the UI (datasets / jobs / columns DAG) |
 | **medallion** | 4 apps + sidecars | event-driven pipeline: `lance-ray` producer + raw→bronze→silver→gold movers (see [MEDALLION.md](MEDALLION.md)) |
 | **compaction** | app + sidecar | compaction/GC service triggered by a Dapr **cron binding** (`bindings.cron`) — compacts Lance fragments + GCs old versions |
-| **gateway** | nginx + sidecar | single entry point — clean-URL edge that routes app traffic via **Dapr service invocation** (`/v1.0/invoke/...`); `/`→web, `/lineage/`,`/catalog/`,`/produce`,`/perses/`,`/greptime/` |
+| **gateway** | nginx + sidecar | single entry point — clean-URL edge that routes app traffic via **Dapr service invocation** (`/v1.0/invoke/...`); `/`→web, `/lineage/`,`/catalog/`,`/produce` (values-gated: `medallion.producer.expose`, off in prod — it's the unauthenticated demo entry),`/perses/`,`/greptime/`. Dapr-delivered routes (lineage ingest + the reconcile cron binding) are **403-blocked** from one source (`lance.lineageSidecarOnlyRoutes`) — the sidecar is their only legitimate caller |
 | **Dapr** | subchart | control plane + sidecar injection + pub/sub + secret-store + tracing config |
 | **NATS** | subchart | JetStream — the durable event bus behind Dapr pub/sub |
 | **Apache AGE Postgres** | StatefulSet | the lineage graph (`lineage`) **and** OpenFGA's datastore (`openfga` db) |

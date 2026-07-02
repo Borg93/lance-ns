@@ -1,6 +1,10 @@
 {{- if .Values.observability.enabled }}
+{{- if not .Values.externalSecrets.enabled }}
 # GreptimeDB object-storage credentials — the greptimedb-standalone subchart reads these env-var keys
 # from `credentials.existingSecretName`. Points GreptimeDB at the in-cluster RustFS S3 (same keys).
+# Skipped when externalSecrets.enabled: the external-secrets operator then OWNS this same-named Secret,
+# syncing the RustFS root secret FROM Vault (templates/external-secrets.yaml) — same two-tier rule as
+# infra-credentials, so the "0 plaintext secrets on the prod-secure path" guarantee holds here too.
 apiVersion: v1
 kind: Secret
 metadata:
@@ -10,6 +14,7 @@ type: Opaque
 stringData:
   GREPTIMEDB_STANDALONE__STORAGE__ACCESS_KEY_ID: {{ .Values.rustfs.accessKey | quote }}
   GREPTIMEDB_STANDALONE__STORAGE__SECRET_ACCESS_KEY: {{ .Values.rustfs.secretKey | quote }}
+{{- end }}
 ---
 {{- if .Values.dapr.enabled }}
 # Dapr tracing Configuration — sidecars annotated with dapr.io/config: lance-tracing. There is NO otel

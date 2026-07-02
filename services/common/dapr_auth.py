@@ -16,17 +16,21 @@ default (documented); set it in any deployment that must be trusted.
 from __future__ import annotations
 
 import os
+import secrets
+from typing import Annotated
 
 from fastapi import Header, HTTPException
 
 
-def require_dapr_token(dapr_api_token: str | None = Header(default=None)) -> None:
+def require_dapr_token(dapr_api_token: Annotated[str | None, Header()] = None) -> None:
     """FastAPI dependency: reject a sidecar-delivered request whose ``dapr-api-token`` header doesn't
     match the app's ``APP_API_TOKEN`` (set by Dapr from ``dapr.io/app-token-secret``). No-op when the
     token is unset — the open dev default; ``assert_app_token_configured`` makes that a startup error
     once Dapr ingest is actually enabled, so the no-op can only apply in dev."""
     expected = os.environ.get("APP_API_TOKEN")
-    if expected and dapr_api_token != expected:
+    # compare_digest: the token is the only guard on these routes, so no timing side-channel; bytes
+    # (not str) so a non-ASCII header value is a clean 403, never a TypeError.
+    if expected and not secrets.compare_digest((dapr_api_token or "").encode(), expected.encode()):
         raise HTTPException(status_code=403, detail="invalid or missing Dapr app-api-token")
 
 

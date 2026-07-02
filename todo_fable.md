@@ -9,41 +9,37 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 
 ---
 
-## 1 · P0 — security / correctness holes
+## 1 · P0 — security / correctness holes — ✅ ALL FIXED (2026-07-02)
 
-- ⛔ **Reconcile cron route reachable unauthenticated through the gateway** — the gateway 403-blocks only
-  `/lineage/lineage-events`; the `/lineage/` proxy rides Dapr service invocation which stamps the same
-  `dapr-api-token` header `require_dapr_token` trusts, so an external caller can trigger graph-mutating
-  back-fills. Found independently by 3 agents. Fix: gateway block for the reconcile route (and any future
-  Dapr-delivered route — make the block list derive from one source). `chart/templates/gateway.yaml:49-50`
-- ⛔ **Reconcile route mount vs token-assert flag decoupling** — the cron route mounts on
-  `reconcile_binding_name` but the fail-closed boot assert only checks `dapr_enabled`; the flags can diverge,
-  leaving the route mounted with no token verification. Tie the assert to “any sidecar-delivered route mounts”.
-  `services/lineage/main.py:177`
-- ⛔ **`observability-s3` Secret always ships the plaintext RustFS root secret** — not gated by
-  `externalSecrets`, so the “0 plaintext secrets on the prod-secure path” guarantee is defeated.
-  `chart/templates/observability.yaml:12`
-- ⛔ **`values-prod.yaml` ships a known-constant app-token placeholder** (`REPLACE-ME-with-a-real-secret`) and
-  nothing fails render/boot if the operator forgets to override — the forgery guard on every sidecar-delivered
-  route would rest on a public string. Add a `fail`-template guard. `chart/values-prod.yaml:57`
-- ⛔ **`values-prod.yaml` ships dev credentials if applied literally** — flips `openbao.devMode=false` but
-  neither enables externalSecrets nor overrides `age.password`/`rustfs.secretKey` (`lance`/`rustfsadmin` land
-  in infra + observability Secrets). Guard or document hard. `chart/values-prod.yaml:52`
-- ⛔ **Demo data-peek router force-enabled with no auth and no off-switch** — `LINEAGE_DEMO_DATA_ENABLED`
-  hardcoded `"true"` in every deployment; endpoints carry no OIDC/FGA guard → unauthenticated metadata
-  disclosure bypassing the governance layer. Make it a values toggle, off in prod. `chart/templates/services.yaml:178`
-- ⛔ **`/produce` exposed unauthenticated through the gateway** — an external caller can trigger cascades and
-  inject forged medallion provenance (sidesteps `enforce_author`, which only guards HTTP ingest).
-  `chart/templates/gateway.yaml:52`
-- ⛔ **`authorize` tier-downgrade via path truncation** — the catalog guard derives the action tier from
-  `request.url.path`, which Starlette truncates at decoded `#`/`?`, collapsing owner-tier ops
-  (drop/deregister) to the writer-tier `can_write_data` check for exotically-named tables.
-  `services/catalog/api/fga_deps.py:234`
-- ⛔ **`require_dapr_token` uses `!=`** — timing side-channel on the only guard of the sidecar-delivered
-  routes; switch to `secrets.compare_digest` (+ modern Annotated Header form). `services/common/dapr_auth.py:29`
-- ⛔ **Vault secret-store component sets `skipVerify: "true"` unconditionally** — the wired
-  `openbao.externalAddr` prod path (external HTTPS Vault) gets zero TLS verification for the component that
-  fronts every app secret. Make it conditional. `chart/templates/dapr-component.yaml:70`
+- ✅ **Reconcile cron route reachable unauthenticated through the gateway** — FIXED: the gateway 403 block
+  now renders from ONE source, the `lance.lineageSidecarOnlyRoutes` helper (`_helpers.tpl`) — an nginx regex
+  alternation covering `/lineage-events` + the reconcile binding name; add any future Dapr-delivered lineage
+  route there, not in `gateway.yaml`.
+- ✅ **Reconcile route mount vs token-assert flag decoupling** — FIXED: `services/lineage/main.py` asserts
+  `dapr_enabled OR reconcile_binding_name` — any sidecar-delivered mount without `APP_API_TOKEN` refuses to
+  boot. Pinned by `tests/unit/test_dapr_auth.py::test_lineage_boot_fails_when_only_the_reconcile_route_mounts`.
+- ✅ **`observability-s3` Secret always ships the plaintext RustFS root secret** — FIXED: static Secret now
+  skipped when `externalSecrets.enabled`; a second ExternalSecret in `external-secrets.yaml` owns the
+  same-named Secret (secret key from Vault, access-key id templated — it isn't sensitive).
+- ✅ **`values-prod.yaml` ships a known-constant app-token placeholder** — FIXED: `dapr-app-token.yaml`
+  `fail`s the render on the placeholder value; verified the guard fires independently of the others.
+- ✅ **`values-prod.yaml` ships dev credentials if applied literally** — FIXED: `infra-credentials.yaml`
+  `fail`s the render when `openbao.devMode=false` (the prod signal) + dev-default `age.password` /
+  `rustfs.secretKey` + no externalSecrets; values-prod documents the guards. Verified each fires.
+- ✅ **Demo data-peek router force-enabled with no auth and no off-switch** — FIXED: values toggle
+  `services.lineage.demoData` (dev default true), `false` in values-prod → the router never mounts.
+- ✅ **`/produce` exposed unauthenticated through the gateway** — FIXED: gateway location gated on new
+  `medallion.producer.expose` (dev demo true; values-prod false — the prod head fires only via `/raw-arrival`).
+- ✅ **`authorize` tier-downgrade via path truncation** — FIXED: `authorize` reads `request.scope["path"]`
+  (what routing matched) instead of `request.url.path` (re-parses and truncates at decoded `#`/`?` —
+  repro'd on the installed Starlette before fixing). Pinned by
+  `tests/integration/test_authz.py::test_hash_or_question_in_id_cannot_downgrade_the_owner_tier`.
+- ✅ **`require_dapr_token` uses `!=`** — FIXED: `secrets.compare_digest` over BYTES (a non-ASCII header is
+  a clean 403, not a TypeError) + Annotated Header form. `tests/unit/test_dapr_auth.py` now covers the whole
+  module (was zero tests — also closes that §7 row).
+- ✅ **Vault secret-store component sets `skipVerify: "true"` unconditionally** — FIXED: `skipVerify` now
+  tracks the Vault address scheme — `false` for an https Vault (the `openbao.externalAddr` prod path),
+  `true` only for the plain-http in-cluster dev OpenBao. Render-verified both ways.
 
 ## 2 · P1 — Dapr / bus correctness (before scaling any subscriber past 1 replica)
 
@@ -199,8 +195,9 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 
 ## 7 · P1/P2 — test coverage holes (add these tests)
 
-- ⛔ **`common/dapr_auth.py` — ZERO tests at any tier** for `require_dapr_token` + `assert_app_token_configured`
-  (the forged-CloudEvent guard whose docstring calls the unauthenticated path a prod-blocker). `services/common/dapr_auth.py:24`
+- ✅ **`common/dapr_auth.py` — ZERO tests at any tier** — FIXED with the §1 sweep: `tests/unit/test_dapr_auth.py`
+  covers `require_dapr_token` (open default, match, mismatch/missing/non-ASCII 403) + `assert_app_token_configured`
+  (fail-closed, blank token, no-ops) + the lineage reconcile-mount coupling.
 - ⛔ **AGE-backed e2e not in CI** — CI runs `-m "not e2e"`; no job/Make target spins the AGE Postgres (the auth
   e2e DID get a docker-compose CI job — mirror it). `.github/workflows/ci.yml:39`
 - ⛔ **/events Postgres surface never executes against a real DB** — record_event INSERT+prune, list_events

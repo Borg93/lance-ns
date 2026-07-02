@@ -3,6 +3,9 @@
 # injected by Dapr, and Dapr stamps a `dapr-api-token` header on every request it delivers to the app.
 # The subscriber routes (/lineage-events, /medallion-event, the compaction cron route) verify it
 # (common.dapr_auth.require_dapr_token) so a forged POST that didn't come through the sidecar is 403'd.
+{{- if eq .Values.dapr.appToken "REPLACE-ME-with-a-real-secret" }}
+{{- fail "dapr.appToken is still the values-prod placeholder — it authenticates EVERY sidecar-delivered route (lineage ingest, medallion triggers, the cron sweeps), so a known-constant value makes them forgeable. Set a real secret (--set dapr.appToken=... from your secret manager)." }}
+{{- end }}
 apiVersion: v1
 kind: Secret
 metadata:

@@ -22,6 +22,8 @@ auth:
 medallion:
   fgaEnabled: true
   moverReplicas: 2
+  producer:
+    expose: false # /produce is the unauthenticated demo entry — the prod head fires from real raw writes
 
 # --- HA (P3): multi-replica stateless services + a PodDisruptionBudget. Stateful HA (AGE/RustFS) is the
 # operators' job in rask (CNPG / rustfs-operator), not here. Optionally also set autoscaling.enabled. -----
@@ -30,6 +32,7 @@ services:
     replicas: 2
   lineage:
     replicas: 2
+    demoData: false # the /demo data-peek router carries no OIDC/FGA guard — never mount it in prod
 gateway:
   replicas: 2
 web:
@@ -48,11 +51,16 @@ backups:
     enabled: true
     snapshotClassName: "" # set your cluster's CSI VolumeSnapshotClass
 
-# --- Secrets: the SEALED, file-backed OpenBao (no fixed root token; an operator must init + unseal) -
+# --- Secrets: the SEALED, file-backed OpenBao (no fixed root token; an operator must init + unseal).
+# NOTE devMode=false is the prod signal: the render now FAILS unless age.password + rustfs.secretKey are
+# overridden (or externalSecrets.enabled hands the Secrets to the external-secrets operator) — the
+# well-known dev credentials must not reach a prod cluster (infra-credentials.yaml guard). -----------
 openbao:
   devMode: false
 
-# --- Dapr: the app-API token is the auth secret for the sidecar-delivered routes — MUST be overridden
+# --- Dapr: the app-API token is the auth secret for the sidecar-delivered routes — MUST be overridden.
+# The placeholder below FAILS the render on purpose (dapr-app-token.yaml guard): pass a real value with
+# --set dapr.appToken=... (or your values pipeline) — never commit it to this file.
 dapr:
   appToken: "REPLACE-ME-with-a-real-secret" # source from OpenBao / an external secret, not this file
   dashboard:

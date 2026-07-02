@@ -164,6 +164,25 @@ def test_drop_namespace_requires_owner_on_namespace_object(client: TestClient, m
     assert captured[-1] == {"user": "alice", "relation": "can_delete", "obj": "namespace:db1"}
 
 
+def test_hash_or_question_in_id_cannot_downgrade_the_owner_tier(client: TestClient, monkeypatch) -> None:
+    """CONTRACT: the action tier derives from the RAW ASGI path — an id containing an encoded
+    ``#``/``?`` (decoded into ``scope['path']``) must not truncate the route suffix and collapse an
+    owner-tier op (drop/deregister) to the generic ``can_write_data`` check. ``request.url.path``
+    re-parses the decoded path as a URL string and DOES truncate there (the audit's tier-downgrade
+    hole), which is why ``authorize`` reads the scope path."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.post("/v1/table/db1$us%23ers/drop", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_drop", "obj": "table:db1$us#ers"}
+
+    resp = client.post("/v1/table/db1$us%3Fers/deregister", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_deregister", "obj": "table:db1$us?ers"}
+
+
 # --------------------------------------------------------------------------- #
 # Create-on-parent: authorize the parent, then seed owner + parent tuples.
 # --------------------------------------------------------------------------- #

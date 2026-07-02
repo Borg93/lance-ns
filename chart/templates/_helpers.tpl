@@ -52,6 +52,19 @@ the external Vault WITHOUT falling back to plaintext secrets in pod env (the clo
 {{- if or .Values.openbao.enabled .Values.openbao.externalAddr -}}true{{- end -}}
 {{- end -}}
 
+{{/* Sidecar-only lineage routes: Dapr-delivered (pub/sub ingest + the cron reconcile binding), auth'd by
+the app-api-token the sidecar stamps — they must NEVER be reachable through the public edge, which would
+otherwise proxy them via the gateway's own sidecar (stamping that same trusted token). ONE source for the
+gateway's 403 blocks — add any new Dapr-delivered lineage route here, not in gateway.yaml. Rendered as an
+nginx regex alternation; `lineage-events` matches the app's subscription route (lineage/api/dapr.py). The
+reconcile binding is blocked even when reconcile is disabled (the route isn't mounted then — belt and
+suspenders). On the kgateway/Envoy migration these become "no HTTPRoute declared" (allow-list by
+construction) — the service-side token check is the load-bearing guard either way. */}}
+{{- define "lance.lineageSidecarOnlyRoutes" -}}
+{{- /* `with` skips a blank binding name — a bare `|` alternation would match the empty string and 403 the whole /lineage/ API. */ -}}
+lineage-events{{ with .Values.services.lineage.reconcile.bindingName }}|{{ . }}{{ end }}
+{{- end -}}
+
 {{/* OTel SDK env for an app (call: include "lance.otelEnv" (list $root "<service.name>")). The apps run
 under `opentelemetry-instrument` and export all three signals OTLP-direct to GreptimeDB — no Collector
 (mirrors rask). The SDK appends /v1/{traces,metrics,logs} to the /v1/otlp base. GreptimeDB needs the

@@ -175,7 +175,8 @@ spec:
             - { name: LINEAGE_DAPR_ENABLED, value: "true" }
             - { name: LINEAGE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
             - { name: LINEAGE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
-            - { name: LINEAGE_DEMO_DATA_ENABLED, value: "true" }
+            # Demo peek router — values-gated (unauthenticated metadata disclosure; prod ships it off).
+            - { name: LINEAGE_DEMO_DATA_ENABLED, value: {{ .Values.services.lineage.demoData | quote }} }
             {{- if .Values.services.lineage.reconcile.enabled }}
             # Mounts the cron reconcile route at this binding name (matches the bindings.cron component above).
             - { name: LINEAGE_RECONCILE_BINDING_NAME, value: {{ .Values.services.lineage.reconcile.bindingName | quote }} }

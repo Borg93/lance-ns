@@ -37,6 +37,11 @@ ignored, so the head can't self-trigger. `raw→bronze` subscribes to `medallion
 then *triggers* the `raw→bronze` mover, which produces bronze. Because the head is now a subscriber like
 every other stage, the pipeline is event-driven end to end — nothing polls or waits on a timer (GOAL 4 B2).
 
+> **`/produce` is the demo entry point, not a prod surface.** It carries no auth (it sidesteps
+> `enforce_author` — an external caller could trigger cascades and forge medallion provenance), so its
+> gateway route is values-gated: `medallion.producer.expose` (on for the dev demo, **off in
+> `values-prod.yaml`**). In prod the head fires only from real raw-namespace writes via `/raw-arrival`.
+
 ### Does the cascade produce real data, or just lineage?
 
 Both modes, by a flag (`MEDALLION_COMPUTE_ENABLED`, chart toggle `medallion.compute`, **off by default**).

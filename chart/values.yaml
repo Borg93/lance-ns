@@ -278,6 +278,10 @@ services:
     port: 8000
     daprAppId: lineage
     replicas: 1 # Dapr load-balances event delivery across replicas; ingest is idempotent (MERGE on run_id)
+    # Demo data-peek router (/demo/*: live Lance schema/versions/rows for the UI) — DEMO ONLY: the
+    # endpoints carry no OIDC/FGA guard, so they'd disclose dataset metadata past the governance layer.
+    # values-prod sets it false (the router is then never mounted).
+    demoData: true
     # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<bindingName> on `schedule`
     # to back-fill Lance writes whose lineage event was lost (the outbox gap). Off by default (the demo ships
     # without it); the /datasets/{name}/reconcile read endpoint is available regardless.
@@ -345,6 +349,10 @@ medallion:
   qualityKeyColumn: id
   producer:
     daprAppId: lance-ray
+    # Expose POST /produce through the gateway (the DEMO entry point for the cascade). It carries no
+    # auth — an external caller could trigger cascades / forge medallion provenance — so values-prod
+    # sets it false; the head then fires only from real raw-namespace writes via /raw-arrival.
+    expose: true
     rawDataset: raw_events
     rawNamespace: raw
     operation: lance_ray_ingest

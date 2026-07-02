@@ -67,7 +67,10 @@ spec:
     # Dapr defaults vaultKVPrefix to "dapr", so it reads secret/data/dapr/<key>; our seed writes
     # secret/data/<key>. Drop the prefix so the path is the natural secret/data/<key> (the kv-v2 nuance).
     - { name: vaultKVUsePrefix, value: "false" }
-    - { name: skipVerify, value: "true" }
+    # TLS verification tracks the Vault address scheme: an https Vault (the openbao.externalAddr prod
+    # path) is verified; skipVerify only for the plain-http in-cluster dev OpenBao (no TLS to verify).
+    # An unconditional "true" would leave the component fronting EVERY app secret unverified in prod.
+    - { name: skipVerify, value: {{ ternary "false" "true" (hasPrefix "https://" (include "lance.vaultAddr" .)) | quote }} }
 scopes:
   - {{ .Values.services.catalog.daprAppId }}
   - {{ .Values.services.lineage.daprAppId }}

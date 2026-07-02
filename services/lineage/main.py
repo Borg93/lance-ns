@@ -40,9 +40,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # shutting_down, so k8s pulls the pod from rotation during boot and graceful drain.
     app.state.startup_complete = False
     app.state.shutting_down = False
-    # Fail closed if Dapr ingest is on but the app-api-token is unset — the ingest route would otherwise be
-    # an unauthenticated forgery path (the audit's 'blanked token' residual). No-op in dev (Dapr off).
-    assert_app_token_configured(dapr_enabled=settings.dapr_enabled)
+    # Fail closed if ANY sidecar-delivered route mounts — the pub/sub ingest (dapr_enabled) OR the cron
+    # reconcile binding — but the app-api-token is unset: either route would otherwise be an
+    # unauthenticated forgery/graph-mutation path (the audit's 'blanked token' residual + its
+    # reconcile-route follow-up: the two flags can diverge, so the assert must cover both mounts).
+    # No-op in dev (both off).
+    assert_app_token_configured(dapr_enabled=settings.dapr_enabled or bool(settings.reconcile_binding_name))
     # Consume the S3 secret + AGE DB password from the Dapr secret store (OpenBao) before opening the pool,
     # so neither lives in plaintext pod env — the audit's secret-consumption fix, symmetric with the
     # catalog. No-op (and no Dapr dependency) when secrets_from_dapr is off; fails closed on the S3 secret.

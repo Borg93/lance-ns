@@ -263,6 +263,13 @@ pointed here with `OPENLINEAGE_URL` ingests with no glue.
 
 > ✅ The query + ingest endpoints are **gated in-service** (default OFF; enable in prod) — see
 > [Read-side authz](#read-side-authz-implemented--in-service-default-off).
+>
+> The two **Dapr-delivered** routes (`/lineage-events` pub/sub ingest + the cron reconcile binding) are
+> sidecar-only: they verify the Dapr app-api-token (constant-time), the gateway 403-blocks both from one
+> source (`lance.lineageSidecarOnlyRoutes` in `_helpers.tpl`), and the service **refuses to boot** if either
+> route would mount without the token — the pub/sub and reconcile flags are asserted together, so they
+> can't diverge into an open graph-mutating route. The `/demo` data-peek router (no OIDC/FGA guard) is
+> values-gated (`services.lineage.demoData`) and off in `values-prod.yaml`.
 
 ## Mock medallion data (a real OpenLineage producer)
 

@@ -42,13 +42,18 @@ data:
         # so the gateway→service hop rides Dapr (mTLS + retries + distributed tracing), not a raw nginx
         # upstream. This is the "Dapr-native gateway": nginx is just the clean-URL north-south edge.
         location /catalog/  { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.services.catalog.daprAppId }}/method/; }
-        # Dapr-delivered ingest routes are sidecar-only — never expose them through the public edge
-        # (defense-in-depth on top of the app-api-token). A REGEX prefix (case-insensitive) — not an
-        # exact-match — so trailing-slash (/lineage-events/), sub-path, and ..-normalization variants
-        # can't fall through to the /lineage/ proxy. nginx evaluates regex locations before prefixes.
-        location ~* ^/lineage/lineage-events { return 403; }
+        # Dapr-delivered routes (pub/sub ingest + the cron reconcile binding) are sidecar-only — never
+        # expose them through the public edge (defense-in-depth on top of the app-api-token). The block
+        # list is the lance.lineageSidecarOnlyRoutes helper (ONE source — add new Dapr routes there). A
+        # REGEX prefix (case-insensitive) — not an exact-match — so trailing-slash (/lineage-events/),
+        # sub-path, and ..-normalization variants can't fall through to the /lineage/ proxy. nginx
+        # evaluates regex locations before prefixes.
+        location ~* ^/lineage/({{ include "lance.lineageSidecarOnlyRoutes" . }}) { return 403; }
         location /lineage/  { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.services.lineage.daprAppId }}/method/; }
-        {{- if .Values.medallion.enabled }}
+        {{- if and .Values.medallion.enabled .Values.medallion.producer.expose }}
+        # The dummy raw-writer demo entry point — carries NO auth (it sidesteps enforce_author), so it is
+        # values-gated: producer.expose=true is the DEV demo; values-prod flips it off (an external caller
+        # could otherwise trigger cascades + inject forged medallion provenance).
         location /produce   { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.medallion.producer.daprAppId }}/method/produce; }
         {{- end }}
         {{- if .Values.observability.enabled }}

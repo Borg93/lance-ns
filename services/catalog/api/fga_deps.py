@@ -231,7 +231,10 @@ async def authorize(request: Request, settings: SettingsDep, token: CurrentToken
     if token is None:
         raise UnauthenticatedError("authentication required")
 
-    path = request.url.path
+    # The raw ASGI path (what routing actually matched) — NOT request.url.path, which re-parses the
+    # decoded path as a URL string and truncates at a decoded '#'/'?' inside an id, collapsing
+    # owner-tier suffixes (drop/deregister) to the generic writer tier for exotically-named tables.
+    path: str = request.scope["path"]
     object_id = request.path_params.get("id")
 
     # Body-keyed batch routes have no {id} path param — authorize by reading the body.

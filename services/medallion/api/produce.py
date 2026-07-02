@@ -11,7 +11,7 @@ from medallion.services.produce import produce as run_produce
 router = APIRouter(tags=["produce"])
 
 
-@router.post("/produce", status_code=202)
+@router.post("/produce", status_code=202, response_model=None)  # union with JSONResponse → no auto model
 async def produce(dapr: DaprClientDep, settings: SettingsDep) -> dict[str, str] | JSONResponse:
     """Ingest (dummy) the raw dataset and emit its write event — the event-driven cascade head.
 

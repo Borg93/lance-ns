@@ -117,6 +117,19 @@ def test_terminal_mover_emits_lineage_but_no_next_trigger() -> None:
     assert len(dapr.calls) == 1 and dapr.calls[0]["topic"] == "lineage.events.v1"
 
 
+def test_medallion_apps_build_their_openapi() -> None:
+    """Regression: the FastAPI apps must construct AND build their OpenAPI schema.
+
+    A route whose return annotation isn't a valid Pydantic response model (e.g. ``dict | JSONResponse``)
+    passes every service-level test but crashes the app at startup/`openapi()` — this pins that the
+    producer + mover apps actually stand up. (Caught live when /produce's RFC-9457 union broke lance-ray.)"""
+    import medallion.mover as mover_app
+    import medallion.producer as producer_app
+
+    assert producer_app.app.openapi()["openapi"]  # the crash path — must not raise
+    assert mover_app.app.openapi()["openapi"]
+
+
 def test_mover_retries_on_publish_failure() -> None:
     status = asyncio.run(
         mover.handle_stage(cast(Any, _FakeDapr(fail=True)), _BRONZE_TO_SILVER, {"data": {"token": "t"}})
@@ -227,7 +240,9 @@ def test_mover_denied_when_not_authorized(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setattr(mover.fga, "check", _deny)
     dapr = _FakeDapr()
     status = asyncio.run(
-        mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=object())
+        mover.handle_stage(
+            cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=cast(Any, object())
+        )
     )
     assert status == {"status": "DROP"}
     assert dapr.calls == []  # not authorized → no lineage emitted, no next stage triggered
@@ -237,7 +252,9 @@ def test_mover_allowed_when_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mover.fga, "check", _allow)
     dapr = _FakeDapr()
     status = asyncio.run(
-        mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=object())
+        mover.handle_stage(
+            cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=cast(Any, object())
+        )
     )
     assert status == {"status": "SUCCESS"}
     assert len(dapr.calls) == 2  # authorized → lineage + next trigger
@@ -254,7 +271,9 @@ def test_mover_retries_on_fga_outage(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mover.fga, "check", _outage)
     dapr = _FakeDapr()
     status = asyncio.run(
-        mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=object())
+        mover.handle_stage(
+            cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=cast(Any, object())
+        )
     )
     assert status == {"status": "RETRY"}
     assert dapr.calls == []  # nothing emitted while authz is unanswerable

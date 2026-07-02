@@ -249,9 +249,30 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 
 ## 9 · Feature gaps — ephemeral multimodal lakehouse (→ rask merge)
 
-- ⛔ **P1 Multimodal data plane** — catalog is tabular Arrow-IPC only: no blob-column handling, no binary/image
-  endpoints, no streaming reads. Lance supports blob encoding + vector/FTS; rask brings HTR/embedding
-  patterns. Needed: blob read/write surface + size-bounded streaming on the data plane.
+- ⛔ **P0 Multimodal (blob_v2) — MULTIMODAL FIRST.** The format + our pinned pylance>=7.0.0 fully support it
+  (`lance/blob.py` BlobColumn, inline-when-small / pointer-when-large, ranged reads; verified in the installed
+  package + lance_docs/{guide,file_format,ray}.md) and the direct write path (vended creds → RustFS) is open —
+  but lance-ns has NEVER exercised a blob column. Dapr is uninvolved by design (events carry pointers, never
+  data). Concrete work:
+  - ⛔ P0 e2e proof: a blob column round-trips through OUR stack — write via vended creds → catalog registers →
+    lineage captures schema/columnLineage → reconcile reads the version → ranged read back. No test exists.
+  - ⛔ P0 guard the tabular path: the Arrow-IPC insert/query endpoints are wrong for blobs (2GB video over
+    HTTP POST) — add a size guard + clear 4xx steering clients to the vending/direct path; document the rule.
+  - ⛔ P1 serving path for credential-less consumers (frontend/browser): catalog endpoint doing a ranged blob
+    read or presigned URL from a blob column — does not exist.
+  - ⛔ P1 blob-pointer lifecycle: compaction/GC + reconcile must understand pointer columns referencing objects
+    OUTSIDE the dataset dir (never GC them as orphans; flag dangling pointers after a bucket wipe).
+  - ⛔ P2 quality gate blob assertion: "the blob pointer resolves" check alongside row_count/not_null.
+  - ⛔ P2 per-project schema declaration (embeddings/classification/summarization columns are KNOWN per project):
+    register expected columns so the quality gate asserts they landed, FGA pre-registers column masking, and
+    reconcile flags undeclared writes — a governance contract, not a Dapr one. Lance itself needs no up-front
+    schema (add_columns evolves it; per-version schemas already ride the WROTE edge).
+  - ⛔ P1 enforce the claim-check invariant: events carry POINTERS (dataset/version/URI), never data — add a
+    payload-size guard at every publish site + a doc'd rule "no base64/embeddings/data-shaped content in
+    facets" (NATS default max message ~1MB; events must stay small JSON regardless of what the rows hold).
+  - ⛔ P2 facet metadata bloat cap: a table with thousands of columns makes the schema/columnLineage facets
+    themselves large (metadata bloat, not data bloat) — cap/truncate with a count + pointer to /schema instead
+    of inlining every field, before rask-scale tables hit the message-size ceiling.
 - ⛔ **P1 Ephemerality** — RustFS is `emptyDir` in this chart (pod roll wipes the lakehouse); at merge switch to
   rask’s RustFS-operator Tenant + CNPG-backed AGE. Prove “helm install from zero” fully reproducible
   (FGA seeds, OpenBao seeding, dex clients are still script-manual); backups exist but gated off.

@@ -1,7 +1,7 @@
 """Operational health endpoints (``/livez``, ``/readyz``) shared by both medallion apps.
 
 Cheap liveness/readiness probes — no dependency calls (a Dapr/broker blip must not pull the pod; the
-sidecar owns publish retry/DLQ). Mounted without an API-version prefix on the mover and the producer.
+sidecar owns publish retry; no DLQ). Mounted without an API-version prefix on the mover and the producer.
 """
 
 from __future__ import annotations

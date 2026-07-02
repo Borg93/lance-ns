@@ -223,3 +223,20 @@ def test_mover_allowed_when_authorized(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert status == {"status": "SUCCESS"}
     assert len(dapr.calls) == 2  # authorized → lineage + next trigger
+
+
+def test_mover_retries_on_fga_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An FGA OUTAGE (fail-closed 503 from fga.check) is transient — unlike a denial: the mover must
+    # return the explicit RETRY contract so the sidecar redelivers, and publish NOTHING meanwhile.
+    from lance_namespace import ServiceUnavailableError
+
+    async def _outage(*_a: Any, **_k: Any) -> bool:
+        raise ServiceUnavailableError("openfga unreachable")
+
+    monkeypatch.setattr(mover.fga, "check", _outage)
+    dapr = _FakeDapr()
+    status = asyncio.run(
+        mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}, fga_client=object())
+    )
+    assert status == {"status": "RETRY"}
+    assert dapr.calls == []  # nothing emitted while authz is unanswerable

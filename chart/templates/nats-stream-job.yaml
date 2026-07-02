@@ -1,7 +1,9 @@
-{{- if .Values.nats.enabled }}
+{{- if or .Values.nats.enabled .Values.nats.externalUrl }}
 # Create the JetStream LINEAGE stream (subjects lineage.events.>) that the Dapr pubsub.jetstream
 # component publishes to / consumes from. Dapr's jetstream component does NOT auto-create the stream,
-# so this post-install Job does it (idempotent: skip if it already exists).
+# so this post-install Job does it (idempotent: skip if it already exists). Also runs against an
+# EXTERNAL NATS (nats.externalUrl + nats.enabled=false) — the component would otherwise point at a
+# server with no streams and every publish would fail.
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -22,10 +24,12 @@ spec:
             - sh
             - -c
             - |
-              S="nats://{{ include "lance.natsHost" . }}:4222"
+              S="{{ include "lance.natsUrl" . }}"
               until nats --server "$S" stream ls >/dev/null 2>&1; do echo wait-nats; sleep 3; done
               # LINEAGE carries OpenLineage events; MEDALLION carries the stage triggers that cascade the
               # event-driven pipeline (medallion.raw/bronze/silver). Each created once (idempotent skip).
+              # streamReplicas > 1 (raft-replicated streams) needs a CLUSTERED NATS — the in-cluster
+              # single-node subchart supports 1 only; set 3 with an external/clustered NATS in prod.
               add_if_missing() {
                 if nats --server "$S" stream info "$1" >/dev/null 2>&1; then
                   echo "stream $1 already exists"
@@ -33,7 +37,7 @@ spec:
                   nats --server "$S" stream add "$1" \
                     --subjects "$2" --storage file --retention limits \
                     --max-age=168h --max-bytes=-1 --max-msgs=-1 --max-msgs-per-subject=-1 \
-                    --max-msg-size=-1 --discard old --dupe-window=2m --replicas 1 \
+                    --max-msg-size=-1 --discard old --dupe-window=2m --replicas {{ .Values.nats.streamReplicas | default 1 }} \
                     --no-allow-rollup --deny-delete --deny-purge
                 fi
               }

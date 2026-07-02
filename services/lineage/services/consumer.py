@@ -3,11 +3,12 @@
 The catalog publishes OpenLineage events to the Dapr ``pubsub.jetstream`` component; the Dapr sidecar
 persists them to NATS JetStream and delivers each to this service over HTTP (a CloudEvent envelope). The
 handler ingests into Apache AGE and returns a Dapr status: ``SUCCESS`` (ack), ``RETRY`` (transient — the
-sidecar redelivers per the component's ``backOff``/``maxDeliver``, then dead-letters), or ``DROP`` (a
+sidecar redelivers per the component's ``backOff``/``maxDeliver``, then drops from the consumer; the
+stream retains it and this consumer's ``deliverPolicy: all`` re-sees it on restart), or ``DROP`` (a
 malformed payload that redelivery can't fix). Redelivery is safe: the authoritative graph is idempotent
 (nodes/edges MERGE on ``run_id``) and the durable events feed dedups on its ``(run_id, event_type,
 event_time)`` natural key — only the ``Run.events_count`` is a plain delivery counter (so a redelivery
-bumps it). The sidecar owns retry/backoff/DLQ/trace-propagation as component config, not app code (the
+bumps it). The sidecar owns retry/backoff/trace-propagation (no DLQ — docs/RESILIENCE.md gap #2) as component config, not app code (the
 decoupled microservice path — microservices.md).
 
 Trust model: the topic is an internal, catalog-only channel, so the handler **trusts the verified

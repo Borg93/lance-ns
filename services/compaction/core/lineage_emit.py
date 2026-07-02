@@ -5,7 +5,7 @@ A maintenance sweep compacts small fragments + GCs old versions of each Lance da
 ``RunEvent`` (output = the dataset, ``operation=compaction``) published to the **Dapr**
 ``pubsub.jetstream`` component — the SAME pubsub component + topic the catalog publishes to and the
 lineage service subscribes to, so a compaction run shows up in ``producers()`` alongside the writes.
-The sidecar owns retry/backoff/DLQ + trace-propagation as component config (no broker client here).
+The sidecar owns retry/backoff + trace-propagation (no DLQ — see docs/RESILIENCE.md gap #2) as component config (no broker client here).
 
 Self-contained: the compaction service never imports the catalog (zero cross-service imports — the
 mergeability invariant). The only shared code is ``common.fga`` for the id↔namespace derivation, so the
@@ -99,7 +99,7 @@ class DaprMaintenanceEmitter:
     """Publishes maintenance events to a **Dapr** ``pubsub.jetstream`` component (the production path).
 
     Publishes to the local Dapr sidecar (``DaprClient.publish_event``); the sidecar persists to NATS
-    JetStream and owns retry/backoff/DLQ + W3C trace-context propagation as component config, so the app
+    JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation as component config, so the app
     holds no broker client. Best-effort: a sidecar/broker outage logs + drops rather than failing the sweep.
     """
 

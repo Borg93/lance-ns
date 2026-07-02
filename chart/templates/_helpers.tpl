@@ -44,6 +44,30 @@ This is what makes the docs/DURABILITY.md tier-3 externalization real (values-pr
 {{- define "lance.vaultAddr" -}}
 {{- if .Values.openbao.externalAddr -}}{{ .Values.openbao.externalAddr }}{{- else -}}http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}{{- end -}}
 {{- end -}}
+{{- define "lance.natsUrl" -}}
+{{- if .Values.nats.externalUrl -}}{{ .Values.nats.externalUrl }}{{- else -}}nats://{{ include "lance.natsHost" . }}:4222{{- end -}}
+{{- end -}}
+
+{{/* The per-SUBSCRIBER pubsub component name (call: include "lance.subPubsub" (list $root <appId>)).
+Each subscriber app-id gets its OWN pubsub.jetstream component carrying its queueGroupName — one shared
+component cannot: lineage AND lance-ray both consume lineage.events.v1, so a single queue group would
+SPLIT those messages across the two apps instead of duplicating per app / competing per replica. The
+component (dapr-component.yaml) and the app's *_PUBSUB env must agree on this name — hence one helper. */}}
+{{- define "lance.subPubsub" -}}
+{{- $root := index . 0 -}}
+{{- $root.Values.pubsub.name }}-{{ index . 1 -}}
+{{- end -}}
+
+{{/* daprd sidecar resource annotations — the app containers are bounded (resources.default), so the
+sidecars must be too (an unbounded daprd per pod × 8 pods can starve a small node). One helper = one
+place to size them. */}}
+{{- define "lance.daprSidecarResources" -}}
+{{- $r := .Values.dapr.sidecarResources -}}
+dapr.io/sidecar-cpu-request: {{ $r.cpuRequest | quote }}
+dapr.io/sidecar-cpu-limit: {{ $r.cpuLimit | quote }}
+dapr.io/sidecar-memory-request: {{ $r.memoryRequest | quote }}
+dapr.io/sidecar-memory-limit: {{ $r.memoryLimit | quote }}
+{{- end -}}
 {{/* Do the app services consume secrets via Dapr (the secret store), vs plaintext env? True when there is
 ANY Vault to read from — the in-cluster OpenBao OR an external Vault address. This decouples "use the secret
 store" from "render the in-cluster OpenBao server", so openbao.enabled=false + externalAddr consumes from

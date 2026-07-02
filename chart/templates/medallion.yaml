@@ -28,6 +28,7 @@ spec:
         dapr.io/app-port: {{ $port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
         dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
+        {{- include "lance.daprSidecarResources" . | nindent 8 }}
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}
@@ -54,7 +55,9 @@ spec:
             - name: APP_API_TOKEN  # verify the Dapr-stamped header on /raw-arrival (forged-trigger guard)
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
-            - { name: MEDALLION_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
+            # lance-ray's OWN subscriber component (queueGroupName=lance-ray, deliverPolicy=new) — it
+            # subscribes on /raw-arrival AND publishes through the same handle (same NATS subjects).
+            - { name: MEDALLION_PUBSUB, value: {{ include "lance.subPubsub" (list $root .Values.medallion.producer.daprAppId) | quote }} }
             - { name: MEDALLION_LINEAGE_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
             - { name: MEDALLION_RAW_DATASET, value: {{ .Values.medallion.producer.rawDataset | quote }} }
             - { name: MEDALLION_RAW_NAMESPACE, value: {{ .Values.medallion.producer.rawNamespace | quote }} }
@@ -112,6 +115,7 @@ spec:
         dapr.io/app-port: {{ $port | quote }}
         dapr.io/log-level: {{ $root.Values.dapr.logLevel | quote }}
         dapr.io/app-token-secret: {{ $root.Release.Name }}-dapr-app-token
+        {{- include "lance.daprSidecarResources" $root | nindent 8 }}
         {{- if $root.Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}
@@ -134,7 +138,9 @@ spec:
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ $root.Values.dapr.apiTimeoutSeconds | quote }} }
             # Fail-closed at boot if behind a sidecar but the app-token is unset (open forged-trigger path).
             - { name: MEDALLION_DAPR_ENABLED, value: {{ $root.Values.dapr.sidecars | quote }} }
-            - { name: MEDALLION_PUBSUB, value: {{ $root.Values.pubsub.name | quote }} }
+            # This mover's OWN subscriber component (queueGroupName=<app-id>, deliverPolicy=new) — it
+            # subscribes to its stage trigger AND publishes lineage + the next trigger through it.
+            - { name: MEDALLION_PUBSUB, value: {{ include "lance.subPubsub" (list $root .daprAppId) | quote }} }
             - { name: MEDALLION_LINEAGE_TOPIC, value: {{ $root.Values.pubsub.topic | quote }} }
             - name: APP_API_TOKEN  # verify the Dapr-stamped header on /medallion-event (forged-trigger guard)
               valueFrom:

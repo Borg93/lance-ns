@@ -41,38 +41,38 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
   tracks the Vault address scheme — `false` for an https Vault (the `openbao.externalAddr` prod path),
   `true` only for the plain-http in-cluster dev OpenBao. Render-verified both ways.
 
-## 2 · P1 — Dapr / bus correctness (before scaling any subscriber past 1 replica)
+## 2 · P1 — Dapr / bus correctness — ✅ ALL FIXED (2026-07-02; NOT yet live-verified on the cluster — re-run the chaos rows in RESILIENCE.md after the next deploy)
 
-- ⛔ **No `queueGroupName` on pubsub.jetstream → replicas get DUPLICATE delivery, not competing consumers.**
-  Verified against components-contrib source (release-1.16 + 1.18). Contradicts `values.yaml:280,325-326`
-  comments; `values-prod.yaml:24` sets `moverReplicas: 2` → each stage runs every trigger twice (up to 8× at
-  gold). Fix: one pubsub component per subscriber app-id with `queueGroupName=<app-id>` (a single shared
-  component can’t — one queue group would split messages ACROSS app-ids), or pin subscriber replicas to 1 and
-  fix the comments. `chart/templates/dapr-component.yaml:16`
-- ⛔ **`deliverPolicy` defaults to `all`** — every sidecar restart replays the full 168h stream into a fresh
-  ephemeral consumer. Safe for lineage MERGE; NOT safe for the cascade head + movers (re-fired cascades,
-  version churn). Set `deliverPolicy: new` for trigger consumption (or durable PULL consumers — the
-  RESILIENCE.md roadmap item). `chart/templates/dapr-component.yaml:18`
-- ⛔ **`backOff[0]=1s` silently overrides `ackWait=30s`** — effective ack window before first redelivery is
-  1s; any handler slower than ~1s gets concurrently-redelivered duplicates even at 1 replica. Align backOff
-  with real handler latency. `chart/templates/dapr-component.yaml:23`
-- ⛔ **NATS backbone has no externalization path + is a prod SPOF** — `natsHost` hardcoded to the in-cluster
-  subchart, streams created `--replicas 1`, and `nats.enabled=false` leaves the component pointing at dead DNS
-  with no streams. Add external NATS hooks + stream replicas for prod. `chart/templates/nats-stream-job.yaml:36`
-- ⛔ **Catalog never sets `DAPR_API_TIMEOUT_SECONDS`** — its inline-awaited lineage publish has no gRPC
-  deadline; a wedged sidecar/NATS hangs every catalog write (create/insert/update/delete) indefinitely. Same
-  root cause as `lineage_emit.py:324` (publish carries no deadline). `chart/templates/services.yaml:42`,
-  `services/catalog/core/lineage_emit.py:324`
-- ⛔ **Compaction cron Component renders without a `dapr.enabled` gate** — `--set dapr.enabled=false` emits a
-  `dapr.io/v1alpha1` Component into a cluster with no Dapr CRDs → release fails to apply.
-  `chart/templates/compaction.yaml:8`
-- ⛔ **No `dapr.io/sidecar-cpu/memory` annotations on any of the 8 sidecar’d deployments** — every daprd runs
-  unbounded while app containers are bounded (project’s own convention specifies limits). `chart/templates/services.yaml:21`
-- ⛔ **Dapr placement + scheduler control-plane deploy by default** though the chart uses no actors/workflows/
-  jobs/state store — disable in the subchart values. `chart/values.yaml:48`
-- ⛔ **FGA outage exits `handle_stage` via unhandled `ServiceUnavailableError`** instead of the explicit RETRY
-  contract — redelivery only happens because a 5xx is incidentally retriable. Catch → return `_RETRY`.
-  `services/medallion/services/transform.py:60`
+- ✅ **No `queueGroupName` → duplicate delivery** — FIXED with per-subscriber components: each subscriber
+  app-id gets its own `pubsub.jetstream` Component (`lance.subPubsub` helper → `lineage-pubsub-<app-id>`)
+  carrying `queueGroupName=<app-id>` + per-app scope; the bare `lineage-pubsub` is publish-only (catalog +
+  compaction). The shared-component trap (one queue group splitting lineage.events.v1 across lineage and
+  lance-ray) is documented in the helper. values.yaml replica comments corrected.
+- ✅ **`deliverPolicy` defaults to `all`** — FIXED as a deliberate per-app split: `all` for lineage
+  (restart-replay into idempotent MERGE = the durability story), `new` for the cascade head + movers (no
+  restart-triggered cascade storms; missed-while-down triggers are the documented gap — RESILIENCE.md #3
+  rewritten, durable PULL consumer stays the roadmap fix).
+- ✅ **`backOff[0]=1s` overrides `ackWait=30s`** — FIXED: `backOff: 30s,60s,120s,300s` (first step = the
+  effective ack window ≥ the slowest compute-on handler; ~8.5 min total), comment explains the NATS
+  semantics. RESILIENCE.md numbers updated.
+- ✅ **NATS externalization + SPOF** — FIXED: `nats.externalUrl` + `lance.natsUrl` helper (components +
+  stream Job), `nats.streamReplicas` on the stream Job (needs clustered NATS — documented), Job also runs
+  when external-only (`or nats.enabled nats.externalUrl`), values-prod EXTERNALIZE stanza added.
+- ✅ **Catalog/lineage missing `DAPR_API_TIMEOUT_SECONDS`** — FIXED: both env blocks set it from
+  `dapr.apiTimeoutSeconds` (7 pods total render it), so the inline-awaited catalog publish and the boot
+  secret fetch carry a gRPC deadline.
+- ✅ **Compaction cron Component no `dapr.enabled` gate** — FIXED (and the reconcile-cron Component got the
+  same gate); `--set dapr.enabled=false` renders 0 Components.
+- ✅ **No sidecar resource annotations** — FIXED: `lance.daprSidecarResources` helper (values
+  `dapr.sidecarResources`) on all 8 sidecar'd deployments (render-verified 8×4 annotations).
+- ✅ **Placement + scheduler deploy unused** — FIXED: `dapr.global.actors.enabled=false` +
+  `dapr.global.scheduler.enabled=false` (render-verified: no placement/scheduler workloads; injector sets
+  `ACTORS_ENABLED=false`).
+- ✅ **FGA outage → unhandled 500** — FIXED: `handle_stage` catches `ServiceUnavailableError` around the
+  gate check → explicit `RETRY` (outage ≠ denial); pinned by
+  `tests/unit/test_medallion.py::test_mover_retries_on_fga_outage`.
+- Also fixed here: false “sidecar owns DLQ / dead-letters” claims corrected across 7 docstrings +
+  DEPLOY.md (no `deadLetterTopic` exists — RESILIENCE.md gap #2 is the honest statement).
 
 ## 3 · P1 — OpenLineage spec fidelity (breaks the Marquez-reuse goal)
 
@@ -183,8 +183,9 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 
 - ⛔ `values.yaml` **`dex.staticPassword` never read** — dex config hardcodes the bcrypt hash; changing the key
   silently does nothing. `chart/values.yaml:105`
-- ⛔ `values.yaml` **`pubsub.route` never read** — the route is hardcoded in the lineage app AND the gateway
-  403 regex (so it’s also a silently-diverging security config). `chart/values.yaml:309`
+- ✅ `values.yaml` **`pubsub.route` never read** — FIXED with the §2 sweep: the dead key is removed; the
+  pubsub comment now names where the routes actually live (app code) and the gateway block regex derives
+  from the `lance.lineageSidecarOnlyRoutes` helper (§1), so there is no silently-diverging copy left.
 - ⛔ **Orphan scripts** — `scripts/seed_demo.sh` (its one mention, a config.py comment, misdescribes it) and
   `scripts/medallion_reset.sh` (referenced nowhere). Wire into Makefile/docs or delete.
 - ⛔ **8 unused frontend type aliases** — DemoField, DemoVersion, ColumnRef, ColumnNode, ColumnEdge,

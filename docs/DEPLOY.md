@@ -49,11 +49,18 @@ catalog --DaprClient.publish_event--> [daprd sidecar] --pubsub.jetstream--> NATS
    (:User)-[:CREATED]->(:Dataset)        (Dapr subscription)
 ```
 
-- The catalog publishes to its **local** sidecar; the sidecar owns retry/backoff/DLQ + **W3C
-  trace-context propagation** as component config (no broker client in app code).
+- The catalog publishes to its **local** sidecar; the sidecar owns retry/backoff + **W3C
+  trace-context propagation** as component config (no broker client in app code; no DLQ —
+  [`RESILIENCE.md`](RESILIENCE.md) gap #2).
 - The lineage service subscribes via `dapr-ext-fastapi` (`/dapr/subscribe` → `/lineage-events`),
   ingests into AGE, and returns the Dapr ack status (`SUCCESS`/`RETRY`/`DROP`). Ingest is idempotent
   (MERGE on `run_id`).
+- **Every subscriber has its own pubsub component** (`lineage-pubsub-<app-id>`, the `lance.subPubsub`
+  helper): `queueGroupName=<app-id>` makes that app's replicas a competing-consumer group (single
+  delivery per app — safe to scale), and `deliverPolicy` is `all` for lineage (restart replays into the
+  idempotent MERGE = the durability story) but `new` for the cascade head + movers (a replay would
+  re-fire every cascade in the 168h retention window). The bare `lineage-pubsub` component is publish-only
+  (catalog + compaction).
 - `make verify` publishes a `create_table` event and asserts AGE recorded the creator.
 
 ## Observability (GreptimeDB + Vector + Perses — the rask stack)

@@ -106,6 +106,10 @@ ingress:
 # openbao:                                           # external Vault / cloud KMS (operator populates the Secret)
 #   enabled: false
 #   externalAddr: https://vault.internal:8200
+# nats:                                              # managed/clustered NATS JetStream (the in-cluster single
+#   enabled: false                                   # node is a SPOF: bus down = no lineage ingest, no cascade)
+#   externalUrl: nats://nats.internal:4222
+#   streamReplicas: 3                                # raft-replicated streams (needs the 3+ node cluster)
 # observability:                                     # ship telemetry to an off-cluster collector
 #   enabled: false
 #   externalOtlpEndpoint: http://otel-collector.observability:4318/v1/otlp

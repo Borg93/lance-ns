@@ -86,6 +86,7 @@ spec:
         dapr.io/app-id: {{ .Values.gateway.daprAppId | quote }}
         dapr.io/app-port: {{ $port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
+        {{- include "lance.daprSidecarResources" . | nindent 8 }}
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}

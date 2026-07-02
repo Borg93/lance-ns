@@ -2,8 +2,11 @@
 {{- $root := . }}
 {{- $port := .Values.compaction.port }}
 {{- $rustfs := include "lance.rustfsHost" . }}
+{{- if .Values.dapr.enabled }}
 # Dapr cron INPUT binding — the sidecar POSTs to /<bindingName> on `schedule`. The schedule lives here
 # as component config, not in app code (no scheduler thread in the service). Scoped to the compaction app.
+# Gated on dapr.enabled: without the Dapr control plane the Component CRD doesn't exist and the release
+# would fail to apply (the service still renders below; its cron route just never fires).
 apiVersion: dapr.io/v1alpha1
 kind: Component
 metadata:
@@ -17,6 +20,7 @@ spec:
 scopes:
   - {{ .Values.compaction.daprAppId }}
 ---
+{{- end }}
 # Compaction/GC service — runs uvicorn compaction.service:app (shares the catalog image).
 apiVersion: apps/v1
 kind: Deployment
@@ -40,6 +44,7 @@ spec:
         dapr.io/app-port: {{ $port | quote }}
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
         dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
+        {{- include "lance.daprSidecarResources" . | nindent 8 }}
         {{- if .Values.observability.enabled }}
         dapr.io/config: "lance-tracing"
         {{- end }}

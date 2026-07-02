@@ -21,6 +21,7 @@ from typing import Any
 from common import fga
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
+from lance_namespace import ServiceUnavailableError
 from opentelemetry import trace
 
 from medallion.core.config import MedallionSettings
@@ -38,7 +39,8 @@ _SUCCESS = {"status": "SUCCESS"}
 _RETRY = {"status": "RETRY"}
 _DROP = {"status": "DROP"}
 # A quality-blocked run was handled (its failed assertions are recorded in lineage), it just must not
-# promote — DROP so Dapr doesn't redeliver (the data is deterministically bad) and can dead-letter it.
+# promote — DROP so Dapr doesn't redeliver (the data is deterministically bad; no DLQ is configured,
+# so the drop is final — the failed run in the lineage graph is the audit trail).
 _QUALITY_BLOCKED = {"status": "DROP"}
 
 
@@ -57,12 +59,21 @@ async def handle_stage(
     transition = f"{settings.from_namespace}->{settings.to_namespace}"
 
     if fga_client is not None:
-        allowed = await fga.check(
-            fga_client,
-            user=settings.fga_service_identity,
-            relation=settings.fga_required_action,
-            obj=settings.fga_object(),
-        )
+        try:
+            allowed = await fga.check(
+                fga_client,
+                user=settings.fga_service_identity,
+                relation=settings.fga_required_action,
+                obj=settings.fga_object(),
+            )
+        except ServiceUnavailableError as exc:
+            # An FGA OUTAGE is transient (unlike a denial): return the explicit RETRY contract so the
+            # sidecar redelivers, instead of leaking a 500 that is only incidentally retriable.
+            log.warning(
+                "medallion_stage_fga_unavailable",
+                extra={"transition": transition, "token": token, "error": str(exc)},
+            )
+            return _RETRY
         if not allowed:
             record_denied(transition)
             log.warning(

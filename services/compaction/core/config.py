@@ -27,7 +27,7 @@ class CompactionSettings(BaseSettings):
     # --- Lineage emission (opt-in, best-effort) — record a maintenance run on each materially-compacted
     # dataset to the lineage graph via Dapr pub/sub. Publishes to the SAME pubsub component + topic the
     # catalog publishes to and the lineage service subscribes to, so a compaction shows up in producers()
-    # next to the writes. Off by default; the sidecar owns retry/DLQ, so a publish never fails a sweep.
+    # next to the writes. Off by default; the sidecar owns retry (no DLQ), so a publish never fails a sweep.
     lineage_emit_enabled: bool = Field(default=False, alias="COMPACTION_LINEAGE_EMIT_ENABLED")
     lineage_pubsub: str = Field(default="lineage-pubsub", alias="COMPACTION_LINEAGE_PUBSUB")
     lineage_topic: str = Field(default="lineage.events.v1", alias="COMPACTION_LINEAGE_TOPIC")

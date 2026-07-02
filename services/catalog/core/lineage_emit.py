@@ -13,7 +13,7 @@ fail a catalog write. Two transports sit behind the same :class:`LineageEmitter`
   event is lost if the lineage service is down when we POST). Good for dev / external producers.
 * :class:`DaprEmitter` — publish to the **Dapr** ``pubsub.jetstream`` component (the production
   transport, ``LANCE_LINEAGE_TRANSPORT=dapr``). We publish to our local Dapr sidecar; the sidecar
-  persists to NATS JetStream and owns retry/backoff/DLQ/trace-propagation as **component config** (no
+  persists to NATS JetStream and owns retry/backoff/trace-propagation (no DLQ — docs/RESILIENCE.md gap #2) as **component config** (no
   broker client in app code) — the decoupled microservice path. The lineage service subscribes via its
   own sidecar. The outbox gap (crash between the Lance write and publish) remains: the catalog has no
   DB for a transactional outbox; the durable producer is the Ray job (future), per microservices.md.
@@ -261,7 +261,7 @@ class DaprEmitter:
     """Publishes OpenLineage events to a **Dapr** ``pubsub.jetstream`` component.
 
     We publish to the local Dapr **sidecar** (``DaprClient.publish_event``); the sidecar persists to NATS
-    JetStream and owns retry/backoff/DLQ + W3C trace-context propagation as *component config*, so the
+    JetStream and owns retry/backoff (no DLQ — docs/RESILIENCE.md gap #2) + W3C trace-context propagation as *component config*, so the
     app holds no broker client (the decoupled microservice path — microservices.md). The topic is
     versioned (``lineage.events.v1``). Publish stays best-effort: a sidecar/broker outage logs + drops
     rather than failing the catalog write. ``authorization`` is unused — the pub/sub topic is an internal

@@ -45,9 +45,23 @@ dapr:
   dashboard:
     enabled: true
     image: daprio/dashboard:0.15.0
+  # daprd sidecar resources (first-party keys → the lance.daprSidecarResources annotations). The app
+  # containers are bounded (resources.default); an unbounded daprd on all 8 sidecar'd pods is not.
+  sidecarResources:
+    cpuRequest: 50m
+    cpuLimit: 300m
+    memoryRequest: 64Mi
+    memoryLimit: 256Mi
   global:
     ha:
       enabled: false # single-node kind
+    # This chart uses pub/sub, bindings, secret stores and service invocation ONLY — no actors,
+    # workflows or jobs — so the placement and scheduler control-plane deployments are dead weight
+    # (two StatefulSets + their PVCs). Re-enable if actors/workflows/jobs are ever adopted.
+    actors:
+      enabled: false # gates the dapr_placement deployment
+    scheduler:
+      enabled: false # gates the dapr_scheduler deployment
 
 # --- NATS (subchart) — JetStream backs the Dapr pubsub.jetstream component -------------------------
 nats:
@@ -59,6 +73,14 @@ nats:
         pvc:
           size: 1Gi
   # the headless service is <release>-nats:4222
+  # First-party keys (the nats subchart ignores them):
+  # Externalize: when set, the pubsub components + the stream-provision Job connect HERE instead of the
+  # in-cluster NATS — pair with nats.enabled=false to use a managed/clustered NATS (the in-cluster
+  # single node is a prod SPOF: the bus down = no lineage ingest, no cascade).
+  externalUrl: "" # e.g. nats://nats.internal:4222
+  # Raft replication for the LINEAGE/MEDALLION streams — REQUIRES a clustered NATS (3+ nodes); the
+  # in-cluster single-node subchart only supports 1. Set 3 together with externalUrl in prod.
+  streamReplicas: 1
 
 # --- OpenFGA (subchart) — Zanzibar authz; datastore = the AGE Postgres (it's just postgres) --------
 openfga:
@@ -277,7 +299,9 @@ services:
     module: lineage.main:app
     port: 8000
     daprAppId: lineage
-    replicas: 1 # Dapr load-balances event delivery across replicas; ingest is idempotent (MERGE on run_id)
+    # Safe to scale: the app's own pubsub component carries queueGroupName=lineage, so replicas form a
+    # competing-consumer group (single delivery per event); ingest is idempotent anyway (MERGE on run_id).
+    replicas: 1
     # Demo data-peek router (/demo/*: live Lance schema/versions/rows for the UI) — DEMO ONLY: the
     # endpoints carry no OIDC/FGA guard, so they'd disclose dataset metadata past the governance layer.
     # values-prod sets it false (the router is then never mounted).
@@ -306,11 +330,13 @@ autoscaling:
   maxReplicas: 5
   targetCPUUtilizationPercentage: 70
 
-# Dapr pub/sub: the component name the catalog publishes to + the lineage topic/route.
+# Dapr pub/sub: the publish-side component name + the lineage topic. Each SUBSCRIBER app additionally
+# gets its own derived component `<name>-<app-id>` carrying its queue group + deliver policy
+# (dapr-component.yaml); the subscription routes live in app code (/lineage-events, /raw-arrival,
+# /medallion-event).
 pubsub:
   name: lineage-pubsub
   topic: lineage.events.v1
-  route: /lineage-events
 
 # --- Event-driven medallion pipeline (raw → bronze → silver → gold) --------------------------------
 # lance-ray (dummy producer) is the HEAD: POST /produce emits the raw_events lineage + the first trigger
@@ -326,8 +352,10 @@ medallion:
   # (scripts/seed_medallion_fga.sh) before flipping it on.
   fgaEnabled: false
   fgaApiUrl: http://lance-ns-openfga:8080
-  # Replica counts — movers are idempotent Dapr subscribers (Dapr load-balances deliveries → competing
-  # consumers, safe). producer (lance-ray) is request-triggered. Both stateless.
+  # Replica counts — each mover's own pubsub component carries queueGroupName=<app-id>, so its replicas
+  # form a competing-consumer group (single delivery per trigger; without the queue group every replica
+  # would process EVERY trigger — up to 8× at gold with 2 replicas per stage). Movers are idempotent on
+  # top (MERGE on run_id). lance-ray is a subscriber too (/raw-arrival). All stateless.
   producerReplicas: 1
   moverReplicas: 1
   # When true, every stage does a REAL in-process Lance read->transform->write (the fake-Ray compute) so the

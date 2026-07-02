@@ -35,7 +35,7 @@ def _s3fs(settings: CompactionSettings) -> pafs.S3FileSystem:
     return pafs.S3FileSystem(
         endpoint_override=endpoint,
         access_key=settings.s3_access_key_id,
-        secret_key=settings.s3_secret_access_key,
+        secret_key=settings.s3_secret_access_key.get_secret_value(),
         scheme=scheme,
         region=settings.s3_region,
     )

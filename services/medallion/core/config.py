@@ -11,7 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Self
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -80,7 +80,8 @@ class MedallionSettings(BaseSettings):
     # object-store client fall back to its default chain (or a local path needs no creds at all). ---------
     s3_endpoint: str = Field(default="", alias="MEDALLION_S3_ENDPOINT")
     s3_access_key_id: str = Field(default="", alias="MEDALLION_S3_ACCESS_KEY_ID")
-    s3_secret_access_key: str = Field(default="", alias="MEDALLION_S3_SECRET_ACCESS_KEY")
+    # SecretStr so it's redacted in repr/model_dump (parity with the catalog) — .get_secret_value() to read.
+    s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="MEDALLION_S3_SECRET_ACCESS_KEY")
     s3_region: str = Field(default="us-east-1", alias="MEDALLION_S3_REGION")
 
     def storage_options(self) -> dict[str, str]:
@@ -90,7 +91,7 @@ class MedallionSettings(BaseSettings):
         return {
             "endpoint": self.s3_endpoint,
             "access_key_id": self.s3_access_key_id,
-            "secret_access_key": self.s3_secret_access_key,
+            "secret_access_key": self.s3_secret_access_key.get_secret_value(),
             "region": self.s3_region,
             "allow_http": "true",
             # RustFS/MinIO require PATH-style addressing; without this lance signs the request
@@ -107,7 +108,7 @@ class MedallionSettings(BaseSettings):
         deliberately withheld from pod env, so turning compute on there leaves no secret and every Lance
         write fails with S3 ``SignatureDoesNotMatch``. Surface it at boot instead of at first produce.
         """
-        if self.compute_enabled and self.s3_endpoint and not self.s3_secret_access_key:
+        if self.compute_enabled and self.s3_endpoint and not self.s3_secret_access_key.get_secret_value():
             raise ValueError(
                 "MEDALLION_COMPUTE_ENABLED with an S3 endpoint but no MEDALLION_S3_SECRET_ACCESS_KEY. The "
                 "medallion does not fetch S3 creds from OpenBao (unlike the catalog), so compute-on requires "

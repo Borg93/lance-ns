@@ -44,14 +44,14 @@ def test_apply_dapr_secrets_consumes_store_as_sole_source(monkeypatch: pytest.Mo
         {"secrets_from_dapr": True, "database_url": "postgresql://lance@age:5432/lineage"}
     )
     apply_dapr_secrets(settings)
-    assert settings.s3_secret_access_key == "from-store"
+    assert settings.s3_secret_access_key.get_secret_value() == "from-store"  # SecretStr now
     assert settings.database_url == "postgresql://lance:db-from-store@age:5432/lineage"
 
 
 def test_apply_dapr_secrets_fails_closed_without_secret(monkeypatch: pytest.MonkeyPatch) -> None:
     # Store empty AND no env fallback → must raise, never boot with an empty S3 key.
     monkeypatch.setattr("common.secrets.fetch_dapr_secret", lambda *_a, **_k: {})
-    settings = LineageSettings.model_validate({"secrets_from_dapr": True, "s3_secret_access_key": None})
+    settings = LineageSettings.model_validate({"secrets_from_dapr": True, "s3_secret_access_key": ""})
     with pytest.raises(RuntimeError, match="failing closed"):
         apply_dapr_secrets(settings)
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -45,7 +45,8 @@ class CompactionSettings(BaseSettings):
     # Default "" so the chart can omit the plaintext env when the store is the source; apply_dapr_secrets
     # fails closed if neither the store nor env provides it (the audit's secret-consumption fix — the
     # compaction pod is a real S3 consumer (compacts/GCs the lakehouse), so it must NOT ship the key plain).
-    s3_secret_access_key: str = Field(default="", alias="COMPACTION_S3_SECRET_ACCESS_KEY")
+    # SecretStr so it's redacted in repr/model_dump (parity with the catalog) — .get_secret_value() to read.
+    s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="COMPACTION_S3_SECRET_ACCESS_KEY")
     s3_bucket: str = Field(default="lance-catalog", alias="COMPACTION_S3_BUCKET")
     s3_region: str = Field(default="us-east-1", alias="COMPACTION_S3_REGION")
 
@@ -61,7 +62,7 @@ class CompactionSettings(BaseSettings):
         return {
             "endpoint": self.s3_endpoint,
             "access_key_id": self.s3_access_key_id,
-            "secret_access_key": self.s3_secret_access_key,
+            "secret_access_key": self.s3_secret_access_key.get_secret_value(),
             "region": self.s3_region,
             "allow_http": "true",
         }
@@ -86,4 +87,4 @@ def apply_dapr_secrets(settings: CompactionSettings) -> None:
     bundle = fetch_required_secrets(
         settings.dapr_secret_store, settings.dapr_secret_key, require=settings.dapr_secret_s3_field
     )
-    settings.s3_secret_access_key = bundle[settings.dapr_secret_s3_field]
+    settings.s3_secret_access_key = SecretStr(bundle[settings.dapr_secret_s3_field])

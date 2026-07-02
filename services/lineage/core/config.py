@@ -13,7 +13,7 @@ from functools import lru_cache
 from typing import Self
 from urllib.parse import quote, urlsplit, urlunsplit
 
-from pydantic import Field, model_validator
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -63,7 +63,9 @@ class LineageSettings(BaseSettings):
     demo_data_enabled: bool = Field(default=False, alias="LINEAGE_DEMO_DATA_ENABLED")
     s3_endpoint: str | None = Field(default=None, alias="LINEAGE_S3_ENDPOINT")
     s3_access_key_id: str | None = Field(default=None, alias="LINEAGE_S3_ACCESS_KEY_ID")
-    s3_secret_access_key: str | None = Field(default=None, alias="LINEAGE_S3_SECRET_ACCESS_KEY")
+    # SecretStr so the value is redacted in repr/model_dump (parity with the catalog) — read it with
+    # .get_secret_value() at the object-store call site.
+    s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="LINEAGE_S3_SECRET_ACCESS_KEY")
     s3_region: str = Field(default="us-east-1", alias="LINEAGE_S3_REGION")
     s3_bucket: str = Field(default="lakehouse", alias="LINEAGE_S3_BUCKET")
 
@@ -135,7 +137,7 @@ def apply_dapr_secrets(settings: LineageSettings) -> None:
     bundle = fetch_required_secrets(
         settings.dapr_secret_store, settings.dapr_secret_key, require=settings.dapr_secret_s3_field
     )
-    settings.s3_secret_access_key = bundle[settings.dapr_secret_s3_field]
+    settings.s3_secret_access_key = SecretStr(bundle[settings.dapr_secret_s3_field])
     db_password = bundle.get(settings.dapr_secret_db_field)
     if db_password:
         settings.database_url = _with_db_password(settings.database_url, db_password)
@@ -151,7 +153,7 @@ def storage_options(settings: LineageSettings) -> dict[str, str]:
     return {
         "endpoint": settings.s3_endpoint or "",
         "access_key_id": settings.s3_access_key_id or "",
-        "secret_access_key": settings.s3_secret_access_key or "",
+        "secret_access_key": settings.s3_secret_access_key.get_secret_value(),
         "region": settings.s3_region,
         "allow_http": "true",
         "virtual_hosted_style_request": "false",

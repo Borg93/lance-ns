@@ -41,7 +41,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # with a cryptic S3 SignatureDoesNotMatch instead of a clear startup error (parity with the catalog's
     # 'credentials required, no silent fallback'). apply_dapr_secrets already fails closed when the store IS
     # the source; this covers the plaintext-env path (secrets_from_dapr off) the comment used to over-claim.
-    if not settings.s3_secret_access_key:
+    if not settings.s3_secret_access_key.get_secret_value():
         raise RuntimeError(
             "COMPACTION_S3_SECRET_ACCESS_KEY is required (set it, or enable COMPACTION_SECRETS_FROM_DAPR)"
         )

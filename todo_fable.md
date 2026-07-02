@@ -266,7 +266,16 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
   - ⛔ P2 per-project schema declaration (embeddings/classification/summarization columns are KNOWN per project):
     register expected columns so the quality gate asserts they landed, FGA pre-registers column masking, and
     reconcile flags undeclared writes — a governance contract, not a Dapr one. Lance itself needs no up-front
-    schema (add_columns evolves it; per-version schemas already ride the WROTE edge).
+    schema (add_columns evolves it; per-version schemas already ride the WROTE edge). This is also the
+    **breaking-change detector**: today a producer renaming/dropping a column a downstream reads is caught only
+    at runtime (mover fails → RETRY → stall); declared columns turn that into a pre-promotion contract
+    violation. Additive evolution is already safe by construction (immutable versions pin readers).
+  - ⛔ P1 **document the data contract** (docs/DATA-CONTRACT.md or an ARCHITECTURE section — currently exists
+    only in chat): the bus contract is `{token, dataset, namespace}` + the OpenLineage spec (facet `_schemaURL`s
+    ARE the contract); the data contract is "the Lance manifest is the schema, the version is the handshake"
+    (self-describing storage, immutable versions, no schema registry needed); enforcement = quality gate
+    (promotion-time) + FGA (access-time) + reconcile (drift-time); known gap = breaking changes (see the
+    schema-declaration item above); blob columns: inline-vs-pointer semantics are part of the read contract.
   - ⛔ P1 enforce the claim-check invariant: events carry POINTERS (dataset/version/URI), never data — add a
     payload-size guard at every publish site + a doc'd rule "no base64/embeddings/data-shaped content in
     facets" (NATS default max message ~1MB; events must stay small JSON regardless of what the rows hold).

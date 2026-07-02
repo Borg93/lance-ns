@@ -130,16 +130,12 @@ def apply_dapr_secrets(settings: LineageSettings) -> None:
     off. Imported lazily so the catalog dep isn't pulled in dev/tests."""
     if not settings.secrets_from_dapr:
         return
-    from common.secrets import fetch_dapr_secret
+    from common.secrets import fetch_required_secrets
 
-    bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
-    s3_secret = bundle.get(settings.dapr_secret_s3_field)
-    if not s3_secret:
-        raise RuntimeError(
-            f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
-            f"{settings.dapr_secret_key!r} — failing closed (store is the sole source)"
-        )
-    settings.s3_secret_access_key = s3_secret
+    bundle = fetch_required_secrets(
+        settings.dapr_secret_store, settings.dapr_secret_key, require=settings.dapr_secret_s3_field
+    )
+    settings.s3_secret_access_key = bundle[settings.dapr_secret_s3_field]
     db_password = bundle.get(settings.dapr_secret_db_field)
     if db_password:
         settings.database_url = _with_db_password(settings.database_url, db_password)

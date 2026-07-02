@@ -15,7 +15,7 @@ import httpx
 from common import fga
 from common.exceptions import problem_detail
 from common.oidc import OIDCVerifier
-from common.secrets import fetch_dapr_secret
+from common.secrets import fetch_required_secrets
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -47,17 +47,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # nothing — we fetch from the store (retrying while it seeds) and FAIL CLOSED if it never arrives,
     # rather than booting with an empty/plaintext key.
     if settings.secrets_from_dapr:
-        # Strict sole source: a store miss FAILS CLOSED — never fall back to a plaintext env value (the
-        # chart ships none when openbao is on, and silently using one would contradict 'OpenBao is the
-        # sole source'). fetch_dapr_secret retries while the store/sidecar/seed come up.
-        bundle = fetch_dapr_secret(settings.dapr_secret_store, settings.dapr_secret_key)
-        s3_secret = bundle.get(settings.dapr_secret_s3_field)
-        if not s3_secret:
-            raise RuntimeError(
-                f"S3 secret unavailable from Dapr store {settings.dapr_secret_store!r}/"
-                f"{settings.dapr_secret_key!r} — failing closed (store is the sole source)"
-            )
-        settings.s3_secret_access_key = SecretStr(s3_secret)
+        # Strict sole source: a store miss FAILS CLOSED (the shared helper raises) — never fall back to a
+        # plaintext env value. fetch_required_secrets retries while the store/sidecar/seed come up.
+        bundle = fetch_required_secrets(
+            settings.dapr_secret_store, settings.dapr_secret_key, require=settings.dapr_secret_s3_field
+        )
+        settings.s3_secret_access_key = SecretStr(bundle[settings.dapr_secret_s3_field])
         log.info("secret_from_dapr_store", extra={"field": settings.dapr_secret_s3_field})
     elif not settings.s3_secret_access_key.get_secret_value():
         raise RuntimeError("LANCE_S3_SECRET_ACCESS_KEY is required when secrets_from_dapr is off")

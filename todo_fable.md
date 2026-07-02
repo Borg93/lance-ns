@@ -140,18 +140,22 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 - ⛔ **Demo peek re-reads EVERY Lance version of every dataset per call** (one S3 dataset-open per version),
   polled every 2s — linear latency growth with cascade runs. Cache or cap versions. `services/lineage/api/v1/endpoints/demo.py:63`
 
-## 5 · P2 — Python / FastAPI quality + consistency — 🟡 8/17 DONE (2026-07-02)
+## 5 · P2 — Python / FastAPI quality + consistency — 🟡 14/17 DONE (2026-07-02)
 
 DONE: catalog config comment-lie (fail-closed, no env fallback); `handle_stage` `fga_client: Any` →
 `OpenFgaClient | None`; `_BACKFILLED`/`_BACKFILLABLE` deduped → one public `BACKFILLABLE_STATES`;
 `governed()` → PEP 695 generic `[T]`; `lineage_transport` → `Literal` (parity with `vending_mode`);
 `_s3fs` scheme derived from the endpoint (no silent HTTPS→http downgrade); `problem_detail` returns a
 generic detail on 5xx (no `str(exc)` leak); lineage lifespan teardown suppress-per-close.
-REMAINING (9): compaction empty-secret boot guard (test-risk — verify first); secret-splice dedup →
-`common/secrets.py`; S3 secret `SecretStr` across lineage/medallion/compaction (migration — needs
-get_secret_value at every read); catalog health probes sync→async; medallion/compaction RFC 9457 parity;
-medallion/compaction `/readyz` lifecycle flags; `/docs` gating parity; emitter dedup (~90 lines);
-catalog endpoint docstrings.
+BATCH 2 (26dff20) added: catalog health probes async; `/docs` gating (LINEAGE/MEDALLION/COMPACTION_DOCS);
+medallion+compaction `/readyz` lifecycle flags; medallion `/produce` RFC 9457 + Retry-After; compaction
+empty-secret boot guard (lifespan). BATCH 3 added: secret-splice dedup → `common.secrets.fetch_required_secrets`
+(catalog/lineage/compaction all call it; the fail-closed rule lives in one place).
+REMAINING (3) — larger refactors, best done as a focused pass (+ live-verify the behavioral batch-2 changes):
+(#4) migrate the S3 secret to `SecretStr` in lineage/medallion/compaction — touches ~6 read sites +
+interacts with the compaction guard + the medallion compute validator (needs `.get_secret_value()` at each);
+(#13) emitter dedup (~90 lines HttpLineageEmitter/DaprEmitter/NoopEmitter) — refactor with test-coverage risk;
+(#15) catalog endpoint docstrings (~15 handlers).
 
 
 - ⛔ **Catalog config comment lies about a fail-closed security invariant** — claims env is a boot-time

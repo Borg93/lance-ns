@@ -33,18 +33,29 @@ from medallion.core.config import get_settings
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Fail closed if behind a Dapr sidecar but the app-token is unset — /raw-arrival would otherwise be an
     # open forged-trigger path (symmetric with the movers + lineage). No-op in dev (dapr_enabled off).
+    app.state.startup_complete = False
+    app.state.shutting_down = False
     assert_app_token_configured(dapr_enabled=get_settings().dapr_enabled)
     # The Dapr client targets the local sidecar (localhost) — cheap to build, no broker reachability
-    # needed at boot. The sidecar persists publishes to NATS JetStream and owns retry/DLQ.
+    # needed at boot. The sidecar persists publishes to NATS JetStream; no DLQ (docs/RESILIENCE.md gap #2).
     app.state.dapr = DaprClient()
+    app.state.startup_complete = True
     try:
         yield
     finally:
+        app.state.shutting_down = True
         with suppress(Exception):
             await app.state.dapr.close()
 
 
-app = FastAPI(title="lance-ray (medallion producer)", version="0.1.0", lifespan=lifespan)
+_docs = get_settings().docs_enabled  # gate /docs + /openapi.json (off in prod), like the catalog
+app = FastAPI(
+    title="lance-ray (medallion producer)",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 app.include_router(health_router)
 app.include_router(produce_router)
 # The event-driven cascade head: subscribe to the lineage topic; a raw-dataset write fires medallion.raw.

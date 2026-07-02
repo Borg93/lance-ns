@@ -183,12 +183,14 @@ async def handle_unexpected_error(request: Request, exc: Exception) -> JSONRespo
 
 
 @app.get("/livez", tags=["health"])
-def livez() -> dict[str, str]:
+async def livez() -> dict[str, str]:
+    # async (not sync def) so the probe runs ON the event loop, not the blocking data-plane threadpool —
+    # else liveness queues behind heavy Arrow-IPC work and fails exactly when the pod is busiest. No I/O here.
     return {"status": "ok"}
 
 
 @app.get("/readyz", tags=["health"])
-def readyz(request: Request) -> JSONResponse:
+async def readyz(request: Request) -> JSONResponse:
     state = request.app.state
     if getattr(state, "shutting_down", False):
         return JSONResponse(status_code=503, content={"status": "shutting_down"})

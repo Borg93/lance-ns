@@ -16,7 +16,8 @@ from contextlib import asynccontextmanager, suppress
 
 from common.dapr_auth import assert_app_token_configured
 from dapr.aio.clients import DaprClient
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 
 from compaction.api.routes import router
 from compaction.core.config import apply_dapr_secrets, get_settings
@@ -25,6 +26,8 @@ from compaction.core.lineage_emit import make_emitter
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    app.state.startup_complete = False
+    app.state.shutting_down = False
     settings = get_settings()
     # Fail closed if behind a Dapr sidecar but the app-token is unset — the cron route would otherwise be an
     # open forged-sweep path (symmetric with the lineage service). No-op in dev (dapr_enabled off).
@@ -33,6 +36,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # sweep's S3 access uses a store-sourced key and the plaintext secret never ships in pod env — the
     # audit's secret-consumption fix. Mutates the cached settings in place; fails closed if unavailable.
     apply_dapr_secrets(settings)
+    # Fail fast at boot if the S3 secret is still empty (neither the store nor plaintext env provided it) —
+    # the sweep is a real S3 consumer, so a silent empty key would otherwise fail every later compaction
+    # with a cryptic S3 SignatureDoesNotMatch instead of a clear startup error (parity with the catalog's
+    # 'credentials required, no silent fallback'). apply_dapr_secrets already fails closed when the store IS
+    # the source; this covers the plaintext-env path (secrets_from_dapr off) the comment used to over-claim.
+    if not settings.s3_secret_access_key:
+        raise RuntimeError(
+            "COMPACTION_S3_SECRET_ACCESS_KEY is required (set it, or enable COMPACTION_SECRETS_FROM_DAPR)"
+        )
     # Lineage emission (opt-in, best-effort): build the Dapr pub/sub emitter so each materially-compacted
     # dataset records a maintenance run on the lineage graph (#7b). The Dapr client targets the local
     # sidecar, so it's cheap to construct and needs no broker reachability at boot; a no-op emitter when off.
@@ -44,15 +56,24 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         topic=settings.lineage_topic,
         job_namespace=settings.lineage_job_namespace,
     )
+    app.state.startup_complete = True
     try:
         yield
     finally:
+        app.state.shutting_down = True
         if dapr_client is not None:
             with suppress(Exception):
                 await dapr_client.close()
 
 
-app = FastAPI(title="Lance compaction/GC", version="0.1.0", lifespan=lifespan)
+_docs = get_settings().docs_enabled  # gate /docs + /openapi.json (off in prod), like the catalog
+app = FastAPI(
+    title="Lance compaction/GC",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 
 
 @app.get("/livez", tags=["health"])
@@ -61,8 +82,14 @@ async def livez() -> dict[str, str]:
 
 
 @app.get("/readyz", tags=["health"])
-async def readyz() -> dict[str, str]:
-    return {"status": "ok"}
+async def readyz(request: Request) -> JSONResponse:
+    """Gate on the lifespan flags (parity with catalog/lineage) so k8s pulls the pod during boot + drain."""
+    state = request.app.state
+    if getattr(state, "shutting_down", False):
+        return JSONResponse(status_code=503, content={"status": "shutting_down"})
+    if not getattr(state, "startup_complete", False):
+        return JSONResponse(status_code=503, content={"status": "starting"})
+    return JSONResponse(status_code=200, content={"status": "ready"})
 
 
 # The Dapr cron route (POST /<binding-name>) + its OPTIONS discovery ack, with the require_dapr_token gate.

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
 from medallion.services.produce import produce as run_produce
@@ -11,7 +12,7 @@ router = APIRouter(tags=["produce"])
 
 
 @router.post("/produce", status_code=202)
-async def produce(dapr: DaprClientDep, settings: SettingsDep) -> dict[str, str]:
+async def produce(dapr: DaprClientDep, settings: SettingsDep) -> dict[str, str] | JSONResponse:
     """Ingest (dummy) the raw dataset and emit its write event — the event-driven cascade head.
 
     Seeds ``raw_events`` (with compute) and emits ONE OpenLineage event for it; lance-ray's ``/raw-arrival``
@@ -22,5 +23,16 @@ async def produce(dapr: DaprClientDep, settings: SettingsDep) -> dict[str, str]:
     """
     result = await run_produce(dapr, settings)
     if result.get("status") == "publish_failed":
-        raise HTTPException(status_code=503, detail="medallion trigger publish failed; retry")
+        # RFC 9457 problem+json + Retry-After (parity with catalog/lineage errors), not a bare FastAPI 503.
+        return JSONResponse(
+            status_code=503,
+            media_type="application/problem+json",
+            headers={"Retry-After": "5"},
+            content={
+                "type": "https://lance.org/problems/serviceunavailable",
+                "title": "ServiceUnavailable",
+                "status": 503,
+                "detail": "medallion trigger publish failed; retry",
+            },
+        )
     return result

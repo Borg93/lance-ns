@@ -28,6 +28,8 @@ class MedallionSettings(BaseSettings):
     # /medallion-event route would otherwise be an open forged-trigger path). Symmetric with the lineage
     # service. Off in dev (no sidecar); the producer's plain-HTTP /produce carries no such route.
     dapr_enabled: bool = Field(default=False, alias="MEDALLION_DAPR_ENABLED")
+    # Serve /docs + /openapi.json (default on for dev; prod sets false, like the catalog's LANCE_REST_DOCS).
+    docs_enabled: bool = Field(default=True, alias="MEDALLION_DOCS")
 
     # --- mover stage config (the 3 movers share medallion.mover:app, differ only by these) ------
     from_dataset: str = Field(default="raw_events", alias="MEDALLION_FROM_DATASET")

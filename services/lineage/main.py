@@ -96,7 +96,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             await pool.close()
 
 
-app = FastAPI(title="Lance Lineage Service", version="0.1.0", lifespan=lifespan)
+_docs = get_settings().docs_enabled  # gate /docs + /openapi.json (off in prod), like the catalog
+app = FastAPI(
+    title="Lance Lineage Service",
+    version="0.1.0",
+    lifespan=lifespan,
+    docs_url="/docs" if _docs else None,
+    openapi_url="/openapi.json" if _docs else None,
+)
 
 # Dapr pub/sub subscription (#25): build app first, then wire the subscription so `app` exists before
 # the registration. DaprApp(app) also serves GET /dapr/subscribe (the sidecar's startup registration).

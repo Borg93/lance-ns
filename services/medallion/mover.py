@@ -33,6 +33,8 @@ _settings = get_settings()
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Fail closed if behind a Dapr sidecar but the app-token is unset — /medallion-event would otherwise be
     # an open forged-trigger path (symmetric with the lineage service). No-op in dev (dapr_enabled off).
+    app.state.startup_complete = False
+    app.state.shutting_down = False
     assert_app_token_configured(dapr_enabled=_settings.dapr_enabled)
     app.state.dapr = DaprClient()  # local sidecar; persists publishes to NATS JetStream
     app.state.fga = None
@@ -42,9 +44,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         # then check authorization as its own service identity before every transition.
         store_id, model_id = await fga.provision(settings.fga_api_url)
         app.state.fga = fga.make_client(settings.fga_api_url, store_id, model_id)
+    app.state.startup_complete = True
     try:
         yield
     finally:
+        app.state.shutting_down = True
         with suppress(Exception):
             await app.state.dapr.close()
         if app.state.fga is not None:
@@ -53,7 +57,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(
-    title=f"medallion mover ({_settings.from_namespace}->{_settings.to_namespace})", lifespan=lifespan
+    title=f"medallion mover ({_settings.from_namespace}->{_settings.to_namespace})",
+    lifespan=lifespan,
+    docs_url="/docs" if _settings.docs_enabled else None,  # gate /docs (off in prod), like the catalog
+    openapi_url="/openapi.json" if _settings.docs_enabled else None,
 )
 app.include_router(health_router)
 # The DaprApp wrapper serves GET /dapr/subscribe (read by the sidecar at startup) and routes deliveries

@@ -87,6 +87,9 @@ class LineageSettings(BaseSettings):
     # so it is effectively a no-op unless OIDC is on. Best-effort: an audit-write failure never fails a read.
     read_audit_enabled: bool = Field(default=False, alias="LINEAGE_READ_AUDIT_ENABLED")
 
+    # Serve /docs + /openapi.json (default on for dev; prod sets false, like the catalog's LANCE_REST_DOCS).
+    docs_enabled: bool = Field(default=True, alias="LINEAGE_DOCS")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail closed: a half-configured auth layer is a startup error, not open access."""

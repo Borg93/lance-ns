@@ -16,6 +16,8 @@ class CompactionSettings(BaseSettings):
     # The Dapr cron binding name == the POST route the sidecar delivers ticks to (must match the
     # bindings.cron Component's metadata.name). Default matches the chart.
     binding_name: str = Field(default="compaction-cron", alias="COMPACTION_BINDING_NAME")
+    # Serve /docs + /openapi.json (default on for dev; prod sets false, like the catalog's LANCE_REST_DOCS).
+    docs_enabled: bool = Field(default=True, alias="COMPACTION_DOCS")
     # Datasets whose newest version is older than this are eligible for version GC (keep recent history).
     # ge=1 (not 0): timedelta(0) is falsy, so pylance collapses `older_than` to None and silently drops the
     # threshold — to GC aggressively, use a small positive value, not 0.

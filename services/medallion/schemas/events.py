@@ -167,24 +167,24 @@ def build_run_event(
     # Deterministic UUID keyed on operation+token → stable across redelivery (idempotent MERGE); a
     # token-less call (defensive fallback — the cascade always threads one) gets a fresh random UUID.
     run_id = run_id_for(f"{operation}-{token}") if token else str(uuid.uuid4())
-    # A FAIL run produced no data: it must not assert a version or an output dataset (record failed runs
-    # WITHOUT fabricating lineage — the failed run node + its errorMessage are the audit trail).
+    # A FAIL run produced no data: it keeps a BARE output (name only — the lineage repo makes the WROTE
+    # edge so producers() surfaces the attempt, but withholds the version for a non-success run) and NO
+    # version/stats/assertions. It does NOT fabricate lineage: the repo also gates DERIVED_FROM on
+    # is_success, so keeping the inputs records the READ, not a derivation.
     failed = event_type.upper() in {"FAIL", "ABORT"}
-    outputs = (
-        []
+    outputs = [
+        _dataset(output_namespace, output_name)
         if failed
-        else [
-            _dataset(
-                output_namespace,
-                output_name,
-                version=version,
-                row_count=row_count,
-                size_bytes=size_bytes,
-                assertions=assertions,
-                source_uri=source_uri,
-            )
-        ]
-    )
+        else _dataset(
+            output_namespace,
+            output_name,
+            version=version,
+            row_count=row_count,
+            size_bytes=size_bytes,
+            assertions=assertions,
+            source_uri=source_uri,
+        )
+    ]
     return {
         "eventType": event_type,
         "eventTime": datetime.now(UTC).isoformat(),

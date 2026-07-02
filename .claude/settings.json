@@ -1,0 +1,16 @@
+  {
+    "extraKnownMarketplaces": {
+      "ra-skills": {
+        "source": { "source": "github", "repo": "AI-Riksarkivet/ra-skills" },
+        "autoUpdate": true
+      }
+    },
+    "enabledPlugins": {
+      "writing-python@ra-skills": true,
+      "fastapi@ra-skills": true,
+      "python-infrastructure@ra-skills": true,
+      "otel@ra-skills": true,
+      "testing-python@ra-skills": true,
+      "dagger@ra-skills": true
+    }
+  }

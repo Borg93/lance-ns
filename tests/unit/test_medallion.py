@@ -34,6 +34,21 @@ class _FakeDapr:
         self.calls.append({"pubsub": pubsub_name, "topic": topic_name, "data": json.loads(data)})
 
 
+class _AttemptDapr:
+    """Records every publish ATTEMPT (parsed data) and fails attempts at/after ``fail_at`` — so a test can
+    inspect what a best-effort FAIL emit tried to publish (``_FakeDapr`` raises before recording)."""
+
+    def __init__(self, *, fail_at: int) -> None:
+        self.attempts: list[dict[str, Any]] = []
+        self._fail_at = fail_at
+
+    async def publish_event(self, *, pubsub_name: str, topic_name: str, data: str, **_: Any) -> None:
+        idx = len(self.attempts)
+        self.attempts.append(json.loads(data))
+        if idx >= self._fail_at:
+            raise RuntimeError("sidecar down")
+
+
 _BRONZE_TO_SILVER = MedallionSettings.model_validate(
     {
         "from_namespace": "bronze",
@@ -243,3 +258,31 @@ def test_mover_retries_on_fga_outage(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert status == {"status": "RETRY"}
     assert dapr.calls == []  # nothing emitted while authz is unanswerable
+
+
+def test_mover_emits_fail_event_on_transform_failure() -> None:
+    # A genuine transform failure (the FIRST publish — the COMPLETE emit — fails) records a FAIL RunEvent:
+    # it keeps a BARE output (so the lineage repo makes a WROTE edge → producers() surfaces the attempt)
+    # with NO version facet, carries the standard errorMessage facet, and returns RETRY.
+    dapr = _AttemptDapr(fail_at=0)  # the COMPLETE emit fails
+    status = asyncio.run(mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}))
+    assert status == {"status": "RETRY"}
+    # Two ATTEMPTS: the COMPLETE (failed), then the best-effort FAIL.
+    fail_events = [e for e in dapr.attempts if e.get("eventType") == "FAIL"]
+    assert fail_events, "a transform failure must emit a FAIL RunEvent"
+    fail = fail_events[-1]
+    assert fail["outputs"][0]["name"] == "silver$features"  # bare output → WROTE edge for producers()
+    assert "version" not in fail["outputs"][0].get("facets", {})  # a failed run asserts no version
+    assert fail["run"]["facets"]["errorMessage"]["message"] == "sidecar down"
+
+
+def test_mover_does_not_fail_run_when_only_the_trigger_publish_fails() -> None:
+    # CONTRACT (review of 73af2fd): if the COMPLETE emit SUCCEEDS but the downstream trigger publish fails,
+    # the run completed — it must NOT be flipped to FAIL. Only RETRY (redelivery re-emits the idempotent
+    # COMPLETE + re-publishes the trigger). fail_at=1 → the COMPLETE lands, the trigger publish raises.
+    dapr = _AttemptDapr(fail_at=1)
+    status = asyncio.run(mover.handle_stage(cast(Any, dapr), _BRONZE_TO_SILVER, {"data": {"token": "t"}}))
+    assert status == {"status": "RETRY"}
+    # Attempts are exactly COMPLETE then the trigger — NO FAIL event (no spurious FAIL for a done run).
+    assert [e.get("eventType", "trigger") for e in dapr.attempts] == ["COMPLETE", "trigger"]
+    assert not any(e.get("eventType") == "FAIL" for e in dapr.attempts)

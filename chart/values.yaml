@@ -55,13 +55,12 @@ dapr:
   global:
     ha:
       enabled: false # single-node kind
-    # This chart uses pub/sub, bindings, secret stores and service invocation ONLY — no actors,
-    # workflows or jobs — so the placement and scheduler control-plane deployments are dead weight
-    # (two StatefulSets + their PVCs). Re-enable if actors/workflows/jobs are ever adopted.
-    actors:
-      enabled: false # gates the dapr_placement deployment
-    scheduler:
-      enabled: false # gates the dapr_scheduler deployment
+    # NOTE: we use pub/sub + bindings + secret stores + service invocation only (no actors/workflows/jobs),
+    # so placement + scheduler are logically unused — BUT do NOT disable them: daprd 1.18 connects to BOTH
+    # at startup unconditionally and never becomes Ready without them (verified live — sidecars stuck 1/2
+    # with "no such host: dapr-placement-server / dapr-scheduler-server-a"). The audit's "disable the unused
+    # control plane" is a real footgun on Dapr 1.18; the control plane stays. (Shrinking scheduler replicas
+    # 3→1 for single-node kind is the safe saving, if any.)
 
 # --- NATS (subchart) — JetStream backs the Dapr pubsub.jetstream component -------------------------
 nats:

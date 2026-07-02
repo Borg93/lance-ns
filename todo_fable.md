@@ -67,9 +67,11 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
   same gate); `--set dapr.enabled=false` renders 0 Components.
 - ✅ **No sidecar resource annotations** — FIXED: `lance.daprSidecarResources` helper (values
   `dapr.sidecarResources`) on all 8 sidecar'd deployments (render-verified 8×4 annotations).
-- ✅ **Placement + scheduler deploy unused** — FIXED: `dapr.global.actors.enabled=false` +
-  `dapr.global.scheduler.enabled=false` (render-verified: no placement/scheduler workloads; injector sets
-  `ACTORS_ENABLED=false`).
+- ❌ **Placement + scheduler deploy unused** — REVERTED (the audit finding is a FOOTGUN on Dapr 1.18):
+  disabling them makes EVERY daprd sidecar hang `1/2` forever — daprd 1.18 connects to
+  `dapr-placement-server` AND `dapr-scheduler-server-a` at startup unconditionally and never goes Ready
+  without them (caught LIVE on helm rev 45: sidecars looping "no such host"). The control plane stays; the
+  values comment now documents why NOT to disable it. (Only safe saving: shrink scheduler replicas 3→1.)
 - ✅ **FGA outage → unhandled 500** — FIXED: `handle_stage` catches `ServiceUnavailableError` around the
   gate check → explicit `RETRY` (outage ≠ denial); pinned by
   `tests/unit/test_medallion.py::test_mover_retries_on_fga_outage`.
@@ -91,8 +93,14 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 - ✅ **Medallion never emits `dataSource`** — FIXED: emitted from the stage TO_URI/raw URI when compute is on
   (unblocks the B4 reconcile for cascade-written datasets — a real functional bug, not just fidelity).
 - ✅ **Cascade head ignores `eventType`** — FIXED: `_writes_raw` requires `eventType == COMPLETE`.
-- ✅ **No FAIL RunEvent on compute failure** — FIXED: the except path best-effort emits a FAIL (no version, no
-  outputs, standard `errorMessage` facet), suppressed so it can't mask the RETRY; idempotent on the run id.
+- ✅ **No FAIL RunEvent on compute failure** — FIXED, then CORRECTED after the 73af2fd review found two bugs
+  in the first cut: (a) the FAIL now keeps a BARE output (name only) so the repo makes a WROTE edge and
+  `producers()` surfaces the attempt — the first version emitted `outputs=[]`, which created no edge and left
+  the failed run invisible in `producers()` (contradicting the repo contract + `seed.py`); (b) the FAIL is
+  emitted ONLY when the transform actually failed (COMPLETE not yet emitted) — the first version emitted it
+  from an except that ALSO covered the downstream trigger publish, so a post-COMPLETE trigger failure flipped
+  a SUCCEEDED run to FAIL. Both pinned by new tests (`test_mover_emits_fail_event_on_transform_failure`,
+  `test_mover_does_not_fail_run_when_only_the_trigger_publish_fails`).
 - ✅ **`"column": null` in quality assertions** — FIXED: `Assertion.model_dump(exclude_none=True)` omits the key.
 - ✅ **Partial outputStatistics persists `-1`** — FIXED: `statistics` returns `None` for the absent half.
 - ✅ **Catalog job identity = bare op** — FIXED: `<operation>.<table_id>` (compaction too: `compaction.<id>`).

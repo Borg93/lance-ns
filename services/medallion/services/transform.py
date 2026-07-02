@@ -89,6 +89,7 @@ async def handle_stage(
             return _DROP
 
     quality_blocked = False
+    completed = False  # set once the COMPLETE lineage emit lands — gates the FAIL-on-failure below
     try:
         # 0. Fake-Ray compute (opt-in): a REAL in-process Lance write of the downstream dataset, so the
         # emitted lineage carries the actual version + measured output statistics (rows + on-disk bytes),
@@ -141,6 +142,7 @@ async def handle_stage(
             data=json.dumps(run_event),
             data_content_type="application/json",
         )
+        completed = True  # the COMPLETE is recorded — a later trigger-publish failure is NOT a run failure
         # 2. Quality gate: a failed assertion BLOCKS promotion — record it, but do NOT trigger the next
         # stage, so a bad batch can't cascade. Composes with the FGA gate above (authz AND data-quality).
         if assertions and not passed(assertions):
@@ -159,28 +161,32 @@ async def handle_stage(
         log.warning(
             "medallion_stage_failed", extra={"transition": transition, "token": token, "error": str(exc)}
         )
-        # Record the failed run in lineage (the "record failed runs without fabricating lineage" contract):
-        # a FAIL RunEvent with NO version + NO output dataset, carrying the errorMessage facet. Best-effort
-        # + suppressed — a FAIL-emit failure must not mask the original error or the RETRY. Idempotent on the
-        # deterministic run_id, so re-emits across redeliveries re-MERGE the same (:Run) rather than pile up.
-        with suppress(Exception):
-            fail_event = build_run_event(
-                operation=settings.operation,
-                author=settings.author,
-                job_namespace=settings.job_namespace,
-                inputs=[(settings.from_namespace, settings.from_dataset)],
-                output_namespace=settings.to_namespace,
-                output_name=settings.to_dataset,
-                token=token,
-                event_type="FAIL",
-                error_message=str(exc),
-            )
-            await dapr.publish_event(
-                pubsub_name=settings.pubsub,
-                topic_name=settings.lineage_topic,
-                data=json.dumps(fail_event),
-                data_content_type="application/json",
-            )
+        # Record the failed run ONLY if the transform itself failed — i.e. the COMPLETE was never emitted.
+        # A failure AFTER the COMPLETE (the downstream trigger publish) is NOT a run failure: the run
+        # succeeded and its COMPLETE is already recorded; emitting a FAIL then would flip that successful
+        # run to FAIL (and leave a spurious FAIL feed row). Such a case just RETRIES — redelivery re-emits
+        # the idempotent COMPLETE + re-publishes the trigger. The FAIL RunEvent keeps a bare output (WROTE
+        # edge, no version) + the errorMessage facet; best-effort + suppressed so it can't mask the RETRY;
+        # idempotent on the deterministic run_id.
+        if not completed:
+            with suppress(Exception):
+                fail_event = build_run_event(
+                    operation=settings.operation,
+                    author=settings.author,
+                    job_namespace=settings.job_namespace,
+                    inputs=[(settings.from_namespace, settings.from_dataset)],
+                    output_namespace=settings.to_namespace,
+                    output_name=settings.to_dataset,
+                    token=token,
+                    event_type="FAIL",
+                    error_message=str(exc),
+                )
+                await dapr.publish_event(
+                    pubsub_name=settings.pubsub,
+                    topic_name=settings.lineage_topic,
+                    data=json.dumps(fail_event),
+                    data_content_type="application/json",
+                )
         return _RETRY
     if quality_blocked:
         record_quality_blocked(transition)

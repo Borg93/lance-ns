@@ -23,6 +23,7 @@ from common import fga
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import ServiceUnavailableError
+from openfga_sdk import OpenFgaClient
 from opentelemetry import trace
 
 from medallion.core.config import MedallionSettings
@@ -46,7 +47,7 @@ _QUALITY_BLOCKED = {"status": "DROP"}
 
 
 async def handle_stage(
-    dapr: DaprClient, settings: MedallionSettings, event: Any, *, fga_client: Any = None
+    dapr: DaprClient, settings: MedallionSettings, event: Any, *, fga_client: OpenFgaClient | None = None
 ) -> dict[str, str]:
     """Handle one upstream stage trigger: emit the transform's lineage, then trigger the next stage.
     ``event`` is the untrusted Dapr CloudEvent envelope (hence ``Any`` + the ``isinstance`` guard).

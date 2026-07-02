@@ -64,7 +64,8 @@ class _ReconcileRepo(Protocol):
 
 # The drift states that mean a real write's lineage event was LOST — storage has data the graph doesn't fully
 # record. Only these are back-filled; GRAPH_AHEAD / MISSING_ON_STORAGE / IN_SYNC are not lost writes.
-_BACKFILLABLE = (ReconcileState.STORAGE_AHEAD, ReconcileState.UNTRACKED)
+# Public: the cron route reports the same set, so there is ONE source of truth (no drift-prone duplicate).
+BACKFILLABLE_STATES = (ReconcileState.STORAGE_AHEAD, ReconcileState.UNTRACKED)
 
 
 async def reconcile_all(
@@ -88,7 +89,7 @@ async def reconcile_all(
         graph_version = await repository.latest_write_version(summary.name)
         storage_version = await read_version(uri)
         status = reconcile(dataset=summary.name, graph_version=graph_version, storage_version=storage_version)
-        if backfill and storage_version is not None and status.status in _BACKFILLABLE:
+        if backfill and storage_version is not None and status.status in BACKFILLABLE_STATES:
             # Fix the drift as a side effect but keep the found status in the report — a subsequent sweep
             # will show it in_sync, proving the back-fill took.
             await repository.backfill_write(summary.name, storage_version)

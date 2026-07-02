@@ -25,13 +25,18 @@ tracer = trace.get_tracer(__name__)
 
 
 def _s3fs(settings: CompactionSettings) -> pafs.S3FileSystem:
-    """A pyarrow S3 filesystem over the (dev, HTTP) RustFS endpoint — used only to LIST the bucket."""
+    """A pyarrow S3 filesystem over the RustFS endpoint — used only to LIST the bucket.
+
+    The scheme is derived from the endpoint (NOT hardcoded ``http``) so an ``https://`` endpoint keeps TLS
+    — hardcoding ``http`` silently downgraded a secured prod S3 connection to plaintext.
+    """
+    scheme = "https" if settings.s3_endpoint.startswith("https://") else "http"
     endpoint = settings.s3_endpoint.removeprefix("http://").removeprefix("https://")
     return pafs.S3FileSystem(
         endpoint_override=endpoint,
         access_key=settings.s3_access_key_id,
         secret_key=settings.s3_secret_access_key,
-        scheme="http",
+        scheme=scheme,
         region=settings.s3_region,
     )
 

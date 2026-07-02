@@ -19,12 +19,9 @@ from fastapi.concurrency import run_in_threadpool
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.core.config import storage_options
-from lineage.core.reconcile import read_storage_version, reconcile_all
-from lineage.schemas import ReconcileState
+from lineage.core.reconcile import BACKFILLABLE_STATES, read_storage_version, reconcile_all
 
 log = logging.getLogger(__name__)
-
-_BACKFILLED = (ReconcileState.STORAGE_AHEAD, ReconcileState.UNTRACKED)
 
 
 async def _on_cron(
@@ -44,7 +41,7 @@ async def _on_cron(
         lambda uri: run_in_threadpool(read_storage_version, uri, opts),
         backfill=True,
     )
-    backfilled = [s.dataset for s in statuses if s.status in _BACKFILLED]
+    backfilled = [s.dataset for s in statuses if s.status in BACKFILLABLE_STATES]
     log.info("lineage_reconcile_sweep", extra={"checked": len(statuses), "backfilled": len(backfilled)})
     return {"checked": len(statuses), "backfilled": backfilled}
 

@@ -61,13 +61,18 @@ def as_unsupported_if_stub(exc: Exception) -> Exception:
 
 
 def problem_detail(exc: LanceNamespaceError) -> tuple[int, dict[str, object]]:
-    """Build (status, RFC 9457 problem+json body) for a domain error."""
+    """Build (status, RFC 9457 problem+json body) for a domain error.
+
+    A 5xx-mapped error uses a GENERIC ``detail`` — never ``str(exc)`` — so internals (paths, DSNs, driver
+    messages) leak via logs only, not the response body. Client (4xx) errors keep their message: it is
+    actionable and self-authored, not an internal leak.
+    """
     status = status_for(int(exc.code))
     body: dict[str, object] = {
         "type": f"https://lance.org/problems/{exc.__class__.__name__.lower()}",
         "title": exc.__class__.__name__,
         "status": status,
-        "detail": str(exc),
+        "detail": "Internal Server Error" if status >= 500 else str(exc),
         "code": int(exc.code),
     }
     return status, body

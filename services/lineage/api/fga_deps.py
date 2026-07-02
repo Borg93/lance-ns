@@ -173,12 +173,12 @@ def get_dataset_filter(request: Request, settings: SettingsDep, token: CurrentTo
 FilterDep = Annotated[DatasetFilter, Depends(get_dataset_filter)]
 
 
-async def governed(
+async def governed[T](
     datasets: DatasetFilter,
     fga_enabled: bool,
-    items: list[Any],
-    refs: Callable[[Any], set[str]],
-) -> list[Any]:
+    items: list[T],
+    refs: Callable[[T], set[str]],
+) -> list[T]:
     """Drop items the caller may not see: any referencing a non-visible dataset, and — when FGA is on —
     any dataset-less item (it would otherwise pass vacuously, leaking run/author/error to a caller with
     no grants). Auth off → ``visible`` is pass-through, so nothing is dropped. (#22 audit)

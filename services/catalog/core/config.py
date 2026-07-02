@@ -40,8 +40,9 @@ class Settings(BaseSettings):
     s3_virtual_hosted: bool = Field(default=False, alias="LANCE_S3_VIRTUAL_HOSTED")
 
     # Secret consumption — when on, read the sensitive S3 secret from the Dapr secret store (OpenBao) at
-    # boot instead of trusting plaintext env (the audit's 'wired but never read' fix). Env stays a
-    # boot-time fallback so a store hiccup can't hard-fail startup.
+    # boot instead of trusting plaintext env (the audit's 'wired but never read' fix). The store is then
+    # the STRICT sole source: the chart omits the plaintext secret from pod env, and a store miss FAILS
+    # CLOSED at boot (no env fallback) — matching the module docstring's "no silent fallback".
     secrets_from_dapr: bool = Field(default=False, alias="LANCE_SECRETS_FROM_DAPR")
     dapr_secret_store: str = Field(default="lance-secrets", alias="LANCE_DAPR_SECRET_STORE")
     dapr_secret_key: str = Field(default="lance", alias="LANCE_DAPR_SECRET_KEY")
@@ -105,7 +106,8 @@ class Settings(BaseSettings):
     # Transport: ``http`` (direct POST — dev / external producers) or ``dapr`` (publish to the Dapr
     # ``pubsub.jetstream`` component via the local sidecar — durable, decoupled, the production path).
     lineage_emit_enabled: bool = Field(default=False, alias="LANCE_LINEAGE_EMIT_ENABLED")
-    lineage_transport: str = Field(default="http", alias="LANCE_LINEAGE_TRANSPORT")
+    # Literal (like vending_mode) so pydantic validates the allowed set — one enum-setting idiom in this file.
+    lineage_transport: Literal["http", "dapr"] = Field(default="http", alias="LANCE_LINEAGE_TRANSPORT")
     lineage_url: str | None = Field(default=None, alias="LANCE_LINEAGE_URL")
     lineage_emit_timeout_seconds: float = Field(
         default=5.0, ge=0.1, alias="LANCE_LINEAGE_EMIT_TIMEOUT_SECONDS"
@@ -125,8 +127,6 @@ class Settings(BaseSettings):
             raise ValueError(
                 "LANCE_OIDC_ENABLED is required when LANCE_FGA_ENABLED is set (authz needs a user)"
             )
-        if self.lineage_transport not in ("http", "dapr"):
-            raise ValueError("LANCE_LINEAGE_TRANSPORT must be 'http' or 'dapr'")
         if self.lineage_emit_enabled and self.lineage_transport == "http" and not self.lineage_url:
             raise ValueError("LANCE_LINEAGE_URL is required for the http lineage transport")
         return self

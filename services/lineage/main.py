@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from common import fga
@@ -86,10 +86,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         yield
     finally:
         app.state.shutting_down = True
+        # Isolate each close so a failure in one still runs the others (parity with the other services) —
+        # e.g. a raising fga_client.close() must not leak the AGE pool.
         fga_client = getattr(app.state, "fga", None)
         if fga_client is not None:
-            await fga_client.close()
-        await pool.close()
+            with suppress(Exception):
+                await fga_client.close()
+        with suppress(Exception):
+            await pool.close()
 
 
 app = FastAPI(title="Lance Lineage Service", version="0.1.0", lifespan=lifespan)

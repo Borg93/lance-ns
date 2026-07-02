@@ -38,13 +38,14 @@ external endpoint:
 | **S3 lakehouse** | the permanent ingest+export surface; you want a managed, replicated, lifecycle-policied object store (AWS S3 / a RustFS or MinIO cluster) | `rustfs.enabled=false` + `rustfs.externalEndpoint=…` → catalog/lineage/compaction + vending connect there (also override `greptimedb-standalone.objectStorage.s3.endpoint`) |
 | **Postgres (AGE)** | a managed DB (RDS/Cloud SQL/CNPG) for backups, HA, PITR | `age.enabled=false` + `age.externalHost=…` (+ matching user/password/dbs) → lineage DSN + the OpenFGA datastore Secret point there (also override the openfga subchart's `datastore.uri`) |
 | **OpenBao / secrets — app tier** | a hardened external Vault / cloud KMS | `openbao.enabled=false` + `openbao.externalAddr=…` → the apps consume from the external Vault via their Dapr sidecar (`secretsViaDapr` keys off `externalAddr`, so there is **no** plaintext-env fallback) and the in-cluster OpenBao is not rendered |
-| **infra-tier Secret** | the `infra-credentials` + `observability-s3` Secrets (AGE/RustFS root creds; GreptimeDB's S3 keys) should come from Vault, not chart values | `externalSecrets.enabled=true` → the external-secrets.io operator syncs `<release>-infra-credentials` **and** `<release>-observability-s3` from Vault (both static Secrets are skipped); the openfga DSN is assembled from the fetched password |
+| **infra-tier Secret** | the `infra-credentials` + `observability-s3` Secrets (AGE/RustFS root creds; GreptimeDB's S3 **secret** key) should come from Vault, not chart values | `externalSecrets.enabled=true` → the external-secrets.io operator syncs `<release>-infra-credentials` **and** `<release>-observability-s3` from Vault (both static Secrets are skipped); the openfga DSN is assembled from the fetched password. The non-sensitive S3 access-key *id* is still templated (it ships in app env regardless) |
 | **Observability** (GreptimeDB / Vector / Perses) | you don't want observability to die with the cluster it observes — run it on a separate platform/cluster | `observability.enabled=false` + `observability.externalOtlpEndpoint=…` → apps + Dapr export OTLP there |
 
 > All four overrides are **wired and verified** (render-checks confirm: no in-cluster DNS leaks into app env
 > when externalized; external-Vault keeps the apps on Dapr secrets with no plaintext fallback **and TLS
 > verification on for an https Vault** — `skipVerify` applies only to the plain-http in-cluster dev OpenBao;
-> the external-secrets operator owns the infra + observability Secrets with no static values). The
+> the external-secrets operator owns the infra + observability Secrets — the RustFS secret key + AGE
+> password come from Vault, only the non-sensitive S3 access-key id stays templated). The
 > `values-prod.yaml` EXTERNALIZE block shows the full set.
 >
 > The prod path also **fails the render** instead of shipping known-bad values: `openbao.devMode=false`

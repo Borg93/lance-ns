@@ -38,9 +38,14 @@ then *triggers* the `raw→bronze` mover, which produces bronze. Because the hea
 every other stage, the pipeline is event-driven end to end — nothing polls or waits on a timer (GOAL 4 B2).
 
 > **`/produce` is the demo entry point, not a prod surface.** It carries no auth (it sidesteps
-> `enforce_author` — an external caller could trigger cascades and forge medallion provenance), so its
-> gateway route is values-gated: `medallion.producer.expose` (on for the dev demo, **off in
-> `values-prod.yaml`**). In prod the head fires only from real raw-namespace writes via `/raw-arrival`.
+> `enforce_author` — a caller could trigger cascades and forge medallion provenance), so its gateway
+> route is values-gated: `medallion.producer.expose` (on for the dev demo, **off in `values-prod.yaml`**).
+> That closes the **external/edge** path — from the gateway, the prod head fires only from real
+> raw-namespace writes via `/raw-arrival`. It does **not** close the in-cluster path: the lance-ray pod
+> still serves the unauthenticated `/produce` on its ClusterIP, and this route is *not* sidecar-delivered
+> so it skips `require_dapr_token`; no NetworkPolicy ships either. So an in-cluster workload can still
+> reach it. Hardening that (a NetworkPolicy, or a token/authz on `/produce`) is tracked in
+> `todo_fable.md` §9.
 
 ### Does the cascade produce real data, or just lineage?
 

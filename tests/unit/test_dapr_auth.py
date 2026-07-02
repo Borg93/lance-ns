@@ -11,6 +11,7 @@ token, since the flags can diverge (the audit's mount/assert decoupling hole).
 from __future__ import annotations
 
 import asyncio
+from typing import Any
 
 import pytest
 from common.dapr_auth import assert_app_token_configured, require_dapr_token
@@ -88,6 +89,14 @@ def test_lineage_boot_fails_when_only_the_reconcile_route_mounts(
     from lineage import main as lineage_main
 
     monkeypatch.delenv("APP_API_TOKEN", raising=False)
+
+    # Keep it infra-free EVEN UNDER the regression: the assert must fire before the pool opens, so make
+    # make_pool blow up loudly if it's ever reached — else a regressed assert would fall through to a
+    # real DB connect and hang ~30s on PoolTimeout (or hit a live dev DB) instead of failing clean.
+    def _no_pool(*_a: Any, **_k: Any) -> Any:
+        raise AssertionError("make_pool reached — the boot app-token assert did not fire first")
+
+    monkeypatch.setattr(lineage_main, "make_pool", _no_pool)
     settings = LineageSettings.model_validate({"reconcile_binding_name": "lineage-reconcile-cron"})
     assert not settings.dapr_enabled  # the divergence under test: binding on, pub/sub ingest off
     monkeypatch.setattr(lineage_main, "get_settings", lambda: settings)

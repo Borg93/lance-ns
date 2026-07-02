@@ -378,8 +378,9 @@ medallion:
   producer:
     daprAppId: lance-ray
     # Expose POST /produce through the gateway (the DEMO entry point for the cascade). It carries no
-    # auth — an external caller could trigger cascades / forge medallion provenance — so values-prod
-    # sets it false; the head then fires only from real raw-namespace writes via /raw-arrival.
+    # auth — a caller could trigger cascades / forge medallion provenance — so values-prod sets it false;
+    # the EDGE head then fires only from real raw writes via /raw-arrival. NB this gates only the gateway
+    # route — the in-cluster ClusterIP route stays reachable + unauthenticated (see docs/MEDALLION.md).
     expose: true
     rawDataset: raw_events
     rawNamespace: raw

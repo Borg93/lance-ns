@@ -22,7 +22,9 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
   skipped when `externalSecrets.enabled`; a second ExternalSecret in `external-secrets.yaml` owns the
   same-named Secret (secret key from Vault, access-key id templated — it isn't sensitive).
 - ✅ **`values-prod.yaml` ships a known-constant app-token placeholder** — FIXED: `dapr-app-token.yaml`
-  `fail`s the render on the placeholder value; verified the guard fires independently of the others.
+  `fail`s the render on the placeholder value AND on the base-chart dev-default token when
+  `openbao.devMode=false` (parity with the age/rustfs guards — closes the diff-review gap where a
+  hand-rolled prod overlay could ship the public dev token). Verified both cases fire.
 - ✅ **`values-prod.yaml` ships dev credentials if applied literally** — FIXED: `infra-credentials.yaml`
   `fail`s the render when `openbao.devMode=false` (the prod signal) + dev-default `age.password` /
   `rustfs.secretKey` + no externalSecrets; values-prod documents the guards. Verified each fires.
@@ -247,6 +249,13 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 
 ## 9 · Feature gaps — ephemeral multimodal lakehouse (→ rask merge)
 
+- ⛔ **P2 `/produce` (lance-ray) is unauthenticated in-cluster even in prod.** The §1 fix values-gated the
+  *gateway* route (`medallion.producer.expose=false`), closing the edge, but the pod still serves the
+  route on its ClusterIP and it is NOT sidecar-delivered (so it skips `require_dapr_token`); no
+  NetworkPolicy ships. An in-cluster workload can still trigger cascades / forge medallion provenance.
+  Fix: a NetworkPolicy restricting `lance-ray:8000`, or an authz guard on `/produce` (it's a real Ray job
+  at rask, so this may resolve in the merge — until then the demo default is documented in MEDALLION.md).
+  Surfaced by the 9562711 diff review. `services/medallion/api/produce.py`
 - ⛔ **P0 Multimodal (blob_v2) — MULTIMODAL FIRST.** The format + our pinned pylance>=7.0.0 fully support it
   (`lance/blob.py` BlobColumn, inline-when-small / pointer-when-large, ranged reads; verified in the installed
   package + lance_docs/{guide,file_format,ray}.md) and the direct write path (vended creds → RustFS) is open —

@@ -85,8 +85,16 @@ reconcile binding is blocked even when reconcile is disabled (the route isn't mo
 suspenders). On the kgateway/Envoy migration these become "no HTTPRoute declared" (allow-list by
 construction) — the service-side token check is the load-bearing guard either way. */}}
 {{- define "lance.lineageSidecarOnlyRoutes" -}}
+{{- $bn := .Values.services.lineage.reconcile.bindingName -}}
+{{- /* The binding name is interpolated raw into the gateway 403 nginx regex (below) AND used as a Dapr
+     Component metadata.name — validate the charset at the render so a `|` (which would add an empty
+     alternation and 403 the whole /lineage/ API) or a space (which breaks `nginx -t`) fails loudly here
+     instead of bricking the gateway. Same [a-z0-9-] shape a k8s name needs anyway. */ -}}
+{{- if and $bn (not (regexMatch "^[a-zA-Z0-9._-]+$" $bn)) -}}
+{{- fail (printf "services.lineage.reconcile.bindingName %q must match ^[A-Za-z0-9._-]+$ — it is interpolated into the gateway 403 regex and used as a Dapr Component name" $bn) -}}
+{{- end -}}
 {{- /* `with` skips a blank binding name — a bare `|` alternation would match the empty string and 403 the whole /lineage/ API. */ -}}
-lineage-events{{ with .Values.services.lineage.reconcile.bindingName }}|{{ . }}{{ end }}
+lineage-events{{ with $bn }}|{{ . }}{{ end }}
 {{- end -}}
 
 {{/* OTel SDK env for an app (call: include "lance.otelEnv" (list $root "<service.name>")). The apps run

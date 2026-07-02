@@ -33,6 +33,7 @@ def list_table_branches(
     page_token: str | None = None,
     limit: int | None = None,
 ) -> ListTableBranchesResponse:
+    """List a table's Git-like branches (paginated) — wraps the pylance ``list_branches`` data-plane op."""
     req = ListTableBranchesRequest(
         id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit
     )
@@ -43,6 +44,7 @@ def list_table_branches(
 def create_table_branch(
     id: str, body: CreateTableBranchRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> CreateTableBranchResponse:
+    """Create a branch from main (or a source branch/version) — wraps pylance ``create_branch``."""
     body.id = parse_identifier(id, settings.delimiter)
     return dataplane.create_branch(ns, so, body)
 
@@ -51,5 +53,6 @@ def create_table_branch(
 def delete_table_branch(
     id: str, body: DeleteTableBranchRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> DeleteTableBranchResponse:
+    """Delete a branch from the table — wraps the pylance ``delete_branch`` data-plane op."""
     body.id = parse_identifier(id, settings.delimiter)
     return dataplane.delete_branch(ns, so, body)

@@ -19,6 +19,7 @@ router = APIRouter(prefix="/v1/transaction", tags=["transaction"])
 
 @router.post("/{id}/describe", response_model_exclude_none=True)
 def describe_transaction(id: str, ns: NamespaceDep, settings: SettingsDep) -> DescribeTransactionResponse:
+    """Report the current status of transaction ``id`` — wraps the backend ``describe_transaction`` op."""
     req = DescribeTransactionRequest(id=parse_identifier(id, settings.delimiter))
     return native.call(ns, "describe_transaction", req)
 
@@ -27,5 +28,6 @@ def describe_transaction(id: str, ns: NamespaceDep, settings: SettingsDep) -> De
 def alter_transaction(
     id: str, body: AlterTransactionRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> AlterTransactionResponse:
+    """Apply the requested state actions to transaction ``id`` — backend ``alter_transaction``."""
     body.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "alter_transaction", body)

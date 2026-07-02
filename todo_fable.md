@@ -140,7 +140,7 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 - ⛔ **Demo peek re-reads EVERY Lance version of every dataset per call** (one S3 dataset-open per version),
   polled every 2s — linear latency growth with cascade runs. Cache or cap versions. `services/lineage/api/v1/endpoints/demo.py:63`
 
-## 5 · P2 — Python / FastAPI quality + consistency — 🟡 14/17 DONE (2026-07-02)
+## 5 · P2 — Python / FastAPI quality + consistency — ✅ 17/17 DONE (2026-07-02)
 
 DONE: catalog config comment-lie (fail-closed, no env fallback); `handle_stage` `fga_client: Any` →
 `OpenFgaClient | None`; `_BACKFILLED`/`_BACKFILLABLE` deduped → one public `BACKFILLABLE_STATES`;
@@ -151,11 +151,12 @@ BATCH 2 (26dff20) added: catalog health probes async; `/docs` gating (LINEAGE/ME
 medallion+compaction `/readyz` lifecycle flags; medallion `/produce` RFC 9457 + Retry-After; compaction
 empty-secret boot guard (lifespan). BATCH 3 added: secret-splice dedup → `common.secrets.fetch_required_secrets`
 (catalog/lineage/compaction all call it; the fail-closed rule lives in one place).
-REMAINING (3) — larger refactors, best done as a focused pass (+ live-verify the behavioral batch-2 changes):
-(#4) migrate the S3 secret to `SecretStr` in lineage/medallion/compaction — touches ~6 read sites +
-interacts with the compaction guard + the medallion compute validator (needs `.get_secret_value()` at each);
-(#13) emitter dedup (~90 lines HttpLineageEmitter/DaprEmitter/NoopEmitter) — refactor with test-coverage risk;
-(#15) catalog endpoint docstrings (~15 handlers).
+BATCH 4 (final) added: (#4) S3 secret → `SecretStr` across lineage/medallion/compaction (all 10 read-sites
++ the 2 guards migrated to `.get_secret_value()`; repr-redaction verified); (#13) emitter dedup via a shared
+`_BaseLineageEmitter` (~60 fewer lines); (#15) docstrings on 48 catalog endpoint handlers (9-agent fan-out,
+each import-verified, then trimmed to the line limit). Plus the caught-live bugfix: `/produce`
+`response_model=None` (the `dict | JSONResponse` union crashed lance-ray at startup) + a regression test that
+builds every medallion app's OpenAPI. ALL of §5 live-verified on the cluster (helm rev 47).
 
 
 - ⛔ **Catalog config comment lies about a fail-closed security invariant** — claims env is a boot-time

@@ -71,6 +71,7 @@ async def create_table(
     properties_header: Annotated[str | None, Header(alias="x-lance-table-properties")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CreateTableResponse:
+    """Create a Lance table from an Arrow-IPC stream — ``create_table``; seeds ownership + lineage."""
     properties = None
     if properties_header:
         try:
@@ -133,6 +134,7 @@ async def insert_into_table(
     mode: str | None = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> InsertIntoTableResponse:
+    """Append Arrow-IPC rows — ``insert_into_table``; emits an INSERT lineage event."""
     segments = parse_identifier(id, settings.delimiter)
     req = InsertIntoTableRequest(id=segments, mode=mode)
     response: InsertIntoTableResponse = await run_in_threadpool(
@@ -167,6 +169,7 @@ async def merge_insert_into_table(
     when_not_matched_by_source_delete: bool | None = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> MergeInsertIntoTableResponse:
+    """Upsert Arrow-IPC rows — ``merge_insert_into_table``; emits a MERGE_INSERT lineage event."""
     segments = parse_identifier(id, settings.delimiter)
     req = MergeInsertIntoTableRequest(
         id=segments,
@@ -201,6 +204,7 @@ async def update_table(
     emitter: LineageEmitterDep,
     authorization: Annotated[str | None, Header()] = None,
 ) -> UpdateTableResponse:
+    """Update rows matching a predicate — ``update_table``; emits an UPDATE lineage event."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: UpdateTableResponse = await run_in_threadpool(dataplane.update_table, ns, so, body)
@@ -227,6 +231,7 @@ async def delete_from_table(
     emitter: LineageEmitterDep,
     authorization: Annotated[str | None, Header()] = None,
 ) -> DeleteFromTableResponse:
+    """Delete rows matching a predicate — ``delete_from_table``; emits a DELETE lineage event."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: DeleteFromTableResponse = await run_in_threadpool(dataplane.delete_from_table, ns, so, body)
@@ -244,6 +249,7 @@ async def delete_from_table(
 
 @router.post("/{id}/query")
 def query_table(id: str, body: QueryTableRequest, ns: NamespaceDep, settings: SettingsDep) -> Response:
+    """Run a query and return matching rows as an Arrow-IPC file — wraps ``query_table``."""
     body.id = parse_identifier(id, settings.delimiter)
     data = native.call(ns, "query_table", body)
     return Response(content=data, media_type=ARROW_FILE)
@@ -253,6 +259,7 @@ def query_table(id: str, body: QueryTableRequest, ns: NamespaceDep, settings: Se
 def count_table_rows(
     id: str, ns: NamespaceDep, settings: SettingsDep, body: CountTableRowsRequest | None = None
 ) -> Response:
+    """Count the table's rows (optionally filtered) — ``count_table_rows``; returns plain text."""
     req = body or CountTableRowsRequest()
     req.id = parse_identifier(id, settings.delimiter)
     count = native.call(ns, "count_table_rows", req)
@@ -263,6 +270,7 @@ def count_table_rows(
 def explain_table_query_plan(
     id: str, body: ExplainTableQueryPlanRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> Response:
+    """Return the logical query plan — ``explain_table_query_plan``; plain text."""
     body.id = parse_identifier(id, settings.delimiter)
     result = native.call(ns, "explain_table_query_plan", body)
     return PlainTextResponse(result if isinstance(result, str) else json.dumps(dump(result)))
@@ -272,6 +280,7 @@ def explain_table_query_plan(
 def analyze_table_query_plan(
     id: str, body: AnalyzeTableQueryPlanRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> Response:
+    """Return the analyzed query plan with runtime metrics — ``analyze_table_query_plan``; plain text."""
     body.id = parse_identifier(id, settings.delimiter)
     result = native.call(ns, "analyze_table_query_plan", body)
     return PlainTextResponse(result if isinstance(result, str) else json.dumps(dump(result)))

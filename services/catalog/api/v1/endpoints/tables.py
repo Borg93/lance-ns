@@ -48,6 +48,8 @@ async def list_all_tables(
     page_token: str | None = None,
     limit: int | None = None,
 ) -> ListTablesResponse:
+    """List every table in the namespace via ``list_all_tables``; when FGA is on,
+    filter the result down to the tables the caller can ``can_read_data``."""
     req = ListTablesRequest(id=[], page_token=page_token, limit=limit)
     response: ListTablesResponse = await run_in_threadpool(native.call, ns, "list_all_tables", req)
     # When FGA is on and the caller is known, return only the tables they can read.
@@ -69,6 +71,8 @@ async def declare_table(
     client: FgaClientDep,
     body: DeclareTableRequest | None = None,
 ) -> DeclareTableResponse:
+    """Declare a new (empty) table at ``id`` via ``declare_table``, then seed the
+    caller's FGA ownership over the new table."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or DeclareTableRequest()
     req.id = segments
@@ -87,6 +91,8 @@ def describe_table(
     check_declared: bool | None = None,
     version: int | None = None,
 ) -> DescribeTableResponse:
+    """Describe the table at ``id`` (schema / uri / detailed metadata, optionally at ``?version=N``)
+    via ``describe_table``."""
     req = DescribeTableRequest(
         id=parse_identifier(id, settings.delimiter),
         with_table_uri=with_table_uri,
@@ -99,6 +105,7 @@ def describe_table(
 
 @router.post("/{id}/exists", status_code=204)
 def table_exists(id: str, ns: NamespaceDep, settings: SettingsDep) -> None:
+    """Check the table at ``id`` exists via ``table_exists`` — 204 if present, error otherwise."""
     native.call(ns, "table_exists", TableExistsRequest(id=parse_identifier(id, settings.delimiter)))
 
 
@@ -112,6 +119,8 @@ async def drop_table(
     token: CurrentToken,
     authorization: Annotated[str | None, Header()] = None,
 ) -> DropTableResponse:
+    """Drop the table at ``id`` via ``drop_table``, then revoke its FGA tuples and
+    emit a best-effort ``drop_table`` lineage event."""
     segments = parse_identifier(id, settings.delimiter)
     response: DropTableResponse = await run_in_threadpool(
         native.call, ns, "drop_table", DropTableRequest(id=segments)
@@ -137,6 +146,8 @@ async def drop_table(
 async def deregister_table(
     id: str, ns: NamespaceDep, settings: SettingsDep, client: FgaClientDep
 ) -> DeregisterTableResponse:
+    """Deregister the table at ``id`` (detach it without deleting data) via lance_namespace
+    ``deregister_table``, then revoke its FGA ownership."""
     segments = parse_identifier(id, settings.delimiter)
     response: DeregisterTableResponse = await run_in_threadpool(
         native.call, ns, "deregister_table", DeregisterTableRequest(id=segments)
@@ -154,6 +165,8 @@ async def register_table(
     token: CurrentToken,
     client: FgaClientDep,
 ) -> RegisterTableResponse:
+    """Register an existing table location at ``id`` via ``register_table``, then
+    seed the caller's FGA ownership over it."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: RegisterTableResponse = await run_in_threadpool(native.call, ns, "register_table", body)
@@ -170,6 +183,8 @@ async def rename_table(
     token: CurrentToken,
     client: FgaClientDep,
 ) -> RenameTableResponse:
+    """Rename the table at ``id`` to its new id via ``rename_table``, then revoke
+    the source id's FGA tuples and seed ownership on the destination id."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: RenameTableResponse = await run_in_threadpool(native.call, ns, "rename_table", body)
@@ -189,11 +204,13 @@ async def rename_table(
 def restore_table(
     id: str, body: RestoreTableRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> RestoreTableResponse:
+    """Restore the table at ``id`` to a prior version via ``restore_table``."""
     body.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "restore_table", body)
 
 
 @router.post("/{id}/stats", response_model_exclude_none=True)
 def get_table_stats(id: str, ns: NamespaceDep, settings: SettingsDep) -> GetTableStatsResponse:
+    """Return storage/row statistics for the table at ``id`` via ``get_table_stats``."""
     req = GetTableStatsRequest(id=parse_identifier(id, settings.delimiter))
     return native.call(ns, "get_table_stats", req)

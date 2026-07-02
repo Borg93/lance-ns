@@ -26,6 +26,7 @@ router = APIRouter(prefix="/v1/table", tags=["index"])
 def create_index(
     id: str, body: CreateTableIndexRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> CreateTableIndexResponse:
+    """Build a vector index on a table's column — wraps the native ``create_table_index`` op."""
     body.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "create_table_index", body)
 
@@ -34,6 +35,7 @@ def create_index(
 def create_scalar_index(
     id: str, body: CreateTableIndexRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> CreateTableScalarIndexResponse:
+    """Build a scalar index on a table's column — wraps the native ``create_table_scalar_index`` op."""
     body.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "create_table_scalar_index", body)
 
@@ -46,6 +48,7 @@ def list_table_indices(
     page_token: str | None = None,
     limit: int | None = None,
 ) -> ListTableIndicesResponse:
+    """List the indices defined on a table (paged) — wraps the native ``list_table_indices`` op."""
     req = ListTableIndicesRequest(
         id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit
     )
@@ -56,6 +59,7 @@ def list_table_indices(
 def describe_table_index_stats(
     id: str, index_name: str, ns: NamespaceDep, settings: SettingsDep
 ) -> DescribeTableIndexStatsResponse:
+    """Report stats for a named index on a table — wraps the native ``describe_table_index_stats`` op."""
     req = DescribeTableIndexStatsRequest(id=parse_identifier(id, settings.delimiter), index_name=index_name)
     return native.call(ns, "describe_table_index_stats", req)
 
@@ -64,5 +68,6 @@ def describe_table_index_stats(
 def drop_table_index(
     id: str, index_name: str, ns: NamespaceDep, settings: SettingsDep
 ) -> DropTableIndexResponse:
+    """Drop a named index from a table — wraps the native ``drop_table_index`` op."""
     req = DropTableIndexRequest(id=parse_identifier(id, settings.delimiter), index_name=index_name)
     return native.call(ns, "drop_table_index", req)

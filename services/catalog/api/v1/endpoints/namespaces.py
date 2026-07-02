@@ -36,6 +36,7 @@ async def create_namespace(
     client: FgaClientDep,
     body: CreateNamespaceRequest | None = None,
 ) -> CreateNamespaceResponse:
+    """Create a namespace via ``create_namespace``, then seed its FGA owner + parent edge."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or CreateNamespaceRequest()
     req.id = segments
@@ -55,6 +56,7 @@ def list_namespaces(
     page_token: str | None = None,
     limit: int | None = None,
 ) -> ListNamespacesResponse:
+    """List the child namespaces under ``id`` via ``list_namespaces`` (page_token/limit paged)."""
     req = ListNamespacesRequest(
         id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit
     )
@@ -63,6 +65,7 @@ def list_namespaces(
 
 @router.post("/{id}/describe", response_model_exclude_none=True)
 def describe_namespace(id: str, ns: NamespaceDep, settings: SettingsDep) -> DescribeNamespaceResponse:
+    """Return the metadata/properties of namespace ``id`` via ``describe_namespace``."""
     req = DescribeNamespaceRequest(id=parse_identifier(id, settings.delimiter))
     return native.call(ns, "describe_namespace", req)
 
@@ -75,6 +78,7 @@ async def drop_namespace(
     client: FgaClientDep,
     body: DropNamespaceRequest | None = None,
 ) -> DropNamespaceResponse:
+    """Drop namespace ``id`` (``drop_namespace``); revoke its FGA tuples so a reused id can't inherit."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or DropNamespaceRequest()
     req.id = segments
@@ -86,6 +90,7 @@ async def drop_namespace(
 
 @router.post("/{id}/exists", status_code=204)
 def namespace_exists(id: str, ns: NamespaceDep, settings: SettingsDep) -> None:
+    """Check that namespace ``id`` exists via ``namespace_exists`` — 204 on success, error otherwise."""
     req = NamespaceExistsRequest(id=parse_identifier(id, settings.delimiter))
     native.call(ns, "namespace_exists", req)
 
@@ -98,5 +103,6 @@ def list_tables(
     page_token: str | None = None,
     limit: int | None = None,
 ) -> ListTablesResponse:
+    """List the tables under namespace ``id`` via ``list_tables`` (page_token/limit paged)."""
     req = ListTablesRequest(id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit)
     return native.call(ns, "list_tables", req)

@@ -29,6 +29,10 @@ async def create_materialized_view(
     token: CurrentToken,
     client: FgaClientDep,
 ) -> CreateMaterializedViewResponse:
+    """Create a materialized view via the native backend's ``create_materialized_view``.
+
+    Then seeds FGA ownership on the ``table`` type so the creator keeps refresh/read rights on it.
+    """
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: CreateMaterializedViewResponse = await run_in_threadpool(
@@ -44,6 +48,7 @@ async def create_materialized_view(
 def refresh_materialized_view(
     id: str, ns: NamespaceDep, settings: SettingsDep, body: RefreshMaterializedViewRequest | None = None
 ) -> RefreshMaterializedViewResponse:
+    """Rematerialize a materialized view via the native backend's ``refresh_materialized_view``."""
     req = body or RefreshMaterializedViewRequest()
     req.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "refresh_materialized_view", req)

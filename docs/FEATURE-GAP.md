@@ -29,7 +29,7 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 |---|-----------|-----------|--------|
 | 1 | Path/body `id` mismatch silently overrides (uses path id) | 400 when both present **and differ** | benign; missing a validation |
 | 2 | Unsupported → HTTP **501** | `UnsupportedOperationErrorResponse` is **406** | body `code:0` is correct; only the HTTP status diverges (501 is arguably cleaner) |
-| 3 | `exists` → **204** | 200 no-content | cosmetic |
+| 3 | ~~`exists` → **204**~~ | 200 no-content | ✅ **fixed (spec 0.9)** — both `exists` endpoints now return **200** |
 | 4 | CreateTable ignores `x-lance-table-location` + `storage_options` | caller-chosen location/options | fine for single-root; completeness gap |
 | 5 | MergeInsert omits optional filters/`timeout`/`use_index`; `on` not enforced required | full param set | minor |
 | 6 | List ops omit `delimiter` / `include_declared` | those params | minor |

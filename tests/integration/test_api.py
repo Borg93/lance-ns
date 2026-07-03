@@ -77,7 +77,7 @@ def test_create_table_passes_arrow_bytes_through(client: TestClient, fake_ns: Ma
 
 
 def test_create_table_accepts_spec_properties_query_param(client: TestClient, fake_ns: MagicMock) -> None:
-    # Spec 0.9 passes properties as a JSON-encoded query param; the header stays as a back-compat alias.
+    # Spec 0.9 passes properties as a JSON-encoded query param (no header form).
     fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
     client.post(
         '/v1/table/db$t/create?properties={"team":"eng"}', content=b"A", headers=ARROW_STREAM

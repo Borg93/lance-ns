@@ -103,7 +103,7 @@ sequenceDiagram
     E->>S: build typed request, call
     S->>B: native op  OR  open_dataset(...).op()
     B-->>E: typed lance_namespace response
-    E-->>C: 200 JSON (snake_case, exclude_none)  /  Arrow IPC  /  204
+    E-->>C: 200 JSON (snake_case, exclude_none)  /  Arrow IPC
     Note over X: any LanceNamespaceError → problem+json with numeric code
 ```
 

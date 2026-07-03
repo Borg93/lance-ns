@@ -97,6 +97,37 @@ version, so `producers()` shows exactly which batch was stopped and why. This is
 half of governance the [lineage doc](LINEAGE.md#runtime-measured-facets--declared--measured-lineage-marquez-goal-1--2)
 describes; a future human-approval rung can layer on the same `quality_passed` signal without new plumbing.
 
+## External edges — the ingest & egress seam
+
+The cascade above is the *interior* (`raw → bronze → silver → gold`). Its two edges to the outside world
+are a **provider-agnostic seam** so no provider SDK leaks into the pipeline:
+
+| Edge | Contract | Adapters (concrete) | Provenance |
+| ---- | -------- | ------------------- | ---------- |
+| **Ingest** (source → bronze) | `SourceAdapter.iter_objects() -> SourceObject{uri, data}` (`services/common/sources.py`) | `LocalDirSource`, `S3Source` | each object's **source URI** is stamped as a `source_uri` column and emitted as the bronze `DERIVED_FROM` input |
+| **Egress** (gold → sink) | `SinkAdapter.put(key, data) -> uri` (`services/common/sinks.py`) | `LocalDirSink`, `S3Sink` | the returned sink URI is the **terminal** lineage output |
+
+Real providers (IIIF / GCS / HuggingFace / HCP / any S3) are **plugins outside the lakehouse** that
+implement the `SourceAdapter`/`SinkAdapter` Protocol — the `S3Source`/`S3Sink` take a configured
+`pyarrow.fs.S3FileSystem`, so MinIO, RustFS, or AWS is just a different filesystem, not different code.
+
+`services/medallion/services/ingest.py::ingest_to_bronze(source, bronze_uri, so)` is the ingest head: it
+writes every object's bytes into a **bronze blob-v2 table at file format 2.2** (`id, payload` (blob),
+`source_uri`) with **`enable_stable_row_ids=True`** and returns the source URIs for the lineage edge. Every
+cascade write (bronze/silver/gold) sets that flag — it is *create-time-only* (cannot be turned on later), so
+we set it up front to keep a durable `_rowid` across compaction, which rewrites fragments and invalidates row
+*addresses*. Today `id` is still positional (the cascade is overwrite-only); the stable `_rowid` is the seam a
+future append/upsert would key blob carry-forward on instead of `range(rows)`. The blob then flows forward through the
+existing cascade (`compute._carry_forward` reads it via `read_blobs` and re-wraps with `blob_array`), and
+the silver stage derives the thumbnail + embedding — so an external image lands as a managed blob and its
+origin survives in the data *and* in the graph.
+
+**Live-proven** by `scripts/media_pipeline_e2e.py` (run in-pod against RustFS): it seeds an external S3
+prefix, ingests → bronze → silver → gold, egresses gold to an S3 sink, and emits lineage each hop. The
+resulting AGE chain (`GET /datasets/<gold>/graph`) is `source-URI → bronze → silver → gold → sink`, every
+Lance dataset at `dsv=2.2`. The `LocalDir*` adapters are unit-tested and the `S3*` adapters are unit-tested
+against an in-memory fake filesystem (`tests/unit/test_ingest_seam.py`), with the S3 path proven live by the e2e.
+
 ## Run it
 
 ```bash

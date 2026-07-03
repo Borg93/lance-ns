@@ -73,8 +73,13 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> Wri
     )
     # data_storage_version="2.2" — the current Lance format (blob v2 + Map need it; pylance 8 still
     # defaults to 2.1). Overwrite-mode upgrades a pre-existing 2.1 dataset forward on the next run.
+    # enable_stable_row_ids — row _rowid stays constant across compaction (which rewrites fragments and
+    # invalidates row ADDRESSES). This is a CREATE-TIME-ONLY flag: it cannot be turned on later, so we set it
+    # at the cascade head to keep durable row identity available (e.g. to key blob carry-forward by _rowid if
+    # a stage ever gains append/upsert). Free on top of overwrite; the positional read path is unaffected.
     lance.write_dataset(
-        table, uri, mode="overwrite", storage_options=storage_options, data_storage_version="2.2"
+        table, uri, mode="overwrite", storage_options=storage_options,
+        data_storage_version="2.2", enable_stable_row_ids=True,
     )
     return _measure(uri, storage_options)
 
@@ -92,10 +97,11 @@ def transform_stage(
     """
     ds = lance.dataset(from_uri, storage_options=storage_options)
     out = _carry_forward(ds, stage)
-    # 2.2 like seed_raw: every dataset the cascade writes is on the current format, so a blob column in any
-    # stage never trips "Blob v2 requires file version >= 2.2" mid-cascade.
+    # 2.2 + stable row ids like seed_raw: every dataset the cascade writes is on the current format (so a blob
+    # column never trips "Blob v2 requires file version >= 2.2" mid-cascade) and keeps durable row identity.
     lance.write_dataset(
-        out, to_uri, mode="overwrite", storage_options=storage_options, data_storage_version="2.2"
+        out, to_uri, mode="overwrite", storage_options=storage_options,
+        data_storage_version="2.2", enable_stable_row_ids=True,
     )
     return _measure(to_uri, storage_options)
 

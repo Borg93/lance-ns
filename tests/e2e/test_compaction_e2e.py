@@ -25,6 +25,10 @@ import requests
 COMPACTION = os.environ.get("LANCE_E2E_COMPACTION_URL", "")
 GREPTIME = os.environ.get("LANCE_E2E_GREPTIME_URL", "")
 BINDING = os.environ.get("LANCE_E2E_COMPACTION_BINDING", "compaction-cron")
+# The cron route is sidecar-only (§1 fail-closed): a direct POST must present the same
+# `dapr-api-token` the sidecar stamps. `make e2e-compaction` reads it from the app-token secret.
+DAPR_TOKEN = os.environ.get("LANCE_E2E_DAPR_TOKEN", "")
+_TOKEN_HEADER = {"dapr-api-token": DAPR_TOKEN} if DAPR_TOKEN else {}
 
 pytestmark = [pytest.mark.e2e, pytest.mark.compaction]
 
@@ -51,8 +55,9 @@ def test_sweep_compacts_real_datasets_and_meters(urls: tuple[str, str]) -> None:
     compaction, _greptime = urls  # _prom_sum reads the module-level GREPTIME
     before = _prom_sum("sum(compaction_runs_total)")
 
-    # Trigger one sweep (the same route the Dapr cron binding POSTs on schedule).
-    resp = requests.post(f"{compaction}/{BINDING}", timeout=30)
+    # Trigger one sweep (the same route the Dapr cron binding POSTs on schedule),
+    # authenticating exactly like the sidecar does (dapr-api-token header).
+    resp = requests.post(f"{compaction}/{BINDING}", headers=_TOKEN_HEADER, timeout=30)
     assert resp.status_code == 200, resp.text
     body = resp.json()
 

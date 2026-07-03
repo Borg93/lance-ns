@@ -29,17 +29,31 @@ class DatasetResult(BaseModel):
     error: str | None = None
 
 
-def discover_dataset_uris(fs: pafs.FileSystem, bucket: str) -> list[str]:
-    """Top-level directories under ``bucket`` that are datasets — skipping the catalog's ``__manifest``
-    (and any other ``__`` bookkeeping dir). The catalog lays each table out as ``<uuid>_<table_id>/``."""
+def discover_dataset_uris(fs: pafs.FileSystem, bucket: str, *, max_depth: int = 3) -> list[str]:
+    """Lance datasets under ``bucket`` — a directory IS a dataset iff it has a ``_versions/`` child
+    (the Lance table-layout marker); any other directory is a namespace prefix and is recursed into
+    (bounded by ``max_depth``). Skips ``__`` bookkeeping dirs (the catalog's ``__manifest``).
+
+    The catalog lays top-level tables out as ``<uuid>_<table_id>/``, but the medallion cascade nests
+    its datasets one level down (``medallion/raw`` …) — without the marker probe the sweep both
+    reported the ``medallion/`` prefix as a failed dataset AND never maintained the real ones under it.
+    """
     uris: list[str] = []
-    for info in fs.get_file_info(pafs.FileSelector(bucket, recursive=False)):
-        if info.type != pafs.FileType.Directory:
-            continue
-        name = info.path.rstrip("/").split("/")[-1]
-        if name.startswith("__"):
-            continue
-        uris.append(f"s3://{info.path}")
+
+    def _walk(prefix: str, depth: int) -> None:
+        for info in fs.get_file_info(pafs.FileSelector(prefix, recursive=False)):
+            if info.type != pafs.FileType.Directory:
+                continue
+            name = info.path.rstrip("/").split("/")[-1]
+            if name.startswith("__"):
+                continue
+            marker = fs.get_file_info(f"{info.path}/_versions")
+            if marker.type == pafs.FileType.Directory:
+                uris.append(f"s3://{info.path}")
+            elif depth < max_depth:
+                _walk(info.path, depth + 1)
+
+    _walk(bucket, 1)
     return uris
 
 

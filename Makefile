@@ -157,6 +157,7 @@ e2e-compaction: ## Run the e2e compaction test (real Lance sweep + OTel metric) 
 	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 >/dev/null 2>&1 & G=$$!; \
 	 sleep 4; \
 	 LANCE_E2E_COMPACTION_URL=http://localhost:8000 LANCE_E2E_GREPTIME_URL=http://localhost:4000 \
+	 LANCE_E2E_DAPR_TOKEN=$$(kubectl get secret $(RELEASE)-dapr-app-token -o jsonpath='{.data.token}' | base64 -d) \
 	   uv run pytest tests/e2e/test_compaction_e2e.py -v -m compaction; rc=$$?; \
 	 kill $$C $$G 2>/dev/null; exit $$rc
 

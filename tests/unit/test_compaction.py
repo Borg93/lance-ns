@@ -13,27 +13,67 @@ from compaction.services.optimize import DatasetResult, discover_dataset_uris
 from compaction.services.sweep import summarize
 
 
+def _dir(path: str) -> pafs.FileInfo:
+    return pafs.FileInfo(path, pafs.FileType.Directory)
+
+
 class _FakeFS:
-    """Returns a fixed FileInfo list from get_file_info (the only method discover_dataset_uris calls)."""
+    """Path-aware fake covering the two calls discover_dataset_uris makes: listing a prefix
+    (FileSelector) and probing a single path (the ``_versions`` dataset marker)."""
 
-    def __init__(self, infos: list[pafs.FileInfo]) -> None:
-        self._infos = infos
+    def __init__(self, tree: dict[str, list[pafs.FileInfo]]) -> None:
+        self._tree = tree
 
-    def get_file_info(self, _selector: Any) -> list[pafs.FileInfo]:
-        return self._infos
+    def get_file_info(self, selector: Any) -> Any:
+        if isinstance(selector, pafs.FileSelector):
+            return self._tree.get(selector.base_dir, [])
+        for infos in self._tree.values():
+            for info in infos:
+                if info.path == selector:
+                    return info
+        return pafs.FileInfo(selector, pafs.FileType.NotFound)
 
 
 def test_discover_skips_manifest_and_non_dirs() -> None:
     fs = _FakeFS(
-        [
-            pafs.FileInfo("lance-catalog/abcd_ns$table", pafs.FileType.Directory),
-            pafs.FileInfo("lance-catalog/__manifest", pafs.FileType.Directory),  # bookkeeping → skip
-            pafs.FileInfo("lance-catalog/loose.txt", pafs.FileType.File),  # not a dataset → skip
-            pafs.FileInfo("lance-catalog/efgh_gold$catalog", pafs.FileType.Directory),
-        ]
+        {
+            "lance-catalog": [
+                _dir("lance-catalog/abcd_ns$table"),
+                _dir("lance-catalog/__manifest"),  # bookkeeping → skip
+                pafs.FileInfo("lance-catalog/loose.txt", pafs.FileType.File),  # not a dataset → skip
+                _dir("lance-catalog/efgh_gold$catalog"),
+            ],
+            "lance-catalog/abcd_ns$table": [_dir("lance-catalog/abcd_ns$table/_versions")],
+            "lance-catalog/efgh_gold$catalog": [_dir("lance-catalog/efgh_gold$catalog/_versions")],
+        }
     )
     uris = discover_dataset_uris(cast(Any, fs), "lance-catalog")
     assert uris == ["s3://lance-catalog/abcd_ns$table", "s3://lance-catalog/efgh_gold$catalog"]
+
+
+def test_discover_recurses_namespace_prefixes_to_nested_datasets() -> None:
+    # `medallion/` has no `_versions` → it's a namespace prefix, not a dataset: the sweep must
+    # descend to the real datasets under it instead of reporting the prefix as a failed open.
+    fs = _FakeFS(
+        {
+            "lance-catalog": [_dir("lance-catalog/medallion"), _dir("lance-catalog/abcd_t")],
+            "lance-catalog/medallion": [
+                _dir("lance-catalog/medallion/raw"),
+                _dir("lance-catalog/medallion/bronze"),
+            ],
+            "lance-catalog/medallion/raw": [_dir("lance-catalog/medallion/raw/_versions")],
+            "lance-catalog/medallion/bronze": [_dir("lance-catalog/medallion/bronze/_versions")],
+            "lance-catalog/abcd_t": [_dir("lance-catalog/abcd_t/_versions")],
+        }
+    )
+    uris = discover_dataset_uris(cast(Any, fs), "lance-catalog")
+    assert uris == [
+        "s3://lance-catalog/medallion/raw",
+        "s3://lance-catalog/medallion/bronze",
+        "s3://lance-catalog/abcd_t",
+    ]
+    # the prefix itself is never reported as a dataset
+    assert "s3://lance-catalog/medallion" not in uris
 
 
 def test_summarize_aggregates_reclaimed_and_errors() -> None:

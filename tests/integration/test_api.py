@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import pyarrow as pa
 from fastapi.testclient import TestClient
 from lance_namespace import (
     BatchDeleteTableVersionsResponse,
@@ -84,6 +85,35 @@ def test_create_table_accepts_spec_properties_query_param(client: TestClient, fa
     )
     req, _ = fake_ns.create_table.call_args.args
     assert req.properties == {"team": "eng"}
+
+
+def _arrow_ipc(table: pa.Table) -> bytes:
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    return sink.getvalue().to_pybytes()
+
+
+def test_create_delegates_to_dataplane_create_table(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # The endpoint stays thin: it delegates create; blob-vs-native routing lives in the facade.
+    seen: dict[str, object] = {}
+
+    def _stub(ns, so, segments, data, *, mode=None, properties=None) -> CreateTableResponse:  # noqa: ANN001
+        seen["segments"] = segments
+        seen["mode"] = mode
+        return CreateTableResponse(location="s3://x/t", version=1)
+
+    monkeypatch.setattr("catalog.services.dataplane.create_table", _stub)
+    resp = client.post(
+        "/v1/table/media$clips/create?mode=overwrite",
+        content=_arrow_ipc(pa.table({"id": [1]})),
+        headers=ARROW_STREAM,
+    )
+
+    assert resp.status_code == 200
+    assert seen == {"segments": ["media", "clips"], "mode": "overwrite"}
 
 
 def test_merge_insert_maps_spec_09_query_params(client: TestClient, fake_ns: MagicMock) -> None:

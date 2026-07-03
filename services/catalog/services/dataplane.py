@@ -4,17 +4,22 @@ The native ``DirectoryNamespace`` stubs several table data, schema, and tag
 operations. These functions fill the gap: resolve the table's dataset via the
 namespace, then perform the operation with pylance.
 
-Each function takes ``(ns, storage_options, request)`` — except
-``update_field_metadata``, which takes ``(ns, storage_options, table_id, updates)``
-— and returns the typed ``lance_namespace`` response model.
+Most functions take ``(ns, storage_options, request)`` and return the typed ``lance_namespace`` response
+model. Exceptions: ``update_field_metadata`` takes ``(ns, storage_options, table_id, updates)``; and
+``create_table`` is the one facade that receives the raw Arrow-IPC ``data`` and picks the write path by
+schema — a blob-v2 column needs file format 2.2 (the native create pins 2.1 and rejects it), so it takes
+a direct 2.2 write, while every other schema delegates to the native create.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from contextlib import suppress
 from typing import Any
 
+import lance
 import pyarrow as pa
+from common import blobs
 from lance_namespace import (
     AlterTableAddColumnsRequest,
     AlterTableAddColumnsResponse,
@@ -24,14 +29,19 @@ from lance_namespace import (
     AlterTableDropColumnsResponse,
     CreateTableBranchRequest,
     CreateTableBranchResponse,
+    CreateTableRequest,
+    CreateTableResponse,
     CreateTableTagRequest,
     CreateTableTagResponse,
+    DeclareTableRequest,
     DeleteFromTableRequest,
     DeleteFromTableResponse,
     DeleteTableBranchRequest,
     DeleteTableBranchResponse,
     DeleteTableTagRequest,
     DeleteTableTagResponse,
+    DescribeTableRequest,
+    DropTableRequest,
     GetTableTagVersionRequest,
     GetTableTagVersionResponse,
     InvalidInputError,
@@ -40,6 +50,7 @@ from lance_namespace import (
     ListTableBranchesResponse,
     ListTableTagsRequest,
     ListTableTagsResponse,
+    TableNotFoundError,
     TableTagNotFoundError,
     UnsupportedOperationError,
     UpdateFieldMetadataResponse,
@@ -50,6 +61,7 @@ from lance_namespace import (
 )
 
 from catalog.core.namespace import open_dataset
+from catalog.services import native
 
 StorageOptions = dict[str, str]
 
@@ -71,6 +83,92 @@ def current_version(ns: LanceNamespace, so: StorageOptions, table_id: list[str])
     """The table's current Lance version — for stamping lineage after a native op whose response omits it
     (``insert`` returns only a ``transaction_id``, so we reopen the dataset like update/delete)."""
     return _version(ns, so, table_id)
+
+
+def create_table(
+    ns: LanceNamespace,
+    so: StorageOptions,
+    segments: list[str],
+    data: bytes,
+    *,
+    mode: str | None = None,
+    properties: dict[str, str] | None = None,
+) -> CreateTableResponse:
+    """Create a table from an Arrow-IPC payload, choosing the write path by schema.
+
+    A blob-v2 column requires file format 2.2, which the native create pins at 2.1 and rejects — such a
+    schema takes the direct 2.2 write; every other schema delegates to the native create. Runs off the
+    event loop (blocking pyarrow decode + Lance/S3 IO), so the endpoint stays a single delegated call.
+    """
+    if _schema_is_blob(data):
+        return _create_blob_table(ns, so, segments, data, mode=mode, properties=properties)
+    request = CreateTableRequest(id=segments, mode=mode, properties=properties)
+    return native.call(ns, "create_table", request, data)
+
+
+def _schema_is_blob(data: bytes) -> bool:
+    """True when the Arrow-IPC ``data``'s schema carries a blob-v2 column.
+
+    An unparseable body returns ``False`` so it falls through to the native create, which surfaces the
+    real decode error — a genuine bug in detection is NOT swallowed (only the Arrow parse failure is).
+    """
+    try:
+        return blobs.schema_has_blob(pa.ipc.open_stream(data).schema)
+    except (pa.ArrowInvalid, OSError):
+        return False
+
+
+def _create_blob_table(
+    ns: LanceNamespace,
+    so: StorageOptions,
+    segments: list[str],
+    data: bytes,
+    *,
+    mode: str | None,
+    properties: dict[str, str] | None,
+) -> CreateTableResponse:
+    """Create a blob-v2 table at file format 2.2 (the native create pins 2.1 and rejects it).
+
+    Honours the create ``mode`` against an existing table (``ExistOk`` keeps it, ``Overwrite`` replaces
+    its data, ``Create`` conflicts). A fresh table is ``declare``-d to learn its canonical location, then
+    written with ``data_storage_version="2.2"`` (lance_docs/guide.md — Version Compatibility); a failed
+    fresh write is rolled back with ``drop_table`` so the name stays retryable rather than stuck
+    describable-but-unreadable.
+    """
+    table = pa.ipc.open_stream(data).read_all()
+    normalized = (mode or "create").lower()
+    if normalized in ("overwrite", "existok", "exist_ok"):
+        existing = _existing_location(ns, segments)
+        if existing is not None:
+            if normalized != "overwrite":  # ExistOk → keep the existing table
+                version = lance.dataset(existing, storage_options=so).version
+                return CreateTableResponse(location=existing, version=version, properties=properties)
+            dataset = lance.write_dataset(
+                table, existing, mode="overwrite", storage_options=so, data_storage_version="2.2"
+            )
+            return CreateTableResponse(location=existing, version=dataset.version, properties=properties)
+
+    location = ns.declare_table(DeclareTableRequest(id=segments, properties=properties)).location
+    if not location:
+        raise InvalidInputError("namespace did not return a location for the declared table")
+    try:
+        dataset = lance.write_dataset(
+            table, location, mode="create", storage_options=so, data_storage_version="2.2"
+        )
+    except Exception:
+        with suppress(Exception):  # best-effort rollback; re-raise the real write error
+            ns.drop_table(DropTableRequest(id=segments))
+        raise
+    return CreateTableResponse(location=location, version=dataset.version, properties=properties)
+
+
+def _existing_location(ns: LanceNamespace, segments: list[str]) -> str | None:
+    """The table's storage location if it already exists, else ``None``."""
+    try:
+        resp = ns.describe_table(DescribeTableRequest(id=segments, with_table_uri=True))
+    except TableNotFoundError:
+        return None
+    return getattr(resp, "table_uri", None) or getattr(resp, "location", None)
 
 
 # Scalar Arrow type names → pyarrow factory, for the alter_columns re-type path. A ``JsonArrowDataType``

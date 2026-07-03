@@ -13,6 +13,10 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 - **Backend construction** (`connect(impl, {root, storage.*})`) matches `supported-catalogs/lance-dir.md`.
 - **Error model** — numeric `ErrorCode` → HTTP status + `code` in the problem+json body — matches `errors.md`.
 - **Arrow-IPC ops** (create/insert/merge/query/count/explain) match `catalog/rest/index.md` content types.
+- **Multimodal (blob-v2) create** — `create_table` picks the write path by schema (§9 P1): a `lance.blob.v2`
+  column needs file format 2.2, which the native create pins at 2.1 and rejects, so it routes to a direct
+  `write_dataset(data_storage_version="2.2")` (declare → write, with rollback-on-failure); every other schema
+  delegates to native. Client `storage_options` are still not accepted (the catalog vends storage access).
 - **Tags / branches / versions** — `ds.tags` reference mapping (int vs `(branch, version)`), `ds.branches`,
   and the `_DICT_REQUEST_METHODS` version-marshalling fix — all match `guide.md` / `spec.yaml`.
 - **Schema evolution** — `add_columns` / `alter_columns` (JSON-Arrow→`pa.DataType`) / `drop_columns`,

@@ -109,6 +109,7 @@ def test_create_handler_keeps_all_three_axes_identical_under_non_default_delimit
             token=cast(Any, SimpleNamespace(sub="alice")),
             client=cast(Any, object()),
             emitter=cast(Any, emitter),
+            so=cast(Any, {}),  # unused on the native (non-blob) path this test drives
             data=b"arrow-ipc-bytes",
             mode=None,
             properties=None,

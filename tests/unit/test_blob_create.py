@@ -1,0 +1,124 @@
+"""§9 blob-v2 create path — detection helpers + the catalog's ``create_table`` facade.
+
+The facade tests run a real ``dir`` namespace + real pylance write (no mocks): they are the unit-level
+proof that a blob column, which the native create rejects at 2.1, round-trips at file format 2.2, that a
+plain schema still takes the native 2.1 path, and that the create ``mode`` (Create/ExistOk/Overwrite) is
+honoured on the blob path.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import lance
+import pyarrow as pa
+import pytest
+from catalog.services.dataplane import _schema_is_blob, create_table
+from common import blobs
+from lance import blob_array, blob_field
+from lance_namespace import DescribeTableRequest, TableAlreadyExistsError, connect
+
+
+def _blob_schema() -> pa.Schema:
+    return pa.schema([pa.field("id", pa.int64()), blob_field("payload"), pa.field("src", pa.string())])
+
+
+def _blob_ipc(payloads: list[bytes] | None = None) -> bytes:
+    payloads = payloads or [b"img-1", b"video" * 1000]
+    ids = list(range(len(payloads)))
+    table = pa.table(
+        {"id": ids, "payload": blob_array(payloads), "src": ["cam"] * len(payloads)},
+        schema=_blob_schema(),
+    )
+    return _ipc(table)
+
+
+def _ipc(table: pa.Table) -> bytes:
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, table.schema) as writer:
+        writer.write_table(table)
+    return sink.getvalue().to_pybytes()
+
+
+def _open(ns, segments: list[str]) -> lance.LanceDataset:
+    described = ns.describe_table(
+        DescribeTableRequest(id=segments, with_table_uri=True, load_detailed_metadata=True)
+    )
+    return lance.dataset(described.table_uri or described.location)
+
+
+# --- detection helpers ----------------------------------------------------- #
+
+
+def test_is_blob_field_detects_blob_v2_and_ignores_scalars() -> None:
+    schema = _blob_schema()
+    assert blobs.is_blob_field(schema.field("payload"))
+    assert not blobs.is_blob_field(schema.field("id"))
+    assert not blobs.is_blob_field(schema.field("src"))
+
+
+def test_schema_has_blob_and_blob_field_names() -> None:
+    assert blobs.schema_has_blob(_blob_schema())
+    assert blobs.blob_field_names(_blob_schema()) == ["payload"]
+    plain = pa.schema([pa.field("id", pa.int64())])
+    assert not blobs.schema_has_blob(plain)
+    assert blobs.blob_field_names(plain) == []
+
+
+def test_schema_is_blob_over_ipc_and_garbage() -> None:
+    assert _schema_is_blob(_blob_ipc()) is True
+    assert _schema_is_blob(_ipc(pa.table({"id": [1]}))) is False
+    assert _schema_is_blob(b"not-an-arrow-stream") is False  # unparseable → native path, not a crash
+
+
+# --- the create_table facade (real dir namespace + real pylance) ----------- #
+
+
+def test_create_table_writes_blob_at_2_2_and_roundtrips(tmp_path: Path) -> None:
+    ns = connect("dir", {"root": str(tmp_path)})
+    resp = create_table(ns, {}, ["clips"], _blob_ipc(), mode="create")
+
+    assert resp.location
+    dataset = _open(ns, ["clips"])
+    assert dataset.data_storage_version == "2.2"
+    assert dataset.count_rows() == 2
+    assert dataset.read_blobs("payload", indices=[0])[0][1] == b"img-1"
+
+
+def test_create_table_routes_plain_schema_to_native_2_1(tmp_path: Path) -> None:
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["plain"], _ipc(pa.table({"id": [1, 2, 3]})), mode="create")
+
+    dataset = _open(ns, ["plain"])
+    assert dataset.data_storage_version == "2.1"  # native default — no blob, no 2.2
+    assert dataset.count_rows() == 3
+
+
+def test_create_mode_conflicts_when_blob_table_exists(tmp_path: Path) -> None:
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["c1"], _blob_ipc(), mode="create")
+    with pytest.raises(TableAlreadyExistsError):
+        create_table(ns, {}, ["c1"], _blob_ipc(), mode="create")
+
+
+def test_overwrite_replaces_existing_blob_table(tmp_path: Path) -> None:
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["o1"], _blob_ipc([b"a", b"b", b"c"]), mode="create")
+    resp = create_table(ns, {}, ["o1"], _blob_ipc([b"z"]), mode="overwrite")
+
+    dataset = _open(ns, ["o1"])
+    assert dataset.count_rows() == 1  # replaced 3 rows with 1
+    assert dataset.read_blobs("payload", indices=[0])[0][1] == b"z"
+    assert resp.version is not None and resp.version > 1  # overwrite committed a new version
+
+
+def test_exist_ok_keeps_existing_blob_table(tmp_path: Path) -> None:
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["e1"], _blob_ipc([b"a", b"b"]), mode="create")
+    second = create_table(ns, {}, ["e1"], _blob_ipc([b"z"]), mode="exist_ok")
+
+    # ExistOk keeps the existing table untouched — the 1-row payload is NOT written over the original 2.
+    assert second.location
+    dataset = _open(ns, ["e1"])
+    assert dataset.count_rows() == 2
+    assert dataset.read_blobs("payload", indices=[0])[0][1] == b"a"

@@ -14,7 +14,6 @@ from fastapi.responses import PlainTextResponse, Response
 from lance_namespace import (
     AnalyzeTableQueryPlanRequest,
     CountTableRowsRequest,
-    CreateTableRequest,
     CreateTableResponse,
     DeleteFromTableRequest,
     DeleteFromTableResponse,
@@ -66,6 +65,7 @@ async def create_table(
     token: CurrentToken,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    so: StorageOptionsDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
     properties: str | None = None,
@@ -103,8 +103,11 @@ async def create_table(
             )
         except Exception as exc:  # noqa: BLE001 — lineage metadata is an enhancement, not a gate
             log.warning("lineage_metadata_inject_failed", extra={"table": table_id, "error": str(exc)})
-    req = CreateTableRequest(id=segments, mode=mode, properties=parsed_properties)
-    response: CreateTableResponse = await run_in_threadpool(native.call, ns, "create_table", req, data)
+    # ``dataplane.create_table`` picks the write path by schema off the event loop: a blob-v2 column needs
+    # file format 2.2 (native create pins 2.1 and rejects it) → a direct 2.2 write; else → native create. (§9)
+    response: CreateTableResponse = await run_in_threadpool(
+        dataplane.create_table, ns, so, segments, data, mode=mode, properties=parsed_properties
+    )
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
     # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget

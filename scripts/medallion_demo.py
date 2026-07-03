@@ -52,15 +52,9 @@ from openlineage.client.transport.http import HttpConfig, HttpTransport
 # (python puts scripts/ on sys.path, not the repo root).
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
+from lance import blob_array, blob_field
 from lineage.schemas import LineageGraph, Producers, Runs  # noqa: E402  (after sys.path bootstrap)
 from lineage.seed import build_events  # noqa: E402  (intentional: after the sys.path bootstrap)
-
-try:
-    from lance import blob_array, blob_field
-
-    _HAVE_BLOB = True
-except ImportError:  # pragma: no cover - depends on the installed lance build
-    _HAVE_BLOB = False
 
 
 def _load_demo_env() -> None:
@@ -165,19 +159,15 @@ def write_bronze() -> None:
     # payload_src = where each row's payload came from (the camera/sensor) — NOT the dataset's
     # source system (that's the raw_events node upstream of bronze in the lineage graph).
     payload_src = ["cam-a", "cam-b", "cam-a"]
-    if _HAVE_BLOB:
-        schema = pa.schema(
-            [pa.field("id", pa.int64()), blob_field("payload"), pa.field("payload_src", pa.string())]
-        )
-        table = pa.table(
-            {"id": ids, "payload": blob_array(payloads), "payload_src": payload_src}, schema=schema
-        )
-        lance.write_dataset(
-            table, _BRONZE, storage_options=opts, mode="overwrite", data_storage_version="2.2"
-        )
-    else:  # fall back to a plain binary column if blob v2 isn't available in this build
-        table = pa.table({"id": ids, "payload": payloads, "payload_src": payload_src})
-        lance.write_dataset(table, _BRONZE, storage_options=opts, mode="overwrite")
+    schema = pa.schema(
+        [pa.field("id", pa.int64()), blob_field("payload"), pa.field("payload_src", pa.string())]
+    )
+    table = pa.table(
+        {"id": ids, "payload": blob_array(payloads), "payload_src": payload_src}, schema=schema
+    )
+    lance.write_dataset(
+        table, _BRONZE, storage_options=opts, mode="overwrite", data_storage_version="2.2"
+    )
     _say(f"bronze$events written ({len(ids)} rows, blob payload) -> {_BRONZE}")
 
 
@@ -192,7 +182,9 @@ def write_silver() -> None:
     table = pa.table(
         {"id": base.column("id"), "payload_src": base.column("payload_src"), "embedding": embedding}
     )
-    lance.write_dataset(table, _SILVER, storage_options=opts, mode="overwrite")
+    lance.write_dataset(
+        table, _SILVER, storage_options=opts, mode="overwrite", data_storage_version="2.2"
+    )
     _say(f"silver$features v1 written ({len(ids)} rows, +embedding) -> {_SILVER}")
 
 
@@ -287,7 +279,9 @@ def write_gold() -> None:
             "lineage": lineage_col,
         }
     )
-    lance.write_dataset(table, _GOLD, storage_options=opts, mode="overwrite")
+    lance.write_dataset(
+        table, _GOLD, storage_options=opts, mode="overwrite", data_storage_version="2.2"
+    )
     _say(f"gold$catalog v1 written ({sv.num_rows} rows, +lineage JSONB) -> {_GOLD}")
 
 

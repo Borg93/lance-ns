@@ -61,7 +61,11 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> Wri
             "payload": pa.array([f"event-{i}" for i in range(rows)]),
         }
     )
-    lance.write_dataset(table, uri, mode="overwrite", storage_options=storage_options)
+    # data_storage_version="2.2" — the current Lance format (blob v2 + Map need it; pylance 8 still
+    # defaults to 2.1). Overwrite-mode upgrades a pre-existing 2.1 dataset forward on the next run.
+    lance.write_dataset(
+        table, uri, mode="overwrite", storage_options=storage_options, data_storage_version="2.2"
+    )
     return _measure(uri, storage_options)
 
 
@@ -83,5 +87,9 @@ def transform_stage(
         if _STAGE_COLUMN in src.column_names
         else src.append_column(field, marker)
     )
-    lance.write_dataset(out, to_uri, mode="overwrite", storage_options=storage_options)
+    # 2.2 like seed_raw: every dataset the cascade writes is on the current format, so a future blob
+    # column in any stage never trips "Blob v2 requires file version >= 2.2" mid-cascade.
+    lance.write_dataset(
+        out, to_uri, mode="overwrite", storage_options=storage_options, data_storage_version="2.2"
+    )
     return _measure(to_uri, storage_options)

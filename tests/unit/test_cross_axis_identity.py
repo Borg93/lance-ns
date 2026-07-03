@@ -111,7 +111,7 @@ def test_create_handler_keeps_all_three_axes_identical_under_non_default_delimit
             emitter=cast(Any, emitter),
             data=b"arrow-ipc-bytes",
             mode=None,
-            properties_header=None,
+            properties=None,
             authorization="Bearer tok",
         )
     )

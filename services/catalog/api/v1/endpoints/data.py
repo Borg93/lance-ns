@@ -69,21 +69,18 @@ async def create_table(
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
     properties: str | None = None,
-    properties_header: Annotated[str | None, Header(alias="x-lance-table-properties")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CreateTableResponse:
     """Create a Lance table from an Arrow-IPC stream — ``create_table``; seeds ownership + lineage.
 
-    ``properties`` is the spec-0.9 JSON-encoded query parameter; the ``x-lance-table-properties``
-    header is kept as a back-compat alias (query wins when both are sent). Client-supplied
-    ``storage_options`` are deliberately NOT accepted: storage access is the catalog's to vend
-    (two-tier secret model), so callers can't redirect writes or splice credentials.
+    ``properties`` is the spec-0.9 JSON-encoded query parameter. Client-supplied ``storage_options``
+    are deliberately NOT accepted: storage access is the catalog's to vend (two-tier secret model),
+    so callers can't redirect writes or splice credentials.
     """
-    raw_properties = properties or properties_header
     parsed_properties = None
-    if raw_properties:
+    if properties:
         try:
-            parsed_properties = json.loads(raw_properties)
+            parsed_properties = json.loads(properties)
         except json.JSONDecodeError as exc:
             raise InvalidInputError(f"table properties is not valid JSON: {exc}") from exc
     segments = parse_identifier(id, settings.delimiter)

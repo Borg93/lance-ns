@@ -47,10 +47,12 @@ async def list_all_tables(
     client: FgaClientDep,
     page_token: str | None = None,
     limit: int | None = None,
+    include_declared: bool = True,
 ) -> ListTablesResponse:
     """List every table in the namespace via ``list_all_tables``; when FGA is on,
-    filter the result down to the tables the caller can ``can_read_data``."""
-    req = ListTablesRequest(id=[], page_token=page_token, limit=limit)
+    filter the result down to the tables the caller can ``can_read_data``.
+    ``include_declared=false`` drops declared-only tables (reserved, no storage yet)."""
+    req = ListTablesRequest(id=[], page_token=page_token, limit=limit, include_declared=include_declared)
     response: ListTablesResponse = await run_in_threadpool(native.call, ns, "list_all_tables", req)
     # When FGA is on and the caller is known, return only the tables they can read.
     # Each table name is the canonical id suffix, matching ``table:<name>`` from list_objects.
@@ -103,9 +105,9 @@ def describe_table(
     return native.call(ns, "describe_table", req)
 
 
-@router.post("/{id}/exists", status_code=204)
+@router.post("/{id}/exists", status_code=200)
 def table_exists(id: str, ns: NamespaceDep, settings: SettingsDep) -> None:
-    """Check the table at ``id`` exists via ``table_exists`` — 204 if present, error otherwise."""
+    """Check the table at ``id`` exists via ``table_exists`` — 200 if present (spec 0.9), else error."""
     native.call(ns, "table_exists", TableExistsRequest(id=parse_identifier(id, settings.delimiter)))
 
 

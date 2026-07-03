@@ -88,9 +88,9 @@ async def drop_namespace(
     return response
 
 
-@router.post("/{id}/exists", status_code=204)
+@router.post("/{id}/exists", status_code=200)
 def namespace_exists(id: str, ns: NamespaceDep, settings: SettingsDep) -> None:
-    """Check that namespace ``id`` exists via ``namespace_exists`` — 204 on success, error otherwise."""
+    """Check that namespace ``id`` exists via ``namespace_exists`` — 200 on success (spec 0.9), else error."""
     req = NamespaceExistsRequest(id=parse_identifier(id, settings.delimiter))
     native.call(ns, "namespace_exists", req)
 
@@ -102,7 +102,14 @@ def list_tables(
     settings: SettingsDep,
     page_token: str | None = None,
     limit: int | None = None,
+    include_declared: bool = True,
 ) -> ListTablesResponse:
-    """List the tables under namespace ``id`` via ``list_tables`` (page_token/limit paged)."""
-    req = ListTablesRequest(id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit)
+    """List the tables under namespace ``id`` via ``list_tables`` (page_token/limit paged);
+    ``include_declared=false`` drops declared-only tables (reserved, no storage yet)."""
+    req = ListTablesRequest(
+        id=parse_identifier(id, settings.delimiter),
+        page_token=page_token,
+        limit=limit,
+        include_declared=include_declared,
+    )
     return native.call(ns, "list_tables", req)

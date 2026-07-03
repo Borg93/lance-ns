@@ -5,13 +5,13 @@ description = "Lance Namespace REST Catalog (FastAPI over native pylance Directo
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "pylance>=7.0.0",
+    "pylance>=8.0.0",
     "pyarrow",
     "fastapi",
     "uvicorn[standard]",
     "pydantic-settings",
-    "lance-namespace>=0.8.6",
-    "lance-namespace-urllib3-client>=0.8.6",
+    "lance-namespace>=0.9.0",
+    "lance-namespace-urllib3-client>=0.9.0",
     "pyjwt[crypto]>=2.8",
     "httpx>=0.27",
     "openfga-sdk>=0.9",
@@ -41,17 +41,17 @@ dev = [
     "openlineage-python>=1.50.0",
 ]
 
-# pylance 7.x caps lance-namespace<0.8 in its metadata, but at runtime it works
-# with the latest lance-namespace 0.8.x — verified: native DirectoryNamespace +
-# branch ops + create/list all function. We override that conservative cap so the
-# catalog tracks the latest namespace spec (branches, managed versions). pylance
-# ships no macOS x86_64 wheel, so resolution is restricted to Linux (devcontainer
-# + Docker) for a clean, reproducible lockfile across teammates / CI / Codespaces.
+# pylance 8.0.0 caps lance-namespace<0.9 in its metadata (7.x capped <0.8), but at
+# runtime it works with lance-namespace 0.9.x — same conservative-cap story as 7.x,
+# verified again: native DirectoryNamespace + branch ops + create/list all function.
+# We override the cap so the catalog tracks the latest namespace spec. pylance ships
+# no macOS x86_64 wheel, so resolution is restricted to Linux (devcontainer + Docker)
+# for a clean, reproducible lockfile across teammates / CI / Codespaces.
 [tool.uv]
 environments = ["sys_platform == 'linux'"]
 override-dependencies = [
-    "lance-namespace>=0.8.6",
-    "lance-namespace-urllib3-client>=0.8.6",
+    "lance-namespace>=0.9.0",
+    "lance-namespace-urllib3-client>=0.9.0",
 ]
 
 [tool.fastapi]

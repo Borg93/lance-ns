@@ -20,6 +20,8 @@ from lance_namespace import (
     DescribeTableResponse,
     DescribeTableVersionResponse,
     ListNamespacesResponse,
+    ListTableVersionsResponse,
+    MergeInsertIntoTableResponse,
     TableAlreadyExistsError,
     TableNotFoundError,
     TableVersion,
@@ -74,12 +76,46 @@ def test_create_table_passes_arrow_bytes_through(client: TestClient, fake_ns: Ma
     assert data == b"ARROWSTREAM"  # our raw-body passthrough
 
 
+def test_create_table_accepts_spec_properties_query_param(client: TestClient, fake_ns: MagicMock) -> None:
+    # Spec 0.9 passes properties as a JSON-encoded query param; the header stays as a back-compat alias.
+    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
+    client.post(
+        '/v1/table/db$t/create?properties={"team":"eng"}', content=b"A", headers=ARROW_STREAM
+    )
+    req, _ = fake_ns.create_table.call_args.args
+    assert req.properties == {"team": "eng"}
+
+
+def test_merge_insert_maps_spec_09_query_params(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.merge_insert_into_table.return_value = MergeInsertIntoTableResponse(version=2)
+    client.post(
+        "/v1/table/db$t/merge_insert?on=id&when_matched_update_all=true"
+        "&when_matched_update_all_filt=score>0.5&timeout=30s&use_index=true&branch=exp",
+        content=b"A",
+        headers=ARROW_STREAM,
+    )
+    req = fake_ns.merge_insert_into_table.call_args.args[0]
+    assert req.when_matched_update_all_filt == "score>0.5"
+    assert req.timeout == "30s"
+    assert req.use_index is True
+    assert req.branch == "exp"
+
+
+def test_list_table_versions_maps_descending_and_branch(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.list_table_versions.return_value = ListTableVersionsResponse(versions=[])
+    client.post("/v1/table/db$t/version/list?descending=true&branch=exp")
+    req = fake_ns.list_table_versions.call_args.args[0]
+    assert req.descending is True
+    assert req.branch == "exp"
+
+
 # --- response shaping / content types (our logic) -------------------------- #
 
 
-def test_exists_returns_204(client: TestClient, fake_ns: MagicMock) -> None:
+def test_exists_returns_200(client: TestClient, fake_ns: MagicMock) -> None:
+    # Spec 0.9: existence is conveyed as 200 (was 204 in earlier revisions).
     fake_ns.table_exists.return_value = None
-    assert client.post("/v1/table/db$t/exists").status_code == 204
+    assert client.post("/v1/table/db$t/exists").status_code == 200
 
 
 def test_count_rows_returns_plain_integer(client: TestClient, fake_ns: MagicMock) -> None:

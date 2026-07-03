@@ -68,11 +68,15 @@ def problem_detail(exc: LanceNamespaceError) -> tuple[int, dict[str, object]]:
     actionable and self-authored, not an internal leak.
     """
     status = status_for(int(exc.code))
+    detail = "Internal Server Error" if status >= 500 else str(exc)
     body: dict[str, object] = {
         "type": f"https://lance.org/problems/{exc.__class__.__name__.lower()}",
         "title": exc.__class__.__name__,
         "status": status,
-        "detail": "Internal Server Error" if status >= 500 else str(exc),
+        "detail": detail,
         "code": int(exc.code),
+        # Spec-0.9 ErrorResponse compatibility: `code` (required) + `error` (brief message). Kept
+        # alongside the RFC 9457 fields so both problem-details and spec clients can parse us.
+        "error": detail,
     }
     return status, body

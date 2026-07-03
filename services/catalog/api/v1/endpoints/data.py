@@ -68,16 +68,24 @@ async def create_table(
     emitter: LineageEmitterDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
+    properties: str | None = None,
     properties_header: Annotated[str | None, Header(alias="x-lance-table-properties")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> CreateTableResponse:
-    """Create a Lance table from an Arrow-IPC stream — ``create_table``; seeds ownership + lineage."""
-    properties = None
-    if properties_header:
+    """Create a Lance table from an Arrow-IPC stream — ``create_table``; seeds ownership + lineage.
+
+    ``properties`` is the spec-0.9 JSON-encoded query parameter; the ``x-lance-table-properties``
+    header is kept as a back-compat alias (query wins when both are sent). Client-supplied
+    ``storage_options`` are deliberately NOT accepted: storage access is the catalog's to vend
+    (two-tier secret model), so callers can't redirect writes or splice credentials.
+    """
+    raw_properties = properties or properties_header
+    parsed_properties = None
+    if raw_properties:
         try:
-            properties = json.loads(properties_header)
+            parsed_properties = json.loads(raw_properties)
         except json.JSONDecodeError as exc:
-            raise InvalidInputError(f"x-lance-table-properties is not valid JSON: {exc}") from exc
+            raise InvalidInputError(f"table properties is not valid JSON: {exc}") from exc
     segments = parse_identifier(id, settings.delimiter)
     table_id = fga.canonical_object_id(segments, delimiter=settings.delimiter)
     namespace = fga.parent_namespace_id(segments, delimiter=settings.delimiter) or ""
@@ -98,7 +106,7 @@ async def create_table(
             )
         except Exception as exc:  # noqa: BLE001 — lineage metadata is an enhancement, not a gate
             log.warning("lineage_metadata_inject_failed", extra={"table": table_id, "error": str(exc)})
-    req = CreateTableRequest(id=segments, mode=mode, properties=properties)
+    req = CreateTableRequest(id=segments, mode=mode, properties=parsed_properties)
     response: CreateTableResponse = await run_in_threadpool(native.call, ns, "create_table", req, data)
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
@@ -132,11 +140,13 @@ async def insert_into_table(
     emitter: LineageEmitterDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
+    branch: str | None = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> InsertIntoTableResponse:
-    """Append Arrow-IPC rows — ``insert_into_table``; emits an INSERT lineage event."""
+    """Append Arrow-IPC rows — ``insert_into_table``; emits an INSERT lineage event.
+    ``branch`` targets a non-main branch (spec 0.9 query param for Arrow-IPC-body ops)."""
     segments = parse_identifier(id, settings.delimiter)
-    req = InsertIntoTableRequest(id=segments, mode=mode)
+    req = InsertIntoTableRequest(id=segments, mode=mode, branch=branch)
     response: InsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "insert_into_table", req, data
     )
@@ -165,18 +175,29 @@ async def merge_insert_into_table(
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     on: str | None = None,
     when_matched_update_all: bool | None = None,
+    when_matched_update_all_filt: str | None = None,
     when_not_matched_insert_all: bool | None = None,
     when_not_matched_by_source_delete: bool | None = None,
+    when_not_matched_by_source_delete_filt: str | None = None,
+    timeout: str | None = None,
+    use_index: bool | None = None,
+    branch: str | None = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> MergeInsertIntoTableResponse:
-    """Upsert Arrow-IPC rows — ``merge_insert_into_table``; emits a MERGE_INSERT lineage event."""
+    """Upsert Arrow-IPC rows — ``merge_insert_into_table``; emits a MERGE_INSERT lineage event.
+    The ``*_filt`` SQL filters, ``timeout``, ``use_index`` and ``branch`` are spec-0.9 query params."""
     segments = parse_identifier(id, settings.delimiter)
     req = MergeInsertIntoTableRequest(
         id=segments,
         on=on,
         when_matched_update_all=when_matched_update_all,
+        when_matched_update_all_filt=when_matched_update_all_filt,
         when_not_matched_insert_all=when_not_matched_insert_all,
         when_not_matched_by_source_delete=when_not_matched_by_source_delete,
+        when_not_matched_by_source_delete_filt=when_not_matched_by_source_delete_filt,
+        timeout=timeout,
+        use_index=use_index,
+        branch=branch,
     )
     response: MergeInsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "merge_insert_into_table", req, data

@@ -32,9 +32,8 @@ router = APIRouter(prefix="/v1/table", tags=["version"])
 def batch_create_table_versions(
     body: BatchCreateTableVersionsRequest, ns: NamespaceDep
 ) -> BatchCreateTableVersionsResponse:
-    # Buildable (iterate the now-working CreateTableVersion) but deliberately left a faithful 501: batch
-    # manifest-pointer registration is an external-manifest-store concern this Lance medallion lakehouse
-    # never uses. We don't add code for an op nothing here exercises.
+    """Atomically create version entries for multiple tables — delegates to the native
+    ``batch_create_table_versions`` (implemented by the 0.9 dir backend)."""
     return native.call(ns, "batch_create_table_versions", body)
 
 
@@ -50,9 +49,17 @@ def list_table_versions(
     settings: SettingsDep,
     page_token: str | None = None,
     limit: int | None = None,
+    descending: bool | None = None,
+    branch: str | None = None,
 ) -> ListTableVersionsResponse:
+    """List the versions of table ``id`` via ``list_table_versions``; ``descending=true`` guarantees
+    latest-to-oldest ordering, ``branch`` targets a non-main branch (spec 0.9 query params)."""
     req = ListTableVersionsRequest(
-        id=parse_identifier(id, settings.delimiter), page_token=page_token, limit=limit
+        id=parse_identifier(id, settings.delimiter),
+        page_token=page_token,
+        limit=limit,
+        descending=descending,
+        branch=branch,
     )
     return native.call(ns, "list_table_versions", req)
 

@@ -116,9 +116,12 @@ def test_create_delegates_to_dataplane_create_table(
     # The endpoint stays thin: it delegates create; blob-vs-native routing lives in the facade.
     seen: dict[str, object] = {}
 
-    def _stub(ns, so, segments, data, *, mode=None, properties=None) -> CreateTableResponse:  # noqa: ANN001
+    def _stub(  # noqa: ANN001
+        ns, so, segments, data, *, mode=None, properties=None, allow_external_blobs=False
+    ) -> CreateTableResponse:
         seen["segments"] = segments
         seen["mode"] = mode
+        seen["allow_external_blobs"] = allow_external_blobs  # proves the endpoint forwards the setting
         return CreateTableResponse(location="s3://x/t", version=1)
 
     monkeypatch.setattr("catalog.services.dataplane.create_table", _stub)
@@ -129,7 +132,7 @@ def test_create_delegates_to_dataplane_create_table(
     )
 
     assert resp.status_code == 200
-    assert seen == {"segments": ["media", "clips"], "mode": "overwrite"}
+    assert seen == {"segments": ["media", "clips"], "mode": "overwrite", "allow_external_blobs": False}
 
 
 def test_merge_insert_maps_spec_09_query_params(client: TestClient, fake_ns: MagicMock) -> None:

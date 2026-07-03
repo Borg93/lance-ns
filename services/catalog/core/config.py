@@ -27,6 +27,14 @@ class Settings(BaseSettings):
     root: str = Field(default="s3://lance-catalog", alias="LANCE_REST_ROOT")
     delimiter: str = Field(default="$", alias="LANCE_NS_DELIMITER")
     docs_enabled: bool = Field(default=True, alias="LANCE_REST_DOCS")
+    # Allow blob-v2 columns to reference EXTERNAL objects outside the dataset root (Blob.from_uri) on
+    # create. Default off for two reasons: (1) an external pointer's bytes live outside the lakehouse, so
+    # Lance's version-aware GC can't protect them and a source delete dangles the pointer; (2) SSRF — the
+    # client controls the pointer URI and the cascade's read_blobs would fetch it with the medallion
+    # service's network position + creds, so an arbitrary URI (cloud metadata, internal host) becomes a
+    # server-side read primitive. Enable only for a trusted producer; Lance's REGISTERED EXTERNAL BASES
+    # (approved base paths) are the finer-grained alternative. Managed/inline blobs (bytes in) always work.
+    allow_external_blobs: bool = Field(default=False, alias="LANCE_ALLOW_EXTERNAL_BLOBS")
 
     # Object store (MinIO / S3). Credentials are required — no default — so a
     # missing secret fails loudly at startup instead of silently using a default.

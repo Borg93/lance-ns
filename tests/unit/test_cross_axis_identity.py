@@ -52,7 +52,7 @@ def test_root_level_table_has_no_parent_namespace(delimiter: str) -> None:
 
 
 def _settings(delimiter: str) -> Any:
-    return SimpleNamespace(delimiter=delimiter, lineage_emit_enabled=True)
+    return SimpleNamespace(delimiter=delimiter, lineage_emit_enabled=True, allow_external_blobs=False)
 
 
 class _RecordingEmitter:

@@ -15,8 +15,13 @@ import pyarrow as pa
 import pytest
 from catalog.services.dataplane import _schema_is_blob, create_table
 from common import blobs
-from lance import blob_array, blob_field
-from lance_namespace import DescribeTableRequest, TableAlreadyExistsError, connect
+from lance import Blob, blob_array, blob_field
+from lance_namespace import (
+    DescribeTableRequest,
+    InvalidInputError,
+    TableAlreadyExistsError,
+    connect,
+)
 
 
 def _blob_schema() -> pa.Schema:
@@ -122,3 +127,60 @@ def test_exist_ok_keeps_existing_blob_table(tmp_path: Path) -> None:
     dataset = _open(ns, ["e1"])
     assert dataset.count_rows() == 2
     assert dataset.read_blobs("payload", indices=[0])[0][1] == b"a"
+
+
+# --- blob modes: managed (inline/packed/dedicated) always; external pointer gated ------------------ #
+
+
+def test_managed_blob_modes_inline_and_dedicated(tmp_path: Path) -> None:
+    # Managed blobs (bytes copied in) work regardless of the flag: small → inline, large → dedicated sidecar.
+    ns = connect("dir", {"root": str(tmp_path)})
+    small, large = b"tiny-inline", b"x" * 3_000_000
+    schema = pa.schema([pa.field("id", pa.int64()), blob_field("blob")])
+
+    table = pa.table({"id": [1, 2], "blob": blob_array([small, large])}, schema=schema)
+    create_table(ns, {}, ["managed"], _ipc(table))
+
+    ds = _open(ns, ["managed"])
+    assert ds.data_storage_version == "2.2"
+    assert ds.read_blobs("blob", indices=[0])[0][1] == small
+    assert ds.read_blobs("blob", indices=[1])[0][1] == large
+
+
+def test_external_pointer_blob_is_gated_by_the_flag(tmp_path: Path) -> None:
+    source = tmp_path / "external.bin"
+    source.write_bytes(b"external-bytes-payload")
+    ns = connect("dir", {"root": str(tmp_path / "root")})
+    schema = pa.schema([pa.field("id", pa.int64()), blob_field("blob")])
+    pointer = pa.table(
+        {"id": [1], "blob": blob_array([Blob.from_uri(source.as_uri(), position=0, size=8)])},
+        schema=schema,
+    )
+    data = _ipc(pointer)
+
+    # Default: an external pointer outside the dataset root is rejected as a clean client error (400).
+    with pytest.raises(InvalidInputError, match="external"):
+        create_table(ns, {}, ["ext_off"], data)
+
+    # Opted in: accepted, written at 2.2, and the referenced byte slice reads back.
+    create_table(ns, {}, ["ext_on"], data, allow_external_blobs=True)
+    ds = _open(ns, ["ext_on"])
+    assert ds.data_storage_version == "2.2"
+    assert ds.read_blobs("blob", indices=[0])[0][1] == b"external"  # first 8 bytes of the source
+
+
+def test_rejected_external_create_rolls_back_and_stays_retryable(tmp_path: Path) -> None:
+    source = tmp_path / "external.bin"
+    source.write_bytes(b"external-bytes")
+    ns = connect("dir", {"root": str(tmp_path / "root")})
+    schema = pa.schema([pa.field("id", pa.int64()), blob_field("blob")])
+    pointer = _ipc(pa.table(
+        {"id": [1], "blob": blob_array([Blob.from_uri(source.as_uri(), position=0, size=8)])}, schema=schema
+    ))
+
+    with pytest.raises(InvalidInputError):
+        create_table(ns, {}, ["rb"], pointer)  # flag off → rejected, declared table rolled back
+
+    # retryable: the name is free (rollback dropped the declare), so a managed create at the same id succeeds
+    create_table(ns, {}, ["rb"], _ipc(pa.table({"id": [1], "blob": blob_array([b"managed"])}, schema=schema)))
+    assert _open(ns, ["rb"]).read_blobs("blob", indices=[0])[0][1] == b"managed"

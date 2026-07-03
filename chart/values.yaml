@@ -25,6 +25,12 @@ vending:
   mode: mode_b # mode_b | web_identity | sts | static
   ttlSeconds: 900
   assumeRoleArn: "arn:aws:iam::000000000000:role/lance-vend" # RustFS ignores it; boto3 requires the param
+  # Allow blob-v2 columns to reference EXTERNAL objects outside the dataset root (Blob.from_uri) on create.
+  # Off by default: (1) external bytes live outside the lakehouse (Lance's GC can't protect them, a source
+  # delete dangles the pointer); (2) SSRF — a client-controlled pointer URI is fetched server-side by the
+  # cascade's read_blobs, so an arbitrary URI (cloud metadata / internal host) becomes a read primitive.
+  # Enable only for a trusted producer. Managed/inline blobs (bytes copied in) always work regardless.
+  allowExternalBlobs: false
 
 # --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------
 dapr:

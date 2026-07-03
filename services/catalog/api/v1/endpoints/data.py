@@ -106,7 +106,14 @@ async def create_table(
     # ``dataplane.create_table`` picks the write path by schema off the event loop: a blob-v2 column needs
     # file format 2.2 (native create pins 2.1 and rejects it) → a direct 2.2 write; else → native create. (§9)
     response: CreateTableResponse = await run_in_threadpool(
-        dataplane.create_table, ns, so, segments, data, mode=mode, properties=parsed_properties
+        dataplane.create_table,
+        ns,
+        so,
+        segments,
+        data,
+        mode=mode,
+        properties=parsed_properties,
+        allow_external_blobs=settings.allow_external_blobs,
     )
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)

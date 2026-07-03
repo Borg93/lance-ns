@@ -19,9 +19,9 @@ from typing import Any, cast
 
 import lance
 import pyarrow as pa
-from common import blobs
+from common import blobs, schema
 from lance import blob_array, blob_field
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 _STAGE_COLUMN = "stage"
 
@@ -39,16 +39,24 @@ class WriteResult(BaseModel):
     version: int
     row_count: int
     size_bytes: int
+    #: ``SchemaDatasetFacet`` fields (``[{"name", "type"}]``, blob/vector-aware) of the written dataset —
+    #: what the emit records on the WROTE edge so the lineage graph shows real media column types.
+    fields: list[dict[str, str]] = Field(default_factory=list)
 
 
 def _measure(uri: str, storage_options: dict[str, str]) -> WriteResult:
-    """Read the just-written dataset's version + exact output statistics (rows + on-disk bytes)."""
+    """Read the just-written dataset's version + exact output statistics (rows + on-disk bytes) + schema."""
     ds = lance.dataset(uri, storage_options=storage_options)
     # lance annotates ``DataStatistics.fields`` as a single ``FieldStatistics`` but returns a list at
     # runtime (upstream stub bug), so cast to the real shape before summing the per-field on-disk bytes.
-    fields = cast("list[Any]", ds.stats.data_stats().fields)
-    size_bytes = sum(field.bytes_on_disk for field in fields)
-    return WriteResult(version=int(ds.version), row_count=ds.count_rows(), size_bytes=size_bytes)
+    field_stats = cast("list[Any]", ds.stats.data_stats().fields)
+    size_bytes = sum(stat.bytes_on_disk for stat in field_stats)
+    return WriteResult(
+        version=int(ds.version),
+        row_count=ds.count_rows(),
+        size_bytes=size_bytes,
+        fields=schema.facet_fields(ds.schema),
+    )
 
 
 def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> WriteResult:

@@ -38,6 +38,9 @@ def test_blob_column_survives_a_cascade_hop(tmp_path: Path) -> None:
     # non-blob columns + the fresh stage stamp carried through
     assert ds.to_table(columns=["src"]).column("src").to_pylist() == ["cam-a", "cam-b"]
     assert ds.to_table(columns=["stage"]).column("stage").to_pylist() == ["silver", "silver"]
+    # the measured WriteResult captures a blob-aware schema facet for the WROTE-edge lineage (P4)
+    assert {"name": "payload", "type": "blob"} in result.fields
+    assert {"name": "src", "type": "string"} in result.fields
 
 
 def test_stage_restamped_not_duplicated_when_carrying_a_blob(tmp_path: Path) -> None:

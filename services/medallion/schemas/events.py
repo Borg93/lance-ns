@@ -52,6 +52,12 @@ _DATA_QUALITY_FACET_SCHEMA = (
     "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json"
     "#/$defs/DataQualityAssertionsDatasetFacet"
 )
+#: Standard ``SchemaDatasetFacet`` schema URL → the produced dataset's columns (name + a concise lineage
+#: type). A blob-v2 media column is rendered ``"blob"`` (not its verbose extension repr), a vector as
+#: ``array<elem>`` — so the WROTE edge records real media schema (see ``common.schema``).
+_SCHEMA_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
+)
 
 
 def _dataset(
@@ -62,9 +68,18 @@ def _dataset(
     size_bytes: int | None = None,
     assertions: list[dict[str, Any]] | None = None,
     source_uri: str | None = None,
+    schema_fields: list[dict[str, str]] | None = None,
 ) -> dict[str, Any]:
     ds: dict[str, Any] = {"namespace": namespace, "name": name}
     facets: dict[str, Any] = {}
+    # schema is an OUTPUT facet — the produced dataset's real columns (name + concise type, blob/vector
+    # aware). Present only when the compute measured a write and captured the schema; inputs omit it.
+    if schema_fields:
+        facets["schema"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _SCHEMA_FACET_SCHEMA,
+            "fields": schema_fields,
+        }
     if version is not None:
         facets["version"] = {
             "_producer": _PRODUCER,
@@ -133,6 +148,7 @@ def build_run_event(
     size_bytes: int | None = None,
     assertions: list[dict[str, Any]] | None = None,
     source_uri: str | None = None,
+    schema_fields: list[dict[str, str]] | None = None,
     token: str | None = None,
     event_type: str = "COMPLETE",
     error_message: str | None = None,
@@ -183,6 +199,7 @@ def build_run_event(
             size_bytes=size_bytes,
             assertions=assertions,
             source_uri=source_uri,
+            schema_fields=schema_fields,
         )
     ]
     return {

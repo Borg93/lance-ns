@@ -130,6 +130,7 @@ async def handle_stage(
             row_count=result.row_count if result else None,
             size_bytes=result.size_bytes if result else None,
             source_uri=settings.to_uri if result else None,
+            schema_fields=result.fields if result else None,
             # exclude_none: an assertion with no column omits the key entirely — a serialized
             # ``"column": null`` fails strict DataQualityAssertionsDatasetFacet validation (column: string).
             assertions=[a.model_dump(exclude_none=True) for a in assertions] or None,

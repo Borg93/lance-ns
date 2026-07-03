@@ -305,8 +305,12 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
       `services/medallion/services/media.py` (Pillow: thumbnail + pixel-embedding + caption) — the demo's
       bronze writes real PNG image blobs and silver decodes them into an inline `thumbnail` + `embedding`.
       Live-verified on RustFS (bronze image blob → silver thumbnail+embedding, all 2.2) + e2e-medallion.
-    Remaining: lineage captures the blob schema (P4 — blob-aware SchemaDatasetFacet); optional ranged
-    blob-read serving endpoint (P2).
+    ✅ **lineage schema DONE (§9 P4)** — the medallion emitter now attaches a real blob-aware
+      `SchemaDatasetFacet` (derived from the written dataset by `compute._measure`) rendering
+      `lance.blob.v2`→`blob`, FixedSizeList→`array<elem>`, binary→`binary` (shared `common.schema`).
+      Live-verified in AGE: a media WROTE edge shows `payload:blob, thumbnail:binary, embedding:array<float>`
+      (and the real cascade's `silver$features` now carries its derived schema too).
+    §9 backend round-trip (P0→P4) COMPLETE. Remaining: optional ranged blob-read serving endpoint (P2).
   - ⛔ P0 guard the tabular path: the Arrow-IPC insert/query endpoints are wrong for blobs (2GB video over
     HTTP POST) — add a size guard + clear 4xx steering clients to the vending/direct path; document the rule.
   - ⛔ P1 serving path for credential-less consumers (frontend/browser): catalog endpoint doing a ranged blob

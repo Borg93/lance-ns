@@ -103,7 +103,12 @@ def create_table(
     if _schema_is_blob(data):
         return _create_blob_table(ns, so, segments, data, mode=mode, properties=properties)
     request = CreateTableRequest(id=segments, mode=mode, properties=properties)
-    return native.call(ns, "create_table", request, data)
+    response: CreateTableResponse = native.call(ns, "create_table", request, data)
+    # #88: the native create echoes the catalog's ROOT storage creds back in ``storage_options`` — strip
+    # them so a create caller never receives root credentials. Storage access is vended ONLY through the
+    # dedicated ``/credentials`` endpoint (scoped, two-tier secret model), never as a side effect of create.
+    response.storage_options = None
+    return response
 
 
 def _schema_is_blob(data: bytes) -> bool:

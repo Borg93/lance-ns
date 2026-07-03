@@ -94,6 +94,22 @@ def _arrow_ipc(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
+def test_create_strips_root_storage_options_from_response(client: TestClient, fake_ns: MagicMock) -> None:
+    # #88: the native backend echoes the catalog's ROOT storage creds; the create response must NOT carry
+    # them (storage access is vended only via /credentials).
+    fake_ns.create_table.return_value = CreateTableResponse(
+        location="s3://x",
+        version=1,
+        storage_options={"access_key_id": "rustfsadmin", "secret_access_key": "rustfsadmin"},
+    )
+    body = _arrow_ipc(pa.table({"id": [1]}))
+    resp = client.post("/v1/table/db$t/create", content=body, headers=ARROW_STREAM)
+
+    assert resp.status_code == 200
+    assert "storage_options" not in resp.json()
+    assert "rustfsadmin" not in resp.text
+
+
 def test_create_delegates_to_dataplane_create_table(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:

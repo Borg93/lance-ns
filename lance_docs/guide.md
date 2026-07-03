@@ -215,7 +215,8 @@ Blob columns support both planned full-payload reads and lazy file-like access.
     - Use `take_blobs` when you need a `BlobFile` handle for streaming, seeking, or partial reads.
 
 
-![Blob](../images/blob.png)
+![Blob v2 overview](../images/blob-v2-overview-light.png#only-light)
+![Blob v2 overview](../images/blob-v2-overview-dark.png#only-dark)
 
 If you're unsure about whether you need a blob column in the first place (and why it's useful), read the "[when to use blob column vs. inline binary](#when-to-use-a-blob-column-vs-inline-binary)" section below.
 
@@ -2194,6 +2195,27 @@ it out of experimental status and make stronger commitments to backwards compati
 stable and breaking changes should generally be communicated (via warnings) for 1-2 months prior to being finalized to
 give users a chance to migrate.  This page documents the breaking changes between releases and gives advice on how to
 migrate.
+
+## 9.0.0
+
+* Newly created FTS / inverted indexes now default to format v2 instead of v1.
+  The `LANCE_FTS_FORMAT_VERSION` environment variable no longer controls the
+  format used for newly created indexes. Users who need a specific index layout
+  should pass the index creation parameter `format_version` explicitly.
+
+* This affects users who create FTS / inverted indexes and need those indexes to
+  be readable by older Lance versions, or who depend on the v1 index layout. In
+  those cases, pass `format_version=1` when creating the index. Otherwise, newly
+  created indexes will use v2 by default, and older Lance readers may not be able
+  to read them.
+
+  ```python
+  dataset.create_scalar_index("text", "INVERTED", format_version=1)
+  ```
+
+* Existing v1 FTS indexes remain queryable. Operations that maintain an existing
+  v1 index, including append, incremental indexing, optimize, and mem-wal
+  maintained-index flush, should continue preserving the v1 format.
 
 ## 7.2.0
 

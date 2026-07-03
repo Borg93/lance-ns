@@ -294,12 +294,19 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   package + lance_docs/{guide,file_format,ray}.md) and the direct write path (vended creds → RustFS) is open —
   but lance-ns has NEVER exercised a blob column. Dapr is uninvolved by design (events carry pointers, never
   data). Concrete work:
-  - 🔶 P0 e2e proof (in progress): a blob column round-trips through OUR stack. ✅ **write side DONE (§9 P1)** —
-    `POST /v1/table/{id}/create` with a blob-v2 column routes to a direct file-format-2.2 write via the
-    `dataplane.create_table` facade (declare → `write_dataset(data_storage_version="2.2")`; native create pins
-    2.1 and rejects blob-v2). Live-verified on the cluster + unit/integration tests (Create/ExistOk/Overwrite,
-    rollback-on-failed-write, plain-schema→native-2.1). Remaining: lineage captures blob schema (P4) → cascade
-    carries it forward (P3) → ranged read back (optional serving endpoint).
+  - 🔶 P0 e2e proof (in progress): a blob column round-trips through OUR stack.
+    ✅ **write side DONE (§9 P1)** — `POST /v1/table/{id}/create` with a blob-v2 column routes to a direct
+      file-format-2.2 write via the `dataplane.create_table` facade (declare → `write_dataset(2.2)`; native
+      create pins 2.1 and rejects blob-v2). Live-verified + tests (Create/ExistOk/Overwrite, rollback,
+      plain→native-2.1).
+    ✅ **cascade + media derivation DONE (§9 P3)** — `transform_stage` is now blob-SAFE: a blob-v2 column is
+      carried through a medallion hop via `read_blobs`+`blob_array` (a plain `to_table()` demoted it to the
+      legacy descriptions struct, which a 2.2 write rejects). Real media derivation lives in
+      `services/medallion/services/media.py` (Pillow: thumbnail + pixel-embedding + caption) — the demo's
+      bronze writes real PNG image blobs and silver decodes them into an inline `thumbnail` + `embedding`.
+      Live-verified on RustFS (bronze image blob → silver thumbnail+embedding, all 2.2) + e2e-medallion.
+    Remaining: lineage captures the blob schema (P4 — blob-aware SchemaDatasetFacet); optional ranged
+    blob-read serving endpoint (P2).
   - ⛔ P0 guard the tabular path: the Arrow-IPC insert/query endpoints are wrong for blobs (2GB video over
     HTTP POST) — add a size guard + clear 4xx steering clients to the vending/direct path; document the rule.
   - ⛔ P1 serving path for credential-less consumers (frontend/browser): catalog endpoint doing a ranged blob

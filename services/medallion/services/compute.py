@@ -19,6 +19,8 @@ from typing import Any, cast
 
 import lance
 import pyarrow as pa
+from common import blobs
+from lance import blob_array, blob_field
 from pydantic import BaseModel
 
 _STAGE_COLUMN = "stage"
@@ -76,20 +78,60 @@ def transform_stage(
 
     The generic fake-Ray compute: real rows flow forward and the target version advances, so the cascade
     produces actual versioned data + lineage. ``stage`` is set (not appended twice) so re-running over an
-    already-stamped upstream replaces the value rather than colliding on the column name. Returns the new
-    downstream Lance version + the measured output statistics (rows + on-disk bytes) for the emit.
+    already-stamped upstream replaces the value rather than colliding on the column name. A blob-v2 (media)
+    column is carried through intact — see ``_carry_forward``. Returns the new downstream Lance version +
+    the measured output statistics (rows + on-disk bytes) for the emit.
     """
-    src = lance.dataset(from_uri, storage_options=storage_options).to_table()
-    field = pa.field(_STAGE_COLUMN, pa.string())
-    marker = pa.array([stage] * src.num_rows, pa.string())
-    out = (
-        src.set_column(src.schema.get_field_index(_STAGE_COLUMN), field, marker)
-        if _STAGE_COLUMN in src.column_names
-        else src.append_column(field, marker)
-    )
-    # 2.2 like seed_raw: every dataset the cascade writes is on the current format, so a future blob
-    # column in any stage never trips "Blob v2 requires file version >= 2.2" mid-cascade.
+    ds = lance.dataset(from_uri, storage_options=storage_options)
+    out = _carry_forward(ds, stage)
+    # 2.2 like seed_raw: every dataset the cascade writes is on the current format, so a blob column in any
+    # stage never trips "Blob v2 requires file version >= 2.2" mid-cascade.
     lance.write_dataset(
         out, to_uri, mode="overwrite", storage_options=storage_options, data_storage_version="2.2"
     )
     return _measure(to_uri, storage_options)
+
+
+def _carry_forward(ds: lance.LanceDataset, stage: str) -> pa.Table:
+    """Read the upstream table and stamp the ``stage`` column, carrying any blob-v2 column through intact.
+
+    A plain ``to_table()`` demotes a blob column to its descriptions struct (tagged with the legacy
+    ``lance-encoding:blob`` key), which the 2.2 write then rejects — so blob columns are re-materialised
+    via ``read_blobs`` + ``blob_array``. A stage with no blob column keeps the cheap straight-through path.
+    """
+    blob_cols = blobs.blob_field_names(ds.schema)
+    if not blob_cols:
+        return _stamp_stage(ds.to_table(), stage)
+
+    # Full-materialise each blob column into memory (read_blobs by positional indices 0..N-1) — fine for
+    # this in-process fake-Ray stand-in over the cascade's small overwrite-written datasets (contiguous
+    # row ids); a distributed job would stream instead. `range(rows)` aligns with `to_table()` only because
+    # the cascade is overwrite-only (no soft-deleted rows to shift positions).
+    rows = ds.count_rows()
+    plain = ds.to_table(
+        columns=[f.name for f in ds.schema if f.name not in blob_cols and f.name != _STAGE_COLUMN]
+    )
+    columns: dict[str, Any] = {}
+    fields: list[pa.Field] = []
+    for f in ds.schema:
+        if f.name == _STAGE_COLUMN:
+            continue  # re-stamped below so the value reflects this stage, not the upstream's
+        if f.name in blob_cols:
+            payloads = [payload for _addr, payload in ds.read_blobs(f.name, indices=list(range(rows)))]
+            fields.append(blob_field(f.name))
+            columns[f.name] = blob_array(payloads)
+        else:
+            fields.append(plain.schema.field(f.name))
+            columns[f.name] = plain.column(f.name)
+    fields.append(pa.field(_STAGE_COLUMN, pa.string()))
+    columns[_STAGE_COLUMN] = pa.array([stage] * rows, pa.string())
+    return pa.table(columns, schema=pa.schema(fields))
+
+
+def _stamp_stage(table: pa.Table, stage: str) -> pa.Table:
+    """Set (or append) the ``stage`` provenance column on ``table``."""
+    field = pa.field(_STAGE_COLUMN, pa.string())
+    marker = pa.array([stage] * table.num_rows, pa.string())
+    if _STAGE_COLUMN in table.column_names:
+        return table.set_column(table.schema.get_field_index(_STAGE_COLUMN), field, marker)
+    return table.append_column(field, marker)

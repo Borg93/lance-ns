@@ -30,6 +30,7 @@ Env (defaults target the RustFS compose stack from the host)::
 from __future__ import annotations
 
 import argparse
+import io
 import json
 import os
 import sys
@@ -47,14 +48,16 @@ from openlineage.client import OpenLineageClient
 from openlineage.client.event_v2 import Run, RunEvent, RunState
 from openlineage.client.facet_v2 import RunFacet
 from openlineage.client.transport.http import HttpConfig, HttpTransport
+from PIL import Image
 
-# Make the repo-root ``lineage`` package importable when run as a plain script
-# (python puts scripts/ on sys.path, not the repo root).
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# The ``lineage`` / ``medallion`` service packages live under ``services/`` (not the repo root), so put
+# that on sys.path when run as a plain script — matching the pytest ``pythonpath = ["services", "."]``.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "services"))
 
 from lance import blob_array, blob_field
 from lineage.schemas import LineageGraph, Producers, Runs  # noqa: E402  (after sys.path bootstrap)
 from lineage.seed import build_events  # noqa: E402  (intentional: after the sys.path bootstrap)
+from medallion.services import media  # noqa: E402  (after the sys.path bootstrap)
 
 
 def _load_demo_env() -> None:
@@ -151,11 +154,18 @@ def reset_data() -> None:
             _say(f"s3://{path} (nothing to delete)")
 
 
+def _sample_image(color: tuple[int, int, int], size: tuple[int, int] = (64, 64)) -> bytes:
+    """A small solid-colour PNG standing in for an ingested camera frame."""
+    buffer = io.BytesIO()
+    Image.new("RGB", size, color).save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
 def write_bronze() -> None:
-    """alice's ETL: land raw events into bronze with a multimodal blob ``payload`` column."""
+    """alice's ETL: land raw media as a blob ``payload`` column (real PNG frames)."""
     opts = _storage_options()
     ids = [1, 2, 3]
-    payloads = [f"<bytes for event {i}>".encode() for i in ids]
+    payloads = [_sample_image(c) for c in ((200, 30, 30), (30, 200, 30), (30, 30, 200))]
     # payload_src = where each row's payload came from (the camera/sensor) — NOT the dataset's
     # source system (that's the raw_events node upstream of bronze in the lineage graph).
     payload_src = ["cam-a", "cam-b", "cam-a"]
@@ -168,24 +178,44 @@ def write_bronze() -> None:
     lance.write_dataset(
         table, _BRONZE, storage_options=opts, mode="overwrite", data_storage_version="2.2"
     )
-    _say(f"bronze$events written ({len(ids)} rows, blob payload) -> {_BRONZE}")
+    _say(f"bronze$events written ({len(ids)} rows, real image blobs) -> {_BRONZE}")
 
 
 def write_silver() -> None:
-    """data_eng's embed: read bronze, add an ``embedding`` column, write silver v1."""
+    """data_eng's ETL: decode each bronze media blob into a thumbnail + embedding, write silver v1.
+
+    The heavy ``payload`` blob stays referenced in bronze; silver carries only the small derived artifacts
+    (a downscaled ``thumbnail`` stored INLINE, and a pixel-derived ``embedding``) plus the keys.
+    """
     opts = _storage_options()
-    base = lance.dataset(_BRONZE, storage_options=opts).to_table(columns=["id", "payload_src"])
-    ids = base.column("id").to_pylist()
-    embedding = pa.array(
-        [[float((i + j) % 7) / 7.0 for j in range(8)] for i in ids], type=pa.list_(pa.float32(), 8)
+    bronze = lance.dataset(_BRONZE, storage_options=opts)
+    base = bronze.to_table(columns=["id", "payload_src"])
+    rows = base.num_rows
+    images = [payload for _addr, payload in bronze.read_blobs("payload", indices=list(range(rows)))]
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int64()),
+            pa.field("payload_src", pa.string()),
+            pa.field("thumbnail", pa.large_binary()),  # small INLINE binary — not a blob column
+            pa.field("embedding", pa.list_(pa.float32(), media.EMBEDDING_DIMS)),
+        ]
     )
     table = pa.table(
-        {"id": base.column("id"), "payload_src": base.column("payload_src"), "embedding": embedding}
+        {
+            "id": base.column("id"),
+            "payload_src": base.column("payload_src"),
+            "thumbnail": pa.array([media.derive_thumbnail(img) for img in images], pa.large_binary()),
+            "embedding": pa.array(
+                [media.derive_embedding(img) for img in images],
+                type=pa.list_(pa.float32(), media.EMBEDDING_DIMS),
+            ),
+        },
+        schema=schema,
     )
     lance.write_dataset(
         table, _SILVER, storage_options=opts, mode="overwrite", data_storage_version="2.2"
     )
-    _say(f"silver$features v1 written ({len(ids)} rows, +embedding) -> {_SILVER}")
+    _say(f"silver$features v1 written ({rows} rows, thumbnail+embedding from media) -> {_SILVER}")
 
 
 def add_caption() -> None:

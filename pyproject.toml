@@ -30,6 +30,7 @@ dependencies = [
     "opentelemetry-instrumentation-psycopg>=0.64b0",
     "opentelemetry-instrumentation-logging>=0.64b0",
     "opentelemetry-instrumentation-grpc>=0.64b0",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]

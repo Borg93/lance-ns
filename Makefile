@@ -109,6 +109,7 @@ ray-image: ## Build + side-load the CPU Ray + lance-ray demo image into kind
 
 ray-demo: ray-image ## Real Ray cluster + `ray job submit`: distributed Lance write/index/evolve/compact vs RustFS
 	@kubectl apply -f deploy/ray-lance-demo.yaml
+	@kubectl rollout restart deploy/ray-lance-head  # pick up a reloaded same-tag image (IfNotPresent)
 	@kubectl rollout status deploy/ray-lance-head --timeout=180s
 	@echo "ray job submit → distributed write + index + evolve + compact (baked scripts/ray_lance_job.py) …"
 	@kubectl exec deploy/ray-lance-head -- \

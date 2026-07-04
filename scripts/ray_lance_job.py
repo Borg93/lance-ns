@@ -44,26 +44,36 @@ def main() -> None:
     base = f"s3://lance-catalog/ray-{run}"
     src, dst = base + "/src", base + "/out"
 
-    # 1) SEED (pylance, 2.2 + stable ids) then DISTRIBUTED WRITE (Ray). min<max rows-per-file forces 4 files →
-    #    4 fragments written in parallel by Ray workers, committed once. (lance_ray.write_lance has no
-    #    enable_stable_row_ids param — a known limitation; the seed carries stable ids, the output doesn't.)
+    # 1) SEED src (pylance), then DISTRIBUTED WRITE with STABLE ROW IDS. lance_ray.write_lance has no
+    #    enable_stable_row_ids param, so we CREATE dst with stable ids (an empty table of the output schema)
+    #    and then distributed-APPEND the Ray fragments into it — stable-row-ids is a dataset-level property,
+    #    so the appended rows inherit it. min<max rows-per-file forces 4 files → 4 fragments written in
+    #    parallel by Ray workers, committed once.
     lance.write_dataset(
-        pa.table({"id": list(range(64)), "v": list(range(64))}), src, storage_options=so,
-        mode="overwrite", data_storage_version="2.2", enable_stable_row_ids=True,
+        pa.table({"id": list(range(64)), "v": list(range(64))}), src,
+        storage_options=so, mode="overwrite", data_storage_version="2.2",
+    )
+    out_schema = pa.schema([("id", pa.int64()), ("v", pa.int64()), ("doubled", pa.int64())])
+    lance.write_dataset(
+        out_schema.empty_table(), dst, storage_options=so, mode="overwrite",
+        data_storage_version="2.2", enable_stable_row_ids=True,
     )
     transformed = lr.read_lance(src, storage_options=so).map_batches(
         lambda batch: {"id": batch["id"], "v": batch["v"], "doubled": batch["v"] * 2}, batch_format="numpy"
     )
     lr.write_lance(
-        transformed, dst, storage_options=so, data_storage_version="2.2",
+        transformed, dst, storage_options=so, mode="append", data_storage_version="2.2",
         min_rows_per_file=8, max_rows_per_file=16, concurrency=2,
     )
     written = lance.dataset(dst, storage_options=so)
     fragments_before = len(written.get_fragments())
-    dsv = written.data_storage_version
-    print(f"[1/4] WRITE ok rows={written.count_rows()} fragments={fragments_before} dsv={dsv}")
-    if fragments_before < 2:
-        raise SystemExit(f"expected a distributed multi-fragment write, got {fragments_before}")
+    stable = written.has_stable_row_ids
+    print(
+        f"[1/4] WRITE ok rows={written.count_rows()} fragments={fragments_before} "
+        f"dsv={written.data_storage_version} stable_row_ids={stable}"
+    )
+    if fragments_before < 2 or not stable:
+        raise SystemExit(f"expected >=2 fragments + stable row ids, got {fragments_before} / {stable}")
 
     # 2) INDEXING — a BTREE scalar index on `id`, then a filtered read the index can serve.
     # VERIFIED FINDING: lance_ray.create_scalar_index (DISTRIBUTED) is incompatible with our pinned pylance

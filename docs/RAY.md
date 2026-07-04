@@ -23,15 +23,17 @@ via `--runtime-env-json` (exec-level env is NOT propagated to a Ray job). The jo
 ## What it proves (live, one job, four capabilities)
 
 ```
-[1/4] WRITE   ok  fragments=4  dsv=2.2          # lance_ray.read_lance → map_batches → write_lance, 4 fragments in parallel + 1 commit
+[1/4] WRITE   ok  fragments=4  dsv=2.2  stable_row_ids=True   # distributed append into a stable-row-id dataset
 [2/4] INDEX   ok  indices=['id_idx']  query(id=7)->1 row
 [3/4] EVOLVE  ok  [id,v,doubled] → [id,v,doubled,tripled]  v→v+1  (old version still pins the old schema)
 [4/4] COMPACT ok  fragments 4->2                # compact_files merges the small fragments
 RAY-LANCE ALL OK
 ```
 
-- **Distributed WRITE** — `lance_ray.write_lance(min_rows_per_file<max)` writes 4 fragments in parallel across
-  Ray workers and commits once (the genuine fragment-parallel write, not overwrite-clobber).
+- **Distributed WRITE + stable row ids** — `lance_ray.write_lance` has no `enable_stable_row_ids` param, so we
+  create `dst` with stable ids (an empty table of the output schema) and then distributed-**append** the Ray
+  fragments into it (`mode="append"`, `min_rows_per_file<max` → 4 fragments in parallel + one commit).
+  Stable-row-ids is a dataset-level property, so the appended rows inherit it — `has_stable_row_ids=True`.
 - **DATA EVOLUTION** — `lance_ray.add_columns` distributively adds `tripled = v*3`; the schema and version
   advance, and time-travel to the pre-evolution version still shows the old schema (immutable versions).
 - **COMPACTION** — `lance_ray.compact_files(CompactionOptions(target_rows_per_fragment=…))` merges 4 → 2
@@ -48,8 +50,10 @@ Two real incompatibilities surfaced (and are handled) — worth knowing before t
    `write_dataset(min_rows_per_file=)`. There is no single pylance where both lance_ray paths align, so the
    demo builds the index with the dataset's **native** pylance API inside the job (a real index a query
    serves). Truly-distributed index build is a lance_ray/pylance version-alignment follow-up.
-3. `lance_ray.write_lance` has **no `enable_stable_row_ids`** param — the pylance-seeded input carries stable
-   ids; the Ray-written output does not (a lance_ray gap).
+3. `lance_ray.write_lance` has **no `enable_stable_row_ids`** param. Work around it by creating the target
+   with stable ids (a native pylance `write_dataset(enable_stable_row_ids=True)` of an empty schema) and then
+   distributed-**appending** the Ray fragments — the property is dataset-level, so the output ends up with
+   `has_stable_row_ids=True`.
 4. `compact_files` needs a real `CompactionOptions` on pylance 8 — a bare `None` trips an internal dict check.
 
 ## Relationship to the cascade

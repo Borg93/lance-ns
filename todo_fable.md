@@ -348,8 +348,12 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 - ⛔ **P1 Search** — `/search?q=` over datasets reusing rask’s Lance FTS+vector (`index_catalog.py` /
   `search_api` pattern); the *list* discovery API shipped in GOAL 4, semantic search did not. Also: wire the
   already-shipped `/jobs` + `/namespaces` into the Browse UI.
-- ⛔ **P2 Compute seam completion** — Ray job submission surface + `parent` run facet (batch→chunk hierarchies)
-  + real per-stage transforms; the fake-Ray contract (read→transform→write→version + emit) is in place.
+- 🔶 **P2 Compute seam completion** — Ray job submission surface PROVEN (2026-07-04): a real Ray cluster in kind
+  (`deploy/ray-lance-demo.yaml`, image `.docker/ray-lance.dockerfile`) + `ray job submit` runs a genuine
+  distributed lance_ray job against RustFS — distributed WRITE (4 fragments/1 commit) + INDEX + data EVOLUTION
+  (add_columns, version pinning) + COMPACTION, all live-verified via `make ray-demo` (see docs/RAY.md, which
+  also records the lance_ray↔pylance-8 version findings). REMAINING: wire the medallion movers to submit Ray
+  jobs instead of in-process compute, the `parent` run facet (batch→chunk), and the KubeRay operator (rask merge).
 - ⛔ **P2 Query engine** — DuckDB/DataFusion SQL over Lance + result cache: net-new (rask has neither), deferred
   by decision.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);

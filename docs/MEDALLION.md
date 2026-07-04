@@ -62,6 +62,12 @@ distributed Ray Data job (`lance-ray` on rask's KubeRay) swaps into in productio
 loop is end-to-end testable without a Ray cluster (`tests/unit/test_medallion_cascade.py` runs the full
 raw→gold cascade and asserts both the data and the `DERIVED_FROM` chain).
 
+> **The real Ray seam** (`docs/RAY.md`, `make ray-demo`): a genuine Ray cluster in kind + `ray job submit`
+> runs a distributed `lance_ray` job proving Lance's distributed **write** (fragment-parallel + one commit),
+> **indexing**, data **evolution** (`add_columns` + version pinning), and **compaction** against RustFS —
+> the production shape this in-process `transform_stage` stands in for. Wiring the movers to submit Ray jobs
+> (and the KubeRay operator) is the rask-merge step.
+
 > **Compute + OpenBao:** compute-on writes to RustFS with the plaintext S3 secret, so it **requires OpenBao
 > off** (`--set openbao.enabled=false medallion.compute=true`). The medallion is a dummy producer with no
 > OpenBao secret-fetch (unlike the catalog), so with OpenBao on it **fails fast at boot** rather than 403'ing

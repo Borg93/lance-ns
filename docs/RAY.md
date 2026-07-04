@@ -1,0 +1,61 @@
+# Real Ray-cluster compute seam
+
+The medallion cascade's in-process compute (`services/medallion/services/compute.py`) is the **fake-Ray**
+placeholder — a synchronous `lance.write_dataset` that stands in for a distributed Ray Data job so the
+event-driven loop is testable without a cluster. This doc covers the **real** thing: an actual Ray cluster in
+kind + `ray job submit`, proving Lance's distributed capabilities against RustFS. Production is KubeRay (a
+`RayCluster` CR) via the rask merge; this is the raw-cluster proof that the seam is real, not fake.
+
+## What runs
+
+| Piece | File |
+| ----- | ---- |
+| Thin CPU Ray image (`rayproject/ray:2.56.0-py312-cpu` + `lance-ray` + `pylance==8.0.0`) | `.docker/ray-lance.dockerfile` |
+| A real Ray head (GCS 6379, dashboard/job API 8265) + Service, single node | `deploy/ray-lance-demo.yaml` |
+| The submitted job — a genuine distributed Lance pipeline | `scripts/ray_lance_job.py` |
+| One-shot driver | `make ray-demo` (and `make ray-demo-clean`) |
+
+`make ray-demo` builds + `kind load`s the image (`make ray-image`), applies the head, waits for it, then
+`ray job submit`s `ray_lance_job.py` (baked into the image at `/home/ray/jobs/`), passing a per-run `RUN`
+via `--runtime-env-json` (exec-level env is NOT propagated to a Ray job). The job reads/writes
+`s3://lance-catalog/ray-<run>/…` on the in-cluster RustFS. Tear down with `make ray-demo-clean`.
+
+## What it proves (live, one job, four capabilities)
+
+```
+[1/4] WRITE   ok  fragments=4  dsv=2.2          # lance_ray.read_lance → map_batches → write_lance, 4 fragments in parallel + 1 commit
+[2/4] INDEX   ok  indices=['id_idx']  query(id=7)->1 row
+[3/4] EVOLVE  ok  [id,v,doubled] → [id,v,doubled,tripled]  v→v+1  (old version still pins the old schema)
+[4/4] COMPACT ok  fragments 4->2                # compact_files merges the small fragments
+RAY-LANCE ALL OK
+```
+
+- **Distributed WRITE** — `lance_ray.write_lance(min_rows_per_file<max)` writes 4 fragments in parallel across
+  Ray workers and commits once (the genuine fragment-parallel write, not overwrite-clobber).
+- **DATA EVOLUTION** — `lance_ray.add_columns` distributively adds `tripled = v*3`; the schema and version
+  advance, and time-travel to the pre-evolution version still shows the old schema (immutable versions).
+- **COMPACTION** — `lance_ray.compact_files(CompactionOptions(target_rows_per_fragment=…))` merges 4 → 2
+  fragments.
+
+## Verified lance_ray ↔ pylance version findings (grounded in reality, not just docs)
+
+Two real incompatibilities surfaced (and are handled) — worth knowing before the rask merge pins versions:
+
+1. **Ray Data's built-in `write_lance` datasink** calls `write_fragments(storage_options_provider=…)`, a kwarg
+   pylance 8.0.0 lacks → use the **`lance-ray` package** (`lance_ray.write_lance`), which is version-matched.
+2. **`lance_ray.create_scalar_index` (distributed) is incompatible with pylance 8.0.0** — it calls
+   `create_index_uncommitted(index_type=, fragment_ids=)` which 8.0.0 lacks; and *unpinning* pylance breaks
+   `write_dataset(min_rows_per_file=)`. There is no single pylance where both lance_ray paths align, so the
+   demo builds the index with the dataset's **native** pylance API inside the job (a real index a query
+   serves). Truly-distributed index build is a lance_ray/pylance version-alignment follow-up.
+3. `lance_ray.write_lance` has **no `enable_stable_row_ids`** param — the pylance-seeded input carries stable
+   ids; the Ray-written output does not (a lance_ray gap).
+4. `compact_files` needs a real `CompactionOptions` on pylance 8 — a bare `None` trips an internal dict check.
+
+## Relationship to the cascade
+
+This is the production shape of the `compute.py` seam: `read → transform → write → version` becomes a real
+`ray job submit` instead of an in-process call. It also directly answers the "cascade doesn't parallelize"
+limitation — Lance *does* parallelize writes (fragment-parallel + single commit); our in-process
+`mode="overwrite"` was the placeholder, not a Lance limit. Wiring the medallion movers to submit Ray jobs (vs
+in-process compute) is the rask-merge step; the KubeRay operator replaces the raw head here.

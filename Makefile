@@ -29,6 +29,7 @@ K9S_V       := v0.32.7
 TILT_V      := 0.33.21
 FGA_V       := 0.6.4
 CATALOG_IMG := lance-rest-catalog:dev
+RAY_IMG     := ray-lance:dev
 WEB_IMG     := lance-lineage-web:dev
 MEDALLION_PORT := 8000
 # OCI label provenance — supplied to every image build (BUILD_DATE rfc3339, VCS_REF full SHA, VERSION).
@@ -101,6 +102,22 @@ medallion: ## Fire the event-driven pipeline: lance-ray POST /produce → raw→
 
 compaction: ## Trigger a compaction/GC sweep now (the Dapr cron binding also fires it on its schedule)
 	@kubectl exec deploy/$(RELEASE)-compaction -c compaction -- python -c "import httpx; print('sweep:', httpx.post('http://localhost:$(MEDALLION_PORT)/compaction-cron', timeout=30).json())"
+
+ray-image: ## Build + side-load the CPU Ray + lance-ray demo image into kind
+	docker build $(BUILD_ARGS) -f .docker/ray-lance.dockerfile -t $(RAY_IMG) .
+	kind load docker-image $(RAY_IMG) --name $(CLUSTER)
+
+ray-demo: ray-image ## Real Ray cluster + `ray job submit`: distributed Lance write/index/evolve/compact vs RustFS
+	@kubectl apply -f deploy/ray-lance-demo.yaml
+	@kubectl rollout status deploy/ray-lance-head --timeout=180s
+	@echo "ray job submit → distributed write + index + evolve + compact (baked scripts/ray_lance_job.py) …"
+	@kubectl exec deploy/ray-lance-head -- \
+	  ray job submit --address http://localhost:8265 \
+	  --runtime-env-json '{"env_vars":{"RUN":"demo'$$(date +%s)'"}}' \
+	  -- python /home/ray/jobs/ray_lance_job.py
+
+ray-demo-clean: ## Tear down the Ray demo cluster
+	@kubectl delete -f deploy/ray-lance-demo.yaml --ignore-not-found
 
 gateway: ## Port-forward the API gateway — one entry point for the whole platform (Ctrl-C to stop)
 	@echo "gateway → http://localhost:8088   ( / =UI  /lineage/* /catalog/* =API via Dapr invoke  /produce )"

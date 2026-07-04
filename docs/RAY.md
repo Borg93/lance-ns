@@ -45,11 +45,13 @@ Two real incompatibilities surfaced (and are handled) — worth knowing before t
 
 1. **Ray Data's built-in `write_lance` datasink** calls `write_fragments(storage_options_provider=…)`, a kwarg
    pylance 8.0.0 lacks → use the **`lance-ray` package** (`lance_ray.write_lance`), which is version-matched.
-2. **`lance_ray.create_scalar_index` (distributed) is incompatible with pylance 8.0.0** — it calls
-   `create_index_uncommitted(index_type=, fragment_ids=)` which 8.0.0 lacks; and *unpinning* pylance breaks
-   `write_dataset(min_rows_per_file=)`. There is no single pylance where both lance_ray paths align, so the
-   demo builds the index with the dataset's **native** pylance API inside the job (a real index a query
-   serves). Truly-distributed index build is a lance_ray/pylance version-alignment follow-up.
+2. **lance_ray's DISTRIBUTED index build is incompatible with pylance 8.0.0 — both paths, verified.** The
+   scalar path (`create_scalar_index`) calls `create_index_uncommitted(index_type=, fragment_ids=)` and the
+   vector path (`create_index`, IVF_FLAT/IVF_PQ) calls `create_index_segment_builder` — pylance 8.0.0 exposes
+   *neither* of those distributed-index primitives. And *unpinning* pylance breaks `write_dataset(min_rows_per_file=)`.
+   So on our pinned pylance the demo builds the index with the dataset's **native** pylance API inside the ray
+   job (a real index a query serves — the `index created via ray + a query uses it` contract). A truly
+   worker-distributed index needs the lance_ray↔pylance version alignment the rask/KubeRay merge will pin.
 3. `lance_ray.write_lance` has **no `enable_stable_row_ids`** param. Work around it by creating the target
    with stable ids (a native pylance `write_dataset(enable_stable_row_ids=True)` of an empty schema) and then
    distributed-**appending** the Ray fragments — the property is dataset-level, so the output ends up with

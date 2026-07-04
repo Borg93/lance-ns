@@ -1,0 +1,26 @@
+{{- if .Values.networkPolicy.enabled }}
+# Network-isolation layer for the /produce cascade head (defense-in-depth on top of the require_dapr_token
+# guard on the route). /produce is a direct operator trigger — not sidecar-delivered — so without isolation
+# any pod that can reach lance-ray:8000 could drive the pipeline / fabricate medallion provenance. This
+# restricts ingress to pods in THIS release; the same-pod daprd sidecar is localhost and unaffected.
+# NOTE: requires a policy-enforcing CNI (Calico/Cilium). kind's default CNI ignores NetworkPolicy.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-lance-ray
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: lance-ray
+      app.kubernetes.io/instance: {{ .Release.Name }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        # Only pods belonging to this release (the movers, gateway) may reach the producer's HTTP port.
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/instance: {{ .Release.Name }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.medallion.producer.port | default 8000 }} }
+{{- end }}

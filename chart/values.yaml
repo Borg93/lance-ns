@@ -32,6 +32,22 @@ vending:
   # Enable only for a trusted producer. Managed/inline blobs (bytes copied in) always work regardless.
   allowExternalBlobs: false
 
+# --- Catalog request limits -----------------------------------------------------------------------
+catalog:
+  # Max request-body bytes accepted on any catalog route. The Arrow-IPC write endpoints buffer the whole
+  # body in memory, so an unbounded POST (e.g. a multi-GB media blob pushed through the catalog instead of
+  # the direct storage/vending path) OOMs the worker. The body-limit middleware rejects oversized bodies
+  # with 413 before buffering. 256 MiB — generous for tabular batches + small inline blobs, bounded well
+  # under a worker's memory. Big media must use the direct-write/vending path (claim-check), not this API.
+  maxBodyBytes: 268435456 # 256 * 1024 * 1024
+
+# --- Network isolation (opt-in; requires a policy-enforcing CNI e.g. Calico/Cilium) ---------------
+# kind's default CNI does NOT enforce NetworkPolicy, so this is a no-op there — it is prod hardening.
+# When enabled, restricts ingress to lance-ray:8000 (the /produce cascade head) to in-release pods only,
+# so an out-of-namespace / external workload can't trigger the pipeline even if it has the app-token.
+networkPolicy:
+  enabled: false
+
 # --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------
 dapr:
   enabled: true

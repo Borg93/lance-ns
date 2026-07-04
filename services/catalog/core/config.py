@@ -107,6 +107,13 @@ class Settings(BaseSettings):
     # zero-downtime model/schema migration windows. Default off (no-op).
     maintenance_read_only: bool = Field(default=False, alias="LANCE_MAINTENANCE_READ_ONLY")
 
+    # Max request-body size (bytes) accepted on any route. The Arrow-IPC write endpoints buffer the whole
+    # body in memory, so an unbounded POST (e.g. a multi-GB media blob pushed through the catalog instead of
+    # the direct storage/vending path) OOMs the worker. The body-limit middleware rejects oversized bodies
+    # with 413 BEFORE buffering, steering large payloads to the direct-write path (claim-check). Default
+    # 256 MiB — generous for tabular batches + small inline blobs, bounded well under a worker's memory.
+    max_body_bytes: int = Field(default=256 * 1024 * 1024, ge=1, alias="LANCE_MAX_BODY_BYTES")
+
     # Lineage emission (opt-in). When enabled, the catalog emits an OpenLineage event to the lineage
     # service on a table write — fire-and-forget + best-effort, so the lineage service being down can
     # never block or fail a catalog write. The catalog is the only component that knows the verified

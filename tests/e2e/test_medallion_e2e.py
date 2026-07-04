@@ -22,6 +22,9 @@ import requests
 
 LANCERAY = os.environ.get("LANCE_E2E_LANCERAY_URL", "")
 LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
+# /produce is guarded by require_dapr_token; when the deployed stack sets APP_API_TOKEN this must carry the
+# shared secret (empty on a token-less dev stack, where the guard is a no-op). `make e2e-medallion` fills it.
+DAPR_TOKEN = os.environ.get("LANCE_E2E_DAPR_TOKEN", "")
 
 pytestmark = [pytest.mark.e2e, pytest.mark.medallion]
 
@@ -54,8 +57,9 @@ def test_produce_cascades_raw_to_gold(urls: tuple[str, str]) -> None:
     # strictly rising run count is the real "the cascade fired just now" signal.
     before = _run_count(lineage)
 
-    # ACT — one trigger at the head of the pipeline.
-    produced = requests.post(f"{lance_ray}/produce", timeout=8)
+    # ACT — one trigger at the head of the pipeline (carrying the app-token when the stack enforces it).
+    headers = {"dapr-api-token": DAPR_TOKEN} if DAPR_TOKEN else {}
+    produced = requests.post(f"{lance_ray}/produce", headers=headers, timeout=8)
     assert produced.status_code == 202 and produced.json()["status"] == "produced", produced.text
 
     # ASSERT — the cascade reached gold (its transitive upstream is the full chain) AND it did so from THIS

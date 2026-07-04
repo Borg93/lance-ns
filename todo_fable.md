@@ -282,13 +282,13 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 
 ## 9 · Feature gaps — ephemeral multimodal lakehouse (→ rask merge)
 
-- ⛔ **P2 `/produce` (lance-ray) is unauthenticated in-cluster even in prod.** The §1 fix values-gated the
-  *gateway* route (`medallion.producer.expose=false`), closing the edge, but the pod still serves the
-  route on its ClusterIP and it is NOT sidecar-delivered (so it skips `require_dapr_token`); no
-  NetworkPolicy ships. An in-cluster workload can still trigger cascades / forge medallion provenance.
-  Fix: a NetworkPolicy restricting `lance-ray:8000`, or an authz guard on `/produce` (it's a real Ray job
-  at rask, so this may resolve in the merge — until then the demo default is documented in MEDALLION.md).
-  Surfaced by the 9562711 diff review. `services/medallion/api/produce.py`
+- ✅ **P2 `/produce` (lance-ray) in-cluster auth — DONE (2026-07-04).** BOTH layers now ship
+  (defense-in-depth, the Ray-security shape: network isolation primary + token guard):
+  (1) `/produce` now depends on `require_dapr_token` (the shared app-api-token) — no-op in dev, enforced
+  once `APP_API_TOKEN` is set, so an in-cluster workload can't forge the cascade head; wiring pinned by
+  `tests/unit/test_produce_auth.py` (403 on missing/wrong token). (2) a gated `NetworkPolicy`
+  (`chart/templates/network-policy.yaml`, `networkPolicy.enabled`, default off — needs a policy-enforcing
+  CNI) restricts ingress to `lance-ray` to in-release pods. `services/medallion/api/produce.py`
 - ⛔ **P0 Multimodal (blob_v2) — MULTIMODAL FIRST.** The format + our pinned pylance>=7.0.0 fully support it
   (`lance/blob.py` BlobColumn, inline-when-small / pointer-when-large, ranged reads; verified in the installed
   package + lance_docs/{guide,file_format,ray}.md) and the direct write path (vended creds → RustFS) is open —
@@ -311,8 +311,13 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
       Live-verified in AGE: a media WROTE edge shows `payload:blob, thumbnail:binary, embedding:array<float>`
       (and the real cascade's `silver$features` now carries its derived schema too).
     §9 backend round-trip (P0→P4) COMPLETE. Remaining: optional ranged blob-read serving endpoint (P2).
-  - ⛔ P0 guard the tabular path: the Arrow-IPC insert/query endpoints are wrong for blobs (2GB video over
-    HTTP POST) — add a size guard + clear 4xx steering clients to the vending/direct path; document the rule.
+  - ✅ P0 guard the tabular path — DONE (2026-07-04): a pure-ASGI `BodySizeLimitMiddleware`
+    (`services/catalog/api/body_limit.py`, cap `LANCE_MAX_BODY_BYTES` default 256 MiB) rejects an oversized
+    Arrow-IPC body with a problem+json **413** BEFORE it is buffered — both the fast Content-Length reject
+    and a streaming byte counter for chunked/absent-length — steering big media to the vending/direct-write
+    path (claim-check). Live-verified (2000 B over a 1000 cap → 413) + `tests/unit/test_body_limit.py`.
+    Complement (2026 layered best-practice): also cap at the ingress/Gateway-API/mesh when one fronts the
+    catalog — the app guard covers in-cluster ClusterIP callers that bypass the edge.
   - ⛔ P1 serving path for credential-less consumers (frontend/browser): catalog endpoint doing a ranged blob
     read or presigned URL from a blob column — does not exist.
   - ⛔ P1 blob-pointer lifecycle: compaction/GC + reconcile must understand pointer columns referencing objects

@@ -80,6 +80,13 @@ The 3 movers are the **same module**, differing only by `MEDALLION_*` env (from/
 topic, operation, author) — see `chart/values.yaml` `medallion.movers`. Triggers ride a dedicated
 `MEDALLION` JetStream stream (`medallion.>`); the OpenLineage events ride the existing `LINEAGE` stream.
 
+**`/produce` auth (the cascade head).** `/produce` is a direct operator trigger (not sidecar-delivered), so
+it is guarded by `require_dapr_token` (the shared `APP_API_TOKEN`): **no-op in dev** (unset token — `make
+medallion` works), **enforced in prod** so an in-cluster workload can't forge the cascade head. The
+network-isolation layer is a gated `NetworkPolicy` (`networkPolicy.enabled`, needs a policy-enforcing CNI)
+restricting ingress to `lance-ray` to in-release pods — defense-in-depth, the same shape KubeRay's token
+auth prescribes (network isolation primary + token secondary).
+
 ## Promotion gates — who *may* promote, and whether the data is *good enough* to
 
 A stage moves data forward (fires the next trigger) only when it passes **two independent, opt-in gates** —

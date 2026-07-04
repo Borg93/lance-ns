@@ -94,7 +94,7 @@ verify: ## Prove the event-driven flow: catalog publishes via Dapr, lineage inge
 
 medallion: ## Fire the event-driven pipeline: lance-ray POST /produce → raw→bronze→silver→gold cascade
 	@echo "lance-ray /produce → cascades raw → bronze → silver → gold via Dapr pub/sub …"
-	@kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- python -c "import httpx; print('produce:', httpx.post('http://localhost:$(MEDALLION_PORT)/produce', timeout=8).json())"
+	@kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- python -c "import os, httpx; t=os.environ.get('APP_API_TOKEN'); h={'dapr-api-token': t} if t else {}; print('produce:', httpx.post('http://localhost:$(MEDALLION_PORT)/produce', headers=h, timeout=8).json())"
 	@sleep 6
 	@echo "resulting lineage DAG (gold's provenance):"
 	@kubectl exec deploy/$(RELEASE)-lineage -c lineage -- python -c "import httpx; print(httpx.get('http://localhost:8000/datasets/gold\$$catalog/upstream', timeout=8).json())"
@@ -142,7 +142,8 @@ e2e-medallion: ## Run the e2e medallion-cascade test against the deployed stack 
 	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & R=$$!; \
 	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
 	 sleep 4; \
-	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
+	 TOKEN=$$(kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- printenv APP_API_TOKEN 2>/dev/null || true); \
+	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 LANCE_E2E_DAPR_TOKEN=$$TOKEN \
 	   uv run pytest tests/e2e/test_medallion_e2e.py -v -m medallion; rc=$$?; \
 	 kill $$R $$L 2>/dev/null; exit $$rc
 

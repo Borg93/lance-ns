@@ -352,8 +352,11 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   (`deploy/ray-lance-demo.yaml`, image `.docker/ray-lance.dockerfile`) + `ray job submit` runs a genuine
   distributed lance_ray job against RustFS — distributed WRITE (4 fragments/1 commit) + INDEX + data EVOLUTION
   (add_columns, version pinning) + COMPACTION, all live-verified via `make ray-demo` (see docs/RAY.md, which
-  also records the lance_ray↔pylance-8 version findings). REMAINING: wire the medallion movers to submit Ray
-  jobs instead of in-process compute, the `parent` run facet (batch→chunk), and the KubeRay operator (rask merge).
+  also records the lance_ray↔pylance-8 version findings). EVENT-DRIVEN WIRING DONE (2026-07-05): the movers now
+  submit their stage transform as a `ray job submit` IN RESPONSE TO the Dapr trigger (gated `medallion.ray`,
+  fake-Ray default) via the Ray Jobs REST API (`services/medallion/services/ray_submit.py` + baked
+  `scripts/ray_stage_job.py`); live-proven /produce → raw-to-bronze mover submits a job → bronze @2.2 + stable
+  ids → AGE WROTE edge. REMAINING: the `parent` run facet (batch→chunk) + the KubeRay operator (rask merge).
 - ⛔ **P2 Query engine** — DuckDB/DataFusion SQL over Lance + result cache: net-new (rask has neither), deferred
   by decision.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);

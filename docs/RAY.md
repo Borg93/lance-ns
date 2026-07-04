@@ -58,10 +58,32 @@ Two real incompatibilities surfaced (and are handled) — worth knowing before t
    `has_stable_row_ids=True`.
 4. `compact_files` needs a real `CompactionOptions` on pylance 8 — a bare `None` trips an internal dict check.
 
+## Event-driven cascade integration (wired, not just a demo)
+
+The medallion movers can run their stage compute as a real `ray job submit` **in response to their Dapr/NATS
+cascade trigger** — gated behind `medallion.ray` (default off; requires `medallion.compute` + a running Ray
+cluster). Fake-Ray in-process stays the default.
+
+- **Flag:** `MEDALLION_RAY_ENABLED` (+ `MEDALLION_RAY_ADDRESS`, default `http://ray-lance-head:8265`),
+  chart value `medallion.ray`.
+- **Submit path:** `services/medallion/services/ray_submit.py` — the mover POSTs to the **Ray Jobs REST API**
+  (`/api/jobs/`) with `httpx` (no `ray` package in the mover image), passing `FROM_URI/TO_URI/STAGE` + S3
+  creds as `runtime_env` env-vars, then polls `GET /api/jobs/{id}` under an `asyncio.timeout`. On success the
+  mover `measure()`s the written dataset so the OpenLineage WROTE edge is **identical** to the in-process
+  path; on failure/timeout it raises → the mover returns RETRY and Dapr redelivers (the job is
+  overwrite-idempotent).
+- **The job:** `scripts/ray_stage_job.py` (baked in the image) reads upstream, stamps the `stage` column
+  across Ray workers, and writes downstream at 2.2 + stable row ids (clears the dir first, since
+  `enable_stable_row_ids` is create-time-only and the cascade reuses the stage URI under overwrite semantics).
+
+**Live-proven on kind:** `/produce` → the `raw-to-bronze` mover (ray on) submitted a Ray job that produced
+`bronze` (`stage=bronze`, 2.2, `stable_row_ids=True`), and AGE shows `bronze$events` DERIVED_FROM `raw_events`
+with the real measured stats. With the flag off, `make e2e-medallion` (fake-Ray path) still passes.
+
 ## Relationship to the cascade
 
 This is the production shape of the `compute.py` seam: `read → transform → write → version` becomes a real
 `ray job submit` instead of an in-process call. It also directly answers the "cascade doesn't parallelize"
 limitation — Lance *does* parallelize writes (fragment-parallel + single commit); our in-process
-`mode="overwrite"` was the placeholder, not a Lance limit. Wiring the medallion movers to submit Ray jobs (vs
-in-process compute) is the rask-merge step; the KubeRay operator replaces the raw head here.
+`mode="overwrite"` was the placeholder, not a Lance limit. The mover-submits-Ray-jobs wiring above is done;
+the **KubeRay operator** (a `RayCluster` CR) replacing the raw Ray head is the rask-merge step.

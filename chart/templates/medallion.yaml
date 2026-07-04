@@ -167,6 +167,14 @@ spec:
             {{- if not (include "lance.secretsViaDapr" $root) }}
             - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ $root.Values.rustfs.secretKey | quote }} }
             {{- end }}
+            {{- if $root.Values.medallion.ray }}
+            # Event-driven real-Ray: the mover submits its stage transform as a `ray job submit` to the
+            # ray-lance cluster (Ray Jobs REST API, httpx-only) IN RESPONSE TO its Dapr trigger, instead of
+            # the in-process write. Requires medallion.compute (from/to URIs + S3 creds) + a running Ray
+            # cluster (deploy/ray-lance-demo.yaml). Default off — fake-Ray in-process stays the default path.
+            - { name: MEDALLION_RAY_ENABLED, value: "true" }
+            - { name: MEDALLION_RAY_ADDRESS, value: {{ $root.Values.medallion.rayAddress | quote }} }
+            {{- end }}
             {{- end }}
             {{- if $root.Values.medallion.quality }}
             # Validator gate: after the compute write, assert the stage's data is good enough to promote

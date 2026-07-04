@@ -390,6 +390,13 @@ medallion:
   # the catalog), so with OpenBao on the plaintext S3 secret is withheld and it fails fast at boot. Real
   # compute is a Ray job at rask.
   compute: false
+  # Event-driven REAL-Ray compute (requires compute + a running Ray cluster — deploy/ray-lance-demo.yaml).
+  # When true, each mover submits its stage transform as a `ray job submit` to the ray-lance cluster IN
+  # RESPONSE TO its Dapr trigger (Ray Jobs REST API, httpx-only — no ray package in the mover image), instead
+  # of the in-process fake-Ray write. Default off — fake-Ray in-process stays the default. Production is
+  # KubeRay (RayCluster CR) at the rask merge; the raw Ray head here is the on-kind proof. See docs/RAY.md.
+  ray: false
+  rayAddress: "http://ray-lance-head:8265"
   # When true, after the compute writes a stage's Lance dataset the mover runs data-quality assertions on it
   # (row_count > 0, key column non-null) and BLOCKS promotion on failure — the failed run + its
   # dataQualityAssertions facet are still emitted (auditable in lineage), but the next stage is NOT

@@ -61,6 +61,11 @@ _BRONZE_TO_SILVER = MedallionSettings.model_validate(
         "pub_topic": "medallion.silver",
     }
 )
+# The same stage with the EVENT-DRIVEN Ray path on (compute + ray + from/to URIs). model_copy skips the
+# validators, matching what the deployed pod resolves; a local path keeps storage_options() creds-free.
+_RAY_MOVER = _BRONZE_TO_SILVER.model_copy(
+    update={"compute_enabled": True, "ray_enabled": True, "from_uri": "/tmp/from", "to_uri": "/tmp/to"}
+)
 
 
 def test_build_run_event_records_the_transform_edge() -> None:
@@ -105,6 +110,41 @@ def test_mover_emits_lineage_then_triggers_next_stage() -> None:
     assert lineage["data"]["run"]["facets"]["lance"]["token"] == "abc123"
     assert trigger["topic"] == "medallion.silver"
     assert trigger["data"] == {"token": "abc123", "dataset": "silver$features", "namespace": "silver"}
+
+
+def test_mover_ray_branch_submits_job_then_emits_measured_lineage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ray_enabled: handle_stage submits the Ray job, measures the written dataset, and emits the SAME
+    lineage (with the measured version) + triggers the next stage — the in-process contract, via Ray."""
+    from medallion.services.compute import WriteResult
+
+    submitted: dict[str, Any] = {}
+
+    async def fake_submit(_settings: Any, *, from_uri: str, to_uri: str, stage: str, token: str) -> None:
+        submitted.update({"from": from_uri, "to": to_uri, "stage": stage, "token": token})
+
+    monkeypatch.setattr(mover, "submit_stage_job", fake_submit)
+    measured = WriteResult(version=7, row_count=5, size_bytes=99)
+    monkeypatch.setattr(mover, "measure", lambda _uri, _so: measured)
+    dapr = _FakeDapr()
+
+    status = asyncio.run(mover.handle_stage(cast(Any, dapr), _RAY_MOVER, {"data": {"token": "tok"}}))
+
+    assert status == {"status": "SUCCESS"}
+    assert submitted == {"from": "/tmp/from", "to": "/tmp/to", "stage": "silver", "token": "tok"}
+    lineage, trigger = dapr.calls  # emit then next-stage trigger
+    assert lineage["data"]["outputs"][0]["facets"]["version"]["datasetVersion"] == "7"  # the measured version
+    assert trigger["topic"] == "medallion.silver"
+
+
+def test_mover_ray_branch_retries_when_job_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    from medallion.services.ray_submit import RayJobError
+
+    async def fake_submit(*_a: Any, **_k: Any) -> None:
+        raise RayJobError("ray job FAILED")
+
+    monkeypatch.setattr(mover, "submit_stage_job", fake_submit)
+    status = asyncio.run(mover.handle_stage(cast(Any, _FakeDapr()), _RAY_MOVER, {"data": {"token": "t"}}))
+    assert status == {"status": "RETRY"}  # a failed Ray job → RETRY → Dapr redelivers (re-attaches)
 
 
 def test_terminal_mover_emits_lineage_but_no_next_trigger() -> None:

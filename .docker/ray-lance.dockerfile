@@ -11,8 +11,10 @@ FROM rayproject/ray:2.56.0-py312-cpu@sha256:2951c07de396a8b746f9c678b52c6e2282e6
 # already runs as the non-root `ray` user (UID 1000).
 RUN pip install --no-cache-dir "lance-ray==0.4.2" "pylance==8.0.0" "pyarrow==19.0.1"
 
-# Bake the job so `ray job submit -- python /home/ray/jobs/ray_lance_job.py` needs no working-dir upload.
-COPY scripts/ray_lance_job.py /home/ray/jobs/ray_lance_job.py
+# Bake the jobs so `ray job submit -- python /home/ray/jobs/<job>.py` needs no working-dir upload:
+#   ray_lance_job.py  — the standalone write/index/evolve/compact demo (make ray-demo)
+#   ray_stage_job.py  — the per-stage cascade transform a mover submits (MEDALLION_RAY_ENABLED)
+COPY scripts/ray_lance_job.py scripts/ray_stage_job.py /home/ray/jobs/
 
 ARG BUILD_DATE
 ARG VCS_REF

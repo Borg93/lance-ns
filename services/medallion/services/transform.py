@@ -29,8 +29,9 @@ from opentelemetry import trace
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_denied, record_quality_blocked, record_transition
 from medallion.schemas.events import build_run_event
-from medallion.services.compute import transform_stage
+from medallion.services.compute import measure, transform_stage
 from medallion.services.quality import Assertion, assert_quality, passed
+from medallion.services.ray_submit import submit_stage_job
 
 log = logging.getLogger(__name__)
 # The Lance/S3 write runs in a threadpool and is invisible to every auto-instrumentor — a manual INTERNAL
@@ -102,13 +103,29 @@ async def handle_stage(
         if settings.compute_enabled and settings.from_uri and settings.to_uri:
             with tracer.start_as_current_span("medallion.transform") as span:
                 span.set_attribute("lance.medallion.transition", transition)
-                result = await run_in_threadpool(
-                    transform_stage,
-                    settings.from_uri,
-                    settings.to_uri,
-                    settings.storage_options(),
-                    stage=settings.to_namespace,
-                )
+                if settings.ray_enabled:
+                    # EVENT-DRIVEN real-Ray: submit the stage transform to the Ray cluster IN RESPONSE TO this
+                    # trigger (a `ray job submit` via the Ray Jobs REST API), then measure the written dataset
+                    # so the lineage emit is identical to the in-process path. A job failure/timeout raises →
+                    # the except below returns RETRY and the sidecar redelivers (the job is overwrite-safe).
+                    span.set_attribute("lance.medallion.compute", "ray")
+                    await submit_stage_job(
+                        settings,
+                        from_uri=settings.from_uri,
+                        to_uri=settings.to_uri,
+                        stage=settings.to_namespace,
+                        token=token,  # deterministic submission id → redelivery re-attaches (idempotent)
+                    )
+                    result = await run_in_threadpool(measure, settings.to_uri, settings.storage_options())
+                else:
+                    span.set_attribute("lance.medallion.compute", "in_process")
+                    result = await run_in_threadpool(
+                        transform_stage,
+                        settings.from_uri,
+                        settings.to_uri,
+                        settings.storage_options(),
+                        stage=settings.to_namespace,
+                    )
                 span.set_attribute("lance.version", result.version)
                 span.set_attribute("lance.row_count", result.row_count)
                 span.set_attribute("lance.size_bytes", result.size_bytes)

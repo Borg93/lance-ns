@@ -44,7 +44,7 @@ class WriteResult(BaseModel):
     fields: list[dict[str, str]] = Field(default_factory=list)
 
 
-def _measure(uri: str, storage_options: dict[str, str]) -> WriteResult:
+def measure(uri: str, storage_options: dict[str, str]) -> WriteResult:
     """Read the just-written dataset's version + exact output statistics (rows + on-disk bytes) + schema."""
     ds = lance.dataset(uri, storage_options=storage_options)
     # lance annotates ``DataStatistics.fields`` as a single ``FieldStatistics`` but returns a list at
@@ -81,7 +81,7 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> Wri
         table, uri, mode="overwrite", storage_options=storage_options,
         data_storage_version="2.2", enable_stable_row_ids=True,
     )
-    return _measure(uri, storage_options)
+    return measure(uri, storage_options)
 
 
 def transform_stage(
@@ -103,7 +103,7 @@ def transform_stage(
         out, to_uri, mode="overwrite", storage_options=storage_options,
         data_storage_version="2.2", enable_stable_row_ids=True,
     )
-    return _measure(to_uri, storage_options)
+    return measure(to_uri, storage_options)
 
 
 def _carry_forward(ds: lance.LanceDataset, stage: str) -> pa.Table:

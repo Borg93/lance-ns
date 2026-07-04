@@ -67,6 +67,31 @@ class MedallionSettings(BaseSettings):
     from_uri: str = Field(default="", alias="MEDALLION_FROM_URI")  # upstream Lance dataset (mover input)
     to_uri: str = Field(default="", alias="MEDALLION_TO_URI")  # downstream Lance dataset (mover output)
 
+    # --- EVENT-DRIVEN real-Ray compute (opt-in, requires compute_enabled). When on, the mover submits its
+    # stage transform as a `ray job submit` to the ray-lance cluster (via the Ray Jobs REST API, httpx-only —
+    # no ray package in the mover image) IN RESPONSE TO its Dapr trigger, instead of the in-process fake-Ray
+    # write. The submitted job (scripts/ray_stage_job.py, baked in the ray-lance image) reads upstream, stamps
+    # the stage column across Ray workers, and writes downstream at 2.2 + stable row ids; the mover then reads
+    # the written version/stats for the same lineage emit. OFF by default — fake-Ray stays the default path.
+    # This is the production shape (KubeRay RayCluster at the rask merge; a raw Ray head on kind here).
+    ray_enabled: bool = Field(default=False, alias="MEDALLION_RAY_ENABLED")
+    ray_address: str = Field(default="http://ray-lance-head:8265", alias="MEDALLION_RAY_ADDRESS")
+    ray_entrypoint: str = Field(
+        default="python /home/ray/jobs/ray_stage_job.py", alias="MEDALLION_RAY_ENTRYPOINT"
+    )
+    ray_request_timeout_seconds: float = Field(
+        default=10.0, ge=0.1, alias="MEDALLION_RAY_REQUEST_TIMEOUT_SECONDS"
+    )
+    ray_poll_interval_seconds: float = Field(
+        default=2.0, gt=0, alias="MEDALLION_RAY_POLL_INTERVAL_SECONDS"
+    )
+    # The mover BLOCKS its Dapr handler until the job finishes. Redelivery is safe (the submission id is
+    # deterministic per (stage, token), so a redelivered trigger re-attaches to the same job — not a second
+    # one), but a job that outlives the trigger stream's ack window (dapr-component backOff first value, 30s)
+    # WILL be concurrently redelivered; that only wastes a duplicate poll (re-attach), it does not double-run
+    # the job. For jobs expected to run much longer than the ack window, raise both together.
+    ray_job_timeout_seconds: float = Field(default=180.0, gt=0, alias="MEDALLION_RAY_JOB_TIMEOUT_SECONDS")
+
     # --- Optional quality GATE — when on, after the compute writes the downstream dataset the mover runs
     # data-quality assertions on it (row_count > 0, key column non-null) and BLOCKS promotion on a failure:
     # the failed run + its dataQualityAssertions facet are still emitted (auditable in lineage), but the next
@@ -113,6 +138,13 @@ class MedallionSettings(BaseSettings):
                 "MEDALLION_COMPUTE_ENABLED with an S3 endpoint but no MEDALLION_S3_SECRET_ACCESS_KEY. The "
                 "medallion does not fetch S3 creds from OpenBao (unlike the catalog), so compute-on requires "
                 "OpenBao off (helm --set openbao.enabled=false). The production compute is a Ray job at rask."
+            )
+        if self.ray_enabled and not self.compute_enabled:
+            # ray submits the STAGE transform (from_uri -> to_uri); with compute off there is no data path and
+            # the mover would silently fall through to the dummy version-1 emit. Fail fast, don't degrade.
+            raise ValueError(
+                "MEDALLION_RAY_ENABLED requires MEDALLION_COMPUTE_ENABLED — the Ray path submits the stage's "
+                "read->transform->write, which the compute config (from/to URIs + S3) provides."
             )
         return self
 

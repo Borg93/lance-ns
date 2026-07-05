@@ -31,6 +31,10 @@ import requests
 SERVER = os.environ.get("LANCE_E2E_AUTH_SERVER", "")
 LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
 DEX = os.environ.get("LANCE_E2E_DEX", "http://localhost:5556/dex")
+# The kind Dex registers lance-catalog as a CONFIDENTIAL client (needs the secret); the docker-compose
+# overlay uses a public client. Default to the kind secret so the suite runs on the canonical stack; set
+# LANCE_E2E_DEX_SECRET="" for a public-client Dex.
+DEX_SECRET = os.environ.get("LANCE_E2E_DEX_SECRET", "lance-catalog-secret")
 ARROW = {"content-type": "application/vnd.apache.arrow.stream"}
 
 pytestmark = pytest.mark.e2e
@@ -50,18 +54,19 @@ def stack() -> tuple[str, str]:
 
 
 def _token(username: str) -> str:
-    resp = requests.post(
-        f"{DEX}/token",
-        data={
-            "grant_type": "password",
-            "client_id": "lance-catalog",
-            "username": username,
-            "password": "password",
-            "scope": "openid",
-        },
-        timeout=10,
-    )
-    return resp.json()["id_token"]
+    data = {
+        "grant_type": "password",
+        "client_id": "lance-catalog",
+        "username": username,
+        "password": "password",
+        "scope": "openid",
+    }
+    if DEX_SECRET:  # confidential client (kind); omit for a public-client Dex (docker-compose)
+        data["client_secret"] = DEX_SECRET
+    resp = requests.post(f"{DEX}/token", data=data, timeout=10)
+    body = resp.json()
+    assert "id_token" in body, f"Dex token grant failed ({resp.status_code}): {body}"
+    return body["id_token"]
 
 
 def _sub(token: str) -> str:
@@ -85,8 +90,10 @@ def _get_json(url: str) -> dict:
         return {}
 
 
-def _poll(fn: Callable[[], object], want: object, *, tries: int = 20, delay: float = 0.5) -> object:
-    """Poll ``fn`` until it equals ``want`` — emission is async/fire-and-forget — or give up."""
+def _poll(fn: Callable[[], object], want: object, *, tries: int = 60, delay: float = 1.0) -> object:
+    """Poll ``fn`` until it equals ``want`` — emission is async/fire-and-forget — or give up. Generous
+    window (40s): on kind the create-lineage crosses Dapr → NATS JetStream → lineage → AGE, slower than the
+    docker-compose direct-HTTP path this test was originally written against."""
     last: object = None
     for _ in range(tries):
         last = fn()
@@ -104,7 +111,10 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
     ah = {"Authorization": f"Bearer {alice}"}
     bh = {"Authorization": f"Bearer {bob}"}
     ns = f"gov{os.getpid()}"
-    bronze, silver = f"{ns}$bronze$events", f"{ns}$silver$events"
+    # 2-level ids (namespace$table) — the real medallion pattern; the table's parent is the created
+    # namespace `ns`, so create-on-parent is authorized (a 3-level id would need the intermediate namespace
+    # created first, which an enforcing stack correctly requires).
+    bronze, silver = f"{ns}$bronze", f"{ns}$silver"
 
     # 1. anon -> 401 (OIDC enforced)
     assert requests.post(f"{server}/v1/namespace/{ns}/create", json={}, timeout=10).status_code == 401
@@ -148,3 +158,38 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
         [bronze],
     )
     assert isinstance(up, list) and bronze in up, f"expected {bronze} in silver upstream, got {up}"
+
+
+def test_malformed_bearer_is_rejected(stack: tuple[str, str]) -> None:
+    """OIDC boundary: a garbage / non-JWT bearer is rejected 401 (not 500, not allowed)."""
+    server, _ = stack
+    for bad in ("Bearer not-a-jwt", "Bearer a.b.c", "Bearer "):
+        r = requests.post(f"{server}/v1/namespace/x/describe", headers={"Authorization": bad}, timeout=10)
+        assert r.status_code == 401, f"{bad!r} → {r.status_code} (expected 401)"
+
+
+def test_non_owner_cannot_rename_or_overwrite_anothers_table(stack: tuple[str, str]) -> None:
+    """Security (the fixes committed 9d4de0a / 185c333): a non-owner is denied the destructive
+    rename + Overwrite of another user's table — 403, so the true owner can't be evicted/seized."""
+    server, _ = stack
+    alice, bob = _token("alice@example.com"), _token("bob@example.com")
+    ah, bh = {"Authorization": f"Bearer {alice}"}, {"Authorization": f"Bearer {bob}"}
+    ns = f"sec{os.getpid()}"
+    tbl = f"{ns}$owned"
+    requests.post(f"{server}/v1/namespace/{ns}/create", headers=ah, json={}, timeout=10)
+    rows = _ipc(pa.table({"id": pa.array([1], pa.int64())}))
+    assert (
+        requests.post(f"{server}/v1/table/{tbl}/create", headers={**ah, **ARROW}, data=rows, timeout=30)
+    ).status_code == 200
+
+    # bob has no grant on alice's table → both destructive paths are denied (owner-tier gates).
+    rn = requests.post(
+        f"{server}/v1/table/{tbl}/rename", headers=bh, json={"new_table_name": "stolen"}, timeout=10
+    )
+    ov = requests.post(
+        f"{server}/v1/table/{tbl}/create?mode=overwrite", headers={**bh, **ARROW}, data=rows, timeout=30
+    )
+    assert rn.status_code == 403, f"bob rename → {rn.status_code} (expected 403)"
+    assert ov.status_code == 403, f"bob overwrite → {ov.status_code} (expected 403)"
+    # and alice still owns it (not evicted)
+    assert (requests.post(f"{server}/v1/table/{tbl}/describe", headers=ah, timeout=10)).status_code == 200

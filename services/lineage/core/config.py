@@ -99,11 +99,10 @@ class LineageSettings(BaseSettings):
             raise ValueError("LINEAGE_OIDC_ENABLED requires LINEAGE_OIDC_ISSUER and LINEAGE_OIDC_AUDIENCE")
         if self.fga_enabled and not self.oidc_enabled:
             raise ValueError("LINEAGE_FGA_ENABLED requires LINEAGE_OIDC_ENABLED (need a verified subject)")
-        if self.fga_enabled and not (self.fga_store_id and self.fga_model_id):
-            raise ValueError(
-                "LINEAGE_FGA_ENABLED requires LINEAGE_FGA_STORE_ID and LINEAGE_FGA_MODEL_ID "
-                "(the catalog's store + model, shared read-only)"
-            )
+        # NOTE: store_id/model_id are intentionally NOT required here. main.py provisions the store by NAME
+        # ("lance-catalog") at boot when they are absent — the idempotent convergence the catalog uses too —
+        # so pinning them ahead of time is optional, not mandatory. Requiring them here crashed the lineage
+        # pod in governed mode (the chart can't know the runtime-provisioned ids at helm-template time).
         return self
 
 

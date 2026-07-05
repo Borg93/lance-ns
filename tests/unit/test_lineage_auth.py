@@ -92,9 +92,12 @@ def test_fga_enabled_requires_oidc() -> None:
         _settings(fga_enabled=True, oidc_enabled=False)
 
 
-def test_fga_enabled_requires_store_and_model() -> None:
-    with pytest.raises(ValidationError):
-        _settings(oidc_enabled=True, oidc_issuer=_ISSUER, oidc_audience="lance", fga_enabled=True)
+def test_fga_enabled_without_store_and_model_is_valid() -> None:
+    # store_id/model_id are OPTIONAL — main.py provisions the store by NAME at boot when they are absent
+    # (idempotent convergence on the catalog's store). Requiring them here would (and did) crash the lineage
+    # pod in governed mode, since the chart can't know the runtime-provisioned ids at template time.
+    settings = _settings(oidc_enabled=True, oidc_issuer=_ISSUER, oidc_audience="lance", fga_enabled=True)
+    assert settings.fga_enabled and settings.fga_store_id is None and settings.fga_model_id is None
 
 
 def test_full_auth_config_is_valid() -> None:

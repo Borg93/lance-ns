@@ -195,6 +195,95 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   `services/common/secrets.py:38`
 - ⛔ **Demo peek re-reads EVERY Lance version of every dataset per call** (one S3 dataset-open per version),
   polled every 2s — linear latency growth with cascade runs. Cache or cap versions. `services/lineage/api/v1/endpoints/demo.py:63`
+- ⛔ **RustFS conditional-write (CAS) support has NEVER been validated — Lance commit safety rests on it**
+  (added 2026-07-05, firnflow/lance_docs audit; execution-spec'd same day after an Opus fresh-implementer
+  dry-run). Every Lance commit publishes a new manifest via put-if-not-exists (`If-None-Match: *`); the
+  format REQUIRES the store to guarantee exactly one writer wins (`lance_docs/file_format.md:4778`), and
+  NOTHING detects a store that silently ignores the header (proven failure mode elsewhere: GCS S3-interop
+  accepted both PUTs → silently lost writes; only a contended stress catches it). Our concurrent writers are
+  real — catalog inserts, medallion overwrites, Ray appends, the 120s compaction sweep with no overlap guard
+  that swallows every error — and RustFS is a pre-1.0 beta (`chart/values.yaml:179`). Add a 3-tier harness
+  `tests/e2e/test_object_store_cas_e2e.py` (pytest marker `cas`, register it in pyproject) + `make e2e-cas`
+  (reuse the e2e-compaction recipe STRUCTURE but port-forward `svc/<release>-rustfs 9000`; creds via
+  `LANCE_E2E_S3_ENDPOINT/ACCESS_KEY_ID/SECRET_ACCESS_KEY/BUCKET`, secret key read from the infra-credentials
+  Secret). boto3 client MUST use path-style addressing + s3v4. Tiers: (1) conditional-PUT pre-flight — second
+  put of the same key must fail 412; (2) 8-thread barrier-gated contended-key stress — exactly one 200 +
+  seven 412 per round (THE silent-ignore detector); (3) 8-process Lance append stress under
+  `s3://<bucket>/__cas_stress/<uuid>` (compaction's discovery skips `__` dirs): SEED-CREATE the dataset first
+  in the parent process (v1, 2.2 + stable row ids per §0) — concurrent creates would be Overwrite races,
+  which DO conflict — then 8 append-only writers; Append⊥Append never logically conflicts
+  (`file_format.md:4836`) so ALL must land: assert count_rows()==800 AND len(ds.versions())==9 (v1 seed + 8
+  appends); assert DATA invariants, not exception names (none are documented). Raise `lance_aimd_max_rate`
+  very high in storage_options (there is NO full-disable for S3 stores, `guide.md:2964`) so client throttling
+  can't mask store behavior; clean up both prefixes even on assertion failure (§0). TWO-LAYER VERDICT —
+  report separately: tiers 1-2 prove the STORE honors If-None-Match; tier 3 proves pylance's object_store
+  actually SENDS conditional puts to this custom endpoint (a store can pass 1-2 while Lance still loses
+  writes). If tier 3 loses rows while 1-2 pass, FIRST probe object_store's conditional-put storage option
+  before blaming RustFS. If RustFS fails 1-2, remediation is real work, in cost order: RustFS upgrade;
+  external manifest store via lance-namespace `table_version_management=true` (`namespace.md:6181-6202` —
+  NOT a config toggle: per `namespace.md:1022` it routes ALL version ops through the namespace
+  CreateTableVersion API, touching catalog dataplane + medallion + Ray + compaction); backend swap. Record
+  the verdict in docs/DURABILITY.md as the gate for any backend swap; this is also the evidence base for the
+  insert version-attribution retry-loop item above (what error, if any, surfaces on a lost race).
+- ⛔ **`/merge_insert` has no scalar index on its `on` key — every upsert full-scans** (added 2026-07-05;
+  execution-spec'd same day after an Opus fresh-implementer dry-run). pylance's `use_index=True` default only
+  helps "if an index is available"; no automatic data-flow ever builds one (the only build call sites are the
+  smoke test's endpoint POSTs and the Ray demo's BTREE on `id`), so merge latency decays as a table grows.
+  The namespace spec's own `__manifest` design mandates exactly the fix — merge-insert PK dedup **with**
+  "BTREE index on object_id" (`lance_docs/namespace.md:978-994`). Add best-effort
+  `ensure_merge_key_index(ns, segments, on, *, branch=None)` in `services/catalog/services/dataplane.py`:
+  (1) no-op when `on` is falsy; (2) LIST FIRST via the native `list_table_indices` (branch-aware) and SKIP
+  the build if any existing index already covers `on` — REQUIRED, not optional: pylance's
+  `create_scalar_index` defaults `replace=True`, so an unconditional build would full-scan + rebuild the
+  column on EVERY upsert and turn the fix into a regression; (3) otherwise build via the native op path —
+  `native.call(ns, "create_table_scalar_index", CreateTableIndexRequest(column=on, index_type="BTREE",
+  branch=branch))` — the native op is the only path that carries `branch` (pylance's `ds.create_scalar_index`
+  has none); LIVE-verify the branch is actually honored on build (§0); (4) broad try/except + log.warning —
+  index-build failure or a CreateIndex commit conflict must never fail the write. Hook: fire inline via
+  `run_in_threadpool` in `merge_insert_into_table` AFTER the merge native.call and the emit (matching the
+  emit_write_event pattern; §0 forbids BackgroundTasks) — the FIRST merge on a table pays the build latency
+  synchronously, subsequent merges pay one cheap list call. The existing compact→optimize_indices sweep folds
+  later fragments in (30 min prod cadence). Implicit DDL — document BOTH on the endpoint: the build commits a
+  NEW Lance version with no lineage event (consistent with /create_scalar_index today), so the first indexed
+  merge leaves the table at response.version+1 while the MERGE_INSERT lineage points at response.version —
+  a version gap, not a lost write. Tests (tests/integration/test_moto_s3.py): merge with on=id → BTREE
+  visible via the list endpoint; monkeypatched build failure → merge still returns 200.
+  `services/catalog/api/v1/endpoints/data.py:175`
+- ⛔ **Compaction failures are invisible to every API** (added 2026-07-05; execution-spec'd same day after an
+  Opus fresh-implementer dry-run). `compact_one` never raises (error → string) and `emit_sweep_lineage` SKIPS
+  errored datasets, so a persistently failing dataset surfaces only in OTel spans + a cron response body
+  nobody reads. Emit an OpenLineage FAIL RunEvent per errored dataset. Scope + mechanics (all decided — do
+  not relitigate):
+  - EMIT ONLY for `maintain:`-prefixed errors (escaped compact_files/cleanup = post-auto-retry terminal);
+    skip `open:` errors (unreadable/declared-only dirs — transient non-dataset noise). Conflict taxonomy is
+    THREE-way (`file_format.md:~5261`): Rebasable (auto-retried inside the commit layer, never reaches
+    Python — never report), Retryable (app must re-run), Incompatible (non-retryable).
+  - Event shape: mirror `build_maintenance_event` with eventType=FAIL + a standard `errorMessage` run facet
+    (message + programmingLanguage="PYTHON"). The compaction COMPLETE event is ALREADY bare/versionless —
+    unlike the medallion FAIL there is nothing to strip; the only delta is FAIL + the facet. Keep the bare
+    output dataset (FGA hides dataset-less events on /runs).
+  - Retryable-vs-non-retryable classification is BEST-EFFORT ONLY: pylance 8.0.0 raises no typed conflict
+    exception (`lance.commit.CommitConflictError` exists but is never raised) — use a string heuristic on
+    str(exc) recorded as a custom field on the (extra=allow) facet; there is no ground-truth signal.
+  - Flood guard: DETERMINISTIC run_id = `run_id_for(f"compaction-fail-{table_id}")` so every tick's FAIL for
+    the same dataset MERGEs onto ONE (:Run) node and the /events partial-unique (run_id, event_type) dedups
+    it (a uuid4-per-tick would flood the never-pruned Run nodes — §4 item above). ACCEPTED consequence: after
+    recovery the FAIL node stays until the §4 retention prune lands; do NOT change COMPLETE's uuid4 semantics.
+  - Cap/bound-gather the per-tick FAIL publishes (each bounded by the 5s publish timeout) so a bucket of
+    failing datasets can't push the cron handler past the 30s Dapr ack window (§0).
+  - Also adopt `compact_files(defer_index_remap=True)` (Fragment Reuse Index — compaction and index-build "no
+    longer conflict", `lance_docs/guide.md:3013`; keyword confirmed present at pylance 8.0.0) to cut failures
+    at the source; PROBE its interplay with the immediate `optimize_indices()` at optimize.py:77 and pin with
+    a regression test in the same commit (§0).
+  - SCOPED OUT: medallion-nested datasets (`s3://<bucket>/medallion/<ns>` has no catalog id for
+    `table_id_from_uri` to reconstruct) — document the blind spot; a URI→id map is out of proportion here.
+    Chart `lineageEmit` STAYS default-false (opt-in, symmetric with medallion) — document that the failure
+    surface requires it on.
+  - Live-verify fault injection (no dataset fails naturally): seed a real dataset then delete one data file
+    out from under its manifest — discovery still finds it via `_versions/`, compact_files raises a
+    `maintain:` error → assert the FAIL event lands in /events. Extend tests/unit/test_compaction_lineage.py
+    for the FAIL path (it currently covers only errored→skip selection).
+  `services/compaction/services/optimize.py:88` + `services/compaction/services/sweep.py:90`
 
 ## 5 · P2 — Python / FastAPI quality + consistency — ✅ 17/17 DONE (2026-07-02)
 
@@ -398,12 +487,23 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   - ⛔ P2 facet metadata bloat cap: a table with thousands of columns makes the schema/columnLineage facets
     themselves large (metadata bloat, not data bloat) — cap/truncate with a count + pointer to /schema instead
     of inlining every field, before rask-scale tables hit the message-size ceiling.
-- ⛔ **P1 Ephemerality** — RustFS is `emptyDir` in this chart (pod roll wipes the lakehouse); at merge switch to
-  rask’s RustFS-operator Tenant + CNPG-backed AGE. Prove “helm install from zero” fully reproducible
+- ⛔ **P1 Ephemerality** — ~~RustFS is `emptyDir` in this chart~~ STALE premise (corrected 2026-07-05): RustFS
+  now persists on a keep-PVC by default (`rustfs.persistence.enabled=true`, `helm.sh/resource-policy: keep`);
+  emptyDir remains only as the `persistence=false` throwaway-CI mode — a stale comment at
+  `chart/values.yaml:~180` still claims otherwise, fix it. Still open: at merge switch to rask’s
+  RustFS-operator Tenant + CNPG-backed AGE. Prove “helm install from zero” fully reproducible
   (FGA seeds, OpenBao seeding, dex clients are still script-manual); backups exist but gated off.
 - ⛔ **P1 Search** — `/search?q=` over datasets reusing rask’s Lance FTS+vector (`index_catalog.py` /
   `search_api` pattern); the *list* discovery API shipped in GOAL 4, semantic search did not. Also: wire the
   already-shipped `/jobs` + `/namespaces` into the Browse UI.
+  📌 Decision pin (2026-07-05, firnflow/lance_docs audit): default = FTS + FLAT exact vector scan (the rask
+  pattern builds NO ANN index — correct at our scale); no IVF_PQ/ANN index on an embedding column without a
+  measured gate — external BEIR data shows IVF_PQ recall loss GROWS with corpus size (~0 at ≤25k rows, ~22%
+  nDCG@10 at 57k; nprobes/num_bits do not rescue it — re-measure on our stack, never copy thresholds). The
+  gate is native, no harness needed: same queries with `bypass_vector_index=True` as ground truth
+  (`lance_docs/lance_sdk.md:1997` documents it FOR recall calculation) vs indexed → adopt the index only if
+  recall@10 ≥ 0.95; normalize for `num_unindexed_rows` (IndexStatistics); assert query distance_type matches
+  the index's training distance type first ("results will be invalid" otherwise).
 - 🔶 **P2 Compute seam completion** — Ray job submission surface PROVEN (2026-07-04): a real Ray cluster in kind
   (`deploy/ray-lance-demo.yaml`, image `.docker/ray-lance.dockerfile`) + `ray job submit` runs a genuine
   distributed lance_ray job against RustFS — distributed WRITE (4 fragments/1 commit) + INDEX + data EVOLUTION
@@ -415,6 +515,16 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   ids → AGE WROTE edge. REMAINING: the `parent` run facet (batch→chunk) + the KubeRay operator (rask merge).
 - ⛔ **P2 Query engine** — DuckDB/DataFusion SQL over Lance + result cache: net-new (rask has neither), deferred
   by decision.
+  📌 Decision pin (2026-07-05, firnflow/lance_docs audit) so the cache design isn't relitigated at build time:
+  key = (uuid-prefixed table URI, branch/ref, `dataset.version`, sha256 of the FULL canonicalized request —
+  filter/columns/k/nprobes/refine_factor/ef/distance_type/prefilter/fast_search/version-pin). Version-keyed
+  entries are immutable snapshots (`guide.md:3288`) ⇒ zero invalidation bookkeeping; the URI's uuid prefix
+  kills the delete-recreate stale-incarnation case; branch/ref is REQUIRED (versions are per-ref,
+  `guide.md:3744`). Decode failure = cache miss + overwrite, never a 500; ship with request/hit/miss counters.
+  Evaluate lance-namespace MATERIALIZED VIEWS (spec'd: autoRefresh on source change,
+  `lance_docs/namespace.md:3080`; check maturity in our 0.9 pin) as the native alternative FIRST. Firnflow's
+  semantic (cosine-threshold approximate-reuse) cache = rejected — approximate answers cut against the
+  strict-fidelity posture, and no consumer exists.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);
   rask has no tenancy/operator of its own — this stays ours. FGA-as-registry + declarative seeding is the
   interim.
@@ -424,6 +534,21 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   flip datastore memory→postgres when adopted).
 - ⛔ **P2 Lineage at rask scale** — `parent` facet ingestion, event-volume posture (AGE indexes + pruning from
   §4, /events cursor), `dataQualityMetrics` (deferred, costly on Lance).
+- 📌 **Native pylance/spec capabilities surfaced by the 2026-07-05 lance_docs full-read** — exploit before
+  building bespoke: (a) `dataset::delta` CDC — `list_transactions` + `get_inserted_rows`/`get_updated_rows`
+  between versions (`guide.md:2291`); with stable row ids (already ON for cascade writes) a change-data-feed is
+  plain SQL over `_row_created_at_version` (`file_format.md:4277`) — candidate replacement for bespoke cascade
+  event bookkeeping. (b) `@lance.batch_udf(checkpoint_file=…)` = crash-resumable `add_columns` backfills
+  (thumbnail/embedding derivation, `guide.md:670`) — but schema changes conflict with most concurrent writes,
+  so schedule column adds in quiet windows (`guide.md:594`). (c) Spec virtual columns + materialized views
+  (`namespace.md:2017,3080`) are a spec-level twin of the medallion derive cascade — check maturity in our
+  lance-namespace 0.9 pin before building more cascade machinery. (d) Lance's RAM caches (1 GiB metadata +
+  6 GiB index, `index_cache_size_bytes`) are PER table-object, NOT shared across opens (`guide.md:2899`) —
+  audit that services hold long-lived dataset objects / a shared Session; per-request reopens silently nullify
+  all native caching. (e) `lance::events` trace targets + per-plan execution metrics
+  (iops/bytes_read/parts_loaded, `guide.md:2780`) can wire into the Greptime stack for free. (f) pylance 8.0.0
+  anchors: new FTS indexes are still format v1 (v2-by-default lands in 9.0); `IndexSegmentBuilder` removed
+  in 7.2 (consistent with the lance_ray landmine).
 
 ## 10 · Explicitly refuted (do NOT re-report as bugs)
 

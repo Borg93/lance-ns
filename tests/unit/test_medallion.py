@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, cast
 
 import medallion.services.transform as mover
@@ -17,6 +18,7 @@ import pytest
 from common.openlineage import run_id_for
 from medallion.core.config import MedallionSettings
 from medallion.schemas.events import build_run_event
+from medallion.services.compute import WriteResult
 from medallion.services.ingest_trigger import handle_raw_arrival
 from medallion.services.produce import produce
 
@@ -145,6 +147,39 @@ def test_mover_ray_branch_retries_when_job_fails(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(mover, "submit_stage_job", fake_submit)
     status = asyncio.run(mover.handle_stage(cast(Any, _FakeDapr()), _RAY_MOVER, {"data": {"token": "t"}}))
     assert status == {"status": "RETRY"}  # a failed Ray job → RETRY → Dapr redelivers (re-attaches)
+
+
+def test_mover_write_is_single_flight_under_concurrent_delivery(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two concurrent deliveries of the SAME stage serialize their Lance write (item 7). Without the
+    process-wide _write_lock both would enter the write (two threads → two `mode="overwrite"` commits
+    racing on the same target); with it, at most ONE is ever in the critical section."""
+    settings = _BRONZE_TO_SILVER.model_copy(
+        update={"compute_enabled": True, "from_uri": "/tmp/f", "to_uri": "/tmp/t"}
+    )
+    active = 0
+    max_active = 0
+
+    def slow_transform(*_a: Any, **_k: Any) -> WriteResult:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        time.sleep(0.05)  # hold the critical section so an unguarded second write WOULD overlap
+        active -= 1
+        return WriteResult(version=1, row_count=1, size_bytes=1)
+
+    monkeypatch.setattr(mover, "transform_stage", slow_transform)
+
+    async def _run_two() -> list[dict[str, str]]:
+        return list(
+            await asyncio.gather(
+                mover.handle_stage(cast(Any, _FakeDapr()), settings, {"data": {"token": "a"}}),
+                mover.handle_stage(cast(Any, _FakeDapr()), settings, {"data": {"token": "b"}}),
+            )
+        )
+
+    results = asyncio.run(_run_two())
+    assert all(r == {"status": "SUCCESS"} for r in results)
+    assert max_active == 1  # serialized — never two writes in flight for the same target at once
 
 
 def test_terminal_mover_emits_lineage_but_no_next_trigger() -> None:

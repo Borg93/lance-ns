@@ -59,6 +59,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # node; both now survive restart + are replica-shared — no in-memory state. (#22)
     await repository.ensure_events_table()
     await repository.ensure_reads_table()  # the read-audit log (#6); off unless LINEAGE_READ_AUDIT_ENABLED
+    # UNIQUE index per AGE vertex label so a concurrent MERGE (reconcile racing ingest) can't create a
+    # duplicate vertex (item 6). Best-effort: a per-label failure is logged, not fatal, so ingest still boots.
+    await repository.ensure_graph_constraints()
     # Auth is opt-in; when enabled, reuse the catalog's verifier + the shared OpenFGA store.
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(

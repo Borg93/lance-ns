@@ -14,6 +14,7 @@ unauthorized mover returns ``DROP`` (redelivery won't grant the role), so the ca
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from contextlib import suppress
@@ -37,6 +38,15 @@ log = logging.getLogger(__name__)
 # The Lance/S3 write runs in a threadpool and is invisible to every auto-instrumentor — a manual INTERNAL
 # span makes the step that dominates wall-clock time visible inside the cascade's distributed trace.
 tracer = trace.get_tracer(__name__)
+
+# Single-flight guard for the stage WRITE. Each mover process moves exactly ONE target dataset, so a
+# process-wide lock serializes concurrent handler invocations for that target — a redelivered trigger racing
+# the original, or two overlapping ticks — preventing two `write_dataset(mode="overwrite")` (or two Ray jobs
+# writing the same to_uri) from committing concurrently. With moverReplicas=1 (the default) this is
+# maxConcurrency=1 for the stage cluster-wide; the write stays overwrite-idempotent so scaling replicas is
+# still safe (last-writer-wins on identical deterministic content), the lock just removes the concurrent
+# commit contention. Module-level: one lock per mover process, created without binding a loop (py3.10+).
+_write_lock = asyncio.Lock()
 
 _SUCCESS = {"status": "SUCCESS"}
 _RETRY = {"status": "RETRY"}
@@ -101,41 +111,44 @@ async def handle_stage(
         result = None
         assertions: list[Assertion] = []
         if settings.compute_enabled and settings.from_uri and settings.to_uri:
-            with tracer.start_as_current_span("medallion.transform") as span:
-                span.set_attribute("lance.medallion.transition", transition)
-                if settings.ray_enabled:
-                    # EVENT-DRIVEN real-Ray: submit the stage transform to the Ray cluster IN RESPONSE TO this
-                    # trigger (a `ray job submit` via the Ray Jobs REST API), then measure the written dataset
-                    # so the lineage emit is identical to the in-process path. A job failure/timeout raises →
-                    # the except below returns RETRY and the sidecar redelivers (the job is overwrite-safe).
-                    span.set_attribute("lance.medallion.compute", "ray")
-                    await submit_stage_job(
-                        settings,
-                        from_uri=settings.from_uri,
-                        to_uri=settings.to_uri,
-                        stage=settings.to_namespace,
-                        token=token,  # deterministic submission id → redelivery re-attaches (idempotent)
-                    )
-                    result = await run_in_threadpool(measure, settings.to_uri, settings.storage_options())
-                else:
-                    span.set_attribute("lance.medallion.compute", "in_process")
-                    result = await run_in_threadpool(
-                        transform_stage,
-                        settings.from_uri,
+            # Serialize the write (+ the quality read of what it just wrote) against a concurrent redelivery
+            # of the same stage — single-flight so two overwrites can't race on the same target dataset.
+            async with _write_lock:
+                with tracer.start_as_current_span("medallion.transform") as span:
+                    span.set_attribute("lance.medallion.transition", transition)
+                    if settings.ray_enabled:
+                        # EVENT-DRIVEN real-Ray: submit the stage transform to the Ray cluster IN RESPONSE
+                        # TO this trigger (`ray job submit` via the Ray Jobs REST API), then measure the
+                        # written dataset so the lineage emit matches the in-process path. A job
+                        # failure/timeout raises → the except below RETRYs and the sidecar redelivers.
+                        span.set_attribute("lance.medallion.compute", "ray")
+                        await submit_stage_job(
+                            settings,
+                            from_uri=settings.from_uri,
+                            to_uri=settings.to_uri,
+                            stage=settings.to_namespace,
+                            token=token,  # deterministic submission id → redelivery re-attaches (idempotent)
+                        )
+                        result = await run_in_threadpool(measure, settings.to_uri, settings.storage_options())
+                    else:
+                        span.set_attribute("lance.medallion.compute", "in_process")
+                        result = await run_in_threadpool(
+                            transform_stage,
+                            settings.from_uri,
+                            settings.to_uri,
+                            settings.storage_options(),
+                            stage=settings.to_namespace,
+                        )
+                    span.set_attribute("lance.version", result.version)
+                    span.set_attribute("lance.row_count", result.row_count)
+                    span.set_attribute("lance.size_bytes", result.size_bytes)
+                if settings.quality_enabled:
+                    assertions = await run_in_threadpool(
+                        assert_quality,
                         settings.to_uri,
                         settings.storage_options(),
-                        stage=settings.to_namespace,
+                        key_column=settings.quality_key_column,
                     )
-                span.set_attribute("lance.version", result.version)
-                span.set_attribute("lance.row_count", result.row_count)
-                span.set_attribute("lance.size_bytes", result.size_bytes)
-            if settings.quality_enabled:
-                assertions = await run_in_threadpool(
-                    assert_quality,
-                    settings.to_uri,
-                    settings.storage_options(),
-                    key_column=settings.quality_key_column,
-                )
         run_event = build_run_event(
             operation=settings.operation,
             author=settings.author,

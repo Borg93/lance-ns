@@ -13,12 +13,32 @@ data:
     CREATE EXTENSION IF NOT EXISTS age;
     LOAD 'age';
     SET search_path = ag_catalog, "$user", public;
-    SELECT create_graph('lineage');
+    SELECT create_graph('{{ .Values.age.lineageDb }}');
+    -- Pre-create the vertex labels + a UNIQUE index on each MERGE key (item 6): AGE's MERGE is
+    -- MATCH-then-CREATE, so two concurrent writers (the cron reconcile racing live ingest) could each miss
+    -- and both CREATE a duplicate vertex. The unique index makes the loser's insert fail instead. Fresh-DB
+    -- declarative guarantee; the lineage service ALSO applies these idempotently at boot (existing DBs,
+    -- retained PVC) via ensure_graph_constraints. ag_catalog.agtype_access_operator(...) is AGE's immutable
+    -- property-access expression for a functional index.
+    SELECT create_vlabel('{{ .Values.age.lineageDb }}', 'Run');
+    SELECT create_vlabel('{{ .Values.age.lineageDb }}', 'Job');
+    SELECT create_vlabel('{{ .Values.age.lineageDb }}', 'Dataset');
+    -- Index NAMES are double-quoted (like the schema/table already are, and matching the boot-time Python
+    -- sibling's psycopg.sql.Identifier) so a hyphenated lineageDb (e.g. "lineage-prod") can't produce an
+    -- unquoted identifier that breaks initdb SQL and CrashLoops the AGE StatefulSet.
+    CREATE UNIQUE INDEX IF NOT EXISTS "{{ .Values.age.lineageDb }}_run_uniq" ON "{{ .Values.age.lineageDb }}"."Run"
+      (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"run_id"'::agtype]));
+    CREATE UNIQUE INDEX IF NOT EXISTS "{{ .Values.age.lineageDb }}_dataset_uniq" ON "{{ .Values.age.lineageDb }}"."Dataset"
+      (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"name"'::agtype]));
+    CREATE UNIQUE INDEX IF NOT EXISTS "{{ .Values.age.lineageDb }}_job_uniq" ON "{{ .Values.age.lineageDb }}"."Job"
+      (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"namespace"'::agtype]),
+       ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"name"'::agtype]));
   20-openfga.sql: |
-    CREATE DATABASE {{ .Values.age.openfgaDb }};
+    -- Quoted identifier (same reason as the index names above) so a hyphenated openfgaDb can't break initdb.
+    CREATE DATABASE "{{ .Values.age.openfgaDb }}";
     -- Keep the openfga db off AGE's ag_catalog search path (it has no AGE) so openfga migrations resolve
     -- objects in public, not a non-existent ag_catalog schema.
-    ALTER DATABASE {{ .Values.age.openfgaDb }} SET search_path = public;
+    ALTER DATABASE "{{ .Values.age.openfgaDb }}" SET search_path = public;
 ---
 apiVersion: v1
 kind: Service

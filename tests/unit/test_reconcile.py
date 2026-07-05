@@ -3,15 +3,22 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
 import lance
 import pyarrow as pa
 import pytest
+from lineage.api.reconcile_cron import _on_cron
+from lineage.core.config import LineageSettings
 from lineage.core.reconcile import read_storage_version, reconcile, reconcile_all
 from lineage.schemas import DatasetSummary, ReconcileState
+
+
+def _settings(**values: Any) -> LineageSettings:
+    return LineageSettings.model_validate(values)
 
 
 @pytest.mark.parametrize(
@@ -118,3 +125,46 @@ def test_reconcile_all_read_only_reports_but_writes_nothing() -> None:
 
     assert repo.backfilled == []  # read-only mode never writes
     assert statuses[0].status == ReconcileState.STORAGE_AHEAD
+
+
+# --- item 6: the cron route's single-flight guard ------------------------------------------- #
+
+
+class _LockRepo(_FakeRepo):
+    """A ``_FakeRepo`` plus a ``reconcile_lock`` that yields a canned acquired flag, and records whether the
+    sweep body actually ran (``list_datasets`` is the first thing ``reconcile_all`` touches)."""
+
+    def __init__(self, *, acquired: bool) -> None:
+        # uri None → reconcile_all skips the storage read (no real S3), but list_datasets still runs, which
+        # is all we assert: that the sweep BODY executed (vs the skip path returning before it).
+        super().__init__(datasets=["d"], graph_versions={"d": 1}, uris={"d": None})
+        self._acquired = acquired
+        self.swept = False
+
+    @asynccontextmanager
+    async def reconcile_lock(self) -> AsyncIterator[bool]:
+        yield self._acquired
+
+    async def list_datasets(
+        self, namespace: str | None = None, tag: str | None = None
+    ) -> list[DatasetSummary]:
+        self.swept = True
+        return await super().list_datasets(namespace, tag)
+
+
+def test_cron_skips_when_another_sweep_holds_the_lock() -> None:
+    repo = _LockRepo(acquired=False)
+
+    result = asyncio.run(_on_cron(cast(Any, repo), _settings(), None))
+
+    assert result["skipped"] is True  # single-flight: a busy tick returns skipped
+    assert repo.swept is False  # and never touches the graph (no double-driven back-fill)
+
+
+def test_cron_runs_the_sweep_when_it_acquires_the_lock() -> None:
+    repo = _LockRepo(acquired=True)
+
+    result = asyncio.run(_on_cron(cast(Any, repo), _settings(), None))
+
+    assert repo.swept is True  # acquired → the sweep ran
+    assert "checked" in result and "skipped" not in result

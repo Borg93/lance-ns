@@ -33,11 +33,15 @@ so a dataset referenced by several runs is never duplicated.
 from __future__ import annotations
 
 import json
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from datetime import UTC, datetime
 from typing import Any, Final
 
 import psycopg
 from common.openlineage import RUN_EVENT_SCHEMA_URL, run_id_for
+from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
 from lineage.core.age import fetch, run_cypher
@@ -64,6 +68,8 @@ from lineage.schemas import (
     RunStatus,
     SchemaField,
 )
+
+log = logging.getLogger(__name__)
 
 # Must match catalog.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
 # catalog emits on create, which keys the (:User)-[:CREATED]->(:Dataset) edge below (wire contract).
@@ -168,6 +174,23 @@ _CREATE_READS_TABLE: Final = (
     "read_at timestamptz NOT NULL DEFAULT now())"
 )
 _INSERT_READ: Final = "INSERT INTO public.lineage_reads (reader, dataset) VALUES (%s, %s)"
+
+# Reconcile single-flight (B4 hardening) — a fixed session-level advisory-lock id. The cron reconcile fires
+# on EVERY lineage replica's sidecar independently, and a sweep back-fills the graph; two overlapping sweeps
+# would double-drive the same back-fill. pg_try_advisory_lock on this id serializes them CLUSTER-wide
+# (Postgres is the one shared coordinator) without pinning replicas=1. Arbitrary stable bigint constant.
+_RECONCILE_LOCK_KEY: Final = 0x1A9CE_5EED
+
+# Vertex-uniqueness (B4 hardening) — each AGE vertex label + the property key(s) its MERGE keys on. A UNIQUE
+# index over those keys makes AGE's MATCH-then-CREATE MERGE safe under CONCURRENCY: two txns (a reconcile
+# racing a live ingest, or two sweeps) that both miss and both CREATE would otherwise leave a DUPLICATE
+# vertex — the index makes the loser's insert fail instead. Keys mirror the _MERGE_* Cypher above.
+_VERTEX_UNIQUE_KEYS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
+    ("Run", ("run_id",)),
+    ("Dataset", ("name",)),
+    ("Job", ("namespace", "name")),
+)
+
 _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
 )
@@ -806,6 +829,60 @@ class LineageRepository:
                 await conn.execute(_CREATE_TERMINAL_INDEX)
         except psycopg.errors.DuplicateTable:
             pass
+
+    async def ensure_graph_constraints(self) -> None:
+        """Add a UNIQUE index on each AGE vertex label's MERGE key so a CONCURRENT MERGE can't slip in a
+        duplicate vertex (item 6). Idempotent + safe on every replica boot: ``create_vlabel`` materializes
+        the label's table (suppressed if it already exists), then ``CREATE UNIQUE INDEX IF NOT EXISTS`` on
+        the property-access expression. Best-effort — a per-label failure (e.g. pre-existing dup rows on an
+        already-populated graph, or an AGE build without the index recipe) is logged, not fatal, so the
+        graph keeps ingesting; the guarantee holds wherever the index took. The pool's ``configure`` runs
+        each statement autocommit with AGE loaded, so a raised ``create_vlabel`` never poisons the next."""
+        async with self._pool.connection() as conn:
+            for label, keys in _VERTEX_UNIQUE_KEYS:
+                with suppress(Exception):  # label already exists (a prior MERGE created it lazily) → fine
+                    await conn.execute(
+                        sql.SQL("SELECT create_vlabel({}, {})").format(
+                            sql.Literal(self._graph), sql.Literal(label)
+                        )
+                    )
+                # ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"<key>"'::agtype]) is AGE's
+                # documented immutable property-access expression for a functional index (one term per key).
+                exprs = sql.SQL(", ").join(
+                    sql.SQL(
+                        "ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, {}::agtype])"
+                    ).format(sql.Literal(f'"{key}"'))
+                    for key in keys
+                )
+                index = sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.Identifier(f"{self._graph}_{label.lower()}_uniq"),
+                    sql.Identifier(self._graph),
+                    sql.Identifier(label),
+                    exprs,
+                )
+                try:
+                    await conn.execute(index)
+                except Exception as exc:  # noqa: BLE001 — hardening is best-effort, must not brick ingest
+                    log.warning("age_vertex_constraint_skipped", extra={"label": label, "error": str(exc)})
+
+    @asynccontextmanager
+    async def reconcile_lock(self) -> AsyncIterator[bool]:
+        """Single-flight guard for the reconcile sweep (item 6): yields ``True`` if this caller acquired the
+        cluster-wide advisory lock, ``False`` if another sweep already holds it. The cron fires on every
+        replica's sidecar independently, so without this two sweeps would back-fill the graph in parallel.
+        ``pg_try_advisory_lock`` is non-blocking (a busy tick simply skips, the next tick retries) and
+        session-scoped — held on this dedicated connection for the sweep's duration, released in ``finally``
+        (or automatically if the connection dies mid-sweep)."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute("SELECT pg_try_advisory_lock(%s)", (_RECONCILE_LOCK_KEY,))
+            row = await cur.fetchone()
+            acquired = bool(row and row[0])
+            try:
+                yield acquired
+            finally:
+                if acquired:
+                    with suppress(Exception):
+                        await conn.execute("SELECT pg_advisory_unlock(%s)", (_RECONCILE_LOCK_KEY,))
 
     async def record_event(
         self,

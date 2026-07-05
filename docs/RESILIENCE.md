@@ -69,6 +69,35 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
 4. **Best-effort durable feed.** The `/events` feed table write is best-effort (logged on failure); the
    AGE graph is authoritative. The feed can lag the graph — visibility, not correctness.
 
+## Operational hardening (k8s posture)
+
+Cloud-native guards on the *deployment*, complementing the event-path guarantees above. All applied via the
+chart and live-verified on kind.
+
+- **No plaintext secrets in the render.** OpenFGA's datastore DSN comes from `secretKeyRef`
+  (`datastore.existingSecret`), not a hardcoded `postgres://lance:lance@…`; the S3 secret + AGE password are
+  consumed from OpenBao at boot when a secret store is configured. `helm template -f values-prod.yaml` shows
+  zero plaintext secret values in env/args.
+- **Graceful rollout drain.** Every app Deployment has a `preStop` sleep + `terminationGracePeriodSeconds`
+  (compaction gets a longer budget for an in-flight sweep) so endpoint removal propagates before SIGTERM —
+  in-flight requests drain instead of connection-refusing (`lance.preStop`, `lifecycle.*`).
+- **Bounded Dapr publishes.** Every `publish_event` is wrapped in `asyncio.timeout`
+  (`common/dapr_publish.py`) so a wedged sidecar/NATS can't hang a write handler past its ack window.
+- **Liveness + readiness probes on every workload.** App pods get an HTTP `readinessProbe` (`/readyz`,
+  dependency-aware) **and** `livenessProbe` (`/livez`, process-up only — never restarts on a slow backend);
+  web + RustFS get `tcpSocket` probes (`lance.appProbes` / `lance.tcpProbes`).
+- **Restricted container securityContext on every app pod.** `runAsNonRoot` (images ship a numeric
+  `USER` — uid 10001 catalog, 1000 web — so the kubelet can verify non-root at admission), drop **ALL**
+  capabilities, no privilege escalation, `seccompProfile: RuntimeDefault`, and `readOnlyRootFilesystem`
+  with a writable `/tmp` emptyDir for scratch (`lance.securityContext`, `security.readOnlyRootFilesystem`).
+- **Single-flight writes + reconcile.** The cascade stage write is serialized by a process-wide lock so a
+  redelivered trigger can't race a second `mode="overwrite"` onto the same target
+  (`transform.py:_write_lock`, moverReplicas=1). The B4 reconcile sweep runs under a Postgres
+  advisory lock (`repository.reconcile_lock`) so the per-replica cron can't double-drive a back-fill. And a
+  **UNIQUE index on every AGE vertex label's MERGE key** (`ensure_graph_constraints` at boot + the age-init
+  SQL) makes AGE's MATCH-then-CREATE safe under concurrency — a racing duplicate `CREATE` is rejected by the
+  DB (`duplicate key value violates unique constraint "lineage_run_uniq"`) instead of leaving a dup vertex.
+
 ## Bottom line
 
 - **Corruption:** not possible on the event path — idempotent MERGE on `run_id`.

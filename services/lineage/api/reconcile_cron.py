@@ -34,13 +34,21 @@ async def _on_cron(
     Reconciles every dataset with a dataSource URI against on-disk Lance; a write the graph never recorded
     (storage AHEAD / UNTRACKED) is stamped back onto the graph. The Lance reads run in the threadpool so the
     object-store I/O never stalls the event loop. Best-effort per the cron contract (a bad read is skipped).
+
+    Single-flight: the cron fires on EVERY lineage replica independently, so the sweep runs under a
+    cluster-wide advisory lock. A tick that finds a sweep already in progress skips (the next tick retries)
+    rather than double-driving the same back-fill.
     """
-    opts = storage_options(settings)
-    statuses = await reconcile_all(
-        repository,
-        lambda uri: run_in_threadpool(read_storage_version, uri, opts),
-        backfill=True,
-    )
+    async with repository.reconcile_lock() as acquired:
+        if not acquired:
+            log.info("lineage_reconcile_skipped_locked")
+            return {"skipped": True, "reason": "another reconcile sweep is in progress"}
+        opts = storage_options(settings)
+        statuses = await reconcile_all(
+            repository,
+            lambda uri: run_in_threadpool(read_storage_version, uri, opts),
+            backfill=True,
+        )
     backfilled = [s.dataset for s in statuses if s.status in BACKFILLABLE_STATES]
     log.info("lineage_reconcile_sweep", extra={"checked": len(statuses), "backfilled": len(backfilled)})
     return {"checked": len(statuses), "backfilled": backfilled}

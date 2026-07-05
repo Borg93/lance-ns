@@ -9,8 +9,14 @@ Idempotent under at-least-once redelivery: the submission id is DETERMINISTIC pe
 redelivered trigger (the handler blocks until the job finishes, which can exceed the 30s ack window)
 RE-ATTACHES to the same job and polls it, rather than starting a second concurrent job that would race the
 write. A failure (submit error, FAILED job, or timeout) raises so the mover returns RETRY and the sidecar
-redelivers; a genuinely-failed job with the same token re-attaches to the FAILED job (bounded by maxDeliver)
-— a fresh trigger (new token) runs a new job. Production KubeRay handles job retry/orchestration.
+redelivers; on redelivery a terminally FAILED/STOPPED job with the same id is DELETED and resubmitted fresh
+(so the retry runs on a healthy worker rather than re-observing the same failure), while a still-running job
+is re-attached and polled. Production KubeRay handles in-job task retry/orchestration.
+
+Known limitation (assessment): the handler blocks until the job finishes, so a job that runs longer than
+maxDeliver × ackWait (~2.5 min at the defaults) exhausts redelivery and the trigger is dropped with no DLQ —
+the ray path suits bounded-duration stage transforms; genuinely long jobs need the async-completion redesign
+(submit + ack, the job or a webhook triggers the next stage). See docs/RESILIENCE.md.
 """
 
 from __future__ import annotations
@@ -85,14 +91,25 @@ async def submit_stage_job(
 async def _submit_or_reattach(
     client: httpx.AsyncClient, submission_id: str, body: Mapping[str, object]
 ) -> None:
-    """POST /api/jobs/. A 4xx when the id already exists (idempotent redelivery) re-attaches to that job."""
+    """POST /api/jobs/. A 4xx when the id already exists (idempotent redelivery) re-attaches to that job —
+    UNLESS that prior job terminally FAILED/STOPPED, in which case it is deleted and resubmitted fresh so the
+    redelivery actually retries the transform on a healthy worker (instead of re-observing the same failure
+    every redelivery until maxDeliver silently drops the trigger — the deterministic-id poison)."""
     try:
         response = await client.post("/api/jobs/", json=dict(body))
         if response.status_code < 400:
             return
-        # Already-submitted (redelivery): if the job really exists, re-attach and poll it below.
+        # Already-submitted (redelivery): inspect the existing job to decide re-attach vs fresh retry.
         existing = await client.get(f"/api/jobs/{submission_id}")
         if existing.status_code == 200:
+            status = existing.json().get("status")
+            if status in _TERMINAL_BAD:
+                # DELETE is only valid on a terminal job (FAILED/STOPPED are), then re-POST the same id.
+                await client.delete(f"/api/jobs/{submission_id}")
+                fresh = await client.post("/api/jobs/", json=dict(body))
+                fresh.raise_for_status()
+                log.info("ray_stage_job_resubmitted_after_failure", extra={"submission_id": submission_id})
+                return
             log.info("ray_stage_job_reattach", extra={"submission_id": submission_id})
             return
         response.raise_for_status()

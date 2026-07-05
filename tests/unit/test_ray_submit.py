@@ -56,6 +56,32 @@ def test_submit_reattaches_when_already_exists() -> None:
     _run(go())
 
 
+def test_failed_existing_job_is_deleted_and_resubmitted_fresh() -> None:
+    """A redelivery that finds a terminally-FAILED prior job must DELETE it and POST a fresh one (retry on a
+    healthy worker) — not re-attach to the dead job forever (the deterministic-id poison)."""
+    calls: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.method)
+        if request.method == "POST":
+            # 1st POST: already-exists conflict; 2nd POST (after delete): fresh submit OK.
+            return (
+                httpx.Response(200, json={"submission_id": "s"}) if "DELETE" in calls else httpx.Response(409)
+            )
+        if request.method == "GET":
+            return httpx.Response(200, json={"status": "FAILED"})  # the prior job terminally failed
+        if request.method == "DELETE":
+            return httpx.Response(200)
+        return httpx.Response(404)
+
+    async def go() -> None:
+        async with _client(handler) as client:
+            await _submit_or_reattach(client, "s", {})
+
+    _run(go())
+    assert "DELETE" in calls and calls.count("POST") == 2  # deleted the dead job + resubmitted fresh
+
+
 def test_submit_raises_when_post_fails_and_no_existing_job() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(500, text="boom") if request.method == "POST" else httpx.Response(404)

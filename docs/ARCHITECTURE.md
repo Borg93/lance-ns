@@ -134,16 +134,27 @@ HTTP request
   │        create  table   -> check can_create_table on the PARENT    (create-on-parent)
   │      OpenFGA says yes/no. No → 403. OpenFGA down → 503 (never silent allow).
   │
+  ├─ 2b. Overwrite gate  (create mode=Overwrite of an EXISTING table, in the create handler)
+  │      Overwrite is spec-defined as drop+recreate, so it ADDITIONALLY requires owner-tier
+  │      can_drop on the existing table — BEFORE the destructive write. Without it a mere
+  │      namespace writer could overwrite (destroy) and, via step 4b, seize another user's table.
+  │
   ├─ 3. Handler  (services/catalog/api/v1/endpoints/*)
   │      run the pylance backend op in a threadpool (it's blocking I/O).
   │
-  └─ 4. Seed  (only on create — fga_deps.seed_ownership)
-         write owner + parent tuples for the new object so the creator keeps access
-         and the new object inherits the cascade. No-op when FGA is off/unauthenticated.
+  ├─ 4. Seed  (only on create — fga_deps.seed_ownership)
+  │      write owner + parent tuples for the new object so the creator keeps access
+  │      and the new object inherits the cascade. No-op when FGA is off/unauthenticated.
+  │
+  └─ 4b. Revoke  (on drop/deregister/rename-source/overwrite — fga_deps.revoke_ownership)
+         delete EVERY tuple on the removed object so a reused id can't inherit stale grants
+         (privilege bleed). A Cascade namespace drop enumerates its descendants first and
+         revokes each; an Overwrite resets the replaced table's ACL (owner-gated at 2b).
 ```
 
 **Why two authz touch-points?** Step 2 is the *pre-op check* ("may you?"). Step 4 is the
-*post-create grant* ("you made it, you own it; link it into the tree"). Both live in
+*post-create grant* ("you made it, you own it; link it into the tree"). Step 4b is the
+*revoke-on-removal* (drop/overwrite clears grants so a reused id starts clean). All live in
 `fga_deps.py` so all request-time authz policy is in one module.
 
 ---

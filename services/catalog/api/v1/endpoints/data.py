@@ -17,13 +17,16 @@ from lance_namespace import (
     CreateTableResponse,
     DeleteFromTableRequest,
     DeleteFromTableResponse,
+    DescribeTableRequest,
     ExplainTableQueryPlanRequest,
     InsertIntoTableRequest,
     InsertIntoTableResponse,
     InvalidInputError,
+    LanceNamespace,
     MergeInsertIntoTableRequest,
     MergeInsertIntoTableResponse,
     QueryTableRequest,
+    TableNotFoundError,
     UpdateTableRequest,
     UpdateTableResponse,
 )
@@ -55,6 +58,17 @@ ARROW_FILE = "application/vnd.apache.arrow.file"
 _MAX_INJECT_BYTES = 64 * 1024 * 1024
 
 router = APIRouter(prefix="/v1/table", tags=["data"])
+
+
+def _table_exists(ns: LanceNamespace, segments: list[str]) -> bool:
+    """True if a table already lives at ``segments`` (declared-only counts — it already holds an owner
+    grant). Used to decide whether a create ``mode=Overwrite`` is destroying an EXISTING table (which then
+    needs an owner-tier gate) vs creating a fresh one. Blocking native call → run in a threadpool."""
+    try:
+        native.call(ns, "describe_table", DescribeTableRequest(id=segments, check_declared=True))
+        return True
+    except TableNotFoundError:
+        return False
 
 
 @router.post("/{id}/create", response_model_exclude_none=True)
@@ -103,6 +117,21 @@ async def create_table(
             )
         except Exception as exc:  # noqa: BLE001 — lineage metadata is an enhancement, not a gate
             log.warning("lineage_metadata_inject_failed", extra={"table": table_id, "error": str(exc)})
+    # mode=Overwrite is spec-defined as "the existing table is DROPPED and a new table created" (lance
+    # namespace.md). ``authorize`` only gated this create at writer-tier can_create_table on the PARENT — but
+    # a DROP needs owner-tier can_drop. So if an Overwrite is about to DESTROY an existing table, require
+    # owner-tier on it FIRST (before the irreversible write) — else a mere namespace writer could overwrite
+    # and, via the ownership reset below, seize another user's table. Fresh-id Overwrite creates nothing to
+    # gate. FGA-off skips it (no ACL to protect).
+    # Short-circuits: the describe (_table_exists) only runs on an Overwrite with FGA on.
+    overwrote_existing = (
+        (mode or "").lower() == "overwrite"
+        and settings.fga_enabled
+        and client is not None
+        and await run_in_threadpool(_table_exists, ns, segments)
+    )
+    if overwrote_existing:
+        await fga_deps.require_can_drop_table(client, settings, token, segments=segments)
     # ``dataplane.create_table`` picks the write path by schema off the event loop: a blob-v2 column needs
     # file format 2.2 (native create pins 2.1 and rejects it) → a direct 2.2 write; else → native create. (§9)
     response: CreateTableResponse = await run_in_threadpool(
@@ -115,6 +144,12 @@ async def create_table(
         properties=parsed_properties,
         allow_external_blobs=settings.allow_external_blobs,
     )
+    # An Overwrite that replaced an EXISTING table (owner-authorized above) resets its ACL: revoke the prior
+    # incarnation's grants (any reader/writer/validator that must not survive onto the reused id) before
+    # re-seeding the overwriter. Only when we actually overwrote — a fresh create has nothing to revoke, and
+    # revoking on a non-owner path is what the audit flagged as an eviction vector (now gated out).
+    if overwrote_existing:
+        await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
     # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget

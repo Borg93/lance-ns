@@ -45,6 +45,7 @@ from lance_namespace import (
     DescribeTableResponse,
     DropNamespaceResponse,
     DropTableResponse,
+    ListNamespacesResponse,
     ListTablesResponse,
     RenameTableResponse,
 )
@@ -400,6 +401,135 @@ def test_rename_table_revokes_source_then_seeds_destination(
     )
     assert resp.status_code == 200
     assert order == ["revoke:table:db1$users", "grant:db1$u2"]
+
+
+def test_overwrite_by_owner_revokes_prior_grants_then_seeds(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT: an Overwrite of an EXISTING table BY ITS OWNER (can_drop passes) is drop+recreate, so the
+    prior grants are revoked BEFORE the overwriter is re-seeded (``table:db1$users``), revoke before grant."""
+    fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://b/db1$users")  # table exists
+    fake_ns.create_table.return_value = CreateTableResponse(location="s3://b/db1$users", version=2)
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))  # owner → can_drop passes
+    order: list[str] = []
+
+    async def _revoke(_c: object, obj: str, **_k: object) -> int:
+        order.append(f"revoke:{obj}")
+        return 1
+
+    async def _grant(_c: object, **kw: object) -> None:
+        order.append(f"grant:{kw['obj_id']}")
+
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", _revoke)
+    monkeypatch.setattr(fga_module, "grant_on_create", _grant)
+
+    resp = client.post(
+        "/v1/table/db1$users/create?mode=overwrite",
+        content=b"ARROW",
+        headers={"Authorization": "Bearer t", **ARROW_STREAM},
+    )
+    assert resp.status_code == 200
+    assert order == ["revoke:table:db1$users", "grant:db1$users"]
+
+
+def test_overwrite_of_existing_table_by_non_owner_is_denied_and_revokes_nothing(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT (security): Overwrite = drop+recreate, so overwriting an EXISTING table needs owner-tier
+    can_drop — NOT the writer-tier can_create_table that authorize applies to a create. A namespace writer
+    who is not the table owner is 403'd BEFORE the destructive write, and NO grant is revoked (the audit's
+    eviction/seizure vector). The backend create is never reached."""
+    fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://b/db1$users")  # table exists
+
+    async def _check(_c: object, *, user: str, relation: str, obj: str, **_kw: object) -> bool:
+        return relation != "can_drop"  # writer-on-parent (create) allowed; owner-tier can_drop denied
+
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _check)
+    revoke = AsyncMock(return_value=1)
+    grant = AsyncMock()
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", revoke)
+    monkeypatch.setattr(fga_module, "grant_on_create", grant)
+
+    resp = client.post(
+        "/v1/table/db1$users/create?mode=overwrite",
+        content=b"ARROW",
+        headers={"Authorization": "Bearer t", **ARROW_STREAM},
+    )
+    assert resp.status_code == 403  # owner-tier gate on the destructive overwrite
+    revoke.assert_not_awaited()  # the owner's grant is NOT stripped
+    grant.assert_not_awaited()
+    fake_ns.create_table.assert_not_called()  # gated BEFORE the irreversible write
+
+
+def test_plain_create_seeds_without_revoking(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: a non-overwrite create only seeds — it must NOT revoke (fresh id, nothing to clean)."""
+    fake_ns.create_table.return_value = CreateTableResponse(location="s3://b/db1$new", version=1)
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    revoke = AsyncMock(return_value=0)
+    grant = AsyncMock()
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", revoke)
+    monkeypatch.setattr(fga_module, "grant_on_create", grant)
+
+    resp = client.post(
+        "/v1/table/db1$new/create",
+        content=b"ARROW",
+        headers={"Authorization": "Bearer t", **ARROW_STREAM},
+    )
+    assert resp.status_code == 200
+    revoke.assert_not_awaited()
+    grant.assert_awaited_once()
+
+
+def test_cascade_drop_namespace_revokes_every_child(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT: a Cascade namespace drop revokes the namespace AND every dropped child (tables + nested
+    namespaces enumerated before the drop), so no reused child id inherits a stale grant."""
+    fake_ns.drop_namespace.return_value = DropNamespaceResponse()
+    fake_ns.list_tables.return_value = ListTablesResponse(tables=["users", "logs"], page_token=None)
+    fake_ns.list_namespaces.return_value = ListNamespacesResponse(namespaces=[], page_token=None)
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    revoked: list[str] = []
+
+    async def _revoke(_c: object, obj: str, **_k: object) -> int:
+        revoked.append(obj)
+        return 1
+
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", _revoke)
+
+    resp = client.post(
+        "/v1/namespace/db1/drop",
+        json={"behavior": "Cascade"},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 200
+    assert set(revoked) == {"namespace:db1", "table:db1$users", "table:db1$logs"}
+
+
+def test_restrict_drop_namespace_revokes_only_itself(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT: a Restrict (default) drop does NOT enumerate or revoke children — a non-empty Restrict drop
+    errors in the backend, so children (and their still-valid grants) stay put."""
+    fake_ns.drop_namespace.return_value = DropNamespaceResponse()
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+    revoked: list[str] = []
+
+    async def _revoke(_c: object, obj: str, **_k: object) -> int:
+        revoked.append(obj)
+        return 1
+
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", _revoke)
+
+    resp = client.post("/v1/namespace/db1/drop", json={}, headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+    assert revoked == ["namespace:db1"]
+    fake_ns.list_tables.assert_not_called()  # no descendant enumeration on the Restrict path
 
 
 # --------------------------------------------------------------------------- #

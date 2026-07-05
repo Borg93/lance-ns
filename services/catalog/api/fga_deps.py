@@ -328,3 +328,24 @@ async def revoke_ownership(
     removed = await fga.revoke_object_tuples(client, obj)
     if removed:
         log.info("fga_tuples_revoked", extra={"object": obj, "removed": removed})
+
+
+async def require_can_drop_table(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    segments: list[str],
+) -> None:
+    """Raise 403 unless the caller holds owner-tier ``can_drop`` on the table at ``segments``.
+
+    The gate for a destructive create ``mode=Overwrite`` against an EXISTING table: Overwrite is spec-defined
+    as drop-then-recreate (lance namespace.md), so it must clear the same owner-tier bar a real ``drop_table``
+    does — NOT the writer-tier ``can_create_table`` on the parent that ``authorize`` already applied for a
+    create. Without this, a mere namespace writer could overwrite (destroy) another user's table and — via the
+    ownership reset that follows — seize sole ownership of it. No-op when FGA is off / unwired /
+    unauthenticated (the create path enforces those elsewhere)."""
+    if not (settings.fga_enabled and client is not None and token is not None):
+        return
+    obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    await _require(client, user=token.sub, relation="can_drop", obj=obj)

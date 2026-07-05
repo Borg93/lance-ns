@@ -559,10 +559,10 @@ async def revoke_object_tuples(
     full tuple set, then deletes it. No-op (0) when the object has none.
 
     Scope: revokes the object's OWN tuples. A CASCADING namespace drop (``DropNamespaceRequest``
-    ``behavior=Cascade``) that removes child tables/namespaces does NOT revoke their tuples here — those
-    children's grants would be stranded. The default directory backend does not cascade (so the common
-    path is safe), but the API permits it, so a Cascade drop is a known limitation pending a reconciliation
-    sweep over orphan tuples.
+    ``behavior=Cascade``) also removes child tables/namespaces — the ``drop_namespace`` endpoint enumerates
+    those descendants BEFORE the drop and calls this once per child, so their grants are revoked too (the
+    default directory backend rejects Cascade outright, so that path only engages on a backend that
+    supports it).
     """
     tuples = await read_object_tuples(
         client,

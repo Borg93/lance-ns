@@ -63,6 +63,15 @@ and cleans up its data, not just its k8s objects.
 literally true of the diff; grep docs/ + chart/values comments for statements the change just falsified
 (two "carries no auth" comments survived the commit that added the auth).
 
+**Executor-independence rule (2026-07-05).** Items marked "execution-spec'd" carry a `✅ DONE WHEN`
+checklist and `🚧 GUARDRAILS` block — that is the contract, and it is model-independent: a weaker executor
+follows it verbatim; a stronger one may improve the HOW but may NOT skip a DONE WHEN check, cross a
+guardrail, or "simplify away" an assert. Every DONE WHEN bullet is binary — if you cannot demonstrate it
+(command output, test name, live check), the item is not done. Before committing, run an adversarial review
+of the diff (`/code-review` at high effort, or a multi-agent workflow audit) and reconcile every finding;
+the DoD's self-audit step is not advisory. If mid-implementation you discover a DONE WHEN check is wrong or
+impossible, STOP and update the item first (with evidence) — never silently deliver less than the checklist.
+
 ---
 
 ## 1 · P0 — security / correctness holes — ✅ ALL FIXED (2026-07-02)
@@ -195,7 +204,13 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   `services/common/secrets.py:38`
 - ⛔ **Demo peek re-reads EVERY Lance version of every dataset per call** (one S3 dataset-open per version),
   polled every 2s — linear latency growth with cascade runs. Cache or cap versions. `services/lineage/api/v1/endpoints/demo.py:63`
-- ⛔ **RustFS conditional-write (CAS) support has NEVER been validated — Lance commit safety rests on it**
+- ✅ **DONE 2026-07-05 — RustFS conditional-write (CAS) VALIDATED (PASS).** `tests/e2e/test_object_store_cas_e2e.py`
+  + `make e2e-cas` ran green against the live kind cluster: tier-1 second-put→412; tier-2 exactly one 200 +
+  seven 412 per round (5 rounds); tier-3 8-process append → count_rows()==800 + full id set + len(versions())==9.
+  Verdict + evidence recorded in docs/DURABILITY.md. RustFS honors If-None-Match AND pylance's object_store
+  sends conditional puts to the custom endpoint. Original finding below (kept for the remediation path if a
+  future backend swap fails the gate):
+- ~~⛔~~ **RustFS conditional-write (CAS) support has NEVER been validated — Lance commit safety rests on it**
   (added 2026-07-05, firnflow/lance_docs audit; execution-spec'd same day after an Opus fresh-implementer
   dry-run). Every Lance commit publishes a new manifest via put-if-not-exists (`If-None-Match: *`); the
   format REQUIRES the store to guarantee exactly one writer wins (`lance_docs/file_format.md:4778`), and
@@ -225,6 +240,15 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   CreateTableVersion API, touching catalog dataplane + medallion + Ray + compaction); backend swap. Record
   the verdict in docs/DURABILITY.md as the gate for any backend swap; this is also the evidence base for the
   insert version-attribution retry-loop item above (what error, if any, surfaces on a lost race).
+  ✅ DONE WHEN: `make e2e-cas` runs green against the live kind cluster and prints a TWO-layer verdict
+  (store: tiers 1-2 PASS/FAIL; lance-path: tier 3 PASS/FAIL) · tier-1 asserts second-put 412 · tier-2 asserts
+  exactly one 200 + seven 412 PER round · tier-3 asserts count_rows()==800 AND len(versions())==9 · both
+  `__cas_probe/` + `__cas_stress/` prefixes verified deleted after the run (list call), including on failure ·
+  docs/DURABILITY.md records verdict + date + RustFS image tag · `cas` marker registered; `make ci` untouched.
+  🚧 GUARDRAILS: never write outside the two `__` prefixes · never weaken tier-2's exactly-one-winner assert
+  to "at least one" (that is the silent-ignore hole) · a tier-3 pass alone is NOT store validation (pylance
+  auto-retry masks) · no hardcoded creds (env/Secret only, §0) · if ANY tier fails: STOP, record the verdict,
+  do NOT attempt remediation in the same change.
 - ⛔ **`/merge_insert` has no scalar index on its `on` key — every upsert full-scans** (added 2026-07-05;
   execution-spec'd same day after an Opus fresh-implementer dry-run). pylance's `use_index=True` default only
   helps "if an index is available"; no automatic data-flow ever builds one (the only build call sites are the
@@ -248,6 +272,14 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   merge leaves the table at response.version+1 while the MERGE_INSERT lineage points at response.version —
   a version gap, not a lost write. Tests (tests/integration/test_moto_s3.py): merge with on=id → BTREE
   visible via the list endpoint; monkeypatched build failure → merge still returns 200.
+  ✅ DONE WHEN: two consecutive merges on the same (table, on) trigger exactly ONE index build (assert via
+  call-count monkeypatch or stable list_table_indices output — the idempotence proof) · index visible via the
+  list endpoint after the first merge · monkeypatched build failure still returns 200 with the merge applied ·
+  branch propagation live-verified or explicitly documented as unverifiable at pylance 8.0.0 · endpoint
+  docstring documents implicit DDL + the version gap · live-verify one real /merge_insert on kind (§0).
+  🚧 GUARDRAILS: NEVER build unconditionally (replace=True → full rebuild every upsert = regression) · no
+  exception from the ensure path may reach the HTTP response · build only AFTER the merge commits · BTREE
+  only, this endpoint only (no auto-index creep into other write paths).
   `services/catalog/api/v1/endpoints/data.py:175`
 - ⛔ **Compaction failures are invisible to every API** (added 2026-07-05; execution-spec'd same day after an
   Opus fresh-implementer dry-run). `compact_one` never raises (error → string) and `emit_sweep_lineage` SKIPS
@@ -283,6 +315,17 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
     out from under its manifest — discovery still finds it via `_versions/`, compact_files raises a
     `maintain:` error → assert the FAIL event lands in /events. Extend tests/unit/test_compaction_lineage.py
     for the FAIL path (it currently covers only errored→skip selection).
+  ✅ DONE WHEN: fault-injected dataset produces exactly ONE FAIL Run node across ≥2 cron ticks (deterministic
+  run_id proven live via /runs + /events with lineageEmit=true) · FAIL event shape verified: eventType FAIL,
+  bare output (name only), errorMessage facet with message + programmingLanguage, NO version/schema/stats
+  facets · an `open:`-errored dir produces NO event (test) · `defer_index_remap=True` in compact_files + a
+  regression test pinning its interplay with optimize_indices · publish loop provably bounded (test: N
+  simulated failures, handler under the 30s ack window) · unit tests extended for FAIL path + maintain-only
+  selection + dedup.
+  🚧 GUARDRAILS: never fabricate lineage — no version facet, no DERIVED_FROM, nothing beyond the bare output
+  name on a FAIL · do NOT touch the COMPLETE path's uuid4 run_id or its existing tests · cap errorMessage
+  length (exception strings embed URIs) · emission stays best-effort — a publish failure must never fail the
+  sweep · medallion-nested datasets stay out of scope (document, don't bolt on a URI→id map).
   `services/compaction/services/optimize.py:88` + `services/compaction/services/sweep.py:90`
 
 ## 5 · P2 — Python / FastAPI quality + consistency — ✅ 17/17 DONE (2026-07-02)

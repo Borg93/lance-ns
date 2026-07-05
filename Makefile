@@ -15,6 +15,9 @@ export KUBECONFIG ?= $(HOME)/.kube/config
 
 CLUSTER     := lance
 RELEASE     := lance-ns
+# RustFS access for the CAS e2e (values.yaml defaults; the secret is pulled from the k8s Secret at run time).
+RUSTFS_BUCKET      := lance-catalog
+RUSTFS_ACCESS_KEY  := rustfsadmin
 # Host OS/arch detection so a fresh clone bootstraps on Linux or macOS, x86_64 or arm64. Each tool names
 # its release assets differently (k9s Title-cases the OS; tilt uses mac/x86_64), hence the derived variants.
 # Done with sed/tr (NOT a shell `case`): a `)` inside $(shell …) prematurely closes make's paren-match.
@@ -179,6 +182,16 @@ e2e-compaction: ## Run the e2e compaction test (real Lance sweep + OTel metric) 
 	 LANCE_E2E_DAPR_TOKEN=$$(kubectl get secret $(RELEASE)-dapr-app-token -o jsonpath='{.data.token}' | base64 -d) \
 	   uv run pytest tests/e2e/test_compaction_e2e.py -v -m compaction; rc=$$?; \
 	 kill $$C $$G 2>/dev/null; exit $$rc
+
+e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit safety) against RustFS
+	@echo "port-forwarding RustFS (9900->9000) …"
+	@kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_S3_ENDPOINT=http://localhost:9900 LANCE_E2E_S3_BUCKET=$(RUSTFS_BUCKET) \
+	 LANCE_E2E_S3_ACCESS_KEY=$(RUSTFS_ACCESS_KEY) \
+	 LANCE_E2E_S3_SECRET_KEY=$$(kubectl get secret $(RELEASE)-infra-credentials -o jsonpath='{.data.rustfs-secret-key}' | base64 -d) \
+	   uv run pytest tests/e2e/test_object_store_cas_e2e.py -v -m cas; rc=$$?; \
+	 kill $$S 2>/dev/null; exit $$rc
 
 status: ## Show all pods
 	@kubectl get pods

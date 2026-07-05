@@ -28,6 +28,25 @@ no-op for data.
 > Before this work RustFS was `emptyDir` — the one place the *durable* asset sat on *ephemeral* storage, so
 > every RustFS roll wiped the lakehouse. It is now a PVC by default.
 
+#### Object-store commit safety (conditional writes / CAS) — VALIDATED ✅
+
+Lance's correctness under concurrent writers rests entirely on the object store honoring **put-if-not-exists**
+(`If-None-Match: *`): every commit publishes `_versions/N.manifest` conditionally, and the format requires the
+store to guarantee **exactly one writer wins** that race (`lance_docs/file_format.md` — conflict resolution). A
+store that silently *ignores* the header accepts both PUTs and silently loses a commit — a real failure mode
+(GCS S3-interop) that a single-writer smoke test never catches. Since RustFS is a pre-1.0 store, this had to be
+proven, not assumed.
+
+**Verdict (2026-07-05): RustFS enforces CAS.** The `tests/e2e/test_object_store_cas_e2e.py` harness (`make
+e2e-cas`) validates it in three tiers against the deployed store, asserting **data invariants** (not S3 error
+names): (1) a second `If-None-Match: *` PUT of a live key is rejected **412** and does not overwrite; (2) 8
+threads racing the same key at a barrier yield **exactly one winner per round** (the silent-ignore detector);
+(3) 8 processes each appending 100 rows to one Lance dataset **all land — 800/800 rows** with the full id set
+intact, exercising Lance's real manifest-CAS commit+retry path under contention. All three pass. This is the
+gate for any backend swap: re-run `make e2e-cas` against a candidate store before trusting it with the
+lakehouse. If a store FAILS, the documented remedy is an external manifest store (lance-namespace
+`table_version_management`).
+
 ### 3. External / managed in production
 You **can** run everything in-cluster (the default), but in production the stateful + cross-cutting
 services are better run as managed/external services — disable the in-cluster copy and point the apps at the

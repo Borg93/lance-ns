@@ -78,8 +78,12 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> Wri
     # at the cascade head to keep durable row identity available (e.g. to key blob carry-forward by _rowid if
     # a stage ever gains append/upsert). Free on top of overwrite; the positional read path is unaffected.
     lance.write_dataset(
-        table, uri, mode="overwrite", storage_options=storage_options,
-        data_storage_version="2.2", enable_stable_row_ids=True,
+        table,
+        uri,
+        mode="overwrite",
+        storage_options=storage_options,
+        data_storage_version="2.2",
+        enable_stable_row_ids=True,
     )
     return measure(uri, storage_options)
 
@@ -100,8 +104,12 @@ def transform_stage(
     # 2.2 + stable row ids like seed_raw: every dataset the cascade writes is on the current format (so a blob
     # column never trips "Blob v2 requires file version >= 2.2" mid-cascade) and keeps durable row identity.
     lance.write_dataset(
-        out, to_uri, mode="overwrite", storage_options=storage_options,
-        data_storage_version="2.2", enable_stable_row_ids=True,
+        out,
+        to_uri,
+        mode="overwrite",
+        storage_options=storage_options,
+        data_storage_version="2.2",
+        enable_stable_row_ids=True,
     )
     return measure(to_uri, storage_options)
 

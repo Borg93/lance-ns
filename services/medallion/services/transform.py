@@ -155,7 +155,9 @@ async def handle_stage(
         )
         # 1. Emit the transform's lineage (-> the lineage service ingests the DERIVED_FROM edge). This runs
         # even on a quality failure, so the failed assertions are recorded and the bad batch is auditable.
-        await dapr_publish.publish_event(dapr, timeout_seconds=settings.publish_timeout_seconds,
+        await dapr_publish.publish_event(
+            dapr,
+            timeout_seconds=settings.publish_timeout_seconds,
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
             data=json.dumps(run_event),
@@ -168,7 +170,9 @@ async def handle_stage(
             quality_blocked = True
         # 3. Trigger the next stage (unless terminal — gold has no pub_topic — or blocked by the gate).
         elif settings.pub_topic:
-            await dapr_publish.publish_event(dapr, timeout_seconds=settings.publish_timeout_seconds,
+            await dapr_publish.publish_event(
+                dapr,
+                timeout_seconds=settings.publish_timeout_seconds,
                 pubsub_name=settings.pubsub,
                 topic_name=settings.pub_topic,
                 data=json.dumps(
@@ -200,7 +204,9 @@ async def handle_stage(
                     event_type="FAIL",
                     error_message=str(exc),
                 )
-                await dapr_publish.publish_event(dapr, timeout_seconds=settings.publish_timeout_seconds,
+                await dapr_publish.publish_event(
+                    dapr,
+                    timeout_seconds=settings.publish_timeout_seconds,
                     pubsub_name=settings.pubsub,
                     topic_name=settings.lineage_topic,
                     data=json.dumps(fail_event),

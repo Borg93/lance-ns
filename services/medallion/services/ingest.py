@@ -30,9 +30,7 @@ class IngestResult(BaseModel):
     fields: list[dict[str, str]]
 
 
-def ingest_to_bronze(
-    source: SourceAdapter, bronze_uri: str, storage_options: dict[str, str]
-) -> IngestResult:
+def ingest_to_bronze(source: SourceAdapter, bronze_uri: str, storage_options: dict[str, str]) -> IngestResult:
     """Write every object from ``source`` into a bronze blob-v2 table at 2.2 (``id, payload, source_uri``).
 
     Raises ``ValueError`` on an empty source: an empty bronze is almost always a mis-set prefix, and silently
@@ -56,8 +54,12 @@ def ingest_to_bronze(
     # enable_stable_row_ids (create-time-only) — durable _rowid across compaction; forward-proofs the
     # positional-id note above, so a future append/upsert can key blob carry-forward by _rowid not range.
     dataset = lance.write_dataset(
-        table, bronze_uri, mode="overwrite", storage_options=storage_options,
-        data_storage_version="2.2", enable_stable_row_ids=True,
+        table,
+        bronze_uri,
+        mode="overwrite",
+        storage_options=storage_options,
+        data_storage_version="2.2",
+        enable_stable_row_ids=True,
     )
     return IngestResult(
         version=int(dataset.version),

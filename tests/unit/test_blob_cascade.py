@@ -22,10 +22,13 @@ def _write(uri: str, table: pa.Table) -> None:
 def test_blob_column_survives_a_cascade_hop(tmp_path: Path) -> None:
     bronze, silver = str(tmp_path / "bronze"), str(tmp_path / "silver")
     schema = pa.schema([pa.field("id", pa.int64()), blob_field("payload"), pa.field("src", pa.string())])
-    _write(bronze, pa.table(
-        {"id": [1, 2], "payload": blob_array([b"img-a", b"video" * 1000]), "src": ["cam-a", "cam-b"]},
-        schema=schema,
-    ))
+    _write(
+        bronze,
+        pa.table(
+            {"id": [1, 2], "payload": blob_array([b"img-a", b"video" * 1000]), "src": ["cam-a", "cam-b"]},
+            schema=schema,
+        ),
+    )
 
     result = transform_stage(bronze, silver, {}, stage="silver")
 
@@ -45,12 +48,8 @@ def test_blob_column_survives_a_cascade_hop(tmp_path: Path) -> None:
 
 def test_stage_restamped_not_duplicated_when_carrying_a_blob(tmp_path: Path) -> None:
     bronze, silver = str(tmp_path / "b"), str(tmp_path / "s")
-    schema = pa.schema(
-        [pa.field("id", pa.int64()), blob_field("payload"), pa.field("stage", pa.string())]
-    )
-    _write(bronze, pa.table(
-        {"id": [1], "payload": blob_array([b"x"]), "stage": ["bronze"]}, schema=schema
-    ))
+    schema = pa.schema([pa.field("id", pa.int64()), blob_field("payload"), pa.field("stage", pa.string())])
+    _write(bronze, pa.table({"id": [1], "payload": blob_array([b"x"]), "stage": ["bronze"]}, schema=schema))
 
     transform_stage(bronze, silver, {}, stage="silver")
 
@@ -76,17 +75,20 @@ def test_carry_forward_preserves_fixed_size_list_alongside_a_blob(tmp_path: Path
     schema = pa.schema(
         [pa.field("id", pa.int64()), blob_field("payload"), pa.field("embedding", pa.list_(pa.float32(), 4))]
     )
-    _write(bronze, pa.table(
-        {
-            "id": [1, 2],
-            "payload": blob_array([b"a", b"b"]),
-            # float32-exact (dyadic) values so the round-trip compares equal without rounding noise
-            "embedding": pa.array(
-                [[0.5, 0.25, 0.75, 1.0], [0.125, 0.375, 0.625, 0.875]], pa.list_(pa.float32(), 4)
-            ),
-        },
-        schema=schema,
-    ))
+    _write(
+        bronze,
+        pa.table(
+            {
+                "id": [1, 2],
+                "payload": blob_array([b"a", b"b"]),
+                # float32-exact (dyadic) values so the round-trip compares equal without rounding noise
+                "embedding": pa.array(
+                    [[0.5, 0.25, 0.75, 1.0], [0.125, 0.375, 0.625, 0.875]], pa.list_(pa.float32(), 4)
+                ),
+            },
+            schema=schema,
+        ),
+    )
 
     transform_stage(bronze, silver, {}, stage="gold")
 
@@ -100,9 +102,12 @@ def test_carry_forward_preserves_fixed_size_list_alongside_a_blob(tmp_path: Path
 def test_carry_forward_handles_multiple_blob_columns(tmp_path: Path) -> None:
     bronze, silver = str(tmp_path / "b"), str(tmp_path / "s")
     schema = pa.schema([pa.field("id", pa.int64()), blob_field("img"), blob_field("audio")])
-    _write(bronze, pa.table(
-        {"id": [1], "img": blob_array([b"pixels"]), "audio": blob_array([b"waveform"])}, schema=schema
-    ))
+    _write(
+        bronze,
+        pa.table(
+            {"id": [1], "img": blob_array([b"pixels"]), "audio": blob_array([b"waveform"])}, schema=schema
+        ),
+    )
 
     transform_stage(bronze, silver, {}, stage="silver")
 

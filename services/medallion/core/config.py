@@ -85,9 +85,7 @@ class MedallionSettings(BaseSettings):
     ray_request_timeout_seconds: float = Field(
         default=10.0, ge=0.1, alias="MEDALLION_RAY_REQUEST_TIMEOUT_SECONDS"
     )
-    ray_poll_interval_seconds: float = Field(
-        default=2.0, gt=0, alias="MEDALLION_RAY_POLL_INTERVAL_SECONDS"
-    )
+    ray_poll_interval_seconds: float = Field(default=2.0, gt=0, alias="MEDALLION_RAY_POLL_INTERVAL_SECONDS")
     # The mover BLOCKS its Dapr handler until the job finishes. Redelivery is safe (the submission id is
     # deterministic per (stage, token), so a redelivered trigger re-attaches to the same job — not a second
     # one), but a job that outlives the trigger stream's ack window (dapr-component backOff first value, 30s)

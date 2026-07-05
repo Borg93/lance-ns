@@ -178,8 +178,11 @@ class _FakeDaprClient:
 def test_dapr_emitter_publishes_to_configured_pubsub_and_topic() -> None:
     client = _FakeDaprClient()
     emitter = DaprMaintenanceEmitter(
-        cast(Any, client), "lineage-pubsub", "lineage.events.v1",
-        job_namespace="compaction", timeout_seconds=5.0,
+        cast(Any, client),
+        "lineage-pubsub",
+        "lineage.events.v1",
+        job_namespace="compaction",
+        timeout_seconds=5.0,
     )
     asyncio.run(emitter.emit_maintenance(table_id="ns$a", namespace="ns"))
     assert len(client.published) == 1

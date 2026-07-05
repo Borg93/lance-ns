@@ -314,8 +314,11 @@ class _FakeDapr:
 def test_dapr_emitter_publishes_event_to_topic() -> None:
     dapr = _FakeDapr()
     emitter = DaprEmitter(
-        cast(Any, dapr), "lineage-pubsub", "lineage.events.v1",
-        job_namespace="lance-catalog", timeout_seconds=5.0,
+        cast(Any, dapr),
+        "lineage-pubsub",
+        "lineage.events.v1",
+        job_namespace="lance-catalog",
+        timeout_seconds=5.0,
     )
     asyncio.run(emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=1, run_id="r-1"))
     assert len(dapr.published) == 1
@@ -330,8 +333,11 @@ def test_dapr_emitter_publishes_event_to_topic() -> None:
 def test_dapr_emitter_swallows_publish_failure() -> None:
     # A sidecar/broker outage at publish must never break the catalog write (best-effort, like HTTP).
     emitter = DaprEmitter(
-        cast(Any, _FakeDapr(fail=True)), "lineage-pubsub", "lineage.events.v1",
-        job_namespace="x", timeout_seconds=5.0,
+        cast(Any, _FakeDapr(fail=True)),
+        "lineage-pubsub",
+        "lineage.events.v1",
+        job_namespace="x",
+        timeout_seconds=5.0,
     )
     asyncio.run(
         emitter.emit_write(table_id="a$b", namespace="a", author=None, version=2, operation=INSERT)

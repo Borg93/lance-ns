@@ -65,9 +65,7 @@ def _read_dataset(name: str, uri: str, opts: dict[str, str]) -> DemoDataset:
         timestamp = entry.get("timestamp")
         try:
             at_version = lance.dataset(uri, storage_options=opts, version=number)
-            fields = [
-                DemoField(name=f.name, type=schema.type_label(f)) for f in at_version.schema
-            ]
+            fields = [DemoField(name=f.name, type=schema.type_label(f)) for f in at_version.schema]
         except Exception:  # noqa: BLE001
             fields = []
         versions.append(

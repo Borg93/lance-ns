@@ -94,17 +94,27 @@ def create_table(
     mode: str | None = None,
     properties: dict[str, str] | None = None,
     allow_external_blobs: bool = False,
+    external_blob_bases: list[str] | None = None,
 ) -> CreateTableResponse:
     """Create a table from an Arrow-IPC payload, choosing the write path by schema.
 
     A blob-v2 column requires file format 2.2, which the native create pins at 2.1 and rejects — such a
     schema takes the direct 2.2 write; every other schema delegates to the native create. Runs off the
     event loop (blocking pyarrow decode + Lance/S3 IO), so the endpoint stays a single delegated call.
-    ``allow_external_blobs`` permits ``Blob.from_uri`` columns pointing outside the dataset root.
+    ``allow_external_blobs`` permits ``Blob.from_uri`` columns pointing ANYWHERE outside the dataset root
+    (the blanket bypass); ``external_blob_bases`` is the safer allowlist — external pointers are accepted
+    only under one of these registered bases, with the blanket bypass left off.
     """
     if _schema_is_blob(data):
         return _create_blob_table(
-            ns, so, segments, data, mode=mode, properties=properties, allow_external=allow_external_blobs
+            ns,
+            so,
+            segments,
+            data,
+            mode=mode,
+            properties=properties,
+            allow_external=allow_external_blobs,
+            external_blob_bases=external_blob_bases or [],
         )
     request = CreateTableRequest(id=segments, mode=mode, properties=properties)
     response: CreateTableResponse = native.call(ns, "create_table", request, data)
@@ -128,10 +138,26 @@ def _schema_is_blob(data: bytes) -> bool:
 
 
 def _write_blob(
-    table: pa.Table, uri: str, so: StorageOptions, *, mode: str, allow_external: bool
+    table: pa.Table,
+    uri: str,
+    so: StorageOptions,
+    *,
+    mode: str,
+    allow_external: bool,
+    external_blob_bases: list[str],
 ) -> lance.LanceDataset:
     """Write a blob-v2 table at file format 2.2. ``allow_external`` opts into ``Blob.from_uri`` columns
-    that point outside the dataset root (lance_docs/guide.md — external blob bases)."""
+    ANYWHERE outside the dataset root (blanket bypass); ``external_blob_bases`` registers approved base URIs
+    so external pointers UNDER a registered base are accepted with the blanket bypass left off — the safer
+    allowlist posture (lance_docs/guide.md — external blob bases). Bases register on a fresh CREATE; an
+    overwrite reuses the bases the table registered at create."""
+    # DatasetBasePath registers each approved base; only on create (initial_bases is a create-time arg —
+    # overwrite/append inherit the manifest's registered bases).
+    initial_bases = (
+        [lance.DatasetBasePath(b, is_dataset_root=False) for b in external_blob_bases]
+        if external_blob_bases and mode == "create"
+        else None
+    )
     try:
         return lance.write_dataset(
             table,
@@ -139,16 +165,18 @@ def _write_blob(
             mode=mode,
             storage_options=so,
             data_storage_version="2.2",
+            initial_bases=initial_bases,
             allow_external_blob_outside_bases=allow_external,
         )
     except OSError as exc:
-        # An external-pointer blob while the flag is off is a client error, not a 500 — surface a clear 400.
-        # Match lance's specific phrase (NOT a bare "external"), so a genuine infra OSError on a path that
-        # merely contains the word "external" still surfaces as a retryable 500 rather than a masked 400.
+        # An external-pointer blob outside every registered base (and the blanket flag off) is a client
+        # error, not a 500 — surface a clear 400. Match lance's specific phrase (NOT a bare "external"), so a
+        # genuine infra OSError on a path that merely contains the word "external" still surfaces as a 500.
         if not allow_external and "outside registered external bases" in str(exc).lower():
             raise InvalidInputError(
-                "blob column references an external object outside the dataset root; the catalog must be "
-                "configured with allow_external_blobs to accept external-pointer (Blob.from_uri) columns"
+                "blob column references an external object outside the dataset root and any registered "
+                "external base; configure LANCE_EXTERNAL_BLOB_BASES with the approved base(s), or "
+                "LANCE_ALLOW_EXTERNAL_BLOBS for the blanket bypass, to accept Blob.from_uri columns"
             ) from exc
         raise
 
@@ -162,6 +190,7 @@ def _create_blob_table(
     mode: str | None,
     properties: dict[str, str] | None,
     allow_external: bool,
+    external_blob_bases: list[str],
 ) -> CreateTableResponse:
     """Create a blob-v2 table at file format 2.2 (the native create pins 2.1 and rejects it).
 
@@ -180,7 +209,14 @@ def _create_blob_table(
 
     if existing is not None and not only_declared:  # a written, readable table already lives here
         if normalized == "overwrite":
-            dataset = _write_blob(table, existing, so, mode="overwrite", allow_external=allow_external)
+            dataset = _write_blob(
+                table,
+                existing,
+                so,
+                mode="overwrite",
+                allow_external=allow_external,
+                external_blob_bases=external_blob_bases,
+            )
             return CreateTableResponse(location=existing, version=dataset.version, properties=properties)
         if normalized in ("existok", "exist_ok"):  # keep it untouched, just report its current version
             version = lance.dataset(existing, storage_options=so).version
@@ -188,12 +224,30 @@ def _create_blob_table(
         # `create` against a written table → let declare surface the canonical TableAlreadyExists conflict.
 
     if existing is not None and only_declared:  # declared, no data yet → write into it (all modes)
-        return _write_blob_into(ns, table, existing, so, segments, properties, allow_external=allow_external)
+        return _write_blob_into(
+            ns,
+            table,
+            existing,
+            so,
+            segments,
+            properties,
+            allow_external=allow_external,
+            external_blob_bases=external_blob_bases,
+        )
 
     location = ns.declare_table(DeclareTableRequest(id=segments, properties=properties)).location
     if not location:
         raise InvalidInputError("namespace did not return a location for the declared table")
-    return _write_blob_into(ns, table, location, so, segments, properties, allow_external=allow_external)
+    return _write_blob_into(
+        ns,
+        table,
+        location,
+        so,
+        segments,
+        properties,
+        allow_external=allow_external,
+        external_blob_bases=external_blob_bases,
+    )
 
 
 def _write_blob_into(
@@ -205,12 +259,20 @@ def _write_blob_into(
     properties: dict[str, str] | None,
     *,
     allow_external: bool,
+    external_blob_bases: list[str],
 ) -> CreateTableResponse:
     """Write the blob table's first data version into an already-declared ``location``, rolling the declare
     back with ``drop_table`` on failure so the name stays retryable rather than stuck declared-but-unreadable.
     """
     try:
-        dataset = _write_blob(table, location, so, mode="create", allow_external=allow_external)
+        dataset = _write_blob(
+            table,
+            location,
+            so,
+            mode="create",
+            allow_external=allow_external,
+            external_blob_bases=external_blob_bases,
+        )
     except Exception:
         with suppress(Exception):  # best-effort rollback; re-raise the real write error
             ns.drop_table(DropTableRequest(id=segments))

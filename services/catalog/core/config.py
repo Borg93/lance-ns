@@ -35,6 +35,16 @@ class Settings(BaseSettings):
     # server-side read primitive. Enable only for a trusted producer; Lance's REGISTERED EXTERNAL BASES
     # (approved base paths) are the finer-grained alternative. Managed/inline blobs (bytes in) always work.
     allow_external_blobs: bool = Field(default=False, alias="LANCE_ALLOW_EXTERNAL_BLOBS")
+    # The SAFER external-blob posture: a comma-separated allowlist of approved base URIs. External
+    # ``Blob.from_uri`` pointers are accepted ONLY when they fall under one of these registered bases (Lance
+    # ``initial_bases``), while ``allow_external_blob_outside_bases`` stays False — so a create can reference
+    # a curated media bucket without opening the blanket outside-bases SSRF door. Empty = no external bases.
+    external_blob_bases: str = Field(default="", alias="LANCE_EXTERNAL_BLOB_BASES")
+
+    @property
+    def external_blob_base_list(self) -> list[str]:
+        """The registered external-blob base URIs (parsed from the comma-separated allowlist)."""
+        return [b.strip() for b in self.external_blob_bases.split(",") if b.strip()]
 
     # Object store (MinIO / S3). Credentials are required — no default — so a
     # missing secret fails loudly at startup instead of silently using a default.

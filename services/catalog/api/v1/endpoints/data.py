@@ -143,6 +143,7 @@ async def create_table(
         mode=mode,
         properties=parsed_properties,
         allow_external_blobs=settings.allow_external_blobs,
+        external_blob_bases=settings.external_blob_base_list,
     )
     # An Overwrite that replaced an EXISTING table (owner-authorized above) resets its ACL: revoke the prior
     # incarnation's grants (any reader/writer/validator that must not survive onto the reused id) before

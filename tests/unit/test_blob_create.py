@@ -202,6 +202,37 @@ def test_external_pointer_blob_is_gated_by_the_flag(tmp_path: Path) -> None:
     assert ds.read_blobs("blob", indices=[0])[0][1] == b"external"  # first 8 bytes of the source
 
 
+def test_external_blob_allowlist_accepts_in_base_rejects_out_of_base(tmp_path: Path) -> None:
+    """#92: the SAFER posture. With a registered base allowlist and the blanket flag OFF, an external
+    Blob.from_uri UNDER a registered base is accepted, while one OUTSIDE every registered base is rejected —
+    a curated media bucket without opening the blanket outside-bases door."""
+    base = tmp_path / "approved"
+    base.mkdir()
+    (base / "obj.bin").write_bytes(b"approved-external-payload")
+    outside = tmp_path / "elsewhere.bin"
+    outside.write_bytes(b"unapproved-payload")
+    ns = connect("dir", {"root": str(tmp_path / "root")})
+    schema = pa.schema([pa.field("id", pa.int64()), blob_field("blob")])
+
+    def _pointer(uri: str) -> bytes:
+        return _ipc(
+            pa.table(
+                {"id": [1], "blob": blob_array([Blob.from_uri(uri, position=0, size=8)])}, schema=schema
+            )
+        )
+
+    bases = [base.as_uri()]
+    # UNDER the registered base → accepted with allow_external_blobs left False.
+    create_table(ns, {}, ["in_base"], _pointer((base / "obj.bin").as_uri()), external_blob_bases=bases)
+    ds = _open(ns, ["in_base"])
+    assert ds.data_storage_version == "2.2"
+    assert ds.read_blobs("blob", indices=[0])[0][1] == b"approved"  # first 8 bytes, read back
+
+    # OUTSIDE every registered base → rejected (allowlist doesn't cover it, blanket flag off).
+    with pytest.raises(InvalidInputError, match="external"):
+        create_table(ns, {}, ["out_base"], _pointer(outside.as_uri()), external_blob_bases=bases)
+
+
 def test_rejected_external_create_rolls_back_and_stays_retryable(tmp_path: Path) -> None:
     source = tmp_path / "external.bin"
     source.write_bytes(b"external-bytes")

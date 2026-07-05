@@ -115,11 +115,20 @@ def test_create_delegates_to_dataplane_create_table(
     seen: dict[str, object] = {}
 
     def _stub(  # noqa: ANN001
-        ns, so, segments, data, *, mode=None, properties=None, allow_external_blobs=False
+        ns,
+        so,
+        segments,
+        data,
+        *,
+        mode=None,
+        properties=None,
+        allow_external_blobs=False,
+        external_blob_bases=None,
     ) -> CreateTableResponse:
         seen["segments"] = segments
         seen["mode"] = mode
         seen["allow_external_blobs"] = allow_external_blobs  # proves the endpoint forwards the setting
+        seen["external_blob_bases"] = external_blob_bases  # the allowlist is forwarded too
         return CreateTableResponse(location="s3://x/t", version=1)
 
     monkeypatch.setattr("catalog.services.dataplane.create_table", _stub)
@@ -130,7 +139,12 @@ def test_create_delegates_to_dataplane_create_table(
     )
 
     assert resp.status_code == 200
-    assert seen == {"segments": ["media", "clips"], "mode": "overwrite", "allow_external_blobs": False}
+    assert seen == {
+        "segments": ["media", "clips"],
+        "mode": "overwrite",
+        "allow_external_blobs": False,
+        "external_blob_bases": [],
+    }
 
 
 def test_merge_insert_maps_spec_09_query_params(client: TestClient, fake_ns: MagicMock) -> None:

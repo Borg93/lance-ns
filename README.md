@@ -251,7 +251,8 @@ the former 501s became real operations; batch transactions remain spec-correct 5
 | `LANCE_OIDC_ENABLED` / `_ISSUER` / `_AUDIENCE` / `_CACHE_TTL` / `_LEEWAY` / `_ALLOW_INSECURE` | off | OIDC authn |
 | `LANCE_FGA_ENABLED` / `_API_URL` / `_STORE_ID` / `_MODEL_ID` / `_ROOT_OBJECT` / `_LOCK_ROOT_CREATE` | off | OpenFGA authz |
 | `LANCE_MAX_BODY_BYTES` | 256 MiB | 413 body cap (Arrow-IPC OOM guard; steer big media to direct-to-storage) |
-| `LANCE_ALLOW_EXTERNAL_BLOBS` | off | accept `Blob.from_uri` external-pointer columns on create (SSRF/GC caveats — see `core/config.py`) |
+| `LANCE_ALLOW_EXTERNAL_BLOBS` | off | blanket: accept `Blob.from_uri` external-pointer columns pointing ANYWHERE (SSRF/GC caveats — see `core/config.py`) |
+| `LANCE_EXTERNAL_BLOB_BASES` | — | the safer allowlist: comma-separated approved base URIs — external pointers accepted only *under* a registered base, blanket flag left off |
 | `LANCE_VENDING_MODE` / `_VENDING_TTL_SECONDS` / `_S3_ASSUME_ROLE_ARN` / `_S3_STS_ENDPOINT` | `mode_b` | data-plane credential vending (server-mediated / STS / static) |
 | `LANCE_LINEAGE_EMIT_ENABLED` / `_LINEAGE_TRANSPORT` / `_LINEAGE_URL` / `_DAPR_PUBSUB` / `_DAPR_TOPIC` | off | best-effort OpenLineage emit on writes (http or Dapr pub/sub) |
 | `LANCE_SECRETS_FROM_DAPR` / `_DAPR_SECRET_STORE` / `_DAPR_SECRET_KEY` | off | fetch the S3 secret from OpenBao at boot (fail-closed sole source) |

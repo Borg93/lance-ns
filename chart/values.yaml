@@ -34,6 +34,10 @@ vending:
   # cascade's read_blobs, so an arbitrary URI (cloud metadata / internal host) becomes a read primitive.
   # Enable only for a trusted producer. Managed/inline blobs (bytes copied in) always work regardless.
   allowExternalBlobs: false
+  # The SAFER alternative to the blanket flag: a comma-separated allowlist of approved external base URIs
+  # (e.g. "s3://media-bucket/approved,s3://other/base"). External Blob.from_uri pointers are accepted ONLY
+  # under a registered base, with the blanket bypass left off — a curated media source without the SSRF door.
+  externalBlobBases: ""
 
 # --- Catalog request limits -----------------------------------------------------------------------
 catalog:

@@ -19,6 +19,7 @@ image:
 # closed and the pipeline stalls. ------------------------------------------------------------------
 auth:
   enabled: true
+  lockRootCreate: true # prod: a token alone can't create root namespaces — needs a warehouse create grant
 medallion:
   fgaEnabled: true
   moverReplicas: 2

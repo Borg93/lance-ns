@@ -11,6 +11,9 @@ image:
 # --- Governance (Dex OIDC + OpenFGA). Off → open dev mode; on → the full governed demo. ------------
 auth:
   enabled: false
+  # Lock root (top-level) namespace/table creation to warehouse-create-grant holders. Off in dev
+  # (open self-serve); values-prod sets it true so a token alone can't squat root namespaces.
+  lockRootCreate: false
 
 # --- Data-plane credential vending (Track B). How a client gets storage_options for DIRECT object I/O. ----
 # POST /v1/table/<id>/credentials?tier=read|write returns scoped creds (or mode=server_mediated). Modes:

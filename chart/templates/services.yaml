@@ -88,6 +88,10 @@ spec:
             - { name: LANCE_OIDC_ALLOW_INSECURE, value: "true" }
             - { name: LANCE_FGA_ENABLED, value: "true" }
             - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            # Lock top-level (root) namespace/table creation to holders of a warehouse-level create grant.
+            # Off in dev (self-serve); ON in prod (values-prod) — else any Dex-authenticated user can squat
+            # unlimited root namespaces in the shared warehouse bucket (assessment finding).
+            - { name: LANCE_FGA_LOCK_ROOT_CREATE, value: {{ .Values.auth.lockRootCreate | quote }} }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}

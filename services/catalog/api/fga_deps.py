@@ -352,3 +352,23 @@ async def require_can_drop_table(
         return
     obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
     await _require(client, user=token.sub, relation="can_drop", obj=obj)
+
+
+async def require_create_on_parent(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    resource: str,
+    segments: list[str],
+) -> None:
+    """Authorize a create-on-parent op for ``segments`` — check ``can_create_table``/``can_create_namespace``
+    on the child's PARENT namespace (the same gate ``authorize`` applies to create/declare/register). Used by
+    endpoints that mint a NEW child id outside the create routes — notably ``rename`` into a destination
+    namespace: without it, a source-table owner could relocate (plant) their table into a namespace they have
+    no create rights on. No-op when FGA is off / unwired / unauthenticated."""
+    if not (settings.fga_enabled and client is not None and token is not None):
+        return
+    check = _create_parent_check(resource, segments, settings)
+    if check is not None:  # None => open top-level create (authn already enforced)
+        await _require(client, user=token.sub, relation=check[1], obj=check[0])

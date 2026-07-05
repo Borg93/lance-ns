@@ -189,12 +189,16 @@ async def rename_table(
     the source id's FGA tuples and seed ownership on the destination id."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
-    response: RenameTableResponse = await run_in_threadpool(native.call, ns, "rename_table", body)
-    # Rename mints a new table identifier under ``new_namespace_id`` (defaulting to the
-    # source's parent namespace, i.e. all source segments but the last) + ``new_table_name``;
-    # grant ownership on the destination so the caller retains access under the new id.
+    # Rename mints a new table identifier under ``new_namespace_id`` (defaulting to the source's parent
+    # namespace, i.e. all source segments but the last) + ``new_table_name``.
     dest_parent = list(body.new_namespace_id) if body.new_namespace_id else segments[:-1]
     new_segments = [*dest_parent, body.new_table_name]
+    # Renaming INTO a namespace is a create in that namespace: authorize can_create_table on the DESTINATION
+    # parent BEFORE the (destructive, relocating) native rename — else a source-table owner could plant their
+    # table into a namespace/tenant they have no create rights on. (authorize already gated can_drop on the
+    # source at owner tier.)
+    await fga_deps.require_create_on_parent(client, settings, token, resource="table", segments=new_segments)
+    response: RenameTableResponse = await run_in_threadpool(native.call, ns, "rename_table", body)
     # Revoke the SOURCE id's tuples (it no longer names a table) then seed the destination — so no
     # stale grant survives under the old id and the caller keeps ownership under the new one.
     await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)

@@ -15,6 +15,7 @@ from typing import Any, cast
 import httpx
 from catalog.core.lineage_emit import (
     CREATE_TABLE,
+    DEREGISTER_TABLE,
     DROP_TABLE,
     INSERT,
     MERGE_INSERT,
@@ -246,6 +247,27 @@ def test_build_write_event_drop_is_versionless_and_named_drop_table() -> None:
     assert event["run"]["facets"]["lance"]["operation"] == "drop_table"
     assert "version" not in event["run"]["facets"]["lance"]
     assert event["job"]["name"] == "drop_table.db$t"
+
+
+def test_emit_write_event_deregister_is_versionless_marker() -> None:
+    # deregister detaches without deleting data — recorded as a versionless marker (like drop) so the
+    # Dataset node isn't left looking like a live, never-touched table. version=None asserts no Lance write.
+    em = _RecordingEmitter()
+    asyncio.run(
+        emit_write_event(
+            cast(LineageEmitter, em),
+            ["db", "t"],
+            delimiter="$",
+            author="alice",
+            version=None,
+            operation=DEREGISTER_TABLE,
+            authorization=None,
+        )
+    )
+    w = em.writes[0]
+    assert w["operation"] == "deregister_table"
+    assert w["version"] is None
+    assert w["table_id"] == "db$t"
 
 
 def test_http_emitter_omits_auth_header_when_absent() -> None:

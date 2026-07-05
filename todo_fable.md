@@ -603,3 +603,74 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 - “Token-less triggers duplicate Run nodes / stage RETRY re-runs are a bug” — refuted: token always set by every
   wired publisher, route token-guarded, whole-stage replay is the documented at-least-once design converging
   via MERGE + overwrite.
+
+## 11 · Lineage lifecycle-emit + AGE-constraint review (2026-07-05, wf_57c04d9d — 13 findings, all verified)
+
+Adversarial review of the Batch-C AGE constraints + the #93 lifecycle changes + #92 blob create. Only ONE
+"broken" (rename) — and the **live-verify (redeploy + governed drive) showed it is MOOT**: `rename_table`
+returns **501 UnsupportedOperationError** on the `dir` namespace backend (our shipped stack — the integration
+suite even pins the 501 mapping). You can't rename a table, so there is no provenance to lose. This is the
+canonical "verified against code, not against the running backend" miss the review made and the live-verify
+caught. **Fixed + live-verified in AGE this session:**
+- 🟥→⚪ **RENAME lost provenance (the one "broken")** — MOOT: rename is 501 on the `dir` backend. The
+  rename-lineage code (emit_rename_event + inputs param + RENAME_TABLE create-class op) was **REVERTED** as
+  speculative dead code — it fires only on a rename-supporting backend that doesn't exist here. If one is
+  adopted, re-add dest←source lineage in `tables.py:rename_table` (a comment marks the spot).
+- ✅ **deregister emitted no marker** → a detach looked like a live, never-touched table. Now emits a
+  versionless `deregister_table` marker (asymmetric with drop, which deletes). **Live-verified in AGE:** a
+  deregister run lands with `operation='deregister_table'` + a WROTE edge (via Dapr→NATS→lineage→AGE).
+- ✅ **drop op invisible on the Run node** — `operation` is now a first-class Run property, surfaced in
+  `/producers` + `/runs` (`ProducerInfo.operation` / `RunStatus.operation`). **Live-verified in AGE:** create/
+  drop/deregister runs carry `operation` correctly. NOTE: drop+deregister also `revoke_ownership`, so the
+  acting owner 403s on the dropped table's governed `/producers` afterward — the record persists for the
+  ungoverned reconcile/audit/graph readers (which is who cares "is this dataset still live?").
+- ✅ **New deadlock mode from the vertex UNIQUE index** (two concurrent ingests first-creating ≥2 shared
+  datasets in opposing order). Fixed by a **deterministic name-sorted MERGE order** across the input+output
+  loops → total lock-acquisition order, no circular wait.
+- ✅ **:Column dup double-listing** — `_DATASET_COLUMN_NODES` now `RETURN DISTINCT`.
+
+**Deferred (documented, not dev-blocking):**
+- ⛔ **Overwrite accumulates stale column nodes** on the reused id (schema {a,b}→{x,y} leaves a,b in the
+  HAS_COLUMN inventory). Same root as the drop-lineage-GC future-work; `dataset_schema()` is unaffected
+  (per-version snapshot), only `dataset_column_graph()` inventory. Needs column-GC on overwrite/drop.
+- ⛔ **reconcile false-flags dropped/renamed-away tables** as `MISSING_ON_STORAGE` — their node keeps a stale
+  `source_uri` (deleted/moved) so the sweep WARNs storage-loss on a deliberate drop. Fix: a terminal
+  lifecycle flag on the Dataset node that reconcile skips. (Pre-existing, now also reachable via rename-source.)
+- 🟨 **:Column has no UNIQUE index by choice** — dup column vertices from a rare concurrent first-create are
+  benign (the DISTINCT masks the only visible symptom) and an index would add abort/retry churn to the hot
+  column path. Reconsider only if column dedup becomes load-bearing.
+- 🟨 **Losing-side of a concurrent first-create aborts the whole ingest txn → one ~30s-delayed Dapr
+  redelivery** per brand-new shared vertex under prod concurrency (replicas≥2). Self-heals; the sorted MERGE
+  order narrows it. Inherent to the UNIQUE index; a per-statement savepoint would remove it (invasive, deferred).
+
+## 12 · Prod hardening — delegate-to-platform (2026-07-05, don't-reinvent audit wf_f401eea8; NOT dev-blocking)
+
+**Verdict: we reinvent NOTHING k8s/Dapr owns — zero code to delete.** All gaps below are native switches we
+haven't flipped. Almost all are **prod-only** (kind's default CNI ignores NetworkPolicy; PSA/SA/infra-SC are
+prod concerns) — deliberately NOT rushed into the dev baseline (footgun-sequenced). See memory
+`dont-reinvent-k8s-dapr-verdict`.
+
+- ⛔ **Network L3 is effectively open** (biggest gap; prod-only): no namespace **default-deny** NetworkPolicy,
+  **openbao (secret store) reachable by any pod**, `networkPolicy.enabled:false` even in prod. Fix order:
+  (1) default-deny Ingress+Egress, (2) **ship the kube-dns egress allow IN THE SAME CHANGE** (default-deny
+  egress without it bricks name resolution), (3) targeted allows (openbao←catalog/secretstore,
+  age-postgres:5432←catalog/lineage/movers, rustfs←data-plane, nats:4222←sidecar'd pods), (4) flip
+  `networkPolicy.enabled` in values-prod. Tighten the lone lance-ray policy from release-wide to per-component + add Egress.
+- ⛔ **~13 first-party pods on the `default` ServiceAccount** with `automountServiceAccountToken` defaulting
+  true → each mounts an unused k8s-API JWT. Fix: a `lance.serviceAccountName` helper (dedicated unbound SA per
+  workload) + `automountServiceAccountToken:false` on the SA object (NOT the pod — leave the Dapr injector's
+  projected token untouched; verify live with `dapr mtls -k` before flipping).
+- ⛔ **Every INFRA pod ships with zero securityContext** (rustfs, age-postgres, openbao, dex, gateway,
+  dapr-dashboard + subcharts nats/openfga/greptimedb/vector). App tier is fully hardened; infra is not.
+  **gateway is a free win** (its nginx already pins pid/temp to /tmp → RO-rootfs-ready). Data/secret holders
+  (openbao, age-postgres, rustfs) need `runAsUser`+`fsGroup` for their PVCs (not blind helper reuse). Subcharts
+  via their own values surface (delegate, don't template).
+- ⛔ **No Pod Security Admission enforcement** — app-tier hardening is unbackstopped, drift admitted silently.
+  Label the namespace `pod-security.kubernetes.io/enforce` (baseline → restricted). **Sequencing footgun:**
+  restricted would REJECT `lineage` + `openfga-migrate` today (their root busybox `wait-age` init containers
+  have no securityContext) → harden the init containers FIRST.
+- ✅ **Cheap hygiene done this session:** phantom `medallion.producer.port`→`medallion.port` (network-policy);
+  pinned `dapr.global.mtls.enabled:true` explicitly (self-documenting, guards an accidental flip); corrected the
+  misleading "rolled in-house" docstring in `common/oidc.py` (it wires PyJWT — no hand-rolled crypto).
+- 🟨 Minor: downgrade `dapr-dashboard` ClusterRole/Binding → namespaced Role; fold `greptimedb-ttl-job`'s
+  hand-typed securityContext into a pod-level helper variant (DRY).

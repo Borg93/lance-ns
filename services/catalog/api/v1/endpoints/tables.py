@@ -33,7 +33,7 @@ from catalog.api import fga_deps
 from catalog.api.dependencies import FgaClientDep, LineageEmitterDep, NamespaceDep, SettingsDep
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
-from catalog.core.lineage_emit import DROP_TABLE, emit_write_event
+from catalog.core.lineage_emit import DEREGISTER_TABLE, DROP_TABLE, emit_write_event
 from catalog.services import native
 
 router = APIRouter(prefix="/v1/table", tags=["table"])
@@ -146,15 +146,33 @@ async def drop_table(
 
 @router.post("/{id}/deregister", response_model_exclude_none=True)
 async def deregister_table(
-    id: str, ns: NamespaceDep, settings: SettingsDep, client: FgaClientDep
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    client: FgaClientDep,
+    emitter: LineageEmitterDep,
+    token: CurrentToken,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> DeregisterTableResponse:
     """Deregister the table at ``id`` (detach it without deleting data) via lance_namespace
-    ``deregister_table``, then revoke its FGA ownership."""
+    ``deregister_table``, then revoke its FGA ownership and emit a best-effort ``deregister_table`` marker."""
     segments = parse_identifier(id, settings.delimiter)
     response: DeregisterTableResponse = await run_in_threadpool(
         native.call, ns, "deregister_table", DeregisterTableRequest(id=segments)
     )
     await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+    # Record the detach as best-effort lineage — asymmetric with drop (which deletes data), deregister
+    # only detaches, so without this marker the Dataset node looks like a still-live, never-touched table.
+    # Versionless (no data was written), inline-awaited so it reaches the durable transport before the reply.
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=None,
+        operation=DEREGISTER_TABLE,
+        authorization=authorization,
+    )
     return response
 
 
@@ -186,7 +204,11 @@ async def rename_table(
     client: FgaClientDep,
 ) -> RenameTableResponse:
     """Rename the table at ``id`` to its new id via ``rename_table``, then revoke
-    the source id's FGA tuples and seed ownership on the destination id."""
+    the source id's FGA tuples and seed ownership on the destination id.
+
+    No lineage is emitted: the ``dir`` namespace backend returns 501 for ``rename_table`` (unsupported), so a
+    rename can't happen on the shipped stack — provenance can't be lost on an op that never runs. If a
+    rename-supporting backend is adopted, emit dest←source lineage here (see todo_fable §11)."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     # Rename mints a new table identifier under ``new_namespace_id`` (defaulting to the source's parent

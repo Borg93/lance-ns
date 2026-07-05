@@ -1,9 +1,11 @@
-"""In-house OIDC ID-token verification (PyJWT + JWKS discovery).
+"""OIDC ID-token verification wired directly on **PyJWT** (no python-jose / wrapper lib).
 
-Rolled in-house per the fastapi skill (no python-jose / wrapper lib): discover the
-provider's ``.well-known/openid-configuration``, fetch + cache its JWKS, and verify
-the token's signature / issuer / audience / expiry. Provider-agnostic — works with
-Keycloak, Dex, Okta, Auth0, Entra, or Google by setting the issuer + audience.
+The cryptography is PyJWT's, not ours: ``PyJWKClient`` fetches + caches the provider's JWKS and
+``jwt.decode`` does the signature / issuer / audience / expiry math. What we add is the thin OIDC
+plumbing PyJWT does not: discover the provider's ``.well-known/openid-configuration`` for the issuer +
+JWKS URI, and enforce a *local* signing-algorithm allowlist before handing the token to ``jwt.decode``
+(below). Provider-agnostic — works with Keycloak, Dex, Okta, Auth0, Entra, or Google by setting the
+issuer + audience. (We do NOT hand-roll JWT crypto — see the don't-reinvent audit.)
 
 Security posture (see CHANGELOG in the task notes):
 

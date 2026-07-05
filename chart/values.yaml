@@ -101,6 +101,12 @@ dapr:
   global:
     ha:
       enabled: false # single-node kind
+    mtls:
+      # Pin Dapr Sentry service-to-service mTLS ON explicitly. It IS the subchart default, but pinning it
+      # makes the relied-upon guarantee self-documenting and guards against an accidental `--set …=false`
+      # or a subchart-default flip silently dropping inter-service encryption. Delegated to Dapr — we
+      # hand-roll no TLS. Confirm live with `dapr mtls -k` (sidecars 2/2 with SPIFFE identities).
+      enabled: true
     # NOTE: we use pub/sub + bindings + secret stores + service invocation only (no actors/workflows/jobs),
     # so placement + scheduler are logically unused — BUT do NOT disable them: daprd 1.18 connects to BOTH
     # at startup unconditionally and never becomes Ready without them (verified live — sidecars stuck 1/2

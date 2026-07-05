@@ -63,6 +63,10 @@ class ProducerInfo(BaseModel):
     size_bytes: int | None = None
     quality_passed: bool | None = None
     quality_assertions: list[dict[str, Any]] = Field(default_factory=list)
+    #: The catalog operation that produced this run (``create_table`` / ``drop_table`` / ``rename_table`` /
+    #: ``insert`` / …), from the ``lance`` run facet — so a drop/rename is distinguishable from a plain
+    #: versionless write without reading the raw event. ``None`` for external producers that omit it.
+    operation: str | None = None
 
 
 class Neighbors(BaseModel):
@@ -264,6 +268,9 @@ class RunStatus(BaseModel):
     started_at: str | None = None
     updated_at: str | None = None
     events: int = 0
+    #: The catalog operation for this run (``create_table`` / ``drop_table`` / ``rename_table`` / …), so the
+    #: live board can label a drop/rename as such; ``None`` for runs with no ``lance`` operation facet.
+    operation: str | None = None
 
 
 class Runs(BaseModel):

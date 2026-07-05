@@ -48,6 +48,10 @@ DELETE = "delete"
 #: Dataset node PERSISTS in the graph as a historical provenance record (Marquez keeps dropped datasets too);
 #: the operation names it a drop so a reader can tell it was deleted, not just last-written.
 DROP_TABLE = "drop_table"
+#: A table deregister — detaches the table from the catalog WITHOUT deleting its data. Recorded as a
+#: versionless run (asymmetric with drop, which deletes) so the detach has a provenance marker instead of
+#: leaving the Dataset node looking like a still-live, never-touched table.
+DEREGISTER_TABLE = "deregister_table"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
 #: and what a Marquez-style consumer records as the event source).

@@ -88,7 +88,8 @@ _SET_JOB_SOURCE: Final = "MATCH (j:Job {namespace:$ns, name:$nm}) SET j.source_l
 _MERGE_RUN: Final = (
     "MERGE (r:Run {run_id:$rid}) "
     "SET r.event_type=$et, r.event_time=$tm, r.author=$au, r.producer=$pr, r.error_message=$err, "
-    "r.job=$job, r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 "
+    "r.job=$job, r.operation=$op, "
+    "r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 "
     "RETURN 1"
 )
 # Progress + outputs ride only some events (RUNNING carries progress; only the terminal event names
@@ -99,7 +100,7 @@ _SET_RUN_PROGRESS: Final = (
 _SET_RUN_OUTPUTS: Final = "MATCH (r:Run {run_id:$rid}) SET r.outputs=$outs RETURN 1"
 _LIST_RUNS: Final = (
     "MATCH (r:Run) RETURN r.run_id, r.job, r.author, r.event_type, r.progress_done, r.progress_total, "
-    "r.error_message, r.started_at, r.event_time, r.events_count, r.outputs"
+    "r.error_message, r.started_at, r.event_time, r.events_count, r.outputs, r.operation"
 )
 # Discovery / browse — the "what exists?" lists. Like _LIST_RUNS these fetch every node and are governed +
 # paginated in Python (the graph's node count is modest), so a caller can browse the estate without already
@@ -251,7 +252,7 @@ _DOWNSTREAM: Final = (
 _PRODUCERS: Final = (
     "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) "
     "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version, r.producer, r.error_message, "
-    "w.row_count, w.size_bytes, w.quality_passed, w.quality_assertions"
+    "w.row_count, w.size_bytes, w.quality_passed, w.quality_assertions, r.operation"
 )
 # Reconcile (#23): the version the graph believes is current = the version on the most-recent
 # *successful* WROTE edge (failed runs carry a WROTE edge with no version, so the IS NOT NULL guard
@@ -332,8 +333,14 @@ _COL_DOWNSTREAM: Final = (
 )
 # Per-dataset column view: the dataset's OWN columns (complete typed inventory via HAS_COLUMN, incl.
 # columns with no declared lineage) + every column edge touching the dataset (either endpoint).
+# DISTINCT: :Column has no UNIQUE index (unlike Run/Dataset/Job — deliberately, since duplicate column
+# vertices from a rare concurrent first-create are benign and an index would add abort/retry churn to the
+# hot column path). Two concurrent ingests that first-touch the same (dataset, field) can each MATCH-miss
+# and CREATE, leaving a duplicate :Column + duplicate HAS_COLUMN; DISTINCT collapses them so the inventory
+# lists each field once regardless. The upstream/downstream column walks already RETURN DISTINCT.
 _DATASET_COLUMN_NODES: Final = (
-    "MATCH (d:Dataset {name:$ds})-[:HAS_COLUMN]->(c:Column) RETURN c.field, c.type ORDER BY c.field"
+    "MATCH (d:Dataset {name:$ds})-[:HAS_COLUMN]->(c:Column) "
+    "RETURN DISTINCT c.field, c.type ORDER BY c.field"
 )
 _DATASET_COLUMN_EDGES: Final = (
     "MATCH (o:Column)-[e:DERIVED_FROM_COLUMN]->(i:Column) WHERE o.dataset=$ds OR i.dataset=$ds "
@@ -384,6 +391,10 @@ class LineageRepository:
                     "pr": event.producer or "",
                     "err": event.error_message or "",
                     "job": f"{event.job.namespace}/{event.job.name}",
+                    # The catalog operation (create_table/drop_table/rename_table/…) as a first-class Run
+                    # property so /producers + /runs can name a drop/rename as such (not just a versionless
+                    # WROTE); "" for events that carry no lance-facet operation (external producers).
+                    "op": event.operation or "",
                 },
             )
             progress = event.progress
@@ -408,7 +419,12 @@ class LineageRepository:
                 _LINK_RUN_JOB,
                 {"rid": event.run.run_id, "ns": event.job.namespace, "nm": event.job.name},
             )
-            for ds in event.inputs:
+            # MERGE datasets in a DETERMINISTIC (name-sorted) order across BOTH loops. With the AGE vertex
+            # UNIQUE index, a concurrent first-CREATE of a shared Dataset makes the loser BLOCK on the
+            # winner; if two overlapping events acquired those vertex locks in different orders they would
+            # deadlock (Postgres aborts one → forced Dapr redelivery). A single global sort order makes the
+            # lock-acquisition order total, so overlapping ingests serialize cleanly instead of deadlocking.
+            for ds in sorted(event.inputs, key=lambda d: d.name):
                 await self._merge_dataset(conn, ds)
                 await run_cypher(
                     conn,
@@ -416,7 +432,7 @@ class LineageRepository:
                     _LINK_READ,
                     {"rid": event.run.run_id, "name": ds.name},
                 )
-            for ds in event.outputs:
+            for ds in sorted(event.outputs, key=lambda d: d.name):
                 await self._merge_dataset(conn, ds)
                 # A failed run keeps a WROTE edge (so producers() shows the attempt) but no version —
                 # it produced no data, so it must not claim to have written a Lance version.
@@ -635,7 +651,7 @@ class LineageRepository:
 
     async def producers(self, name: str) -> Producers:
         """The runs that wrote (or failed to write) ``name`` — who / when / how / version / error."""
-        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=11)
+        rows = await fetch(self._pool, self._graph, _PRODUCERS, {"name": name}, columns=12)
         return Producers(
             dataset=name,
             producers=[
@@ -655,6 +671,9 @@ class LineageRepository:
                     # Stored as a JSON string (like schema); _parse unwraps one agtype layer, so json.loads
                     # the remaining string back into the assertions list.
                     quality_assertions=(json.loads(r[10]) if r[10] else []),
+                    # The catalog op (drop_table/rename_table/create_table/…) so a reader can tell a drop from
+                    # a plain versionless write without cross-referencing /events; "" maps back to None.
+                    operation=(r[11] or None),
                 )
                 for r in rows
             ],
@@ -699,7 +718,7 @@ class LineageRepository:
         Durable replacement for the in-memory fold: survives a restart and is shared across replicas.
         ``event_type``/``event_time`` are the last-event-wins state/updated_at; ``""`` maps back to None.
         """
-        rows = await fetch(self._pool, self._graph, _LIST_RUNS, columns=11)
+        rows = await fetch(self._pool, self._graph, _LIST_RUNS, columns=12)
         runs = [
             RunStatus(
                 run_id=r[0],
@@ -713,6 +732,7 @@ class LineageRepository:
                 updated_at=(r[8] or None),
                 events=int(r[9] or 0),
                 outputs=_tags_from(r[10]),
+                operation=(r[11] or None),
             )
             for r in rows
         ]

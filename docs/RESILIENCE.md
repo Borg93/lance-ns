@@ -1,7 +1,13 @@
-# Resilience & failure modes (chaos-tested)
+# Resilience & failure modes
 
-What happens when a service goes down, can we get corrupted state, and how do we recover. Each claim
-below was verified by **pulling a live service** on the kind cluster and observing recovery.
+What happens when a service goes down, can we get corrupted state, and how do we recover.
+
+> **Honesty note on "chaos-tested".** The chaos table below was a **point-in-time** verification — each row
+> was run once by pulling a live service on the kind cluster and observing recovery. It is **not** a standing
+> regression suite, and the **§2 bus fixes changed the delivery semantics after those runs** (see the ⚠️
+> callout below the table) — rows 1 and 3 must be **re-verified on the next deploy**. Treat this as "recovery
+> was demonstrated once under the pre-§2 config", not "continuously chaos-tested". `make e2e` does not yet
+> encode these as repeatable tests (a documented gap).
 
 ## The core guarantee: at-least-once + idempotent → no corruption, no loss (within bounds)
 
@@ -69,6 +75,25 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
 4. **Best-effort durable feed.** The `/events` feed table write is best-effort (logged on failure); the
    AGE graph is authoritative. The feed can lag the graph — visibility, not correctness.
 
+5. **Single points of failure (single-node infra).** Every stateful backing store runs as **one replica** on
+   kind — this is a **demo topology, not an HA one**. If any of these pods dies, the pipeline stalls until it
+   restarts (no data loss — PVCs persist — but no availability either):
+   - **AGE / Postgres** — one StatefulSet pod; the whole lineage graph + the durable `/events` + `/runs` fold
+     live here. Down → all ingest returns `RETRY` (buffered) and every lineage read fails.
+   - **NATS / JetStream** — one node, `streamReplicas=1`; the Dapr pub/sub backbone. Down → no event flows at
+     all (catalog emits swallow, the cascade halts).
+   - **RustFS** — one pod (now on a keep-PVC, not emptyDir); the S3 data plane. Down → no Lance read/write.
+   - **OpenBao / OpenFGA / Dex** — one pod each; down → (respectively) app-tier secrets fail-closed at boot,
+     authz checks fail, OIDC login fails.
+   *Fix (prod):* multi-replica + `streamReplicas=3` for NATS, a real Postgres HA (Patroni/CNPG), a replicated
+   object store. Tracked as infra work; **the app tier is already `replicas`-ready** (stateless, PDBs shipped).
+
+6. **Lineage lifecycle-emit gaps (deferred, see `todo_fable.md` §11).** Overwrite leaves stale column nodes on
+   the reused id; reconcile false-flags a *deliberately* dropped table as `MISSING_ON_STORAGE` (stale
+   `source_uri`). Both are provenance-visibility issues, not corruption. **deregister** now emits a lineage
+   marker (was silent — fixed + live-verified). **rename** is unsupported on the `dir` backend (501), so it
+   emits nothing — moot, not a gap.
+
 ## Operational hardening (k8s posture)
 
 Cloud-native guards on the *deployment*, complementing the event-path guarantees above. All applied via the
@@ -97,6 +122,19 @@ chart and live-verified on kind.
   **UNIQUE index on every AGE vertex label's MERGE key** (`ensure_graph_constraints` at boot + the age-init
   SQL) makes AGE's MATCH-then-CREATE safe under concurrency — a racing duplicate `CREATE` is rejected by the
   DB (`duplicate key value violates unique constraint "lineage_run_uniq"`) instead of leaving a dup vertex.
+  Ingest MERGEs datasets in a **deterministic name-sorted order** so two concurrent ingests that first-create
+  the same vertices acquire the index locks in the same order — no deadlock (the index's only new failure mode).
+
+## Prod hardening backlog (delegate-to-platform — NOT dev-blocking)
+
+The 2026-07-05 don't-reinvent audit confirmed we **reinvent nothing k8s/Dapr owns** (zero code to delete), but
+several **native switches are off** — deliberately deferred because they are prod-only (kind's default CNI
+ignores NetworkPolicy) and footgun-sequenced. Full list + fix order in [`todo_fable.md`](../todo_fable.md) §12:
+the big one is **L3 network** (no default-deny; the OpenBao secret store is reachable by any pod today),
+then **least-privilege ServiceAccounts** (~13 pods on `default` with a mountable API token), **infra-pod
+securityContext** (app tier hardened, infra not), and **Pod Security Admission** enforcement. Do not rush
+these into the dev baseline — default-deny egress without a kube-dns allow bricks the cluster, and restricted
+PSA would reject `lineage`/`openfga-migrate` until their root init containers are hardened.
 
 ## Bottom line
 

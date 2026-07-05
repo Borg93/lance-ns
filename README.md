@@ -70,9 +70,14 @@ touch the object store directly; they go through `native.call` (delegates to the
 
 ## 2. Request lifecycle & middleware
 
-There is **no Starlette middleware**; cross-cutting concerns are **FastAPI dependencies** wired
-once at the router (`APIRouter(dependencies=[Depends(authorize)])`, and `authorize` itself
-depends on `authenticate`). Order is deliberate: cheap authn first, then the OpenFGA round-trip.
+Cross-cutting **auth** concerns are **FastAPI dependencies** wired once at the router
+(`APIRouter(dependencies=[Depends(authorize)])`, and `authorize` itself depends on `authenticate`).
+Order is deliberate: cheap authn first, then the OpenFGA round-trip. Exactly **two ASGI middlewares**
+sit outside the router: `BodySizeLimitMiddleware` (outermost — rejects an oversized request body with a
+problem+json **413** *before* it is buffered, via Content-Length fast-reject plus a streaming byte
+counter; `LANCE_MAX_BODY_BYTES`, default 256 MiB — big media belongs on the direct-to-storage path, not
+this API) and the read-only `maintenance_middleware` (503 + Retry-After on mutations when
+`LANCE_MAINTENANCE_READ_ONLY` is set).
 
 ```mermaid
 sequenceDiagram
@@ -214,6 +219,10 @@ flowchart TB
 
 The app holds **no database of its own** — catalog + data live in Lance/S3, permissions in
 OpenFGA. `/livez` = process up; `/readyz` = 3-state (`starting` / `ready` + namespace id / `shutting_down`).
+The lifespan additionally wires (diagram omits for brevity): the **OpenBao secret fetch**
+(`LANCE_SECRETS_FROM_DAPR` — fail-closed sole source for the S3 secret), the **credential vendor**
+(`core/vending.py`), and the **lineage emitter** (`core/lineage_emit.py`, http or Dapr transport) — all
+torn down independently on shutdown.
 
 ---
 
@@ -222,13 +231,13 @@ OpenFGA. `/livez` = process up; `/readyz` = 3-state (`starting` / `ready` + name
 | Path | Ops | Mechanism |
 |---|---|---|
 | **native** (`services/catalog/services/native.py`) | create/insert/merge/query/count, describe/exists/list, register/deregister/rename/restore/stats, indices, versions, transactions, materialized views | delegate to Rust `DirectoryNamespace`; missing/stub → spec-correct **501** |
-| **pylance data plane** (`services/catalog/services/dataplane.py`) | `update`, `delete`, add/alter/drop columns, field-metadata, all 5 tag ops | `open_dataset(...)` then call pylance directly |
+| **pylance data plane** (`services/catalog/services/dataplane.py`) | `update`, `delete`, add/alter/drop columns, field-metadata, all 5 tag ops, **branches**, version list/checkout, **blob-v2 create** (a `lance.blob` column routes to a direct `data_storage_version="2.2"` write — declare → write → rollback-on-failure — because the native create pins 2.1 and rejects blob columns; `#88` also strips the catalog's root `storage_options` from every create response) | `open_dataset(...)` then call pylance directly |
 
 Writes/reads of table **data** exchange **Arrow IPC** (`application/vnd.apache.arrow.stream` in,
 `application/vnd.apache.arrow.file` out). All metadata responses are typed `lance_namespace`
 Pydantic models, serialized snake_case with `exclude_none`. Errors are **RFC-9457 problem+json**
-carrying the numeric Lance `ErrorCode`. *(Branches + batch version/commit currently 501 — the
-installed `lance` exposes the APIs to implement them in-process; tracked as follow-up.)*
+carrying the numeric Lance `ErrorCode`. *(Branches are now BACKED in-process via the data plane —
+the former 501s became real operations; batch transactions remain spec-correct 501.)*
 
 ---
 
@@ -241,6 +250,15 @@ installed `lance` exposes the APIs to implement them in-process; tracked as foll
 | `LANCE_S3_ENDPOINT` / `_ACCESS_KEY_ID` / `_SECRET_ACCESS_KEY` / `_REGION` | MinIO defaults; **creds required** | object store |
 | `LANCE_OIDC_ENABLED` / `_ISSUER` / `_AUDIENCE` / `_CACHE_TTL` / `_LEEWAY` / `_ALLOW_INSECURE` | off | OIDC authn |
 | `LANCE_FGA_ENABLED` / `_API_URL` / `_STORE_ID` / `_MODEL_ID` / `_ROOT_OBJECT` / `_LOCK_ROOT_CREATE` | off | OpenFGA authz |
+| `LANCE_MAX_BODY_BYTES` | 256 MiB | 413 body cap (Arrow-IPC OOM guard; steer big media to direct-to-storage) |
+| `LANCE_ALLOW_EXTERNAL_BLOBS` | off | accept `Blob.from_uri` external-pointer columns on create (SSRF/GC caveats — see `core/config.py`) |
+| `LANCE_VENDING_MODE` / `_VENDING_TTL_SECONDS` / `_S3_ASSUME_ROLE_ARN` / `_S3_STS_ENDPOINT` | `mode_b` | data-plane credential vending (server-mediated / STS / static) |
+| `LANCE_LINEAGE_EMIT_ENABLED` / `_LINEAGE_TRANSPORT` / `_LINEAGE_URL` / `_DAPR_PUBSUB` / `_DAPR_TOPIC` | off | best-effort OpenLineage emit on writes (http or Dapr pub/sub) |
+| `LANCE_SECRETS_FROM_DAPR` / `_DAPR_SECRET_STORE` / `_DAPR_SECRET_KEY` | off | fetch the S3 secret from OpenBao at boot (fail-closed sole source) |
+| `LANCE_MAINTENANCE_READ_ONLY` | off | 503 + Retry-After on mutations (migration windows) |
+
+The full set (with rationale comments) lives in `services/catalog/core/config.py` — that file is the
+source of truth; this table is the highlights.
 
 ---
 
@@ -266,10 +284,18 @@ curl -X POST "http://localhost:2333/v1/table/myns\$t/count_rows"    -H "Authoriz
 # Tear down: docker compose -f .docker/docker-compose.yml -f .docker/docker-compose.auth.sqlite.yml -f .docker/docker-compose.local.yml down -v
 ```
 
-Local dev (no Docker): `uv sync` then `uv run pytest` (287 unit/integration tests; e2e is gated).
-Quality gates: `uvx ruff check services tests` · `uvx ty check` · `make ci` (hermetic, via Dagger).
+Local dev (no Docker): `uv sync` then `uv run pytest` (380+ unit/integration tests; e2e is gated).
+Quality gates: `uvx ruff check .` · `uvx ty check` · `make ci` (hermetic, via Dagger).
 
 > The commands above are the **standalone-catalog** dev path (docker-compose, still runnable). The **canonical
 > full system** — the event-driven medallion lakehouse (lance-ray producer + raw→bronze→silver→gold Dapr
 > movers, lineage→AGE, OpenFGA, compaction, OpenBao, GreptimeDB observability) — deploys to **kind + Helm**
 > via `make up`. Read [`docs/FLOW.md`](docs/FLOW.md) for the end-to-end flow and [`docs/DEPLOY.md`](docs/DEPLOY.md) to run it.
+>
+> Beyond the catalog, the platform now also ships: the **multimodal blob/media pipeline** (blob-v2 columns at
+> file format 2.2; the cascade derives thumbnails + embeddings and lineage records the media schema —
+> [`docs/MEDALLION.md`](docs/MEDALLION.md)), a **provider-agnostic ingest/egress seam**
+> (`services/common/sources.py` / `sinks.py`: external S3/local → bronze with source-URI provenance, gold →
+> external sink), and a **real Ray compute seam** — `make ray-demo` runs a genuine Ray cluster in kind and
+> `ray job submit`s a distributed Lance write/index/evolve/compact against RustFS; the movers can submit
+> their stage transform as a Ray job on their Dapr trigger (`medallion.ray`) — [`docs/RAY.md`](docs/RAY.md).

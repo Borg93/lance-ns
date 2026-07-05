@@ -9,6 +9,62 @@ detail: workflow journals `wf_c253c55f-52f` (9-dimension) + `wf_e2c6583b-05a` (D
 
 ---
 
+## 0 · Quality contract — read before working any item
+
+Every rule here traces to a real first-pass defect from the 2026-07-03/04 window (Fable-5 review of the 16
+commits, workflow `wf_e2ff6a81-41f`). Definition of done for ANY item below: gate (ruff format + ruff check +
+ty) → rebuild the image → redeploy → LIVE-verify the actual flow on kind → adversarial self-audit of the diff
+→ commit. A green unit suite is not done. Run the format/lint gate before every test run, not at the end
+(E501 churn burned time in nearly every batch).
+
+**Verify third-party contracts BEFORE writing the call site.**
+- Probe the INSTALLED package (`uv run python -c "import inspect; print(inspect.signature(…))"`) and read the
+  matching `lance_docs/` mirror first. (lance_ray is keyword-only after `uri`; `write_lance` has no
+  stable-row-ids param; both lance_ray distributed-index paths are incompatible with pylance 8.0.0 — every
+  one was documented locally and still discovered by runtime failure.)
+- When observed behavior contradicts the docs mirror (e.g. overwrite upgrades `data_storage_version`), pin it
+  with a regression test in the SAME commit — behavior a version bump can revoke must have a tripwire.
+
+**Create-time-only checklist.** Before any new `lance.write_dataset` site: `data_storage_version="2.2"`?
+`enable_stable_row_ids=True`? Both are create-time-only — a missed site ships a dataset that can never be
+fixed without a destructive rewrite (it happened: 28644cf). Use ONE shared cascade-write helper in
+`services/common`; never hand-copy the kwarg pair (six copies exist — collapse them).
+
+**Every table path handles all four states:** absent · declared-only (`is_only_declared` — first-class via
+POST /declare AND what our own rollback leaves after a crash) · readable · has-deletions. The ExistOk blob
+path 500'd on declared-only until 2026-07-05. Multi-step create (declare → write → grant → emit) must be
+retry-safe across a process crash, not just an in-process except.
+
+**Test the SHIPPED composition.** At least one test imports the real app and asserts the real wiring
+(middleware order on `catalog.main.app`, the real mover handler, the real demo function — not an inline
+re-implementation). The bare-`except`→`except*` 413 bug was invisible precisely because the test rebuilt an
+equivalent app. Fakes must reproduce the real boundary's ERROR contract (pyarrow raises FileNotFoundError on
+a missing S3 prefix; a fake returning `[]` pins nothing).
+
+**Bus handlers: work < ack window (`backOff[0]` = 30s), always.** Long work = submit with a DETERMINISTIC
+idempotency key + re-attach on redelivery; design for the redelivered trigger racing the first attempt
+(never a raw destructive step like an S3 dir-wipe mid-handler).
+
+**Helm/k8s: render-and-grep is part of the change.** `helm template | grep` every touched value; confirm
+every referenced `.Values.*` key EXISTS (network-policy shipped `.Values.medallion.producer.port` — no such
+key); pipe large ints through `| int64` (2.68435456e+08); when two flags must agree
+(expose+networkPolicy, dapr+token), add a render/boot-time `fail`, not a comment. kind does not enforce
+NetworkPolicy — say so where the template can't be live-verified.
+
+**Sibling-convention rule.** A new dockerfile/manifest copies its siblings' hard rules first (`# syntax=`,
+digest pin, OCI labels; secrets via secretKeyRef — NEVER plaintext env; the ray demo shipped `rustfsadmin`
+in a pod spec the same week the chart forbade it) and is wired into make/Tilt in the same commit.
+
+**Demos are production surface.** Anything `kubectl apply`-able holds real lakehouse creds: same secret
+rules, same exposure rules (an open Ray 8265 + S3 env = in-cluster RCE), writes OUTSIDE the catalog root,
+and cleans up its data, not just its k8s objects.
+
+**Commit message = claims audit.** Every "Tests: X" and every number ("4 fragments in parallel") must be
+literally true of the diff; grep docs/ + chart/values comments for statements the change just falsified
+(two "carries no auth" comments survived the commit that added the auth).
+
+---
+
 ## 1 · P0 — security / correctness holes — ✅ ALL FIXED (2026-07-02)
 
 - ✅ **Reconcile cron route reachable unauthenticated through the gateway** — FIXED: the gateway 403 block

@@ -6,8 +6,14 @@ What happens when a service goes down, can we get corrupted state, and how do we
 > was run once by pulling a live service on the kind cluster and observing recovery. It is **not** a standing
 > regression suite, and the **§2 bus fixes changed the delivery semantics after those runs** (see the ⚠️
 > callout below the table) — rows 1 and 3 must be **re-verified on the next deploy**. Treat this as "recovery
-> was demonstrated once under the pre-§2 config", not "continuously chaos-tested". `make e2e` does not yet
-> encode these as repeatable tests (a documented gap).
+> was demonstrated once under the pre-§2 config", not "continuously chaos-tested".
+>
+> **What IS a repeatable regression suite:** `make e2e` runs the core end-to-end suites (observability,
+> medallion cascade, gateway, compaction, CAS) against the deployed stack, and `make e2e-governance` the
+> **boundary cases** (malformed-bearer→401, non-owner rename/overwrite→403, verified create-lineage) on an
+> auth-on stack (`make e2e-all` runs both). The **chaos rows below** (pull-a-service → recover) are **not yet
+> encoded as automated tests** — they still need a mutating harness that scales a pod and asserts recovery
+> (a documented follow-up; they mutate shared infra, so they're kept out of the default `make e2e`).
 
 ## The core guarantee: at-least-once + idempotent → no corruption, no loss (within bounds)
 

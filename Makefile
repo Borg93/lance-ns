@@ -42,8 +42,8 @@ VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
-        gateway governed e2e-obs e2e-medallion e2e-gateway e2e-compaction dashboards status k9s \
-        tilt-up tilt-ci clean down
+        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-gateway e2e-compaction e2e-cas \
+        e2e-governance dashboards status k9s tilt-up tilt-ci clean down
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -192,6 +192,35 @@ e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit
 	 LANCE_E2E_S3_SECRET_KEY=$$(kubectl get secret $(RELEASE)-infra-credentials -o jsonpath='{.data.rustfs-secret-key}' | base64 -d) \
 	   uv run pytest tests/e2e/test_object_store_cas_e2e.py -v -m cas; rc=$$?; \
 	 kill $$S 2>/dev/null; exit $$rc
+
+e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malformed-bearer 401, non-owner rename/overwrite 403) — needs an AUTH-ON stack
+	@echo "port-forwarding catalog/lineage/dex …"
+	@kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & C=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & D=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_AUTH_SERVER=http://localhost:2333 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
+	 LANCE_E2E_DEX=http://localhost:5556/dex \
+	   uv run pytest tests/e2e/test_governance_e2e.py -v -m e2e; rc=$$?; \
+	 kill $$C $$L $$D 2>/dev/null; exit $$rc
+
+e2e: ## Run the core e2e suite in sequence against the deployed stack (auth-agnostic: obs, medallion, gateway, compaction, cas)
+	@echo "▶ full core e2e suite against the deployed $(RELEASE) stack (each suite self-forwards + self-skips if unreachable)"; \
+	 fail=0; failed=""; \
+	 for t in e2e-obs e2e-medallion e2e-gateway e2e-compaction e2e-cas; do \
+	   echo; echo "═══════════ $$t ═══════════"; \
+	   $(MAKE) --no-print-directory $$t || { fail=1; failed="$$failed $$t"; }; \
+	 done; \
+	 echo; if [ $$fail -eq 0 ]; then echo "✓ ALL core e2e suites passed"; \
+	 else echo "✗ FAILED:$$failed  (governance is separate: 'make e2e-governance' on an auth-on stack)"; fi; \
+	 exit $$fail
+
+e2e-all: ## Full e2e incl. governance boundary cases (requires the stack deployed with auth ON)
+	@$(MAKE) --no-print-directory e2e; a=$$?; \
+	 echo; echo "═══════════ e2e-governance ═══════════"; \
+	 $(MAKE) --no-print-directory e2e-governance; b=$$?; \
+	 echo; if [ $$((a|b)) -eq 0 ]; then echo "✓ ALL e2e suites (incl. governance) passed"; fi; \
+	 exit $$((a|b))
 
 status: ## Show all pods
 	@kubectl get pods

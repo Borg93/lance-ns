@@ -82,10 +82,14 @@ def _ipc(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
-def _get_json(url: str) -> dict:
-    """GET + parse JSON, degrading to ``{}`` on any transport/non-JSON error (so polls fail cleanly)."""
+def _get_json(url: str, headers: dict | None = None) -> dict:
+    """GET + parse JSON, degrading to ``{}`` on any transport/non-JSON error (so polls fail cleanly).
+
+    The lineage dataset reads (/creator, /upstream, …) are GOVERNED (``require_metadata_access`` on the
+    router), so a bearer MUST be forwarded — an anonymous read 401s and would poll forever on ``None``.
+    """
     try:
-        return requests.get(url, timeout=10).json()
+        return requests.get(url, headers=headers, timeout=10).json()
     except Exception:  # noqa: BLE001
         return {}
 
@@ -129,13 +133,21 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
         f"{server}/v1/table/{bronze}/create", headers={**ah, **ARROW}, data=_ipc(rows), timeout=30
     )
     assert create.status_code == 200, create.text
+    # alice also creates the silver table she'll promote INTO — so she owns it (can_write_data +
+    # can_get_metadata). The lineage ingest below is governed (enforce_output_authz needs can_write_data on
+    # every output), so a promote whose output is a table alice doesn't own would 403.
+    sc = requests.post(
+        f"{server}/v1/table/{silver}/create", headers={**ah, **ARROW}, data=_ipc(rows), timeout=30
+    )
+    assert sc.status_code == 200, sc.text
 
     # 3. bob (no grant) cannot describe -> 403 ; alice (owner) can -> 200 (cascade)
     assert requests.post(f"{server}/v1/table/{bronze}/describe", headers=bh, timeout=10).status_code == 403
     assert requests.post(f"{server}/v1/table/{bronze}/describe", headers=ah, timeout=10).status_code == 200
 
-    # 4. lineage recorded alice as the VERIFIED creator (emission is async -> poll)
-    creator = _poll(lambda: _get_json(f"{lineage}/datasets/{bronze}/creator").get("creator"), alice_sub)
+    # 4. lineage recorded alice as the VERIFIED creator (emission is async -> poll).
+    # The read is GOVERNED (require_metadata_access), so forward alice's bearer — an anon read 401s -> None.
+    creator = _poll(lambda: _get_json(f"{lineage}/datasets/{bronze}/creator", ah).get("creator"), alice_sub)
     assert creator == alice_sub, f"expected lineage creator={alice_sub}, got {creator}"
 
     # 5. a promote run (bronze -> silver), as a lance-ray job would emit
@@ -150,13 +162,17 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
         "inputs": [{"namespace": ns, "name": bronze}],
         "outputs": [{"namespace": ns, "name": silver}],
     }
-    assert requests.post(f"{lineage}/api/v1/lineage", json=promote, timeout=10).status_code == 201
-
-    # 6. silver's upstream includes bronze (the medallion lineage)
-    up = _poll(
-        lambda: [r["name"] for r in _get_json(f"{lineage}/datasets/{silver}/upstream").get("related", [])],
-        [bronze],
+    assert (
+        requests.post(f"{lineage}/api/v1/lineage", json=promote, headers=ah, timeout=10).status_code == 201
     )
+
+    # 6. silver's upstream includes bronze (the medallion lineage). Governed read → forward alice's bearer;
+    # alice can read silver via her ownership of the parent namespace ``ns`` (create-on-parent cascade).
+    def _silver_upstream() -> list[str]:
+        related = _get_json(f"{lineage}/datasets/{silver}/upstream", ah).get("related", [])
+        return [r["name"] for r in related]
+
+    up = _poll(_silver_upstream, [bronze])
     assert isinstance(up, list) and bronze in up, f"expected {bronze} in silver upstream, got {up}"
 
 

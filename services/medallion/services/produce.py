@@ -59,6 +59,9 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
         row_count=result.row_count if result else None,
         size_bytes=result.size_bytes if result else None,
         source_uri=settings.raw_uri if result else None,
+        # The measured raw_events schema (blob/vector-aware) so the cascade HEAD's WROTE edge records real
+        # columns — seed_raw already captured it in result.fields; it was measured but never emitted (#24).
+        schema_fields=result.fields if result else None,
         token=token,
     )
     try:

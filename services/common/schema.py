@@ -12,6 +12,11 @@ import pyarrow as pa
 
 from common.blobs import is_blob_field
 
+#: The ``fields`` of an OpenLineage ``SchemaDatasetFacet`` — one ``{"name", "type"}`` (optionally
+#: ``"description"``) dict per column, in wire-JSON form. A shared alias so the catalog + medallion emitters
+#: and this renderer name the same shape once instead of repeating ``list[dict[str, str]]`` across signatures.
+type SchemaFields = list[dict[str, str]]
+
 
 def type_label(field: pa.Field) -> str:
     """A concise lineage type label for ``field`` — blob/vector/binary specialised, else the pyarrow repr."""
@@ -25,6 +30,6 @@ def type_label(field: pa.Field) -> str:
     return str(dtype)
 
 
-def facet_fields(schema: pa.Schema) -> list[dict[str, str]]:
+def facet_fields(schema: pa.Schema) -> SchemaFields:
     """The ``fields`` of an OpenLineage ``SchemaDatasetFacet`` — ``[{"name", "type"}]`` per column."""
     return [{"name": field.name, "type": type_label(field)} for field in schema]

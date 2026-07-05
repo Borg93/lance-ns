@@ -63,6 +63,62 @@ def test_build_create_event_shape() -> None:
     assert event["job"] == {"namespace": "lance-catalog", "name": "create_table.alpha$bronze$images"}
 
 
+def test_build_write_event_attaches_schema_facet_and_round_trips() -> None:
+    # #24 coverage fix: a catalog write now carries the per-version column schema (blob/vector-aware) as the
+    # standard SchemaDatasetFacet, so the lineage consumer materialises real columns — previously the catalog
+    # emitted NO schema and a catalog-created table showed empty columns until a compute job re-asserted it.
+    fields = [{"name": "id", "type": "int64"}, {"name": "payload", "type": "blob"}]
+    event = build_write_event(
+        table_id="db$images",
+        namespace="db",
+        author="alice",
+        version=1,
+        operation=CREATE_TABLE,
+        run_id="r1",
+        event_time="2026-01-01T00:00:00+00:00",
+        job_namespace="lance-catalog",
+        schema_fields=fields,
+    )
+    schema = event["outputs"][0]["facets"]["schema"]
+    assert schema["fields"] == fields
+    assert schema["_producer"] and schema["_schemaURL"].endswith("SchemaDatasetFacet")
+    # The lineage model reads it back off the standard facet → real per-version columns on the WROTE edge.
+    parsed = RunEvent.model_validate(event)
+    assert parsed.outputs[0].fields == fields
+
+
+def test_build_write_event_without_schema_omits_facet() -> None:
+    # No schema_fields (e.g. a reopen failed → []) must NOT plant an empty schema facet.
+    event = build_write_event(
+        table_id="db$t",
+        namespace="db",
+        author=None,
+        version=1,
+        operation=CREATE_TABLE,
+        run_id="r1",
+        event_time="t",
+        job_namespace="lance-catalog",
+    )
+    assert "schema" not in event["outputs"][0].get("facets", {})
+
+
+def test_emit_write_event_forwards_schema_fields() -> None:
+    em = _RecordingEmitter()
+    asyncio.run(
+        emit_write_event(
+            cast(LineageEmitter, em),
+            ["db", "t"],
+            delimiter="$",
+            author="alice",
+            version=2,
+            operation=INSERT,
+            authorization=None,
+            schema_fields=[{"name": "x", "type": "int64"}],
+        )
+    )
+    assert em.writes[0]["schema_fields"] == [{"name": "x", "type": "int64"}]
+
+
 def test_build_create_event_without_author_omits_facet() -> None:
     event = build_write_event(
         table_id="t",

@@ -32,6 +32,7 @@ from typing import Any, Protocol, runtime_checkable
 import httpx
 from common import dapr_publish, fga
 from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
+from common.schema import SchemaFields
 from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
@@ -75,6 +76,15 @@ _DATASOURCE_FACET_SCHEMA = (
     "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
 )
 
+#: OpenLineage standard ``SchemaDatasetFacet`` schema URL. The output dataset carries this facet with its
+#: per-version column schema (name + a concise, blob/vector-aware type via ``common.schema.facet_fields``) so
+#: the lineage service persists it onto the ``WROTE`` edge (#24). Shared contract with the medallion emitter
+#: (``medallion.schemas.events``) — without it a table written ONLY through the catalog shows empty columns in
+#: the graph until a downstream compute job re-asserts its schema.
+_SCHEMA_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
+)
+
 
 def build_write_event(
     *,
@@ -87,6 +97,7 @@ def build_write_event(
     event_time: str,
     job_namespace: str,
     source_uri: str | None = None,
+    schema_fields: SchemaFields | None = None,
 ) -> dict[str, Any]:
     """Build the OpenLineage ``RunEvent`` (wire JSON) for any catalog write to a table.
 
@@ -121,6 +132,14 @@ def build_write_event(
             "name": source_uri,
             "uri": source_uri,
         }
+    if schema_fields:
+        # Standard schema facet → the per-version column schema (blob/vector-aware) on the WROTE edge (#24),
+        # so a catalog-written table has real columns in the graph, not empty until a compute job re-asserts.
+        facets["schema"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _SCHEMA_FACET_SCHEMA,
+            "fields": schema_fields,
+        }
     if facets:
         output["facets"] = facets
     return {
@@ -153,6 +172,7 @@ class LineageEmitter(Protocol):
         run_id: str | None = None,
         authorization: str | None = None,
         source_uri: str | None = None,
+        schema_fields: SchemaFields | None = None,
     ) -> None: ...
 
     async def emit_write(
@@ -166,6 +186,7 @@ class LineageEmitter(Protocol):
         run_id: str | None = None,
         authorization: str | None = None,
         source_uri: str | None = None,
+        schema_fields: SchemaFields | None = None,
     ) -> None: ...
 
 
@@ -182,6 +203,7 @@ class NoopEmitter:
         run_id: str | None = None,
         authorization: str | None = None,
         source_uri: str | None = None,
+        schema_fields: SchemaFields | None = None,
     ) -> None:
         return None
 
@@ -196,6 +218,7 @@ class NoopEmitter:
         run_id: str | None = None,
         authorization: str | None = None,
         source_uri: str | None = None,
+        schema_fields: SchemaFields | None = None,
     ) -> None:
         return None
 
@@ -219,6 +242,7 @@ class _BaseLineageEmitter:
         run_id: str | None = None,
         authorization: str | None = None,
         source_uri: str | None = None,
+        schema_fields: SchemaFields | None = None,
     ) -> None:
         await self.emit_write(
             table_id=table_id,
@@ -229,6 +253,7 @@ class _BaseLineageEmitter:
             run_id=run_id,
             authorization=authorization,
             source_uri=source_uri,
+            schema_fields=schema_fields,
         )
 
     async def emit_write(
@@ -242,6 +267,7 @@ class _BaseLineageEmitter:
         run_id: str | None = None,
         authorization: str | None = None,
         source_uri: str | None = None,
+        schema_fields: SchemaFields | None = None,
     ) -> None:
         event = build_write_event(
             table_id=table_id,
@@ -255,6 +281,7 @@ class _BaseLineageEmitter:
             event_time=datetime.now(UTC).isoformat(),
             job_namespace=self._job_namespace,
             source_uri=source_uri,
+            schema_fields=schema_fields,
         )
         await self._send(event, operation=operation, table_id=table_id, authorization=authorization)
 
@@ -358,6 +385,7 @@ async def emit_write_event(
     version: int | None,
     operation: str,
     authorization: str | None,
+    schema_fields: SchemaFields | None = None,
 ) -> None:
     """Publish a best-effort lineage ``WROTE`` event for a catalog mutation, awaited INLINE in the handler.
 
@@ -376,4 +404,5 @@ async def emit_write_event(
         operation=operation,
         run_id=str(uuid.uuid4()),
         authorization=authorization,
+        schema_fields=schema_fields,
     )

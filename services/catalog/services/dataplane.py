@@ -13,6 +13,7 @@ a direct 2.2 write, while every other schema delegates to the native create.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable
 from contextlib import suppress
 from typing import Any
@@ -20,6 +21,7 @@ from typing import Any
 import lance
 import pyarrow as pa
 from common import blobs
+from common.schema import SchemaFields, facet_fields
 from lance_namespace import (
     AlterTableAddColumnsRequest,
     AlterTableAddColumnsResponse,
@@ -63,6 +65,8 @@ from lance_namespace import (
 from catalog.core.namespace import open_dataset
 from catalog.services import native
 
+log = logging.getLogger(__name__)
+
 StorageOptions = dict[str, str]
 
 
@@ -83,6 +87,22 @@ def current_version(ns: LanceNamespace, so: StorageOptions, table_id: list[str])
     """The table's current Lance version — for stamping lineage after a native op whose response omits it
     (``insert`` returns only a ``transaction_id``, so we reopen the dataset like update/delete)."""
     return _version(ns, so, table_id)
+
+
+def read_schema_fields(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> SchemaFields:
+    """The table's current column schema as OpenLineage ``SchemaDatasetFacet`` fields (blob/vector-aware).
+
+    Read off the just-written dataset so a catalog write can attach the per-version ``schema`` facet the
+    lineage WROTE edge records (#24) — the catalog previously emitted no schema, so a catalog-written table
+    showed empty columns in the graph until a medallion transform re-asserted it. Best-effort (a reopen
+    failure yields ``[]``): the schema facet is an enrichment, never a reason to fail the write."""
+    try:
+        return facet_fields(open_dataset(ns, so, table_id).schema)
+    except Exception as exc:  # noqa: BLE001 — best-effort enrichment must not fail the already-committed write
+        # Log (like the sibling best-effort lineage swallows) so a persistent reopen failure — or an API
+        # drift this broad catch also traps — is observable instead of silently disabling the #24 schema.
+        log.warning("schema_facet_read_failed", extra={"table": table_id, "error": str(exc)})
+        return []
 
 
 def create_table(

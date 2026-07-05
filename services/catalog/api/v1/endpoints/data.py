@@ -161,6 +161,10 @@ async def create_table(
     # Inline-await (NOT BackgroundTasks — no retry, dies with the worker; fastapi anti-pattern) so the event
     # reaches the durable Dapr/JetStream transport before the response. emit_create is best-effort internally,
     # so it never fails the create; JetStream + the consumer's idempotent MERGE-on-run_id give durability.
+    # The per-version column schema (blob/vector-aware), read off the just-written dataset, so the WROTE
+    # edge records real columns (#24) — a blob table now shows `payload : blob` in the graph at create time
+    # instead of empty-until-a-compute-job-re-asserts. Best-effort (reopen failure → []).
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
     await emitter.emit_create(
         table_id=table_id,
         namespace=namespace,
@@ -169,6 +173,7 @@ async def create_table(
         run_id=run_id,
         authorization=authorization,
         source_uri=response.location,  # the real Lance URI → #23 reconcile can read the on-disk file
+        schema_fields=schema_fields,
     )
     return response
 
@@ -196,6 +201,7 @@ async def insert_into_table(
     # Insert's response carries only a transaction_id, not the Lance version it produced — reopen the
     # dataset to read it (like update/delete) so the WROTE edge records the real version, not null.
     version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
     await emit_write_event(
         emitter,
         segments,
@@ -204,6 +210,7 @@ async def insert_into_table(
         version=version,
         operation=INSERT,
         authorization=authorization,
+        schema_fields=schema_fields,
     )
     return response
 
@@ -213,6 +220,7 @@ async def merge_insert_into_table(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    so: StorageOptionsDep,
     token: CurrentToken,
     emitter: LineageEmitterDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
@@ -245,6 +253,8 @@ async def merge_insert_into_table(
     response: MergeInsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "merge_insert_into_table", req, data
     )
+    # merge can add/change columns (schema drift at this version) → record the real post-write schema.
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
     await emit_write_event(
         emitter,
         segments,
@@ -253,6 +263,7 @@ async def merge_insert_into_table(
         version=response.version,
         operation=MERGE_INSERT,
         authorization=authorization,
+        schema_fields=schema_fields,
     )
     return response
 
@@ -272,6 +283,7 @@ async def update_table(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: UpdateTableResponse = await run_in_threadpool(dataplane.update_table, ns, so, body)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
     await emit_write_event(
         emitter,
         segments,
@@ -280,6 +292,7 @@ async def update_table(
         version=response.version,
         operation=UPDATE,
         authorization=authorization,
+        schema_fields=schema_fields,
     )
     return response
 
@@ -299,6 +312,9 @@ async def delete_from_table(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: DeleteFromTableResponse = await run_in_threadpool(dataplane.delete_from_table, ns, so, body)
+    # A row-delete doesn't change columns, but the WROTE edge at this new version still records the
+    # (unchanged) schema so dataset_schema(version=N) is populated for every version, not just writes.
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
     await emit_write_event(
         emitter,
         segments,
@@ -307,6 +323,7 @@ async def delete_from_table(
         version=response.version,
         operation=DELETE,
         authorization=authorization,
+        schema_fields=schema_fields,
     )
     return response
 

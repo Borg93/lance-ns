@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
+from common.schema import SchemaFields
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event.
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/medallion"
@@ -68,7 +69,7 @@ def _dataset(
     size_bytes: int | None = None,
     assertions: list[dict[str, Any]] | None = None,
     source_uri: str | None = None,
-    schema_fields: list[dict[str, str]] | None = None,
+    schema_fields: SchemaFields | None = None,
 ) -> dict[str, Any]:
     ds: dict[str, Any] = {"namespace": namespace, "name": name}
     facets: dict[str, Any] = {}
@@ -148,7 +149,7 @@ def build_run_event(
     size_bytes: int | None = None,
     assertions: list[dict[str, Any]] | None = None,
     source_uri: str | None = None,
-    schema_fields: list[dict[str, str]] | None = None,
+    schema_fields: SchemaFields | None = None,
     token: str | None = None,
     event_type: str = "COMPLETE",
     error_message: str | None = None,

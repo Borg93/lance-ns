@@ -30,7 +30,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 import httpx
-from common import fga
+from common import dapr_publish, fga
 from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
 from dapr.aio.clients import DaprClient
 
@@ -294,17 +294,23 @@ class DaprEmitter(_BaseLineageEmitter):
     anti-forgery ``enforce_author`` guard is only for the open HTTP endpoint).
     """
 
-    def __init__(self, client: DaprClient, pubsub: str, topic: str, *, job_namespace: str) -> None:
+    def __init__(
+        self, client: DaprClient, pubsub: str, topic: str, *, job_namespace: str, timeout_seconds: float
+    ) -> None:
         self._client = client
         self._pubsub = pubsub
         self._topic = topic
         self._job_namespace = job_namespace
+        self._timeout_seconds = timeout_seconds
 
     async def _send(  # noqa: ARG002 — authorization unused on the trusted internal channel
         self, event: dict[str, Any], *, operation: str, table_id: str, authorization: str | None
     ) -> None:
         try:
-            await self._client.publish_event(
+            # Bounded so a hung sidecar can't pin the inline-awaited emit on the create/write request path.
+            await dapr_publish.publish_event(
+                self._client,
+                timeout_seconds=self._timeout_seconds,
                 pubsub_name=self._pubsub,
                 topic_name=self._topic,
                 data=json.dumps(event),
@@ -326,13 +332,14 @@ def make_emitter(
     pubsub: str,
     topic: str,
     job_namespace: str,
+    timeout_seconds: float = 5.0,
 ) -> LineageEmitter:
     """Select the lineage transport: ``dapr`` (durable pub/sub via the sidecar) or ``http`` (direct POST);
     no-op when disabled or unwired (a half-configured transport must never silently become the other)."""
     if not enabled:
         return NoopEmitter()
     if transport == "dapr" and dapr is not None:
-        return DaprEmitter(dapr, pubsub, topic, job_namespace=job_namespace)
+        return DaprEmitter(dapr, pubsub, topic, job_namespace=job_namespace, timeout_seconds=timeout_seconds)
     if transport == "http" and url and client is not None:
         return HttpLineageEmitter(client, url, job_namespace=job_namespace)
     return NoopEmitter()

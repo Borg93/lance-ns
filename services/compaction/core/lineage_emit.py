@@ -33,6 +33,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
+from common import dapr_publish
 from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
 from dapr.aio.clients import DaprClient
 
@@ -109,11 +110,14 @@ class DaprMaintenanceEmitter:
     holds no broker client. Best-effort: a sidecar/broker outage logs + drops rather than failing the sweep.
     """
 
-    def __init__(self, client: DaprClient, pubsub: str, topic: str, *, job_namespace: str) -> None:
+    def __init__(
+        self, client: DaprClient, pubsub: str, topic: str, *, job_namespace: str, timeout_seconds: float
+    ) -> None:
         self._client = client
         self._pubsub = pubsub
         self._topic = topic
         self._job_namespace = job_namespace
+        self._timeout_seconds = timeout_seconds
 
     async def emit_maintenance(self, *, table_id: str, namespace: str) -> None:
         event = build_maintenance_event(
@@ -124,7 +128,9 @@ class DaprMaintenanceEmitter:
             event_time=datetime.now(UTC).isoformat(),
         )
         try:
-            await self._client.publish_event(
+            await dapr_publish.publish_event(  # bounded so a hung sidecar can't stall the sweep
+                self._client,
+                timeout_seconds=self._timeout_seconds,
                 pubsub_name=self._pubsub,
                 topic_name=self._topic,
                 data=json.dumps(event),
@@ -135,10 +141,18 @@ class DaprMaintenanceEmitter:
 
 
 def make_emitter(
-    *, enabled: bool, dapr: DaprClient | None, pubsub: str, topic: str, job_namespace: str
+    *,
+    enabled: bool,
+    dapr: DaprClient | None,
+    pubsub: str,
+    topic: str,
+    job_namespace: str,
+    timeout_seconds: float = 5.0,
 ) -> MaintenanceEmitter:
     """Select the emitter: a Dapr pub/sub publisher when enabled + wired, else a no-op (never silently
     publish nowhere — a half-configured transport stays a no-op rather than pretending to emit)."""
     if enabled and dapr is not None:
-        return DaprMaintenanceEmitter(dapr, pubsub, topic, job_namespace=job_namespace)
+        return DaprMaintenanceEmitter(
+            dapr, pubsub, topic, job_namespace=job_namespace, timeout_seconds=timeout_seconds
+        )
     return NoopEmitter()

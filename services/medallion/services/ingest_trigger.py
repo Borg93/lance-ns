@@ -18,6 +18,7 @@ import logging
 import uuid
 from typing import Any
 
+from common import dapr_publish
 from dapr.aio.clients import DaprClient
 
 from medallion.core.config import MedallionSettings
@@ -78,7 +79,9 @@ async def handle_raw_arrival(dapr: DaprClient, settings: MedallionSettings, even
     token = _cascade_token(data)
     trigger = {"token": token, "dataset": settings.raw_dataset, "namespace": settings.raw_namespace}
     try:
-        await dapr.publish_event(
+        await dapr_publish.publish_event(
+            dapr,
+            timeout_seconds=settings.publish_timeout_seconds,
             pubsub_name=settings.pubsub,
             topic_name=settings.raw_topic,
             data=json.dumps(trigger),

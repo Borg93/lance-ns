@@ -103,6 +103,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pubsub=settings.dapr_pubsub,
         topic=settings.dapr_topic,
         job_namespace=settings.lineage_job_namespace,
+        timeout_seconds=settings.lineage_emit_timeout_seconds,
     )
     app.state.startup_complete = True
     try:

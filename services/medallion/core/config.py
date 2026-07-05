@@ -23,6 +23,9 @@ class MedallionSettings(BaseSettings):
     # --- shared Dapr wiring (same component + lineage topic as catalog/lineage) -----------------
     pubsub: str = Field(default="lineage-pubsub", alias="MEDALLION_PUBSUB")
     lineage_topic: str = Field(default="lineage.events.v1", alias="MEDALLION_LINEAGE_TOPIC")
+    # Bound every Dapr publish so a hung sidecar raises TimeoutError → the mover's RETRY path fires (the
+    # handler contract expects a prompt return), instead of pinning the worker until the ack window lapses.
+    publish_timeout_seconds: float = Field(default=5.0, gt=0, alias="MEDALLION_PUBLISH_TIMEOUT_SECONDS")
     job_namespace: str = Field(default="lance-medallion", alias="MEDALLION_JOB_NAMESPACE")
     # Behind a Dapr sidecar? — when true, a mover fails closed at boot if the app-token is unset (its
     # /medallion-event route would otherwise be an open forged-trigger path). Symmetric with the lineage

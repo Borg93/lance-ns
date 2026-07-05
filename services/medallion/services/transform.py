@@ -19,7 +19,7 @@ import logging
 from contextlib import suppress
 from typing import Any
 
-from common import fga
+from common import dapr_publish, fga
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import ServiceUnavailableError
@@ -155,7 +155,7 @@ async def handle_stage(
         )
         # 1. Emit the transform's lineage (-> the lineage service ingests the DERIVED_FROM edge). This runs
         # even on a quality failure, so the failed assertions are recorded and the bad batch is auditable.
-        await dapr.publish_event(
+        await dapr_publish.publish_event(dapr, timeout_seconds=settings.publish_timeout_seconds,
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
             data=json.dumps(run_event),
@@ -168,7 +168,7 @@ async def handle_stage(
             quality_blocked = True
         # 3. Trigger the next stage (unless terminal — gold has no pub_topic — or blocked by the gate).
         elif settings.pub_topic:
-            await dapr.publish_event(
+            await dapr_publish.publish_event(dapr, timeout_seconds=settings.publish_timeout_seconds,
                 pubsub_name=settings.pubsub,
                 topic_name=settings.pub_topic,
                 data=json.dumps(
@@ -200,7 +200,7 @@ async def handle_stage(
                     event_type="FAIL",
                     error_message=str(exc),
                 )
-                await dapr.publish_event(
+                await dapr_publish.publish_event(dapr, timeout_seconds=settings.publish_timeout_seconds,
                     pubsub_name=settings.pubsub,
                     topic_name=settings.lineage_topic,
                     data=json.dumps(fail_event),

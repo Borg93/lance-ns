@@ -16,6 +16,7 @@ import json
 import logging
 import uuid
 
+from common import dapr_publish
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
@@ -64,7 +65,9 @@ async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, st
         # The cascade HEAD is this raw-write lineage event: lance-ray's own /raw-arrival subscription reacts
         # to it and publishes the medallion.raw trigger, so the pipeline is driven by the arrival EVENT, not
         # by this call directly (event-driven head — the trigger publish moved to ingest_trigger.py).
-        await dapr.publish_event(
+        await dapr_publish.publish_event(
+            dapr,
+            timeout_seconds=settings.publish_timeout_seconds,
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
             data=json.dumps(raw_event),

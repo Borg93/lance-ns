@@ -55,6 +55,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pubsub=settings.lineage_pubsub,
         topic=settings.lineage_topic,
         job_namespace=settings.lineage_job_namespace,
+        timeout_seconds=settings.publish_timeout_seconds,
     )
     app.state.startup_complete = True
     try:

@@ -129,3 +129,15 @@ signals.md § Exclude noisy endpoints). Launcher-driven instrumentation → the 
 - { name: OTEL_RESOURCE_ATTRIBUTES, value: "service.namespace=lance-ns,deployment.environment.name={{ $o.environment | default "kind" }},service.version={{ $root.Chart.AppVersion }}" }
 {{- end -}}
 
+
+{{/* Rollout drain: a preStop sleep holds SIGTERM until endpoint removal has propagated to kube-proxy /
+the Dapr sidecar, so in-flight requests drain instead of hitting connection-refused — this is what makes
+the apps' /readyz shutting_down branch actually reachable during a rollout. Pairs with pod-level
+terminationGracePeriodSeconds (grace > preStop + app drain). sh exists in every app image
+(python-slim, nginx-unprivileged). */}}
+{{- define "lance.preStop" -}}
+lifecycle:
+  preStop:
+    exec:
+      command: ["sh", "-c", "sleep {{ .Values.lifecycle.preStopSeconds }}"]
+{{- end -}}

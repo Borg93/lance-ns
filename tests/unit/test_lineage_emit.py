@@ -280,7 +280,7 @@ def test_make_emitter_selects_implementation() -> None:
             "job_namespace": "lance-catalog",
         }
         kw.update(over)
-        return make_emitter(**kw)  # type: ignore[arg-type]
+        return make_emitter(**kw)  # ty: ignore[invalid-argument-type]  # dict[str, object] kwargs fan-out
 
     assert isinstance(_make(), HttpLineageEmitter)
     assert isinstance(_make(enabled=False), NoopEmitter)  # disabled → no-op
@@ -314,7 +314,8 @@ class _FakeDapr:
 def test_dapr_emitter_publishes_event_to_topic() -> None:
     dapr = _FakeDapr()
     emitter = DaprEmitter(
-        cast(Any, dapr), "lineage-pubsub", "lineage.events.v1", job_namespace="lance-catalog"
+        cast(Any, dapr), "lineage-pubsub", "lineage.events.v1",
+        job_namespace="lance-catalog", timeout_seconds=5.0,
     )
     asyncio.run(emitter.emit_create(table_id="a$b", namespace="a", author="alice", version=1, run_id="r-1"))
     assert len(dapr.published) == 1
@@ -329,7 +330,8 @@ def test_dapr_emitter_publishes_event_to_topic() -> None:
 def test_dapr_emitter_swallows_publish_failure() -> None:
     # A sidecar/broker outage at publish must never break the catalog write (best-effort, like HTTP).
     emitter = DaprEmitter(
-        cast(Any, _FakeDapr(fail=True)), "lineage-pubsub", "lineage.events.v1", job_namespace="x"
+        cast(Any, _FakeDapr(fail=True)), "lineage-pubsub", "lineage.events.v1",
+        job_namespace="x", timeout_seconds=5.0,
     )
     asyncio.run(
         emitter.emit_write(table_id="a$b", namespace="a", author=None, version=2, operation=INSERT)

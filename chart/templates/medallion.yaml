@@ -35,10 +35,12 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
       containers:
         - name: lance-ray
           image: {{ $img | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "lance.preStop" . | nindent 10 }}
           {{- if .Values.observability.enabled }}
           command: ["opentelemetry-instrument", "uvicorn", "medallion.producer:app", "--host=0.0.0.0", "--port={{ $port }}"]
           {{- else }}
@@ -122,10 +124,12 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      terminationGracePeriodSeconds: {{ $root.Values.lifecycle.terminationGracePeriodSeconds }}
       containers:
         - name: mover
           image: {{ $img | quote }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          {{- include "lance.preStop" $root | nindent 10 }}
           {{- if $root.Values.observability.enabled }}
           command: ["opentelemetry-instrument", "uvicorn", "medallion.mover:app", "--host=0.0.0.0", "--port={{ $port }}"]
           {{- else }}

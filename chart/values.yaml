@@ -41,6 +41,16 @@ catalog:
   # under a worker's memory. Big media must use the direct-write/vending path (claim-check), not this API.
   maxBodyBytes: 268435456 # 256 * 1024 * 1024
 
+# --- Graceful rollouts -----------------------------------------------------------------------------
+# preStop sleep: endpoint removal must propagate to kube-proxy/the Dapr sidecar BEFORE the app receives
+# SIGTERM, else every rollout connection-refuses in-flight requests (and the apps' /readyz shutting_down
+# branch is dead code). terminationGracePeriodSeconds bounds preStop + the app's own drain; compaction
+# gets a longer budget so an in-flight sweep/Lance write is never SIGKILLed mid-transaction.
+lifecycle:
+  preStopSeconds: 5
+  terminationGracePeriodSeconds: 30
+  compactionTerminationGracePeriodSeconds: 120
+
 # --- Network isolation (opt-in; requires a policy-enforcing CNI e.g. Calico/Cilium) ---------------
 # kind's default CNI does NOT enforce NetworkPolicy, so this is a no-op there — it is prod hardening.
 # When enabled, restricts ingress to lance-ray:8000 (the /produce cascade head) to in-release pods only,
@@ -113,7 +123,14 @@ openfga:
     tag: v1.8.0
   datastore:
     engine: postgres
-    uri: postgres://lance:lance@lance-ns-age:5432/openfga?sslmode=disable
+    # DSN comes from the infra-credentials Secret (key openfga-datastore-uri) — the SAME secret the AGE
+    # servers + our migrate Job consume, rendered from age.* in dev and OWNED by the external-secrets
+    # operator when externalSecrets.enabled. No plaintext password in values/env: the subchart's
+    # existingSecret+secretKeys branch turns this into a secretKeyRef. (Subchart values can't template,
+    # so the release-prefixed secret name is hardcoded like the lance-ns-age host was — Makefile RELEASE.)
+    existingSecret: lance-ns-infra-credentials
+    secretKeys:
+      uriKey: openfga-datastore-uri
     # The chart's bundled migrate (both job + initContainer types) fails to pass the datastore flags in
     # 0.3.9, so we disable it and run our own proven migrate Job (templates/openfga-migrate.yaml) that
     # waits for the AGE Postgres first. The server then connects to the already-migrated db.

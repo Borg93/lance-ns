@@ -31,6 +31,8 @@ class CompactionSettings(BaseSettings):
     # catalog publishes to and the lineage service subscribes to, so a compaction shows up in producers()
     # next to the writes. Off by default; the sidecar owns retry (no DLQ), so a publish never fails a sweep.
     lineage_emit_enabled: bool = Field(default=False, alias="COMPACTION_LINEAGE_EMIT_ENABLED")
+    # Bound each Dapr publish so a hung sidecar can't stall a sweep (best-effort → the outage is swallowed).
+    publish_timeout_seconds: float = Field(default=5.0, gt=0, alias="COMPACTION_PUBLISH_TIMEOUT_SECONDS")
     lineage_pubsub: str = Field(default="lineage-pubsub", alias="COMPACTION_LINEAGE_PUBSUB")
     lineage_topic: str = Field(default="lineage.events.v1", alias="COMPACTION_LINEAGE_TOPIC")
     lineage_job_namespace: str = Field(default="compaction", alias="COMPACTION_LINEAGE_JOB_NAMESPACE")

@@ -17,6 +17,7 @@ from catalog.services.dataplane import _schema_is_blob, create_table
 from common import blobs
 from lance import Blob, blob_array, blob_field
 from lance_namespace import (
+    DeclareTableRequest,
     DescribeTableRequest,
     InvalidInputError,
     TableAlreadyExistsError,
@@ -129,6 +130,38 @@ def test_exist_ok_keeps_existing_blob_table(tmp_path: Path) -> None:
     assert dataset.read_blobs("payload", indices=[0])[0][1] == b"a"
 
 
+# --- declared-only tables (POST /declare, and this path's own crash-rollback leaves one) ----------- #
+
+
+def test_exist_ok_on_declared_only_table_writes_instead_of_500(tmp_path: Path) -> None:
+    # A declared-but-unwritten table has NO readable dataset. Opening it to read `.version` (the pre-fix
+    # ExistOk path) would raise -> 500. ExistOk must instead land the first data version into that location.
+    ns = connect("dir", {"root": str(tmp_path)})
+    ns.declare_table(DeclareTableRequest(id=["d1"]))
+
+    resp = create_table(ns, {}, ["d1"], _blob_ipc([b"first"]), mode="exist_ok")
+
+    assert resp.location
+    dataset = _open(ns, ["d1"])
+    assert dataset.data_storage_version == "2.2"
+    assert dataset.count_rows() == 1
+    assert dataset.read_blobs("payload", indices=[0])[0][1] == b"first"
+
+
+def test_default_create_on_declared_only_table_writes_the_first_version(tmp_path: Path) -> None:
+    # declare → crash → retry with the default mode must converge to a written table, not conflict on the
+    # existing declare. (Same path a failed fresh write's rollback intentionally does NOT leave — but a
+    # separate POST /declare does.)
+    ns = connect("dir", {"root": str(tmp_path)})
+    ns.declare_table(DeclareTableRequest(id=["d2"]))
+
+    create_table(ns, {}, ["d2"], _blob_ipc([b"a", b"b"]), mode="create")
+
+    dataset = _open(ns, ["d2"])
+    assert dataset.count_rows() == 2
+    assert dataset.read_blobs("payload", indices=[0])[0][1] == b"a"
+
+
 # --- blob modes: managed (inline/packed/dedicated) always; external pointer gated ------------------ #
 
 
@@ -174,9 +207,12 @@ def test_rejected_external_create_rolls_back_and_stays_retryable(tmp_path: Path)
     source.write_bytes(b"external-bytes")
     ns = connect("dir", {"root": str(tmp_path / "root")})
     schema = pa.schema([pa.field("id", pa.int64()), blob_field("blob")])
-    pointer = _ipc(pa.table(
-        {"id": [1], "blob": blob_array([Blob.from_uri(source.as_uri(), position=0, size=8)])}, schema=schema
-    ))
+    pointer = _ipc(
+        pa.table(
+            {"id": [1], "blob": blob_array([Blob.from_uri(source.as_uri(), position=0, size=8)])},
+            schema=schema,
+        )
+    )
 
     with pytest.raises(InvalidInputError):
         create_table(ns, {}, ["rb"], pointer)  # flag off → rejected, declared table rolled back

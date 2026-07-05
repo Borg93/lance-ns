@@ -165,26 +165,50 @@ def _create_blob_table(
 ) -> CreateTableResponse:
     """Create a blob-v2 table at file format 2.2 (the native create pins 2.1 and rejects it).
 
-    Honours the create ``mode`` against an existing table (``ExistOk`` keeps it, ``Overwrite`` replaces
-    its data, ``Create`` conflicts). A fresh table is ``declare``-d to learn its canonical location, then
-    written with ``data_storage_version="2.2"`` (lance_docs/guide.md — Version Compatibility); a failed
-    fresh write is rolled back with ``drop_table`` so the name stays retryable rather than stuck
-    describable-but-unreadable.
+    Honours the create ``mode`` against a *written* table (``ExistOk`` keeps it, ``Overwrite`` replaces its
+    data, ``Create`` conflicts). A *declared-only* table — one that exists in the namespace but was never
+    written (a bare ``POST /declare``, or a declare→write that crashed before the write) — has no readable
+    dataset, so every mode simply lands the first data version into its already-declared location; this keeps
+    the multi-step create idempotent and crash-safe, and never opens a table that isn't there (which 500'd).
+    A brand-new table is ``declare``-d to learn its canonical location, then written at
+    ``data_storage_version="2.2"`` (lance_docs/guide.md — Version Compatibility). Any failed fresh write is
+    rolled back with ``drop_table`` so the name stays retryable rather than stuck describable-but-unreadable.
     """
     table = pa.ipc.open_stream(data).read_all()
     normalized = (mode or "create").lower()
-    if normalized in ("overwrite", "existok", "exist_ok"):
-        existing = _existing_location(ns, segments)
-        if existing is not None:
-            if normalized != "overwrite":  # ExistOk → keep the existing table
-                version = lance.dataset(existing, storage_options=so).version
-                return CreateTableResponse(location=existing, version=version, properties=properties)
+    existing, only_declared = _existing_location(ns, segments)
+
+    if existing is not None and not only_declared:  # a written, readable table already lives here
+        if normalized == "overwrite":
             dataset = _write_blob(table, existing, so, mode="overwrite", allow_external=allow_external)
             return CreateTableResponse(location=existing, version=dataset.version, properties=properties)
+        if normalized in ("existok", "exist_ok"):  # keep it untouched, just report its current version
+            version = lance.dataset(existing, storage_options=so).version
+            return CreateTableResponse(location=existing, version=version, properties=properties)
+        # `create` against a written table → let declare surface the canonical TableAlreadyExists conflict.
+
+    if existing is not None and only_declared:  # declared, no data yet → write into it (all modes)
+        return _write_blob_into(ns, table, existing, so, segments, properties, allow_external=allow_external)
 
     location = ns.declare_table(DeclareTableRequest(id=segments, properties=properties)).location
     if not location:
         raise InvalidInputError("namespace did not return a location for the declared table")
+    return _write_blob_into(ns, table, location, so, segments, properties, allow_external=allow_external)
+
+
+def _write_blob_into(
+    ns: LanceNamespace,
+    table: pa.Table,
+    location: str,
+    so: StorageOptions,
+    segments: list[str],
+    properties: dict[str, str] | None,
+    *,
+    allow_external: bool,
+) -> CreateTableResponse:
+    """Write the blob table's first data version into an already-declared ``location``, rolling the declare
+    back with ``drop_table`` on failure so the name stays retryable rather than stuck declared-but-unreadable.
+    """
     try:
         dataset = _write_blob(table, location, so, mode="create", allow_external=allow_external)
     except Exception:
@@ -194,13 +218,19 @@ def _create_blob_table(
     return CreateTableResponse(location=location, version=dataset.version, properties=properties)
 
 
-def _existing_location(ns: LanceNamespace, segments: list[str]) -> str | None:
-    """The table's storage location if it already exists, else ``None``."""
+def _existing_location(ns: LanceNamespace, segments: list[str]) -> tuple[str | None, bool]:
+    """``(location, is_only_declared)`` for the table, or ``(None, False)`` if it does not exist.
+
+    ``check_declared=True`` makes the namespace surface a declared-but-unwritten table (rather than raising
+    TableNotFound), and ``is_only_declared`` distinguishes it from a written one — a declared-only table has
+    no readable dataset, so the caller must NOT try to open it (that would 500).
+    """
     try:
-        resp = ns.describe_table(DescribeTableRequest(id=segments, with_table_uri=True))
+        resp = ns.describe_table(DescribeTableRequest(id=segments, with_table_uri=True, check_declared=True))
     except TableNotFoundError:
-        return None
-    return getattr(resp, "table_uri", None) or getattr(resp, "location", None)
+        return None, False
+    location = getattr(resp, "table_uri", None) or getattr(resp, "location", None)
+    return location, bool(getattr(resp, "is_only_declared", False))
 
 
 # Scalar Arrow type names → pyarrow factory, for the alter_columns re-type path. A ``JsonArrowDataType``

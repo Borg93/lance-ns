@@ -111,18 +111,39 @@ def test_read_op_checks_reader_and_allows(client: TestClient, fake_ns: MagicMock
 
 
 def test_generic_mutation_checks_writer(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
-    """CONTRACT: a non-lifecycle mutation (rename) checks ``can_write_data`` (writer rung)."""
+    """CONTRACT: a non-lifecycle mutation (update) checks ``can_write_data`` (writer rung)."""
     _wire(client)
     captured: list[dict] = []
     monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
 
     resp = client.post(
-        "/v1/table/db1$users/rename",
-        json={"new_table_name": "u2"},
+        "/v1/table/db1$users/update",
+        json={"predicate": "id = 1", "updates": {"id": "2"}},
         headers={"Authorization": "Bearer t"},
     )
     assert resp.status_code == 403
     assert captured[-1] == {"user": "alice", "relation": "can_write_data", "obj": "table:db1$users"}
+
+
+def test_rename_is_owner_tier_not_writer(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT (security): rename is OWNER-tier via ``can_drop`` on the SOURCE — it destroys the source id
+    (revokes its tuples) and re-seeds the caller as owner of the destination, so a writer-tier gate would let
+    a non-owner rename another user's table and seize sole ownership (the twin of the Overwrite escalation).
+    A non-owner is 403'd BEFORE any revoke/seed."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+    revoke, grant = AsyncMock(return_value=1), AsyncMock()
+    monkeypatch.setattr(fga_module, "revoke_object_tuples", revoke)
+    monkeypatch.setattr(fga_module, "grant_on_create", grant)
+
+    resp = client.post(
+        "/v1/table/db1$users/rename", json={"new_table_name": "u2"}, headers={"Authorization": "Bearer t"}
+    )
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_drop", "obj": "table:db1$users"}
+    revoke.assert_not_awaited()  # the true owner is NOT evicted
+    grant.assert_not_awaited()
 
 
 def test_drop_table_requires_owner_and_403_is_problem_json(client: TestClient, monkeypatch) -> None:

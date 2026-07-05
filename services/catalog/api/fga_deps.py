@@ -70,8 +70,11 @@ _CREATE_ON_PARENT_SUFFIXES: dict[str, frozenset[str]] = {
 
 # Full route suffixes that are lifecycle/destructive on the object itself (owner rung).
 # Matched on the FULL suffix so ``index/{name}/drop`` / ``version/delete`` stay writer-tier.
+# ``rename`` is owner-tier: it DESTROYS the source id (revokes its tuples) and re-seeds the caller as owner
+# of the destination, so a writer-tier gate would let a non-owner rename another user's table and seize sole
+# ownership (the same escalation closed for Overwrite via require_can_drop_table). Owner-gate the source.
 _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
-    "table": {"drop": "can_drop", "deregister": "can_deregister"},
+    "table": {"drop": "can_drop", "deregister": "can_deregister", "rename": "can_drop"},
     "namespace": {"drop": "can_delete"},
 }
 

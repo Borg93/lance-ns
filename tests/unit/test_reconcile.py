@@ -168,3 +168,15 @@ def test_cron_runs_the_sweep_when_it_acquires_the_lock() -> None:
 
     assert repo.swept is True  # acquired → the sweep ran
     assert "checked" in result and "skipped" not in result
+    assert "storage_loss" in result  # the sweep always reports the (possibly empty) storage-loss set
+
+
+def test_storage_loss_states_flag_graph_ahead_and_missing_not_insync() -> None:
+    # The states that mean STORAGE lost data the graph still records (surfaced as WARN, not auto-fixed) —
+    # distinct from the back-fillable "graph lost the event" set. Guards the classification the cron reports.
+    from lineage.core.reconcile import BACKFILLABLE_STATES, STORAGE_LOSS_STATES
+
+    assert ReconcileState.GRAPH_AHEAD in STORAGE_LOSS_STATES
+    assert ReconcileState.MISSING_ON_STORAGE in STORAGE_LOSS_STATES
+    assert ReconcileState.IN_SYNC not in STORAGE_LOSS_STATES
+    assert not set(STORAGE_LOSS_STATES) & set(BACKFILLABLE_STATES)  # loss ≠ back-fillable (disjoint)

@@ -67,6 +67,12 @@ class _ReconcileRepo(Protocol):
 # Public: the cron route reports the same set, so there is ONE source of truth (no drift-prone duplicate).
 BACKFILLABLE_STATES = (ReconcileState.STORAGE_AHEAD, ReconcileState.UNTRACKED)
 
+# The drift states that mean STORAGE lost data the graph still records — the graph claims a version/dataset
+# that on-disk Lance no longer has (e.g. an older PVC snapshot restored under the graph, a deleted dataset).
+# These are NOT auto-fixable (we can't recreate lost data); the cron surfaces them as a WARNING so a bad
+# restore / storage loss is visible instead of silently served as valid provenance.
+STORAGE_LOSS_STATES = (ReconcileState.GRAPH_AHEAD, ReconcileState.MISSING_ON_STORAGE)
+
 
 async def reconcile_all(
     repository: _ReconcileRepo,

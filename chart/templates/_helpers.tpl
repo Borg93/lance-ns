@@ -141,3 +141,65 @@ lifecycle:
     exec:
       command: ["sh", "-c", "sleep {{ .Values.lifecycle.preStopSeconds }}"]
 {{- end -}}
+
+{{/* HTTP health probes for the FastAPI app workloads (catalog/lineage/producer/movers/compaction). Two
+distinct signals: readiness (/readyz) is dependency-aware (503 until the pool/namespace is up AND again once
+draining) so k8s only routes traffic to a truly-ready pod; liveness (/livez) is process-up only (never
+checks a backend — a slow dependency must NOT trigger a restart loop). Liveness runs slower + more tolerant
+(failureThreshold 3 × 20s) so a busy-but-alive worker is never SIGKILLed. One helper = every app agrees. */}}
+{{- define "lance.appProbes" -}}
+readinessProbe:
+  httpGet: { path: /readyz, port: http }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+livenessProbe:
+  httpGet: { path: /livez, port: http }
+  initialDelaySeconds: 10
+  periodSeconds: 20
+  timeoutSeconds: 3
+  failureThreshold: 3
+{{- end -}}
+
+{{/* TCP health probes for non-HTTP-health workloads — the SvelteKit web pod (no /readyz route) and RustFS
+(S3 API, no health route). A successful TCP accept on the serving port is the liveness/readiness signal.
+Call: include "lance.tcpProbes" "<portName>" (the named container port to dial). */}}
+{{- define "lance.tcpProbes" -}}
+readinessProbe:
+  tcpSocket: { port: {{ . }} }
+  initialDelaySeconds: 5
+  periodSeconds: 10
+livenessProbe:
+  tcpSocket: { port: {{ . }} }
+  initialDelaySeconds: 10
+  periodSeconds: 20
+  failureThreshold: 3
+{{- end -}}
+
+{{/* Container hardening applied to every APP container (our images: catalog/lineage/web/movers/compaction).
+runAsNonRoot enforces the image's non-root USER (catalog uid 10001, web `bun`) at admission — a manifest that
+regressed to root fails to start instead of running privileged. drop ALL caps + no privilege escalation +
+the RuntimeDefault seccomp profile = the restricted PodSecurity baseline. readOnlyRootFilesystem is on by
+default (values.security.readOnlyRootFilesystem) — each app mounts an emptyDir at /tmp for scratch (pyarrow
+spill, OTel), so nothing needs a writable rootfs. Container-level (NOT pod-level) so it never touches the
+injected daprd sidecar or the busybox wait-age initContainer (which legitimately runs as root). */}}
+{{- define "lance.securityContext" -}}
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: {{ .Values.security.readOnlyRootFilesystem }}
+  capabilities:
+    drop: ["ALL"]
+  seccompProfile:
+    type: RuntimeDefault
+{{- end -}}
+
+{{/* The writable-/tmp scratch pair that makes readOnlyRootFilesystem feasible: an emptyDir volume + its
+mount. Emitted as a container volumeMount via "lance.tmpMount" and a pod volume via "lance.tmpVolume" so a
+read-only rootfs still has a place for pyarrow/Lance spill + OTel. Only needed when readOnlyRootFilesystem
+is on; harmless (an unused tmpfs) when off, so unconditionally included keeps the templates uniform. */}}
+{{- define "lance.tmpMount" -}}
+- { name: tmp, mountPath: /tmp }
+{{- end -}}
+{{- define "lance.tmpVolume" -}}
+- { name: tmp, emptyDir: {} }
+{{- end -}}

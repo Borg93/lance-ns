@@ -59,7 +59,10 @@ COPY --link services ./services
 # (which only tolerates find matching nothing) cannot mask a real build failure above.
 RUN find / -xdev -perm /6000 -type f -exec chmod a-s {} + || true
 
-USER app
+# NUMERIC USER (the `app` account is uid 10001) — k8s `runAsNonRoot: true` can only VERIFY non-root at
+# admission when the image user is numeric; a name ("app") makes the kubelet reject the pod
+# (CreateContainerConfigError). The chart's lance.securityContext relies on this.
+USER 10001
 # 2333 = catalog (catalog.main:app); 8000 = lineage service (lineage.main:app) — same image, run with
 # `command: uvicorn lineage.main:app --host 0.0.0.0 --port 8000` (see docker-compose.governance.yml).
 EXPOSE 2333 8000

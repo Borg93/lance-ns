@@ -38,5 +38,7 @@ EXPOSE 3000
 # Bun is the init/PID1 here; the slim image has no curl, so health-check via bun's fetch.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \
     CMD bun -e "fetch('http://localhost:'+ (process.env.PORT||3000)).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
-USER bun
+# NUMERIC USER (the base image's `bun` account is uid 1000) — k8s `runAsNonRoot: true` can only VERIFY
+# non-root at admission when the image user is numeric; a name ("bun") makes the kubelet reject the pod.
+USER 1000
 ENTRYPOINT ["bun", "./build/index.js"]

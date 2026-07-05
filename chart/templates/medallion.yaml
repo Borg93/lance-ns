@@ -40,6 +40,7 @@ spec:
         - name: lance-ray
           image: {{ $img | quote }}
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          {{- include "lance.securityContext" . | nindent 10 }}
           {{- include "lance.preStop" . | nindent 10 }}
           {{- if .Values.observability.enabled }}
           command: ["opentelemetry-instrument", "uvicorn", "medallion.producer:app", "--host=0.0.0.0", "--port={{ $port }}"]
@@ -79,8 +80,12 @@ spec:
             - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
             {{- end }}
             {{- end }}
-          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          volumeMounts:
+            {{- include "lance.tmpMount" . | nindent 12 }}
+      volumes:
+        {{- include "lance.tmpVolume" . | nindent 8 }}
 ---
 apiVersion: v1
 kind: Service
@@ -129,6 +134,7 @@ spec:
         - name: mover
           image: {{ $img | quote }}
           imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          {{- include "lance.securityContext" $root | nindent 10 }}
           {{- include "lance.preStop" $root | nindent 10 }}
           {{- if $root.Values.observability.enabled }}
           command: ["opentelemetry-instrument", "uvicorn", "medallion.mover:app", "--host=0.0.0.0", "--port={{ $port }}"]
@@ -193,7 +199,11 @@ spec:
             - { name: MEDALLION_FGA_SERVICE_IDENTITY, value: {{ .serviceIdentity | quote }} }
             - { name: MEDALLION_FGA_REQUIRED_ACTION, value: {{ .requiredAction | quote }} }
             {{- end }}
-          readinessProbe: { httpGet: { path: /readyz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          {{- include "lance.appProbes" $root | nindent 10 }}
           resources: {{- toYaml $root.Values.resources.default | nindent 12 }}
+          volumeMounts:
+            {{- include "lance.tmpMount" $root | nindent 12 }}
+      volumes:
+        {{- include "lance.tmpVolume" $root | nindent 8 }}
 {{- end }}
 {{- end }}

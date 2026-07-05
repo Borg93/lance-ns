@@ -82,6 +82,7 @@ spec:
             {{- end }}
           ports:
             - { name: s3, containerPort: 9000 }
+          {{- include "lance.tcpProbes" "s3" | nindent 10 }}
           volumeMounts:
             - { name: data, mountPath: /data }
           resources: {{- toYaml .Values.resources.default | nindent 12 }}

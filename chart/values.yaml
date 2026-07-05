@@ -51,6 +51,13 @@ lifecycle:
   terminationGracePeriodSeconds: 30
   compactionTerminationGracePeriodSeconds: 120
 
+# --- Pod hardening (applied to every app container via the lance.securityContext helper) ----------
+# runAsNonRoot + drop-ALL-caps + RuntimeDefault seccomp are unconditional (the restricted PodSecurity
+# baseline). readOnlyRootFilesystem is the one tunable: on by default (each app has a writable /tmp
+# emptyDir for pyarrow/Lance spill + OTel), flip off only if a workload genuinely needs a writable rootfs.
+security:
+  readOnlyRootFilesystem: true
+
 # --- Network isolation (opt-in; requires a policy-enforcing CNI e.g. Calico/Cilium) ---------------
 # kind's default CNI does NOT enforce NetworkPolicy, so this is a no-op there — it is prod hardening.
 # When enabled, restricts ingress to lance-ray:8000 (the /produce cascade head) to in-release pods only,

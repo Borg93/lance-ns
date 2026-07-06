@@ -11,9 +11,14 @@ What happens when a service goes down, can we get corrupted state, and how do we
 > **What IS a repeatable regression suite:** `make e2e` runs the core end-to-end suites (observability,
 > medallion cascade, gateway, compaction, CAS) against the deployed stack, and `make e2e-governance` the
 > **boundary cases** (malformed-bearer→401, non-owner rename/overwrite→403, verified create-lineage) on an
-> auth-on stack (`make e2e-all` runs both). The **chaos rows below** (pull-a-service → recover) are **not yet
-> encoded as automated tests** — they still need a mutating harness that scales a pod and asserts recovery
-> (a documented follow-up; they mutate shared infra, so they're kept out of the default `make e2e`).
+> auth-on stack (`make e2e-all` runs both). `make e2e-governed-union` drives the FULL flag union
+> (auth + FGA + compute + quality ON, OpenBao off): the governed cascade allow-path, a live FGA-deny→DROP
+> (gold validator tuple revoked → gold's run never lands → re-grant restores), a live quality-block (bad
+> batch recorded `quality_passed=false` in lineage, never promoted), and the media lane under governance —
+> deploy flags in `tests/e2e/test_governed_union_e2e.py`. The **chaos rows below** (pull-a-service →
+> recover) are **not yet encoded as automated tests** — they still need a mutating harness that scales a
+> pod and asserts recovery (a documented follow-up; they mutate shared infra, so they're kept out of the
+> default `make e2e`).
 
 ## The core guarantee: at-least-once + idempotent → no corruption, no loss (within bounds)
 

@@ -350,45 +350,15 @@ each import-verified, then trimmed to the line limit). Plus the caught-live bugf
 builds every medallion app's OpenAPI. ALL of §5 live-verified on the cluster (helm rev 47).
 
 
-- ⛔ **Catalog config comment lies about a fail-closed security invariant** — claims env is a boot-time
-  fallback for the Dapr secret store; the lifespan implements strict fail-closed with NO env fallback. Fix the
-  comment (twice: config docstring + settings field). `services/catalog/core/config.py:44`
-- ⛔ **Compaction missing the boot guard its comment claims** — with `secrets_from_dapr` off, an empty
-  `COMPACTION_S3_SECRET_ACCESS_KEY` boots silently (catalog has the guard; compaction doesn’t).
-  `services/compaction/core/config.py:44`
-- ⛔ **Fail-closed Dapr-secret splice copy-pasted 3×** (lineage, compaction, inline catalog lifespan) — move
-  next to `fetch_dapr_secret` in `common/secrets.py`. `services/lineage/core/config.py:121`
-- ⛔ **S3 secret is `SecretStr` only in catalog** — plain `str` in lineage/medallion/compaction; repr/dump
-  leak-protection inconsistent. `services/lineage/core/config.py:66`
-- ⛔ **Lineage lifespan teardown not isolated per-resource** — if `fga_client.close()` raises, `pool.close()`
-  never runs (other 3 services use suppress-per-close). `services/lineage/main.py:88`
-- ⛔ **`handle_stage` types `fga_client: Any`** though every caller passes `OpenFgaClient | None`.
-  `services/medallion/services/transform.py:46`
-- ⛔ **`_BACKFILLED` duplicates `_BACKFILLABLE`** — two must-agree private constants that can drift.
-  `services/lineage/api/reconcile_cron.py:27` vs `services/lineage/core/reconcile.py`
-- ⛔ **Catalog health probes are sync `def`** — they queue on the same 40-token threadpool as the blocking
-  data plane; liveness fails exactly when the pod is busiest. Make async (they do no blocking work).
-  `services/catalog/main.py:186`
-- ⛔ **Medallion + compaction apps lack RFC 9457 handler parity** — `/produce` raises bare
-  `HTTPException(503)` with default `{"detail": …}` and no Retry-After. `services/medallion/api/produce.py:25`
-- ⛔ **`problem_detail` leaks internals on 500** — `str(exc)` lands in the response for INTERNAL-mapped errors,
-  contradicting “internals leak via logs only”. `services/common/exceptions.py:70`
-- ⛔ **medallion/compaction `/readyz` are static 200s** — no startup_complete/shutting_down lifecycle flags
-  (catalog + lineage gate on lifespan state). `services/medallion/api/health.py:20`
-- ⛔ **Docs-exposure policy inconsistent** — lineage/medallion/compaction serve `/docs` + `/openapi.json`
-  unconditionally; catalog gates behind `LANCE_REST_DOCS`. `services/lineage/main.py:92`
-- ⛔ **Emitter duplication** — HttpLineageEmitter/DaprEmitter duplicate identical `emit_create` bodies +
-  9-kwarg `emit_write` signatures (~90 lines); NoopEmitter repeats a third time. Extract the shared body.
-  `services/catalog/core/lineage_emit.py:199`
-- ⛔ **`_s3fs` silently downgrades HTTPS to http** — strips both schemes then hardcodes `scheme="http"`.
-  `services/compaction/services/sweep.py:34`
-- ⛔ **Catalog endpoint handlers have no docstrings** (tables/namespaces/data/columns/indices/tags/branches/
-  versions/transactions) while every lineage/medallion/compaction handler is documented.
-  `services/catalog/api/v1/endpoints/tables.py:43`
-- ⛔ **`governed()` erases element types** (`list[Any]`) — a PEP 695 generic keeps the type relationship free.
-  `services/lineage/api/fga_deps.py:176`
-- ⛔ **Same enum-setting constraint solved two ways in one file** — `lineage_transport` (str + validator) vs
-  `vending_mode` (`Literal`). `services/catalog/core/config.py:107`
+*(2026-07-06 truth-up: the 17 itemized ⛔ bullets that used to sit here were the ORIGINAL find-list,
+left unflipped after the fix batches above landed. Every one was re-verified against the code today —
+comment-lie fixed at `catalog/core/config.py:63`, compaction boot guard via `fetch_required_secrets`,
+splice deduped in `common/secrets.py`, SecretStr everywhere, teardown suppress-per-close in
+`lineage/main.py:99`, `fga_client: OpenFgaClient | None`, `BACKFILLABLE_STATES` single-sourced, async
+catalog probes, RFC 9457 + Retry-After on `/produce`, generic 5xx `problem_detail`, readyz lifecycle
+flags, `*_DOCS` gating, `_BaseLineageEmitter` dedup, endpoint-derived `_s3fs` scheme, handler docstrings
+(e.g. `tables.py:114`), `governed[T]`, `lineage_transport: Literal` — so the section header's 17/17 DONE
+is accurate and the list is removed rather than left contradicting it.)*
 
 ## 6 · P2 — dead config / dead exports / orphans
 
@@ -436,8 +406,77 @@ builds every medallion app's OpenAPI. ALL of §5 live-verified on the cluster (h
   `frontend/package.json:15` *(PARKED with §9 frontend scope — no frontend work per the 2026-07-06 goal)*
 - ✅ **DONE 2026-07-06 — /graph transitive-disclosure filter unit test**: hidden node dropped, edges dropped
   in BOTH leak directions, root kept WITHOUT re-checking it. `tests/unit/test_lineage_auth.py`
-- ⛔ **Live medallion e2e covers only the happy path** — FGA-gate DROP and quality-block never validated with
-  real Dapr/NATS/AGE. `tests/e2e/test_medallion_e2e.py:48`
+- ✅ **DONE 2026-07-06 — governed FULL-UNION e2e** (`make e2e-governed-union`, 4 passed live in 126s on the
+  auth+FGA+compute+quality stack): governed allow-path with per-stage run-id correlation + quality verdicts
+  + 401/403 boundaries; FGA-deny→DROP live (validator tuple revoked via the OpenFGA API → gold never lands;
+  re-grant restores); quality-block live (nulled-id bronze → `quality_passed=false` + failed `not_null`
+  recorded, gold never triggered, /produce recovers); media lane under governance incl. the transitive-
+  disclosure filter hiding ungranted s3:// sources. Plus the seed-script fix it surfaced: table→namespace
+  parent tuples for mover datasets (previously invisible to ALL humans under LINEAGE_FGA_ENABLED).
+  `tests/e2e/test_governed_union_e2e.py`
+
+### §7a · PICK-UP HERE — governed-union audit follow-ups (2026-07-06, workflow wf_45d9bf8e-ec9: 22 confirmed, 1 fixed, 3 refuted)
+
+The governed-union e2e itself PASSED live (4/4, 126s) and is pushed; these harden the harness + close
+what the audit proved the tests DON'T yet prove. Every item verified against code with file:line.
+
+- ⛔ **(MAJOR) writer-gate deny never proven + 12s grace window too short vs 30s redelivery** —
+  `tests/e2e/test_governed_union_e2e.py` test 2: add a sub-phase revoking
+  `user:service-bronze-to-silver writer warehouse:lance_catalog` → drive → bronze COMPLETE, silver
+  absent → restore; keep the validator sub-phase; then AFTER the positive-control drive completes
+  (~60s later, past the 30s ackWait/backOff window) re-assert BOTH denied run-ids are STILL absent —
+  that closes the false-pass window AND distinguishes "checked-and-denied" from "never checked".
+- ⛔ **(MAJOR) Makefile `e2e-governed-union`**: seed failure is silenced by `;` — change to
+  `scripts/seed_medallion_fga.sh || { kill $$R…; exit 1; }`; replace bare `sleep 4` with a bounded
+  readiness loop (curl lineage/lance-ray /livez + fga /healthz); re-run the seed AFTER pytest
+  (`|| true`) so an interrupted/failed run still restores the validator grant.
+- ⛔ **(MAJOR) events-feed e2e ordering masks the INSERT-time dedup** — `tests/e2e/test_lineage_e2e.py`:
+  capture `list_events()` BEFORE the third `ensure_events_table()` (its DDL dedup DELETEs currently
+  make the assertion pass even if ON CONFLICT did nothing). Same test: add a destructive-DB guard
+  (skip unless DSN host is localhost/`@age:` — retention=1 wipes `public.lineage_events` on ANY DB it
+  points at) + unique reader per run (`user:analyst-<uuid>`; plain INSERT makes exact-equality
+  non-re-runnable).
+- ⛔ **(MAJOR) reconcile route mounted only on a synthetic app** — extract
+  `mount_reconcile_cron(app, binding_name)` in `services/lineage/main.py:197-200` (no-op on empty),
+  call it at module level, unit-test the PRODUCTION function both ways in `tests/unit/test_reconcile.py`.
+- ⛔ **(prod, small) `RunEvent.progress` int() poison-message** — `services/lineage/models.py:271-274`:
+  non-int-coercible `done`/`total` raises at ingest → RETRY loop; wrap in try/except → None; add the
+  non-coercible unit case; the test docstring's "malformed → None" then becomes true (today it
+  overclaims). Needs the shared catalog image rebuilt + rolled at next deploy.
+- ⛔ **(small) `_poll` hardening** — lazy failure message (the f-string evaluates `_run_states` BEFORE
+  polling starts → diagnostic shows pre-poll state) + treat `requests.RequestException` in the
+  predicate as not-ready (one dropped port-forward packet currently aborts the 90s budget).
+- ⛔ **(small) alice fixture residue** — yield + teardown deleting her warehouse reader tuple (a
+  durable broad grant otherwise persists in the shared store across runs).
+- ⛔ **(small) test 3 order-independence** — guard on bronze existing (drive `/produce` + wait if
+  `lance.dataset(bronze_uri)` raises) instead of implicitly depending on test 1 having run.
+- ⛔ **(small) test 4 positive control for the s3:// filter** — grant alice reader on
+  `table:s3://<bucket>/media-src/batch/img-a.png`, assert exactly that source appears while img-b
+  stays hidden, then delete the tuple (today the negative is vacuously green if sources were never
+  recorded). Related design note: s3:// source datasets are invisible to EVERY governed principal
+  (no parent tuples) — decide whether source provenance should be governable (e.g. seed a
+  `namespace:source` parent) or document invisibility as the contract.
+- ⛔ **(small) /graph route↔filter structural binding** — `tests/unit/test_lineage_auth.py`: assert
+  `get_dataset_filter` is among the /graph route's dependant tree (handler-level test alone stays
+  green if the route loses `FilterDep`).
+- ⛔ **(small) pin `_LIST_RUNS` column order on real AGE** — add a `repo.list_runs()` assertion to
+  `test_discovery_lists_against_age` (the unit fold test mirrors a hand-built row, so a reordered
+  RETURN would pass unit + break prod).
+- ⛔ **(small) todo wording** — the progress flip says "all three tiers"; all three tests are
+  unit-tier (model / ingest-write / fold). Reword.
+- ⛔ **(design, log only) /events keep-first-terminal vs graph last-wins** — a re-executed run
+  (same deterministic run_id, RETRY-after-trigger-failure re-emits COMPLETE with a NEW version)
+  updates /runs + /producers + WROTE but the /events row keeps the FIRST terminal forever
+  (`repository.py:150-165` partial index + ON CONFLICT DO NOTHING). Decide: upsert-latest for
+  terminal rows, or document keep-first as the feed's contract. The e2e currently pins keep-first.
+- ⛔ **(doc) seed-script comment** — note that table→namespace parent links deliberately extend the
+  warehouse rung cascade (a warehouse writer gains `can_write_data` on medallion tables); intended
+  (rung inheritance), but say so where the tuples are written.
+- ✅ **(fixed in this batch) `_tuples` blanket-400 tolerance** — now only the two idempotency
+  messages pass; malformed writes fail at the call site with the real OpenFGA error.
+- Refuted (no action): quality-block try/finally restore (the healing `/produce` IS the restore, and
+  a mid-test failure leaves only test data); mover direct-POST 180s timeout (arithmetic); one
+  s3://-related duplicate.
 
 ## 8 · P1/P3 — docs staleness — ✅ ALL FIXED (2026-07-02)
 
@@ -497,6 +536,19 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 > its source); the real port = re-attach blob_field on the job's write-back (v2 columns arrive as plain
 > LargeBinary, typing stripped) + Pillow/deriver in the ray image. Small task, then drop the gate.
 > Still open here: registering cascade outputs into the catalog; real encoder plugin; egress lane.
+
+- ⛔ **Ray TRAIN vs Ray DATA distinction** (added 2026-07-06, user request; task #115 + todo_confirm §4).
+  The platform must host BOTH batch/ETL (today's cascade = Ray Data shape) and TRAINING workloads
+  (Ray Train). Design first, then implement — open questions: (1) head shape — a separate producer
+  endpoint (`/train`) vs a workload-type field on the trigger payload (and its own topic? training is
+  long-running, not a stage hop); (2) lineage shape for a training run — use the OFFICIAL OpenLineage
+  `jobType` job facet (processingType=BATCH, integration=RAY, jobType=TRAINING vs ETL), inputs = the
+  versioned feature datasets read, output = the model artifact — and DECIDE where the model lives
+  (a Lance dataset in a `models` namespace keeps provenance uniform; an external registry needs the
+  external-pointer seam); (3) authz — a training job likely needs its own service identity + rung
+  (reader on features, writer on models — NOT the medallion writer rung); (4) whether `ray job submit`
+  seam is shared or training gets a KubeRay RayJob shape at the rask merge. Deliverable: design note +
+  execution-spec'd items here; OpenLineage stays spec-true (official facets only, no invented ones).
 
 - ✅ **P2 `/produce` (lance-ray) in-cluster auth — DONE (2026-07-04).** BOTH layers now ship
   (defense-in-depth, the Ray-security shape: network isolation primary + token guard):

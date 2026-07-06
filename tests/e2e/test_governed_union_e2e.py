@@ -98,8 +98,12 @@ def fga_store() -> tuple[str, str]:
 def _tuples(
     fga_store: tuple[str, str], *, writes: list[dict] | None = None, deletes: list[dict] | None = None
 ) -> None:
-    """Write/delete tuples via OpenFGA's Write RPC. Tolerates duplicate-write / missing-delete 400s so
-    seeding is idempotent across runs (mirrors the seed script's ``|| true``)."""
+    """Write/delete tuples via OpenFGA's Write RPC, idempotently across runs.
+
+    Only the two IDEMPOTENCY 400s are tolerated (duplicate write / delete-of-absent — matched on the
+    error message); any other 400 (malformed tuple, bad relation, wrong model id) fails HERE with the
+    real error, not 90 seconds later as a misleading poll timeout (audit: a blanket 400-pass masked
+    real seed errors)."""
     store, model = fga_store
     body: dict = {"authorization_model_id": model}
     if writes:
@@ -107,7 +111,12 @@ def _tuples(
     if deletes:
         body["deletes"] = {"tuple_keys": deletes}
     resp = requests.post(f"{FGA}/stores/{store}/write", json=body, timeout=10)
-    assert resp.status_code in (200, 400), resp.text  # 400 = tuple already there / already gone
+    if resp.status_code == 200:
+        return
+    message = resp.json().get("message", "") if resp.status_code == 400 else ""
+    assert "already exists" in message or "did not exist" in message or "does not exist" in message, (
+        f"OpenFGA write failed ({resp.status_code}): {resp.text}"
+    )
 
 
 def _token(username: str) -> str:

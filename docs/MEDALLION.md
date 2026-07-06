@@ -97,7 +97,10 @@ inline `thumbnail` + `embedding`; unrecognised media carries through untouched; 
 no-op), writing `silver-media$features`. Undecodable-after-probe payloads are deterministic bad data:
 the run FAILs in lineage and the trigger is DROPPED (the quality-gate contract), never retried.
 Live-regression-guarded by `make e2e-media` (part of the `make e2e` umbrella; skips on compute-off
-stacks). Governed mode needs the media grants — `scripts/seed_medallion_fga.sh` seeds them.
+stacks). Governed mode needs the media grants — `scripts/seed_medallion_fga.sh` seeds them. Ray note:
+lance-ray 0.4.2 reads blob BYTES correctly (its datasource reconstructs them via `take_blobs`), but
+exposes blob-v2 columns as plain LargeBinary — so until the stage job re-attaches `blob_field` on
+write and ships the deriver (+Pillow) in the ray image, blob upstreams take the in-process path.
 
 **`/produce` auth (the cascade head).** `/produce` is a direct operator trigger (not sidecar-delivered), so
 it is guarded by `require_dapr_token` (the shared `APP_API_TOKEN`): **no-op in dev** (unset token — `make

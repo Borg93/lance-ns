@@ -485,7 +485,10 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 > Live-proven end-to-end (`make e2e-media`, in the `make e2e` umbrella; skips compute-off). Undecodable
 > media = deterministic FAIL+DROP (quality-gate contract). Governed grants seeded
 > (`seed_medallion_fga.sh`: bronze-media/silver-media parents + service-media-to-silver writer — the
-> audit's blocker). Ray path falls back in-process for blob upstreams (ray job not blob-safe yet).
+> audit's blocker). Ray path falls back in-process for blob upstreams — CORRECTED scope (user caught an overclaim):
+> lance-ray 0.4.2 READS blob bytes correctly (datasource take_blobs reconstruction — verified against
+> its source); the real port = re-attach blob_field on the job's write-back (v2 columns arrive as plain
+> LargeBinary, typing stripped) + Pillow/deriver in the ray image. Small task, then drop the gate.
 > Still open here: registering cascade outputs into the catalog; real encoder plugin; egress lane.
 
 - ✅ **P2 `/produce` (lance-ray) in-cluster auth — DONE (2026-07-04).** BOTH layers now ship

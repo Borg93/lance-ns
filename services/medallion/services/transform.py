@@ -121,8 +121,10 @@ async def handle_stage(
                     if use_ray and await run_in_threadpool(
                         has_blob_columns, settings.from_uri, settings.storage_options()
                     ):
-                        # The Ray stage job is not yet blob-safe and derives no artifacts, so a
-                        # blob-carrying upstream takes the in-process path even with Ray on — the same
+                        # The Ray stage job cannot yet round-trip a blob column (lance-ray reads
+                        # blob BYTES fine via take_blobs, but strips the blob typing on read, so the
+                        # job's write-back would demote/mismatch it) and derives no artifacts — so a
+                        # blob upstream takes the in-process path even with Ray on, the same
                         # native-fallback convention as the Ray index path (docs/RAY.md). Observable
                         # (warned + span-attributed), never silent.
                         log.warning(

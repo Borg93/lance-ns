@@ -375,9 +375,7 @@ def test_create_index_succeeds_when_readback_fails(
     assert captured["schema_fields"] == []
 
 
-def test_restore_emits_lineage_at_new_version(
-    client: TestClient, fake_ns: MagicMock, monkeypatch
-) -> None:
+def test_restore_emits_lineage_at_new_version(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
     from lance_namespace import RestoreTableResponse
 
     fake_ns.restore_table.return_value = RestoreTableResponse(transaction_id="tx")
@@ -485,9 +483,7 @@ def test_register_emits_versionless_marker_with_source_uri(
     assert captured["source_uri"] == "s3://bucket/t"
 
 
-def test_declare_emits_versionless_marker(
-    client: TestClient, fake_ns: MagicMock, monkeypatch
-) -> None:
+def test_declare_emits_versionless_marker(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
     from lance_namespace import DeclareTableResponse
 
     fake_ns.declare_table.return_value = DeclareTableResponse(location="s3://bucket/t")

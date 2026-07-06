@@ -344,8 +344,7 @@ _COL_DOWNSTREAM: Final = (
 # and CREATE, leaving a duplicate :Column + duplicate HAS_COLUMN; DISTINCT collapses them so the inventory
 # lists each field once regardless. The upstream/downstream column walks already RETURN DISTINCT.
 _DATASET_COLUMN_NODES: Final = (
-    "MATCH (d:Dataset {name:$ds})-[:HAS_COLUMN]->(c:Column) "
-    "RETURN DISTINCT c.field, c.type ORDER BY c.field"
+    "MATCH (d:Dataset {name:$ds})-[:HAS_COLUMN]->(c:Column) RETURN DISTINCT c.field, c.type ORDER BY c.field"
 )
 _DATASET_COLUMN_EDGES: Final = (
     "MATCH (o:Column)-[e:DERIVED_FROM_COLUMN]->(i:Column) WHERE o.dataset=$ds OR i.dataset=$ds "
@@ -809,9 +808,7 @@ class LineageRepository:
         jobs.sort(key=lambda j: j.name)
         return jobs
 
-    async def backfill_write(
-        self, name: str, version: int, schema: SchemaFields | None = None
-    ) -> None:
+    async def backfill_write(self, name: str, version: int, schema: SchemaFields | None = None) -> None:
         """Stamp the actual on-disk version onto the graph when a write's lineage event was lost (B4).
 
         The buildable half of the outbox problem: a crash between a Lance write and the sidecar publish drops

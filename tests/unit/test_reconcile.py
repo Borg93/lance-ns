@@ -83,9 +83,7 @@ class _FakeRepo:
     async def latest_write_version(self, name: str) -> int | None:
         return self._graph.get(name)
 
-    async def backfill_write(
-        self, name: str, version: int, schema: object | None = None
-    ) -> None:
+    async def backfill_write(self, name: str, version: int, schema: object | None = None) -> None:
         self.backfilled.append((name, version))
         if schema is not None:
             self.backfilled_schemas[name] = schema
@@ -144,9 +142,7 @@ def test_reconcile_all_recovers_schema_pinned_to_backfilled_version() -> None:
         pinned.append(version)
         return fields
 
-    asyncio.run(
-        reconcile_all(cast(Any, repo), _reader({"ahead": 3}), backfill=True, read_schema=read_schema)
-    )
+    asyncio.run(reconcile_all(cast(Any, repo), _reader({"ahead": 3}), backfill=True, read_schema=read_schema))
 
     assert repo.backfilled == [("ahead", 3)]  # storage-ahead → back-filled at the on-disk version
     assert pinned == [3]  # the schema read was pinned to exactly that version

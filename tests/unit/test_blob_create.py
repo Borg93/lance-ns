@@ -216,9 +216,7 @@ def test_external_blob_allowlist_accepts_in_base_rejects_out_of_base(tmp_path: P
 
     def _pointer(uri: str) -> bytes:
         return _ipc(
-            pa.table(
-                {"id": [1], "blob": blob_array([Blob.from_uri(uri, position=0, size=8)])}, schema=schema
-            )
+            pa.table({"id": [1], "blob": blob_array([Blob.from_uri(uri, position=0, size=8)])}, schema=schema)
         )
 
     bases = [base.as_uri()]

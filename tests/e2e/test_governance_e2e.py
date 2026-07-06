@@ -162,9 +162,7 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
         "inputs": [{"namespace": ns, "name": bronze}],
         "outputs": [{"namespace": ns, "name": silver}],
     }
-    assert (
-        requests.post(f"{lineage}/api/v1/lineage", json=promote, headers=ah, timeout=10).status_code == 201
-    )
+    assert requests.post(f"{lineage}/api/v1/lineage", json=promote, headers=ah, timeout=10).status_code == 201
 
     # 6. silver's upstream includes bronze (the medallion lineage). Governed read → forward alice's bearer;
     # alice can read silver via her ownership of the parent namespace ``ns`` (create-on-parent cascade).

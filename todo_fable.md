@@ -417,18 +417,25 @@ builds every medallion app's OpenAPI. ALL of §5 live-verified on the cluster (h
   e2e against a hermetic apache/age service container — identical locally (`make e2e-lineage`) and in CI
   (`lineage-e2e` job). Suite grew a §4 test: batched Run-prune + per-version schema + Column-index DDL
   against real AGE. `.github/workflows/ci.yml`, `.dagger/e2e.go`
-- ⛔ **/events Postgres surface never executes against a real DB** — record_event INSERT+prune, list_events
-  SELECT, lineage_reads audit rows. `services/lineage/services/repository.py:802`
+- ✅ **DONE 2026-07-06 — /events Postgres surface against real PG** (Dagger/CI suite): record_event
+  redelivery dedup (3-col natural key + terminal partial index vs a fresh-eventTime terminal), newest-first
+  jsonb round-trip, seq-window retention prune, lineage_reads audit row. `tests/e2e/test_lineage_e2e.py`
 - ✅ **DONE 2026-07-06 — `dataset_schema` at-version exercised against real AGE**: the Dagger/CI lineage
   e2e asserts per-version schema resolution (v1 vs v2 fields) on a live apache/age — the int-vs-string
   `$ver` quirk is now regression-gated. `tests/e2e/test_lineage_e2e.py`
-- ⛔ **`RunEvent.progress` + `_SET_PROGRESS` + /runs progress surfacing** — no test at any tier. `services/lineage/models.py:264`
-- ⛔ **Reconcile cron route** (POST handler, OPTIONS ack, token wiring, response shape) — no test. `services/lineage/api/reconcile_cron.py:31`
-- ⛔ **Demo router** (/demo/datasets Lance-on-S3 reads, per-version schemas, gold JSONB) — no behavioral test;
-  Playwright mocks it empty. `services/lineage/api/v1/endpoints/demo.py:88`
-- ⛔ **Frontend suites not in CI** — 3 Playwright tests + bun oidc-core tests run only manually. `frontend/package.json:15`
-- ⛔ **/graph transitive-disclosure filter has no direct unit test** (its /columns twin tests both leak
-  directions). `services/lineage/api/v1/endpoints/datasets.py:71`
+- ✅ **DONE 2026-07-06 — `RunEvent.progress` tested at all three tiers**: facet parse (both-fields-or-None),
+  the conditional `_SET_RUN_PROGRESS` at ingest (never clobbered back to null), and the 12-col /runs fold.
+  `tests/unit/test_lineage.py`
+- ✅ **DONE 2026-07-06 — Reconcile cron route**: OPTIONS ack (no token — Dapr's discovery probe), exact
+  binding-name registration, 403 on missing/wrong token (sweep never runs), tokened POST → full report
+  shape incl. pruned_runs. `tests/unit/test_reconcile.py`
+- ✅ **DONE 2026-07-06 — Demo router behavioral test** (real local-Lance reads): absent→exists:false,
+  per-version schema walk across evolution, gold's embedded lineage JSONB round-trip, best-effort
+  degradation to None. `tests/unit/test_lineage_demo.py`
+- ⛔ **Frontend suites not in CI** — 3 Playwright tests + bun oidc-core tests run only manually.
+  `frontend/package.json:15` *(PARKED with §9 frontend scope — no frontend work per the 2026-07-06 goal)*
+- ✅ **DONE 2026-07-06 — /graph transitive-disclosure filter unit test**: hidden node dropped, edges dropped
+  in BOTH leak directions, root kept WITHOUT re-checking it. `tests/unit/test_lineage_auth.py`
 - ⛔ **Live medallion e2e covers only the happy path** — FGA-gate DROP and quality-block never validated with
   real Dapr/NATS/AGE. `tests/e2e/test_medallion_e2e.py:48`
 

@@ -306,9 +306,11 @@ def test_run_retention_prune_and_schema_at_version(dsn: str) -> None:
             }
         )
 
+    from lineage.schemas import DatasetSchema
+
     old_rid, new_rid = str(uuid.uuid4()), str(uuid.uuid4())
 
-    async def run() -> tuple[object, object, int, int, set[str]]:
+    async def run() -> tuple[DatasetSchema, DatasetSchema, int, int, set[str]]:
         pool = make_pool(dsn)
         await pool.open()
         try:
@@ -344,3 +346,78 @@ def test_run_retention_prune_and_schema_at_version(dsn: str) -> None:
     assert pruned >= 1  # >= : a retained volume may carry old runs from prior local e2e invocations
     assert pruned_again == 0 or pruned_again < pruned  # idempotent for THIS cutoff once swept clean
     assert new_rid in run_ids and old_rid not in run_ids
+
+
+def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
+    """§7: the durable /events feed + read-audit log against REAL Postgres — the DDL (idempotent on a
+    populated DB), the at-least-once dedup (exact redelivery via the 3-col natural key; a redelivered
+    TERMINAL with a FRESH eventTime via the partial index — while a RUNNING progress trail keeps every
+    distinct time), the newest-first jsonb round-trip, the seq-window retention prune, and record_read."""
+    import uuid
+
+    from lineage.core.age import make_pool
+    from lineage.services.repository import LineageRepository
+
+    rid, rid2 = str(uuid.uuid4()), str(uuid.uuid4())
+
+    async def run() -> tuple[list, list, list]:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            await repo.ensure_events_table()
+            await repo.ensure_events_table()  # idempotent re-boot (DuplicateTable race path is swallowed)
+
+            def kw(run_id: str) -> dict:
+                return {
+                    "run_id": run_id,
+                    "job": "e2e/write.events_feed",
+                    "author": "data_eng",
+                    "inputs": ["bronze$events"],
+                    "outputs": ["silver$features"],
+                    "event": {"run": {"runId": run_id}},
+                }
+
+            await repo.record_event(event_type="RUNNING", event_time="2026-07-06T00:00:01+00:00", **kw(rid))
+            # exact redelivery (same run/type/time — a Dapr re-drive after a lost ack) → deduped
+            await repo.record_event(event_type="RUNNING", event_time="2026-07-06T00:00:01+00:00", **kw(rid))
+            # a LATER RUNNING (fresh time) is real progress, not a duplicate → kept
+            await repo.record_event(event_type="RUNNING", event_time="2026-07-06T00:00:02+00:00", **kw(rid))
+            await repo.record_event(event_type="COMPLETE", event_time="2026-07-06T00:00:03+00:00", **kw(rid))
+            # a redelivered TERMINAL re-emitted with a FRESH eventTime (retry-after-partial-success) —
+            # the 3-col key can't catch this; the partial (run_id, event_type) terminal index must.
+            await repo.record_event(event_type="COMPLETE", event_time="2026-07-06T00:00:09+00:00", **kw(rid))
+            await repo.ensure_events_table()  # the dedup DELETEs are valid SQL on a populated table too
+            records = [r for r in await repo.list_events() if r.event.get("run", {}).get("runId") == rid]
+
+            # retention: a repo bootstrapped with a keep-window prunes older rows on the next insert.
+            pruning = LineageRepository(pool, "lineage", events_retention=1)
+            await pruning.record_event(event_type="START", event_time="2026-07-06T00:01:00+00:00", **kw(rid2))
+            survivors = await pruning.list_events()
+
+            await repo.ensure_reads_table()
+            await repo.record_read(reader="user:analyst", dataset="silver$features")
+            async with pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT reader, dataset FROM public.lineage_reads "
+                    "WHERE reader = 'user:analyst' AND dataset = 'silver$features'"
+                )
+                reads = await cur.fetchall()
+            return records, survivors, reads
+        finally:
+            await pool.close()
+
+    records, survivors, reads = asyncio.run(run())
+
+    # 5 record_event calls → 3 rows: both redeliveries (exact + fresh-time terminal) were dropped, the
+    # first COMPLETE won, and the RUNNING trail kept both distinct times. Newest-first by seq.
+    assert [(r.event_type, r.event_time) for r in records] == [
+        ("COMPLETE", "2026-07-06T00:00:03+00:00"),
+        ("RUNNING", "2026-07-06T00:00:02+00:00"),
+        ("RUNNING", "2026-07-06T00:00:01+00:00"),
+    ]
+    assert records[0].inputs == ["bronze$events"]  # jsonb round-trip
+    assert records[0].outputs == ["silver$features"]
+    # the prune kept only the newest seq window: rid2's row survives, every older row is gone.
+    assert [r.event.get("run", {}).get("runId") for r in survivors] == [rid2]
+    assert reads == [("user:analyst", "silver$features")]  # the read-audit row landed

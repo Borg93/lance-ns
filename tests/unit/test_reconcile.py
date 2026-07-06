@@ -193,6 +193,73 @@ def test_cron_runs_the_sweep_when_it_acquires_the_lock() -> None:
     assert "storage_loss" in result  # the sweep always reports the (possibly empty) storage-loss set
 
 
+# --------------------------------------------------------------------------- #
+# §7 residual: the ROUTE surface around _on_cron — the binding-name registration,
+# Dapr's OPTIONS discovery pre-flight, and the app-api-token guard over HTTP.
+# --------------------------------------------------------------------------- #
+
+
+def _cron_app(repo: _FakeRepo) -> Any:
+    from fastapi import FastAPI
+    from lineage.api.dependencies import get_repository
+    from lineage.api.reconcile_cron import build_reconcile_cron_router
+    from lineage.core.config import get_settings
+
+    app = FastAPI()
+    app.include_router(build_reconcile_cron_router("reconcile-cron"))
+    app.dependency_overrides[get_repository] = lambda: repo
+    # a zero-arg lambda, NOT ``_settings`` itself — FastAPI introspects the override's signature, and
+    # ``**values`` would be read as a required request param (every POST would 422).
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    return app
+
+
+def test_cron_route_options_ack_and_binding_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dapr's startup pre-flight (OPTIONS /<binding-name>) must 2xx — WITHOUT the token guard (the
+    sidecar's discovery probe carries no app token) — and the route lives at the EXACT binding name."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    client = TestClient(_cron_app(_LockRepo(acquired=True)))
+    response = client.options("/reconcile-cron")  # no dapr-api-token header on purpose
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+    assert client.options("/other-binding").status_code == 404  # nothing answers off the binding name
+    # the discovery ack is plumbing, not API surface — POST is the only documented method.
+    paths = client.get("/openapi.json").json()["paths"]
+    assert set(paths["/reconcile-cron"]) == {"post"}
+
+
+def test_cron_route_post_requires_dapr_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The sweep route is sidecar-only: with APP_API_TOKEN set, a missing/wrong ``dapr-api-token``
+    header is 403 and the sweep body never runs (no lock taken, no graph touched)."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    repo = _LockRepo(acquired=True)
+    client = TestClient(_cron_app(repo))
+    assert client.post("/reconcile-cron").status_code == 403
+    assert client.post("/reconcile-cron", headers={"dapr-api-token": "wrong"}).status_code == 403
+    assert repo.swept is False
+
+
+def test_cron_route_post_with_token_returns_sweep_report(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A tokened POST drives the sweep and returns the full report shape the chart's cron consumes."""
+    from fastapi.testclient import TestClient
+
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    repo = _LockRepo(acquired=True)
+    client = TestClient(_cron_app(repo))
+    response = client.post("/reconcile-cron", headers={"dapr-api-token": "s3cret"})
+    assert response.status_code == 200
+    assert repo.swept is True
+    body = response.json()
+    # the fixture's dataset has no dataSource URI, so the sweep checks 0 datasets (swept above proves the
+    # body ran); retention off (the default) → the report still carries pruned_runs, so dashboards can
+    # rely on every key being present on every tick.
+    assert body == {"checked": 0, "backfilled": [], "storage_loss": [], "pruned_runs": 0}
+
+
 def test_storage_loss_states_flag_graph_ahead_and_missing_not_insync() -> None:
     # The states that mean STORAGE lost data the graph still records (surfaced as WARN, not auto-fixed) —
     # distinct from the back-fillable "graph lost the event" set. Guards the classification the cron reports.

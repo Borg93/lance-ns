@@ -37,6 +37,9 @@ from lineage.schemas import (
     DatasetRef,
     DatasetSchema,
     EventRecord,
+    GraphEdge,
+    GraphNode,
+    LineageGraph,
     Neighbors,
     Runs,
     RunStatus,
@@ -316,6 +319,7 @@ class _FakeRepo:
         self.uri: str | None = None
         self.col_related: list[ColumnRef] = []
         self.col_graph: ColumnGraph | None = None
+        self.lineage_graph: LineageGraph | None = None
 
     async def ingest_event(self, event: RunEvent) -> None:
         self.ingested = event
@@ -346,6 +350,9 @@ class _FakeRepo:
 
     async def dataset_column_graph(self, name: str) -> ColumnGraph:
         return self.col_graph or ColumnGraph(root=name)
+
+    async def graph(self, name: str) -> LineageGraph:
+        return self.lineage_graph or LineageGraph(root=name, nodes=[], edges=[])
 
     async def upstream(self, name: str) -> Neighbors:
         return Neighbors(dataset=name, related=[DatasetRef(name="a"), DatasetRef(name="b")])
@@ -417,6 +424,41 @@ def test_get_column_downstream_filters_to_visible_datasets(monkeypatch: pytest.M
     flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_column_downstream("a", "root", cast(LineageRepository, repo), flt, settings))
     assert [(r.dataset, r.field) for r in result.related] == [("a", "x")]  # b's column is hidden
+
+
+def test_get_graph_drops_hidden_nodes_and_edges_both_directions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The dataset-level /graph transitive-disclosure guarantee (the contract the column tests cite as
+    # "same as /graph"): a node the caller can't see is dropped, and an edge needs BOTH endpoints visible
+    # — proven in both leak directions (source-hidden AND target-hidden). The requested root rides on the
+    # route gate's authorization, so the filter must keep it WITHOUT re-checking it (visible() is called
+    # with the other nodes only).
+    from lineage.api.v1.endpoints.datasets import get_graph
+
+    checked: list[str] = []
+
+    async def _allow_c(_client: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
+        checked.extend(objects)
+        return {o: o == "table:c" for o in objects}
+
+    monkeypatch.setattr(fga, "batch_check", _allow_c)
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.lineage_graph = LineageGraph(
+        root="a",
+        nodes=[GraphNode(id="a"), GraphNode(id="b"), GraphNode(id="c")],
+        edges=[
+            GraphEdge(source="a", target="c"),  # KEEP: both endpoints visible
+            GraphEdge(source="b", target="a"),  # source hidden
+            GraphEdge(source="a", target="b"),  # target hidden
+        ],
+    )
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_graph("a", cast(LineageRepository, repo), flt))
+    assert {n.id for n in result.nodes} == {"a", "c"}  # b dropped; the root kept without an FGA check
+    assert "table:a" not in checked  # the root was NOT re-checked (the route gate already authorized it)
+    assert [(e.source, e.target) for e in result.edges] == [("a", "c")]  # both leak directions dropped
 
 
 def test_get_dataset_columns_drops_edges_touching_hidden_datasets(

@@ -611,3 +611,87 @@ def test_prune_runs_noop_when_nothing_old(monkeypatch: pytest.MonkeyPatch) -> No
     repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
     assert asyncio.run(repo.prune_runs("2020-01-01T00:00:00+00:00")) == 0
     assert [q for q in calls if "DETACH DELETE" in q] == []  # no delete issued when nothing qualifies
+
+
+# --------------------------------------------------------------------------- #
+# §7 residual: the RUNNING progress facet — model parse, the conditional
+# _SET_RUN_PROGRESS write at ingest, and the /runs fold that surfaces it.
+# --------------------------------------------------------------------------- #
+
+
+def _running_event(facets: dict[str, Any]) -> RunEvent:
+    return RunEvent.model_validate(
+        {
+            "eventType": "RUNNING",
+            "eventTime": "2026-07-06T00:00:00Z",
+            "run": {"runId": "r-prog", "facets": facets},
+            "job": {"namespace": "lance-medallion", "name": "embed"},
+            "inputs": [],
+            "outputs": [],
+        }
+    )
+
+
+def test_progress_facet_parses_only_when_both_fields_present() -> None:
+    """``RunEvent.progress`` is our custom ``progress`` run facet (OpenLineage has no standard one):
+    ``(done, total)`` when both ride, ``None`` for absent/partial/malformed — never a KeyError 500."""
+    assert _running_event({"progress": {"done": 3, "total": 10}}).progress == (3, 10)
+    assert _running_event({}).progress is None
+    assert _running_event({"progress": {"done": 3}}).progress is None  # partial → None, not (3, ???)
+    assert _running_event({"progress": "3/10"}).progress is None  # non-dict facet ignored
+
+
+def test_ingest_sets_run_progress_only_when_the_facet_rides(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Progress is SET in its own conditional statement — stamped with the facet's numbers when it
+    rides, and NEVER issued without it (an unconditional SET would clobber the trail back to null)."""
+    import lineage.services.repository as repo_mod
+
+    calls: list[tuple[str, dict[str, object]]] = []
+
+    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+        calls.append((query, params))
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _capture)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+
+    asyncio.run(repo.ingest_event(_running_event({"progress": {"done": 3, "total": 10}})))
+    progress_sets = [p for q, p in calls if "SET r.progress_done" in q]
+    assert progress_sets == [{"rid": "r-prog", "pd": 3, "pt": 10}]
+
+    calls.clear()
+    asyncio.run(repo.ingest_event(_running_event({})))  # a later RUNNING without the facet
+    assert [p for q, p in calls if "SET r.progress_done" in q] == []  # trail preserved, not nulled
+
+
+def test_list_runs_folds_progress_onto_the_status_board(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The 12-column _LIST_RUNS row folds into RunStatus with progress as ints (positions 4/5)."""
+    import lineage.services.repository as repo_mod
+
+    async def _fake_fetch(
+        _pool: object, _graph: str, query: str, params: dict[str, object] | None = None, *, columns: int
+    ) -> list[list[object]]:
+        assert "r.progress_done" in query and columns == 12
+        return [
+            [
+                "r-prog",
+                "lance-medallion/embed",
+                "data_eng",
+                "RUNNING",
+                3,
+                10,
+                "",
+                "t0",
+                "t1",
+                2,
+                "silver$features",
+                "",
+            ]
+        ]
+
+    monkeypatch.setattr(repo_mod, "fetch", _fake_fetch)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    runs = asyncio.run(repo.list_runs()).runs
+    assert len(runs) == 1
+    assert (runs[0].progress_done, runs[0].progress_total) == (3, 10)
+    assert runs[0].state == "RUNNING"
+    assert runs[0].operation is None  # "" maps back to None (no lance-facet operation)

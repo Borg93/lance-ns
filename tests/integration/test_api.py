@@ -266,32 +266,27 @@ def test_delete_branch_routes_to_dataset(client: TestClient, monkeypatch) -> Non
 def test_insert_stamps_the_real_version_on_lineage(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:
-    # Insert's native response carries only a transaction_id; the endpoint reopens the dataset for the
-    # version it produced (like update/delete) and stamps it on the WROTE edge — it used to emit version=None.
+    # Insert's native response carries only a transaction_id; the shared trailer reopens the dataset for
+    # the version it produced and stamps it on the WROTE edge — it used to emit version=None.
     from lance_namespace import InsertIntoTableResponse
 
     fake_ns.insert_into_table.return_value = InsertIntoTableResponse(transaction_id="tx1")
     dataset = MagicMock()
     dataset.version = 7
     monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
-
-    captured: dict[str, object] = {}
-
-    async def _capture(_emitter: object, _segments: object, **kwargs: object) -> None:
-        captured.update(kwargs)
-
-    monkeypatch.setattr("catalog.api.v1.endpoints.data.emit_write_event", _capture)
+    captured = _capture_measured_emit(monkeypatch)
 
     resp = client.post("/v1/table/db$t/insert", content=b"ARROWSTREAM", headers=ARROW_STREAM)
     assert resp.status_code == 200
     assert captured["version"] == 7  # the real Lance version, not None
 
 
-# --- #110 lineage-emit coverage: schema-evolution / index / restore / register / declare now emit ---
+# --- #110 lineage-emit coverage: schema-evolution / index / restore / register / declare now emit, ---
+# --- through the shared best-effort + version-pinned read-back trailer (lineage_deps).            ---
 
 
 def _capture_emit(monkeypatch, module: str) -> dict[str, object]:
-    """Patch the endpoint module's emit_write_event to record its kwargs (stands in for the transport)."""
+    """Patch the endpoint module's emit_write_event to record its kwargs (versionless-marker ops)."""
     captured: dict[str, object] = {}
 
     async def _cap(_emitter: object, _segments: object, **kwargs: object) -> None:
@@ -301,24 +296,42 @@ def _capture_emit(monkeypatch, module: str) -> dict[str, object]:
     return captured
 
 
-def test_add_columns_emits_schema_evolution_lineage(
+def _capture_measured_emit(monkeypatch) -> dict[str, object]:
+    """Patch the shared trailer's emit_write_event to record what a measured op finally emits."""
+    captured: dict[str, object] = {}
+
+    async def _cap(_emitter: object, _segments: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr("catalog.api.lineage_deps.emit_write_event", _cap)
+    return captured
+
+
+def test_add_columns_emits_pinned_schema_evolution_lineage(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:
-    # A schema change must carry the NEW per-version schema so /schema + /columns follow the evolution.
+    # A schema change must carry the NEW per-version schema so /schema + /columns follow the evolution —
+    # and the read-back must be PINNED to the response's version, so a concurrent writer between the
+    # commit and the read can't attach a later version's schema to this WROTE edge.
     from lance_namespace import AlterTableAddColumnsResponse
 
     monkeypatch.setattr(
         "catalog.services.dataplane.add_columns", lambda *a, **k: AlterTableAddColumnsResponse(version=4)
     )
-    monkeypatch.setattr(
-        "catalog.services.dataplane.read_schema_fields", lambda *a, **k: [{"name": "x", "type": "int64"}]
-    )
-    captured = _capture_emit(monkeypatch, "columns")
+    seen: dict[str, object] = {}
+
+    def _readback(_ns: object, _so: object, _segments: object, pin_version: object = None) -> object:
+        seen["pin"] = pin_version
+        return pin_version, [{"name": "x", "type": "int64"}]
+
+    monkeypatch.setattr("catalog.services.dataplane.read_version_and_schema", _readback)
+    captured = _capture_measured_emit(monkeypatch)
 
     resp = client.post("/v1/table/db$t/add_columns", json={"new_columns": [{"name": "x", "expression": "1"}]})
     assert resp.status_code == 200
+    assert seen["pin"] == 4  # the read-back opened the dataset AT the version the response reported
     assert captured["operation"] == "add_columns"
-    assert captured["version"] == 4  # the response's new version
+    assert captured["version"] == 4
     assert captured["schema_fields"] == [{"name": "x", "type": "int64"}]  # post-evolution schema rides along
 
 
@@ -332,13 +345,34 @@ def test_create_index_emits_lineage_at_readback_version(
     dataset = MagicMock()
     dataset.version = 9
     monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
-    monkeypatch.setattr("catalog.services.dataplane.read_schema_fields", lambda *a, **k: [])
-    captured = _capture_emit(monkeypatch, "indices")
+    captured = _capture_measured_emit(monkeypatch)
 
     resp = client.post("/v1/table/db$t/create_index", json={"column": "vec", "index_type": "IVF_PQ"})
     assert resp.status_code == 200
     assert captured["operation"] == "create_index"
     assert captured["version"] == 9  # read back off the dataset, not None
+
+
+def test_create_index_succeeds_when_readback_fails(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # The index op is COMMITTED before the lineage read-back runs — a transient reopen failure must
+    # degrade the emit to versionless, never turn the committed op into an error response.
+    from lance_namespace import CreateTableIndexResponse
+
+    fake_ns.create_table_index.return_value = CreateTableIndexResponse(transaction_id="tx")
+
+    def _boom(*_a: object, **_k: object) -> object:
+        raise RuntimeError("transient object-store hiccup")
+
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", _boom)
+    captured = _capture_measured_emit(monkeypatch)
+
+    resp = client.post("/v1/table/db$t/create_index", json={"column": "vec", "index_type": "IVF_PQ"})
+    assert resp.status_code == 200  # the committed index build still returns success
+    assert captured["operation"] == "create_index"
+    assert captured["version"] is None  # degraded to a versionless marker; reconcile recovers the version
+    assert captured["schema_fields"] == []
 
 
 def test_restore_emits_lineage_at_new_version(
@@ -350,13 +384,88 @@ def test_restore_emits_lineage_at_new_version(
     dataset = MagicMock()
     dataset.version = 12
     monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
-    monkeypatch.setattr("catalog.services.dataplane.read_schema_fields", lambda *a, **k: [])
-    captured = _capture_emit(monkeypatch, "tables")
+    captured = _capture_measured_emit(monkeypatch)
 
     resp = client.post("/v1/table/db$t/restore", json={"version": 3})
     assert resp.status_code == 200
     assert captured["operation"] == "restore_table"
     assert captured["version"] == 12  # the NEW current version after restore
+
+
+def test_create_exist_ok_reads_schema_back_instead_of_trusting_payload(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # ExistOk may have KEPT an existing table (nothing written, response.version = the existing version):
+    # the payload's schema may then belong to a table that was never created — the true schema must be
+    # read back PINNED at that version, never parsed from the payload.
+    from lance_namespace import CreateTableResponse
+
+    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=5)
+    seen: dict[str, object] = {}
+
+    def _readback(_ns: object, _so: object, _segments: object, pin_version: object = None) -> object:
+        seen["pin"] = pin_version
+        return pin_version, [{"name": "true_col", "type": "int64"}]
+
+    def _payload_bomb(*_a: object, **_k: object) -> object:
+        raise AssertionError("ExistOk create must not trust the request payload's schema")
+
+    monkeypatch.setattr("catalog.services.dataplane.read_version_and_schema", _readback)
+    monkeypatch.setattr("catalog.services.dataplane.payload_schema_fields", _payload_bomb)
+
+    resp = client.post("/v1/table/db$t/create?mode=exist_ok", content=b"ARROWSTREAM", headers=ARROW_STREAM)
+    assert resp.status_code == 200
+    assert seen["pin"] == 5  # schema read back pinned at the EXISTING table's version
+
+
+def test_create_parses_payload_schema_without_dataset_reopen(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # A plain create writes exactly the request bytes — the schema facet comes from the in-memory payload,
+    # never from a describe + dataset reopen (which would add two network round trips per create).
+    from lance_namespace import CreateTableResponse
+
+    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
+    called: dict[str, object] = {}
+
+    def _payload(_data: object, _segments: object) -> object:
+        called["payload"] = True
+        return [{"name": "p", "type": "int64"}]
+
+    def _readback_bomb(*_a: object, **_k: object) -> object:
+        raise AssertionError("plain create must not reopen the dataset for its schema")
+
+    monkeypatch.setattr("catalog.services.dataplane.payload_schema_fields", _payload)
+    monkeypatch.setattr("catalog.services.dataplane.read_version_and_schema", _readback_bomb)
+
+    resp = client.post("/v1/table/db$t/create", content=b"ARROWSTREAM", headers=ARROW_STREAM)
+    assert resp.status_code == 200
+    assert called.get("payload") is True
+
+
+def test_deregister_emits_marker_before_revoking_tuples(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # The DEREGISTER_TABLE marker must publish BEFORE revoke_ownership: on the http transport the caller's
+    # bearer authorizes ingest against their write grant — revoke-first would 403 the marker (silently
+    # dropped by the best-effort emitter) and the graph would keep showing the table as live.
+    from lance_namespace import DeregisterTableResponse
+
+    fake_ns.deregister_table.return_value = DeregisterTableResponse()
+    order: list[str] = []
+
+    async def _emit(*_a: object, **_k: object) -> None:
+        order.append("emit")
+
+    async def _revoke(*_a: object, **_k: object) -> None:
+        order.append("revoke")
+
+    monkeypatch.setattr("catalog.api.v1.endpoints.tables.emit_write_event", _emit)
+    monkeypatch.setattr("catalog.api.fga_deps.revoke_ownership", _revoke)
+
+    resp = client.post("/v1/table/db$t/deregister")
+    assert resp.status_code == 200
+    assert order == ["emit", "revoke"]  # marker first, while the caller's grant still authorizes ingest
 
 
 def test_register_emits_versionless_marker_with_source_uri(

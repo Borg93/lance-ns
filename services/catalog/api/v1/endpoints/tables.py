@@ -29,7 +29,7 @@ from lance_namespace import (
     TableExistsRequest,
 )
 
-from catalog.api import fga_deps
+from catalog.api import fga_deps, lineage_deps
 from catalog.api.dependencies import (
     FgaClientDep,
     LineageEmitterDep,
@@ -47,7 +47,7 @@ from catalog.core.lineage_emit import (
     RESTORE_TABLE,
     emit_write_event,
 )
-from catalog.services import dataplane, native
+from catalog.services import native
 
 router = APIRouter(prefix="/v1/table", tags=["table"])
 
@@ -154,11 +154,11 @@ async def drop_table(
     response: DropTableResponse = await run_in_threadpool(
         native.call, ns, "drop_table", DropTableRequest(id=segments)
     )
-    # Revoke the table's FGA tuples so a later table reusing this id can't inherit stale grants.
-    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     # Record the drop as best-effort lineage — provenance of the deletion (the dataset node persists in the
     # graph, named a `drop_table` run). Inline-awaited (NOT BackgroundTasks) → reaches the durable
-    # Dapr/JetStream transport before the response; best-effort, so it never fails the drop.
+    # Dapr/JetStream transport before the response; best-effort, so it never fails the drop. Emitted BEFORE
+    # the revoke: on the http transport the caller's bearer authorizes ingest against their (still-live)
+    # write grant — revoking first would 403 the very event that records who dropped the table.
     await emit_write_event(
         emitter,
         segments,
@@ -168,6 +168,8 @@ async def drop_table(
         operation=DROP_TABLE,
         authorization=authorization,
     )
+    # Revoke the table's FGA tuples so a later table reusing this id can't inherit stale grants.
+    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     return response
 
 
@@ -187,10 +189,12 @@ async def deregister_table(
     response: DeregisterTableResponse = await run_in_threadpool(
         native.call, ns, "deregister_table", DeregisterTableRequest(id=segments)
     )
-    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     # Record the detach as best-effort lineage — asymmetric with drop (which deletes data), deregister
     # only detaches, so without this marker the Dataset node looks like a still-live, never-touched table.
-    # Versionless (no data was written), inline-awaited so it reaches the durable transport before the reply.
+    # Versionless (no data was written), inline-awaited so it reaches the durable transport before the
+    # reply. Emitted BEFORE the revoke: on the http transport the caller's bearer authorizes ingest against
+    # their (still-live) write grant — revoking first would 403 the very marker this endpoint exists to
+    # record, and the graph would keep showing the table as live.
     await emit_write_event(
         emitter,
         segments,
@@ -200,6 +204,7 @@ async def deregister_table(
         operation=DEREGISTER_TABLE,
         authorization=authorization,
     )
+    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     return response
 
 
@@ -287,18 +292,17 @@ async def restore_table(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: RestoreTableResponse = await run_in_threadpool(native.call, ns, "restore_table", body)
-    # The response carries only a transaction_id — reopen for the new current version + its schema.
-    version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    # The response carries only a transaction_id — the shared trailer reads the new current version + its
+    # schema off one reopen (best-effort: a readback failure never fails the already-committed restore).
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=RESTORE_TABLE,
         authorization=authorization,
-        schema_fields=schema_fields,
     )
     return response
 

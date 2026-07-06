@@ -133,12 +133,15 @@ def test_reconcile_all_read_only_reports_but_writes_nothing() -> None:
     assert statuses[0].status == ReconcileState.STORAGE_AHEAD
 
 
-def test_reconcile_all_recovers_schema_when_read_schema_wired() -> None:
-    """A back-filled lost write carries the on-disk schema (#24) when a schema reader is injected."""
+def test_reconcile_all_recovers_schema_pinned_to_backfilled_version() -> None:
+    """A back-filled lost write carries the on-disk schema (#24), read PINNED at the back-filled version
+    — an unpinned read would let a write landing mid-sweep attach version N+1's schema to WROTE@N."""
     repo = _FakeRepo(datasets=["ahead"], graph_versions={"ahead": 1}, uris={"ahead": "s3://b/ahead"})
     fields: SchemaFields = [{"name": "id", "type": "int64"}]
+    pinned: list[int] = []
 
-    async def read_schema(_uri: str) -> SchemaFields | None:
+    async def read_schema(_uri: str, version: int) -> SchemaFields | None:
+        pinned.append(version)
         return fields
 
     asyncio.run(
@@ -146,6 +149,7 @@ def test_reconcile_all_recovers_schema_when_read_schema_wired() -> None:
     )
 
     assert repo.backfilled == [("ahead", 3)]  # storage-ahead → back-filled at the on-disk version
+    assert pinned == [3]  # the schema read was pinned to exactly that version
     assert repo.backfilled_schemas["ahead"] == fields  # and the recovered per-version schema rides along
 
 

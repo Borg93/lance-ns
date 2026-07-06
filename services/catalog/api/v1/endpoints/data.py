@@ -31,7 +31,7 @@ from lance_namespace import (
     UpdateTableResponse,
 )
 
-from catalog.api import fga_deps
+from catalog.api import fga_deps, lineage_deps
 from catalog.api.dependencies import (
     FgaClientDep,
     LineageEmitterDep,
@@ -41,7 +41,7 @@ from catalog.api.dependencies import (
 )
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
-from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE, emit_write_event
+from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE
 from catalog.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
 from catalog.core.serialization import dump
 from catalog.services import dataplane, native
@@ -161,10 +161,18 @@ async def create_table(
     # Inline-await (NOT BackgroundTasks — no retry, dies with the worker; fastapi anti-pattern) so the event
     # reaches the durable Dapr/JetStream transport before the response. emit_create is best-effort internally,
     # so it never fails the create; JetStream + the consumer's idempotent MERGE-on-run_id give durability.
-    # The per-version column schema (blob/vector-aware), read off the just-written dataset, so the WROTE
-    # edge records real columns (#24) — a blob table now shows `payload : blob` in the graph at create time
-    # instead of empty-until-a-compute-job-re-asserts. Best-effort (reopen failure → []).
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    # The per-version column schema (blob/vector-aware) for the WROTE edge (#24). A create/Overwrite writes
+    # exactly the request bytes, so the payload schema IS the table's schema — parsed in memory, no
+    # describe + dataset reopen round trip. ExistOk is the exception: it may have KEPT an existing table
+    # (nothing written, response.version = the existing version), so the payload schema could belong to a
+    # table that was never created — read the true schema back PINNED at that version instead. Best-effort
+    # either way (failure → []).
+    if (mode or "").lower() in ("existok", "exist_ok"):
+        _, schema_fields = await run_in_threadpool(
+            dataplane.read_version_and_schema, ns, so, segments, response.version
+        )
+    else:
+        schema_fields = await run_in_threadpool(dataplane.payload_schema_fields, data, segments)
     await emitter.emit_create(
         table_id=table_id,
         namespace=namespace,
@@ -198,19 +206,17 @@ async def insert_into_table(
     response: InsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "insert_into_table", req, data
     )
-    # Insert's response carries only a transaction_id, not the Lance version it produced — reopen the
-    # dataset to read it (like update/delete) so the WROTE edge records the real version, not null.
-    version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    # Insert's response carries only a transaction_id, not the Lance version it produced — the shared
+    # trailer reads version + schema off ONE reopen (best-effort) so the WROTE edge records the real version.
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=INSERT,
         authorization=authorization,
-        schema_fields=schema_fields,
     )
     return response
 
@@ -253,17 +259,18 @@ async def merge_insert_into_table(
     response: MergeInsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "merge_insert_into_table", req, data
     )
-    # merge can add/change columns (schema drift at this version) → record the real post-write schema.
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    # merge can add/change columns (schema drift at this version) → record the post-write schema, read
+    # PINNED at the version this merge produced so a concurrent writer can't smuggle in a later schema.
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=MERGE_INSERT,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 
@@ -283,16 +290,16 @@ async def update_table(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: UpdateTableResponse = await run_in_threadpool(dataplane.update_table, ns, so, body)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=UPDATE,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 
@@ -314,16 +321,16 @@ async def delete_from_table(
     response: DeleteFromTableResponse = await run_in_threadpool(dataplane.delete_from_table, ns, so, body)
     # A row-delete doesn't change columns, but the WROTE edge at this new version still records the
     # (unchanged) schema so dataset_schema(version=N) is populated for every version, not just writes.
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=DELETE,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 

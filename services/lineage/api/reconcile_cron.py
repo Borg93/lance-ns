@@ -54,8 +54,9 @@ async def _on_cron(
             repository,
             lambda uri: run_in_threadpool(read_storage_version, uri, opts),
             backfill=True,
-            # Recover the per-version schema for a back-filled write too (#24), not just its version.
-            read_schema=lambda uri: run_in_threadpool(read_storage_schema, uri, opts),
+            # Recover the per-version schema for a back-filled write too (#24) — pinned to the version
+            # being back-filled so a mid-sweep write can't attach a later schema to the recovered edge.
+            read_schema=lambda uri, ver: run_in_threadpool(read_storage_schema, uri, opts, ver),
         )
     backfilled = [s.dataset for s in statuses if s.status in BACKFILLABLE_STATES]
     # Surface STORAGE loss (graph claims data on-disk Lance no longer has) — NOT auto-fixable, so log it

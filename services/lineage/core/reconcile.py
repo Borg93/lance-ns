@@ -29,15 +29,16 @@ def read_storage_version(uri: str, storage_options: dict[str, str]) -> int | Non
         return None
 
 
-def read_storage_schema(uri: str, storage_options: dict[str, str]) -> SchemaFields | None:
-    """The on-disk Lance column schema at ``uri`` as OpenLineage facet fields — ``None`` when unreadable.
+def read_storage_schema(uri: str, storage_options: dict[str, str], version: int) -> SchemaFields | None:
+    """The on-disk Lance column schema AT ``version`` as OpenLineage facet fields — ``None`` when unreadable.
 
     Used only when back-filling a lost write: the recovered WROTE edge then carries the per-version schema
-    (#24), so ``dataset_schema(version=N)`` is populated for a reconciled version too, not just for versions
-    whose lineage event survived. Best-effort — a read failure yields ``None`` and the edge stays schemaless.
+    (#24). Pinned to the version being back-filled — an unpinned read would open the CURRENT snapshot, so a
+    write landing between the version read and this one would stamp version N+1's columns onto the WROTE@N
+    edge. Best-effort — a read failure yields ``None`` and the edge stays schemaless.
     """
     try:
-        return facet_fields(lance.dataset(uri, storage_options=storage_options).schema)
+        return facet_fields(lance.dataset(uri, storage_options=storage_options, version=version).schema)
     except Exception:  # noqa: BLE001 - absent/unreadable dataset → no schema to recover, not a failure
         return None
 
@@ -95,7 +96,7 @@ async def reconcile_all(
     read_version: Callable[[str], Awaitable[int | None]],
     *,
     backfill: bool,
-    read_schema: Callable[[str], Awaitable[SchemaFields | None]] | None = None,
+    read_schema: Callable[[str, int], Awaitable[SchemaFields | None]] | None = None,
 ) -> list[ReconcileStatus]:
     """Reconcile every dataset the graph knows against storage; optionally back-fill dropped writes (B4).
 
@@ -103,8 +104,8 @@ async def reconcile_all(
     ``read_version``, which the endpoint runs in a threadpool so object-store I/O never stalls the loop) and
     classify drift. When ``backfill`` and storage is AHEAD of — or UNTRACKED by — the graph (the outbox-gap
     signature), stamp the real version onto the graph and re-classify to in-sync. Read-only otherwise.
-    ``read_schema`` (optional, same threadpool wrapping) recovers the on-disk column schema for a
-    back-filled write so the reconciled WROTE edge carries the per-version schema (#24), not just the version.
+    ``read_schema`` (optional, same threadpool wrapping) recovers the on-disk column schema — called with
+    the version being back-filled so the recovered schema is pinned to it — and rides the WROTE edge (#24).
     """
     results: list[ReconcileStatus] = []
     for summary in await repository.list_datasets():
@@ -116,8 +117,9 @@ async def reconcile_all(
         status = reconcile(dataset=summary.name, graph_version=graph_version, storage_version=storage_version)
         if backfill and storage_version is not None and status.status in BACKFILLABLE_STATES:
             # Fix the drift as a side effect but keep the found status in the report — a subsequent sweep
-            # will show it in_sync, proving the back-fill took. Recover the schema too when a reader is wired.
-            schema = await read_schema(uri) if read_schema is not None else None
+            # will show it in_sync, proving the back-fill took. The schema read is pinned to the version
+            # being back-filled, so a write landing mid-sweep can't attach a later schema to this edge.
+            schema = await read_schema(uri, storage_version) if read_schema is not None else None
             await repository.backfill_write(summary.name, storage_version, schema=schema)
         results.append(status)
     return results

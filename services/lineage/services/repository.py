@@ -91,7 +91,9 @@ _SET_JOB_SOURCE: Final = "MATCH (j:Job {namespace:$ns, name:$nm}) SET j.source_l
 _MERGE_RUN: Final = (
     "MERGE (r:Run {run_id:$rid}) "
     "SET r.event_type=$et, r.event_time=$tm, r.author=$au, r.producer=$pr, r.error_message=$err, "
-    "r.job=$job, r.operation=$op, "
+    # operation is STICKY (like started_at): a later event of the same run that carries no lance facet
+    # ($op='') must not erase the operation an earlier event declared (START stamps it, terminal may not).
+    "r.job=$job, r.operation=(CASE WHEN $op = '' THEN r.operation ELSE $op END), "
     "r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 "
     "RETURN 1"
 )
@@ -422,21 +424,42 @@ class LineageRepository:
                 _LINK_RUN_JOB,
                 {"rid": event.run.run_id, "ns": event.job.namespace, "nm": event.job.name},
             )
-            # MERGE datasets in a DETERMINISTIC (name-sorted) order across BOTH loops. With the AGE vertex
-            # UNIQUE index, a concurrent first-CREATE of a shared Dataset makes the loser BLOCK on the
-            # winner; if two overlapping events acquired those vertex locks in different orders they would
-            # deadlock (Postgres aborts one → forced Dapr redelivery). A single global sort order makes the
-            # lock-acquisition order total, so overlapping ingests serialize cleanly instead of deadlocking.
-            for ds in sorted(event.inputs, key=lambda d: d.name):
-                await self._merge_dataset(conn, ds)
+            # Merge EVERY dataset vertex this event touches in ONE name-sorted, property-bearing pass —
+            # the ONLY place in this transaction that inserts or updates Dataset rows. Both lock kinds
+            # need the total order: the unique-index INSERT lock (concurrent first-create of a shared
+            # dataset blocks the loser on the winner) AND the row-UPDATE lock the SET takes on an
+            # already-existing vertex. Two separately-sorted loops were not total (an input of one event
+            # can be an output of the other), and a bare pre-create pass orders only the inserts — a
+            # matching bare MERGE takes no lock, so unsorted SETs behind it still deadlock on tuple
+            # locks. One sorted pass makes the acquisition order total, eliminating deadlocks between
+            # overlapping ingests; a concurrent same-row update can still abort one side (AGE surfaces
+            # Postgres's concurrent-update error), which self-heals via Dapr redelivery. For a name that
+            # is both input and output, the input ref merges first so the output's SETs win — the same
+            # precedence the old input-then-output loops applied. Column-lineage upstreams (facet-only
+            # references _ingest_columns links against) join the same pass, success-gated so a failed
+            # run grows no stub vertices; the loops below only link edges and never touch Dataset rows.
+            plan: dict[str, list[Dataset]] = {}
+            for ds in [*event.inputs, *event.outputs]:
+                plan.setdefault(ds.name, []).append(ds)
+            stub_ns: dict[str, str] = {}
+            if event.is_success:
+                for out in event.outputs:
+                    for edge in out.column_edges:
+                        if edge["name"] not in plan:
+                            stub_ns.setdefault(edge["name"], edge["namespace"])
+            for name in sorted(plan.keys() | stub_ns.keys()):
+                for ds in plan.get(name, []):
+                    await self._merge_dataset(conn, ds)
+                if name in stub_ns:
+                    await run_cypher(conn, self._graph, _MERGE_DATASET, {"name": name, "ns": stub_ns[name]})
+            for ds in event.inputs:
                 await run_cypher(
                     conn,
                     self._graph,
                     _LINK_READ,
                     {"rid": event.run.run_id, "name": ds.name},
                 )
-            for ds in sorted(event.outputs, key=lambda d: d.name):
-                await self._merge_dataset(conn, ds)
+            for ds in event.outputs:
                 # A failed run keeps a WROTE edge (so producers() shows the attempt) but no version —
                 # it produced no data, so it must not claim to have written a Lance version.
                 await run_cypher(conn, self._graph, _LINK_WROTE, {"rid": event.run.run_id, "name": ds.name})
@@ -554,9 +577,9 @@ class LineageRepository:
                 # column flow that is the core value here, so they are KEPT (unlike the dataset self-skip).
                 if in_ds == out.name and in_fld == out_fld:
                     continue
-                # The input dataset may not appear in event.inputs (facet-only reference) — ensure its node
-                # exists so HAS_COLUMN can attach, else the input column is orphaned from its Dataset.
-                await run_cypher(conn, self._graph, _MERGE_DATASET, {"name": in_ds, "ns": edge["namespace"]})
+                # The input dataset may not appear in event.inputs (facet-only reference) — its vertex is
+                # guaranteed by ingest_event's sorted merge pass (which includes column-edge upstreams), so
+                # no Dataset-row write happens here: a merge in facet order would break the total lock order.
                 await run_cypher(
                     conn, self._graph, _MERGE_COLUMN, {"ds": in_ds, "fld": in_fld, "ns": edge["namespace"]}
                 )

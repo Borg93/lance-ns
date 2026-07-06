@@ -2,6 +2,8 @@
 
 Every op that changes the schema or bumps the Lance version emits a best-effort lineage ``WROTE`` event so
 the graph's per-version column inventory follows the evolution (``/datasets/{id}/schema`` + ``/columns``).
+The shared ``lineage_deps.emit_measured_write`` trailer reads version + schema off ONE dataset open —
+pinned to the response's version when it carries one — and never fails the already-committed mutation.
 ``backfill_column`` is the one exception: it returns a ``job_id`` (the backfill runs asynchronously), so the
 resulting version isn't known synchronously — emitting here would assert a version that hasn't been produced.
 """
@@ -27,6 +29,7 @@ from lance_namespace import (
     UpdateTableSchemaMetadataResponse,
 )
 
+from catalog.api import lineage_deps
 from catalog.api.dependencies import LineageEmitterDep, NamespaceDep, SettingsDep, StorageOptionsDep
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
@@ -36,7 +39,6 @@ from catalog.core.lineage_emit import (
     DROP_COLUMNS,
     UPDATE_FIELD_METADATA,
     UPDATE_SCHEMA_METADATA,
-    emit_write_event,
 )
 from catalog.services import dataplane, native
 
@@ -59,16 +61,16 @@ async def add_columns(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response = await run_in_threadpool(dataplane.add_columns, ns, so, body)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=ADD_COLUMNS,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 
@@ -89,16 +91,16 @@ async def alter_columns(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response = await run_in_threadpool(dataplane.alter_columns, ns, so, body)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=ALTER_COLUMNS,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 
@@ -119,16 +121,16 @@ async def drop_columns(
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response = await run_in_threadpool(dataplane.drop_columns, ns, so, body)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=DROP_COLUMNS,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 
@@ -164,16 +166,16 @@ async def update_field_metadata(
     segments = parse_identifier(id, settings.delimiter)
     updates = [u.model_dump() for u in (body.updates or [])]
     response = await run_in_threadpool(dataplane.update_field_metadata, ns, so, segments, updates)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=response.version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=UPDATE_FIELD_METADATA,
         authorization=authorization,
-        schema_fields=schema_fields,
+        pin_version=response.version,
     )
     return response
 
@@ -190,7 +192,7 @@ async def update_table_schema_metadata(
     authorization: Annotated[str | None, Header()] = None,
 ) -> UpdateTableSchemaMetadataResponse:
     """Set the table's schema-level metadata map — wraps ``update_table_schema_metadata``; emits an
-    UPDATE_SCHEMA_METADATA event (the response omits the version, so the new version is read back)."""
+    UPDATE_SCHEMA_METADATA event (the response omits the version, so it is read back best-effort)."""
     # REST-only: the spec sends the metadata map directly, or wrapped as {"metadata": {...}}.
     segments = parse_identifier(id, settings.delimiter)
     nested = body.get("metadata")
@@ -200,16 +202,14 @@ async def update_table_schema_metadata(
     response: UpdateTableSchemaMetadataResponse = await run_in_threadpool(
         native.call, ns, "update_table_schema_metadata", req
     )
-    version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
-    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
-    await emit_write_event(
+    await lineage_deps.emit_measured_write(
         emitter,
         segments,
-        delimiter=settings.delimiter,
-        author=token.sub if token is not None else None,
-        version=version,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
         operation=UPDATE_SCHEMA_METADATA,
         authorization=authorization,
-        schema_fields=schema_fields,
     )
     return response

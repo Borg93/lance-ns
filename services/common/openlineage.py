@@ -18,6 +18,13 @@ RUN_EVENT_SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$def
 #: (not a standalone facet file) — verified against the installed ``openlineage-python``.
 BASE_FACET_SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/BaseFacet"
 
+#: Standard ``SchemaDatasetFacet`` schema URL — the produced dataset's columns (name + a concise,
+#: blob/vector-aware type via ``common.schema.facet_fields``). Shared here so every emitter (catalog,
+#: medallion) stamps the SAME spec version; a per-emitter copy would silently drift when one bumps it.
+SCHEMA_FACET_SCHEMA_URL = (
+    "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
+)
+
 #: Fixed namespace for lance-ns name-based run ids (``uuid5`` of the project URL under ``NAMESPACE_URL``
 #: — a constant, so the derivation is documented but not recomputed per call).
 _RUN_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/Borg93/lance-ns")
@@ -43,3 +50,12 @@ def custom_facet(producer: str, **fields: object) -> dict[str, object]:
     keeps them spec-legal for a strict consumer.
     """
     return {"_producer": producer, "_schemaURL": BASE_FACET_SCHEMA_URL, **fields}
+
+
+def schema_facet(producer: str, fields: object) -> dict[str, object]:
+    """The standard ``SchemaDatasetFacet`` payload for an output dataset's column schema.
+
+    One builder for every emitter so the ``_schemaURL`` spec version can never drift between the
+    catalog and the medallion compute (both stamp the per-version schema onto the WROTE edge, #24).
+    """
+    return {"_producer": producer, "_schemaURL": SCHEMA_FACET_SCHEMA_URL, "fields": fields}

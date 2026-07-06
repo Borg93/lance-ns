@@ -13,7 +13,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for, schema_facet
 from common.schema import SchemaFields
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event.
@@ -53,12 +53,6 @@ _DATA_QUALITY_FACET_SCHEMA = (
     "https://openlineage.io/spec/facets/1-1-0/DataQualityAssertionsDatasetFacet.json"
     "#/$defs/DataQualityAssertionsDatasetFacet"
 )
-#: Standard ``SchemaDatasetFacet`` schema URL → the produced dataset's columns (name + a concise lineage
-#: type). A blob-v2 media column is rendered ``"blob"`` (not its verbose extension repr), a vector as
-#: ``array<elem>`` — so the WROTE edge records real media schema (see ``common.schema``).
-_SCHEMA_FACET_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
-)
 
 
 def _dataset(
@@ -75,12 +69,9 @@ def _dataset(
     facets: dict[str, Any] = {}
     # schema is an OUTPUT facet — the produced dataset's real columns (name + concise type, blob/vector
     # aware). Present only when the compute measured a write and captured the schema; inputs omit it.
+    # Built by the SHARED common.openlineage helper — one spec version across all emitters.
     if schema_fields:
-        facets["schema"] = {
-            "_producer": _PRODUCER,
-            "_schemaURL": _SCHEMA_FACET_SCHEMA,
-            "fields": schema_fields,
-        }
+        facets["schema"] = schema_facet(_PRODUCER, schema_fields)
     if version is not None:
         facets["version"] = {
             "_producer": _PRODUCER,

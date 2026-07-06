@@ -31,7 +31,7 @@ from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from common import dapr_publish, fga
-from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, schema_facet
 from common.schema import SchemaFields
 from dapr.aio.clients import DaprClient
 
@@ -97,15 +97,6 @@ _DATASOURCE_FACET_SCHEMA = (
     "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
 )
 
-#: OpenLineage standard ``SchemaDatasetFacet`` schema URL. The output dataset carries this facet with its
-#: per-version column schema (name + a concise, blob/vector-aware type via ``common.schema.facet_fields``) so
-#: the lineage service persists it onto the ``WROTE`` edge (#24). Shared contract with the medallion emitter
-#: (``medallion.schemas.events``) — without it a table written ONLY through the catalog shows empty columns in
-#: the graph until a downstream compute job re-asserts its schema.
-_SCHEMA_FACET_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
-)
-
 
 def build_write_event(
     *,
@@ -156,11 +147,8 @@ def build_write_event(
     if schema_fields:
         # Standard schema facet → the per-version column schema (blob/vector-aware) on the WROTE edge (#24),
         # so a catalog-written table has real columns in the graph, not empty until a compute job re-asserts.
-        facets["schema"] = {
-            "_producer": _PRODUCER,
-            "_schemaURL": _SCHEMA_FACET_SCHEMA,
-            "fields": schema_fields,
-        }
+        # Built by the SHARED common.openlineage helper — one spec version across all emitters.
+        facets["schema"] = schema_facet(_PRODUCER, schema_fields)
     if facets:
         output["facets"] = facets
     return {

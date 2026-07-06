@@ -83,25 +83,47 @@ def _version(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> int
     return open_dataset(ns, so, table_id).version
 
 
-def current_version(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> int:
-    """The table's current Lance version — for stamping lineage after a native op whose response omits it
-    (``insert`` returns only a ``transaction_id``, so we reopen the dataset like update/delete)."""
-    return _version(ns, so, table_id)
+def read_version_and_schema(
+    ns: LanceNamespace, so: StorageOptions, table_id: list[str], pin_version: int | None = None
+) -> tuple[int | None, SchemaFields]:
+    """The ``(version, schema-facet fields)`` pair for stamping lineage after a committed write.
 
+    ONE dataset open serves both reads, so the version and the schema can never come from two different
+    snapshots (two separate reopens let a concurrent writer land between them and attach version N+1's
+    schema to version N's WROTE edge). ``pin_version`` opens the dataset AT the version the write's
+    response reported, so the schema is exactly that version's; without it (ops whose response carries
+    only a ``transaction_id`` — insert/index/restore/schema-metadata) both come from the current snapshot.
 
-def read_schema_fields(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> SchemaFields:
-    """The table's current column schema as OpenLineage ``SchemaDatasetFacet`` fields (blob/vector-aware).
-
-    Read off the just-written dataset so a catalog write can attach the per-version ``schema`` facet the
-    lineage WROTE edge records (#24) — the catalog previously emitted no schema, so a catalog-written table
-    showed empty columns in the graph until a medallion transform re-asserted it. Best-effort (a reopen
-    failure yields ``[]``): the schema facet is an enrichment, never a reason to fail the write."""
+    Entirely best-effort: the write is already committed, so a readback failure must degrade the lineage
+    enrichment (``(pin_version, [])`` — versionless when unpinned), never fail the request.
+    """
     try:
-        return facet_fields(open_dataset(ns, so, table_id).schema)
-    except Exception as exc:  # noqa: BLE001 — best-effort enrichment must not fail the already-committed write
-        # Log (like the sibling best-effort lineage swallows) so a persistent reopen failure — or an API
-        # drift this broad catch also traps — is observable instead of silently disabling the #24 schema.
+        dataset = open_dataset(ns, so, table_id, version=pin_version)
+        version = pin_version if pin_version is not None else int(dataset.version)
+    except Exception as exc:  # noqa: BLE001 — best-effort: never fail the already-committed write
+        log.warning("lineage_readback_failed", extra={"table": table_id, "error": str(exc)})
+        return pin_version, []
+    try:
+        return version, facet_fields(dataset.schema)
+    except Exception as exc:  # noqa: BLE001 — schema is an enrichment; keep the version we did read
         log.warning("schema_facet_read_failed", extra={"table": table_id, "error": str(exc)})
+        return version, []
+
+
+def payload_schema_fields(data: bytes, table_id: list[str]) -> SchemaFields:
+    """Schema-facet fields parsed straight from an Arrow-IPC request payload (no storage round trip).
+
+    A create/Overwrite writes exactly this payload, so its schema — including the blob/vector field
+    metadata ``facet_fields`` keys on — IS the new table's schema; re-opening the just-written dataset
+    would cost a describe + object-store open for information already in memory. NOT valid for ExistOk
+    (which may keep an existing table the payload never touched) — that path reads back pinned instead.
+    ``table_id`` is logging context only. Best-effort (``[]`` on a parse failure): the schema facet is an
+    enrichment, never a reason to fail the write.
+    """
+    try:
+        return facet_fields(pa.ipc.open_stream(data).schema)
+    except Exception as exc:  # noqa: BLE001 — best-effort enrichment must not fail the committed create
+        log.warning("schema_facet_parse_failed", extra={"table": table_id, "error": str(exc)})
         return []
 
 

@@ -266,3 +266,81 @@ def test_medallion_column_lineage(dsn: str) -> None:
     # the embed transformation kind rode the edge as a scalar prop.
     emb = next(e for e in cg.edges if e.target_dataset == "silver$features" and e.target_field == "embedding")
     assert emb.transformation_subtype == "TRANSFORMATION"
+
+
+def test_run_retention_prune_and_schema_at_version(dsn: str) -> None:
+    """§4 hardening, provable only against real AGE: (a) ``prune_runs`` DETACH-DELETEs runs older than
+    the cutoff — its DELETE has no RETURN clause, an AGE-dialect shape a fake pool can't validate;
+    (b) ``dataset_schema(version=N)`` resolves per-version against real agtype comparison (the documented
+    int-vs-string ``$ver`` silent-miss quirk); (c) ``ensure_graph_constraints`` applies the Column
+    LOOKUP index DDL (non-unique — the deliberate no-abort-churn design) without error."""
+    import uuid
+    from datetime import UTC, datetime
+
+    from lineage.core.age import make_pool
+    from lineage.models import RunEvent
+    from lineage.services.repository import LineageRepository
+
+    name = f"e2e$prune_{uuid.uuid4().hex[:8]}"
+
+    def event(run_id: str, version: int, event_time: str, fields: list[dict[str, str]]) -> RunEvent:
+        return RunEvent.model_validate(
+            {
+                "eventType": "COMPLETE",
+                "eventTime": event_time,
+                "producer": "e2e",
+                "schemaURL": "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent",
+                "run": {"runId": run_id, "facets": {"lance": {"operation": "insert", "version": version}}},
+                "job": {"namespace": "e2e", "name": f"write.{name}"},
+                "inputs": [],
+                "outputs": [
+                    {
+                        "namespace": "e2e",
+                        "name": name,
+                        "facets": {
+                            "version": {"datasetVersion": str(version)},
+                            "schema": {"fields": fields},
+                        },
+                    }
+                ],
+            }
+        )
+
+    old_rid, new_rid = str(uuid.uuid4()), str(uuid.uuid4())
+
+    async def run() -> tuple[object, object, int, int, set[str]]:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            await repo.ensure_graph_constraints()  # exercises the new Column lookup-index DDL too
+            # v1 long ago (prunable), v2 now (kept) — with DIFFERENT schemas per version.
+            await repo.ingest_event(
+                event(old_rid, 1, "2000-01-01T00:00:00+00:00", [{"name": "id", "type": "int64"}])
+            )
+            await repo.ingest_event(
+                event(
+                    new_rid,
+                    2,
+                    datetime.now(UTC).isoformat(),
+                    [{"name": "id", "type": "int64"}, {"name": "vec", "type": "array<float>"}],
+                )
+            )
+            schema_v1 = await repo.dataset_schema(name, version=1)
+            schema_v2 = await repo.dataset_schema(name, version=2)
+            pruned = await repo.prune_runs("2010-01-01T00:00:00+00:00")
+            pruned_again = await repo.prune_runs("2010-01-01T00:00:00+00:00")
+            producers = await repo.producers(name)
+            return schema_v1, schema_v2, pruned, pruned_again, {p.run_id for p in producers.producers}
+        finally:
+            await pool.close()
+
+    schema_v1, schema_v2, pruned, pruned_again, run_ids = asyncio.run(run())
+
+    # Per-version schema resolves against real AGE (the int-vs-string $ver quirk is exercised here).
+    assert [f.name for f in schema_v1.fields] == ["id"]
+    assert [f.name for f in schema_v2.fields] == ["id", "vec"]
+    # The old run is pruned (edges included — DETACH), the fresh one survives; a re-run prunes nothing.
+    assert pruned >= 1  # >= : a retained volume may carry old runs from prior local e2e invocations
+    assert pruned_again == 0 or pruned_again < pruned  # idempotent for THIS cutoff once swept clean
+    assert new_rid in run_ids and old_rid not in run_ids

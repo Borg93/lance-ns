@@ -47,8 +47,12 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
 > but **`new` for the cascade head + movers** — a full-stream replay there would *re-fire every cascade
 > in the retention window* on each restart. Consequence: the third row changes — a trigger published
 > while a mover is down **beyond the ephemeral consumer's inactivity window** is no longer replayed on
-> restart (quick restarts rejoin the surviving queue-group consumer and keep its pending messages). The
-> stalled stage is a documented gap (#3 below) until the durable PULL consumer lands.
+> restart (quick restarts rejoin the surviving queue-group consumer and keep its pending messages).
+> **CLOSED 2026-07-06:** the `new` subscribers (cascade head + movers) now carry a `durableName`, so the
+> consumer cursor survives pod death AND redeploys — chaos-verified live: a trigger published while the
+> mover was scaled to 0 sat as `Unprocessed: 1` on the durable and was delivered on recovery, and a
+> rollout restart re-attached with zero `consumer name already in use` errors (that orphan mode applies
+> to durables *without* a queue group). See gap #3 for what remains.
 
 ## Where it CAN bite — the real gaps (honest)
 
@@ -70,13 +74,16 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
    restart**. *Fix:* set a Dapr `deadLetterTopic` + an operator drain, and move to a **durable PULL
    consumer**.
 
-3. **The lineage consumer still full-stream-replays on restart; the trigger consumers now miss instead.**
-   Post-§2 the trade-off is explicit per subscriber: lineage keeps `deliverPolicy: all` (each restart
-   replays the entire retained stream into the idempotent MERGE — O(stream size) load, zero loss), while
-   the cascade head + movers use `new` (no restart storm, but a trigger published while a mover is fully
-   down is **missed** — that batch stalls until the next raw write or a manual re-fire; the reconcile
-   cron back-fills dataset *writes*, not triggers). *Fix for both:* a **durable PULL consumer** that
-   resumes from the last ack (the documented production-hardening follow-up).
+3. **Trigger loss on mover death: FIXED (durable cursors, 2026-07-06); lineage full-stream-replay
+   remains by design.** The cascade head + movers now pair `deliverPolicy: new` with a `durableName`
+   (`chart/templates/dapr-component.yaml`): the consumer cursor survives pod death and redeploys, so a
+   trigger published while a mover is down is **delivered on recovery** instead of skipped —
+   chaos-verified live (publish-while-scaled-to-0 → `Unprocessed: 1` retained → processed on scale-up;
+   post-redeploy consumption clean). Lineage deliberately stays ephemeral + `deliverPolicy: all`: each
+   restart replays the retained stream into the idempotent MERGE (O(stream size) load, zero loss) —
+   a durable cursor there would defeat the replay-rebuilds-the-graph recovery story. Residual: the
+   replay load on lineage restarts, and gap #2's poison/no-DLQ window, which durable cursors do not
+   change.
 
 4. **Best-effort durable feed.** The `/events` feed table write is best-effort (logged on failure); the
    AGE graph is authoritative. The feed can lag the graph — visibility, not correctness.

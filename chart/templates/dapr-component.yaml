@@ -28,10 +28,15 @@ scopes:
      shared queue group would split those messages across the two apps. deliverPolicy differs on
      purpose: `all` for lineage (a restart replays the retained stream into the idempotent MERGE ingest —
      that replay IS the outage-durability story), `new` for the cascade head + movers (a replayed
-     168h of triggers would re-fire cascades / re-run compute; a trigger missed while a mover is down is
-     accepted demo loss — the reconcile cron back-fills dataset writes; durable PULL consumers are the
-     production follow-up, docs/RESILIENCE.md). Still no durableName: Dapr's durable PUSH consumer
-     orphans on redeploy ("consumer name already in use"); the queue-group consumer is auto-cleaned. */}}
+     168h of triggers would re-fire cascades / re-run compute). The `new` subscribers ALSO get a
+     durableName: an ephemeral queue-group consumer is deleted with its last member, so a trigger
+     published (or unacked) while the mover is down was LOST — deliverPolicy=new skipped it on
+     reconnect (the chaos-confirmed cascade stall, docs/RESILIENCE.md). A durable+queue-group consumer
+     keeps its cursor across pod death AND redeploys — chaos-verified live 2026-07-06: publish-while-down
+     delivered on recovery, and a rollout restart re-attached with zero "consumer name already in use"
+     errors (that orphan failure applies to durables WITHOUT a queue group, not this combination).
+     lineage stays ephemeral ON PURPOSE — a durable cursor would defeat its replay-rebuilds-the-graph
+     recovery story. */}}
 {{- $subscribers := list (dict "appId" .Values.services.lineage.daprAppId "deliverPolicy" "all") }}
 {{- if .Values.medallion.enabled }}
 {{- $subscribers = append $subscribers (dict "appId" .Values.medallion.producer.daprAppId "deliverPolicy" "new") }}
@@ -54,6 +59,12 @@ spec:
     - { name: name, value: "lance-dapr-{{ .appId }}" }
     - { name: queueGroupName, value: {{ .appId | quote }} }
     - { name: deliverPolicy, value: {{ .deliverPolicy | quote }} }
+    {{- if eq .deliverPolicy "new" }}
+    # Durable cursor for the trigger consumers (movers + cascade head): survives pod death and redeploys,
+    # so a trigger published while the app is down is DELIVERED on recovery instead of skipped (see the
+    # comment block above; chaos-verified). Name matches the app-id — one durable per subscriber app.
+    - { name: durableName, value: "{{ .appId }}-durable" }
+    {{- end }}
     # backOff supersedes ackWait for redelivery timing (NATS consumer semantics): its FIRST value is the
     # effective ack window, so it must not undercut the slowest handler (a compute-on mover does real
     # S3 reads+writes) — a 1s first step would concurrently redeliver mid-handling even at 1 replica.

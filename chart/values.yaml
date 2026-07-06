@@ -373,6 +373,12 @@ services:
       enabled: false
       bindingName: lineage-reconcile-cron
       schedule: "@every 300s" # demo cadence (prod: e.g. "0 */15 * * * *")
+    # Run-node retention (§4): the reconcile cron prunes graph :Run nodes older than this many days
+    # (batched DETACH DELETE under the sweep's single-flight lock). 0 = off — keep full provenance
+    # (the dev/demo default). Only meaningful with reconcile.enabled (the cron is the pruner).
+    runRetentionDays: 0
+    # Server-side per-statement timeout (seconds) on the AGE pool — bounds a runaway Cypher traversal.
+    ageStatementTimeoutSeconds: 30
 
 # Web (SvelteKit UI) replica count — stateless. (Demo scaffolding; rask supplies the real frontends.)
 web:

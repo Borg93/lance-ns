@@ -42,7 +42,7 @@ VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
-        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-gateway e2e-compaction e2e-cas \
+        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-gateway e2e-compaction e2e-cas e2e-lineage \
         e2e-governance dashboards status k9s tilt-up tilt-ci clean down
 
 help: ## Show this help
@@ -90,7 +90,7 @@ up: kind-up deps images load deploy ## Everything: toolchain + cluster + images 
 
 verify: ## Prove the event-driven flow: catalog publishes via Dapr, lineage ingests into AGE
 	@kubectl exec deploy/$(RELEASE)-catalog -c catalog -- python -c "import httpx; \
-	  e={'eventType':'COMPLETE','eventTime':'t','producer':'x','run':{'runId':'make-verify','facets':{'author':{'name':'frank','sub':'frank'},'lance':{'operation':'create_table','version':1}}},'job':{'namespace':'lance-catalog','name':'create_table'},'inputs':[],'outputs':[{'namespace':'bronze','name':'bronze\$$mk','facets':{'version':{'datasetVersion':'1'}}}]}; \
+	  e={'eventType':'COMPLETE','eventTime':__import__('datetime').datetime.now(__import__('datetime').UTC).isoformat(),'producer':'x','run':{'runId':'make-verify','facets':{'author':{'name':'frank','sub':'frank'},'lance':{'operation':'create_table','version':1}}},'job':{'namespace':'lance-catalog','name':'create_table'},'inputs':[],'outputs':[{'namespace':'bronze','name':'bronze\$$mk','facets':{'version':{'datasetVersion':'1'}}}]}; \
 	  print('dapr publish:', httpx.post('http://localhost:3500/v1.0/publish/lineage-pubsub/lineage.events.v1', json=e, timeout=8).status_code)"
 	@sleep 4
 	@kubectl exec deploy/$(RELEASE)-lineage -c lineage -- python -c "import httpx; \
@@ -182,6 +182,9 @@ e2e-compaction: ## Run the e2e compaction test (real Lance sweep + OTel metric) 
 	 LANCE_E2E_DAPR_TOKEN=$$(kubectl get secret $(RELEASE)-dapr-app-token -o jsonpath='{.data.token}' | base64 -d) \
 	   uv run pytest tests/e2e/test_compaction_e2e.py -v -m compaction; rc=$$?; \
 	 kill $$C $$G 2>/dev/null; exit $$rc
+
+e2e-lineage: ## AGE-backed lineage e2e — real Cypher vs a hermetic AGE service container via Dagger (== CI)
+	@dagger call test-lineage
 
 e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit safety) against RustFS
 	@echo "port-forwarding RustFS (9900->9000) …"

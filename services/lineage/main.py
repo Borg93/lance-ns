@@ -17,6 +17,7 @@ from common.dapr_auth import assert_app_token_configured
 from common.exceptions import problem_detail
 from common.oidc import OIDCVerifier
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -49,8 +50,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Consume the S3 secret + AGE DB password from the Dapr secret store (OpenBao) before opening the pool,
     # so neither lives in plaintext pod env — the audit's secret-consumption fix, symmetric with the
     # catalog. No-op (and no Dapr dependency) when secrets_from_dapr is off; fails closed on the S3 secret.
-    apply_dapr_secrets(settings)
-    pool = make_pool(settings.database_url)
+    # In a thread: the fetch is sync (blocking httpx + sleep between retries, ~80s worst case) — event-loop
+    # hygiene; nothing is served until the lifespan completes, but the loop must stay free regardless.
+    await run_in_threadpool(apply_dapr_secrets, settings)
+    pool = make_pool(settings.database_url, statement_timeout_seconds=settings.age_statement_timeout_seconds)
     await pool.open()
     app.state.pool = pool
     repository = LineageRepository(pool, settings.graph, events_retention=settings.events_retention)

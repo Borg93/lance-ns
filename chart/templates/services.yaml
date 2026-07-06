@@ -195,6 +195,10 @@ spec:
             - { name: LINEAGE_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}
             - { name: LINEAGE_GRAPH, value: {{ .Values.age.lineageDb | quote }} }
+            # §4 reliability knobs: Run-node retention (pruned by the reconcile cron; 0 = keep all) and
+            # the AGE pool's per-statement timeout (bounds runaway traversals).
+            - { name: LINEAGE_RUN_RETENTION_DAYS, value: {{ .Values.services.lineage.runRetentionDays | quote }} }
+            - { name: LINEAGE_AGE_STATEMENT_TIMEOUT_SECONDS, value: {{ .Values.services.lineage.ageStatementTimeoutSeconds | quote }} }
             - { name: LINEAGE_DAPR_ENABLED, value: "true" }
             # The lineage app's OWN subscriber component (queueGroupName=lineage, deliverPolicy=all) —
             # must match the Component name in dapr-component.yaml (both render lance.subPubsub).

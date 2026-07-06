@@ -568,3 +568,46 @@ def test_parse_handles_scalars_vertices_and_null() -> None:
     vertex = _parse('{"id":1,"label":"Dataset","properties":{"name":"x"}}::vertex')
     assert vertex["label"] == "Dataset"
     assert vertex["properties"]["name"] == "x"
+
+
+def test_prune_runs_batches_deletes_under_statement_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    """§4: the retention prune deletes in LIMIT-bounded batches (one txn each) — a single all-or-nothing
+    DETACH DELETE over a big backlog would exceed the pool's statement_timeout, roll back entirely, and
+    retry the identical oversized delete forever (retention would never converge)."""
+    import lineage.services.repository as repo_mod
+
+    calls: list[str] = []
+
+    async def _fake(
+        _conn: object, _graph: str, query: str, params: dict[str, object] | None = None, *, columns: int = 1
+    ) -> list[list[object]]:
+        calls.append(query)
+        if "count(r)" in query:
+            return [[1200]]  # 1200 prunable runs → ceil(1200/500) = 3 bounded batches
+        return []
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _fake)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    pruned = asyncio.run(repo.prune_runs("2020-01-01T00:00:00+00:00"))
+
+    assert pruned == 1200
+    deletes = [q for q in calls if "DETACH DELETE" in q]
+    assert len(deletes) == 3  # ceil(1200 / 500) transactions, not one giant statement
+    assert all("LIMIT 500" in q for q in deletes)  # every delete is bounded
+
+
+def test_prune_runs_noop_when_nothing_old(monkeypatch: pytest.MonkeyPatch) -> None:
+    import lineage.services.repository as repo_mod
+
+    calls: list[str] = []
+
+    async def _fake(
+        _conn: object, _graph: str, query: str, params: dict[str, object] | None = None, *, columns: int = 1
+    ) -> list[list[object]]:
+        calls.append(query)
+        return [[0]] if "count(r)" in query else []
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _fake)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    assert asyncio.run(repo.prune_runs("2020-01-01T00:00:00+00:00")) == 0
+    assert [q for q in calls if "DETACH DELETE" in q] == []  # no delete issued when nothing qualifies

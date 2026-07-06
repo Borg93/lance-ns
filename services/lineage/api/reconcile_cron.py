@@ -11,6 +11,7 @@ chart, not app code (no scheduler thread here). Blocking Lance/S3 reads run in t
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
 from common.dapr_auth import require_dapr_token
@@ -58,6 +59,22 @@ async def _on_cron(
             # being back-filled so a mid-sweep write can't attach a later schema to the recovered edge.
             read_schema=lambda uri, ver: run_in_threadpool(read_storage_schema, uri, opts, ver),
         )
+        # Opt-in Run retention (§4) — prune old graph runs while we still hold the single-flight lock,
+        # so two replicas never race the same delete. 0 days (the default) = keep full provenance.
+        # Isolated: a prune failure must degrade to a warning, never 500 the tick — the sweep above
+        # already completed and its report must reach the log/response regardless.
+        pruned_runs = 0
+        if settings.run_retention_days:
+            cutoff = (datetime.now(UTC) - timedelta(days=settings.run_retention_days)).isoformat()
+            try:
+                pruned_runs = await repository.prune_runs(cutoff)
+            except Exception as exc:  # noqa: BLE001 — retention is best-effort housekeeping
+                log.warning("lineage_run_prune_failed", extra={"error": str(exc)})
+            if pruned_runs:
+                log.info(
+                    "lineage_runs_pruned",
+                    extra={"pruned": pruned_runs, "retention_days": settings.run_retention_days},
+                )
     backfilled = [s.dataset for s in statuses if s.status in BACKFILLABLE_STATES]
     # Surface STORAGE loss (graph claims data on-disk Lance no longer has) — NOT auto-fixable, so log it
     # WARN so a bad restore / storage loss is visible instead of the graph silently serving dead provenance.
@@ -66,9 +83,19 @@ async def _on_cron(
         log.warning("lineage_reconcile_storage_loss", extra={"datasets": lost, "count": len(lost)})
     log.info(
         "lineage_reconcile_sweep",
-        extra={"checked": len(statuses), "backfilled": len(backfilled), "storage_loss": len(lost)},
+        extra={
+            "checked": len(statuses),
+            "backfilled": len(backfilled),
+            "storage_loss": len(lost),
+            "pruned_runs": pruned_runs,
+        },
     )
-    return {"checked": len(statuses), "backfilled": backfilled, "storage_loss": lost}
+    return {
+        "checked": len(statuses),
+        "backfilled": backfilled,
+        "storage_loss": lost,
+        "pruned_runs": pruned_runs,
+    }
 
 
 async def _ack_binding() -> dict[str, str]:

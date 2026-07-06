@@ -31,7 +31,10 @@ def fetch_dapr_secret(
 ) -> dict[str, str]:
     """Fetch a secret bundle ``{name: value}`` from the local Dapr secret store, retrying so a service
     that boots before the sidecar/store/seed are ready still gets it. Returns ``{}`` (and logs) only after
-    exhausting retries — the caller decides whether that is fatal (fail-closed) or a fallback."""
+    exhausting retries — the caller decides whether that is fatal (fail-closed) or a fallback.
+
+    Deliberately SYNC (blocking httpx + sleep between retries — ~80s worst case): async lifespans must
+    call it via ``run_in_threadpool`` so a slow-seeding store never blocks the event loop."""
     url = f"http://localhost:{dapr_http_port}/v1.0/secrets/{store}/{key}"
     for attempt in range(1, retries + 1):
         try:

@@ -34,9 +34,25 @@ async def _configure(conn: AsyncConnection) -> None:
     await conn.execute('SET search_path = ag_catalog, "$user", public')
 
 
-def make_pool(database_url: str) -> AsyncConnectionPool:
-    """Build a (closed) async connection pool; call ``await pool.open()`` in the lifespan."""
-    return AsyncConnectionPool(database_url, configure=_configure, open=False, min_size=1, max_size=8)
+def make_pool(database_url: str, *, statement_timeout_seconds: float = 30.0) -> AsyncConnectionPool:
+    """Build a (closed) async connection pool; call ``await pool.open()`` in the lifespan.
+
+    ``check`` pings each connection on checkout so a Postgres restart/failover doesn't hand out dead
+    sockets (the pool discards + replaces them instead of surfacing an OperationalError to the request).
+    ``statement_timeout`` (server-side, per statement) bounds a runaway Cypher traversal — e.g. an
+    unbounded ``*1..`` path over a grown graph — so it can't pin a pooled connection forever; every
+    statement here is a point MERGE/MATCH or a modest fetch-all, so a generous timeout only trips on
+    genuine runaways.
+    """
+    return AsyncConnectionPool(
+        database_url,
+        configure=_configure,
+        open=False,
+        min_size=1,
+        max_size=8,
+        check=AsyncConnectionPool.check_connection,
+        kwargs={"options": f"-c statement_timeout={int(statement_timeout_seconds * 1000)}"},
+    )
 
 
 def _parse(value: Any) -> Any:

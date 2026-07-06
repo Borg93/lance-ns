@@ -33,6 +33,14 @@ data:
     CREATE UNIQUE INDEX IF NOT EXISTS "{{ .Values.age.lineageDb }}_job_uniq" ON "{{ .Values.age.lineageDb }}"."Job"
       (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"namespace"'::agtype]),
        ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"name"'::agtype]));
+    -- Column gets a PLAIN (non-unique) lookup index on its MERGE key: uniqueness is deliberately NOT
+    -- enforced (duplicate column vertices from a rare concurrent first-create are benign, collapsed by
+    -- DISTINCT reads; a unique index would add abort/retry churn to the hot column path) — but without
+    -- any index every column MERGE seq-scans a label table that grows with the estate (§4).
+    SELECT create_vlabel('{{ .Values.age.lineageDb }}', 'Column');
+    CREATE INDEX IF NOT EXISTS "{{ .Values.age.lineageDb }}_column_lookup" ON "{{ .Values.age.lineageDb }}"."Column"
+      (ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"dataset"'::agtype]),
+       ag_catalog.agtype_access_operator(VARIADIC ARRAY[properties, '"field"'::agtype]));
   20-openfga.sql: |
     -- Quoted identifier (same reason as the index names above) so a hyphenated openfgaDb can't break initdb.
     CREATE DATABASE "{{ .Values.age.openfgaDb }}";

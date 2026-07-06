@@ -57,6 +57,27 @@ jobs:
             | tar xz -C /usr/local/bin fga
           fga model test --tests services/common/auth/model.fga.yaml
 
+  # AGE-backed lineage e2e (§7): the graph repository's REAL Cypher runs against a real Apache AGE
+  # Postgres — the unit fakes can't catch AGE dialect behavior (the int-vs-string $ver at-version
+  # match, the RETURN-less DETACH DELETE prune, the functional-index DDL). Runs via the Dagger module
+  # (AGE as a hermetic service container) so `make e2e-lineage` == `dagger call test-lineage` == this
+  # job, byte-for-byte. Engine version pinned by dagger.json. Same fork-gating as auth-e2e.
+  lineage-e2e:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Dagger CLI (pinned to the module's engineVersion)
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
+
+      - name: Lineage e2e (real AGE graph, hermetic via Dagger)
+        env:
+          DAGGER_NO_NAG: "1"
+        run: dagger call test-lineage
+
   # Gated live auth end-to-end: brings up the SQLite OpenFGA + Dex stack via
   # docker compose and runs scripts/auth_e2e.sh, which asserts APP-SIDE SEEDING
   # (create namespace/table -> owner + parent cascade) and a 403 for a second

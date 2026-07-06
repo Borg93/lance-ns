@@ -18,6 +18,7 @@ from common.oidc import OIDCVerifier
 from common.secrets import fetch_required_secrets
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from lance_namespace import LanceNamespaceError
@@ -49,9 +50,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # rather than booting with an empty/plaintext key.
     if settings.secrets_from_dapr:
         # Strict sole source: a store miss FAILS CLOSED (the shared helper raises) — never fall back to a
-        # plaintext env value. fetch_required_secrets retries while the store/sidecar/seed come up.
-        bundle = fetch_required_secrets(
-            settings.dapr_secret_store, settings.dapr_secret_key, require=settings.dapr_secret_s3_field
+        # plaintext env value. fetch_required_secrets retries while the store/sidecar/seed come up; it is
+        # sync (blocking httpx + sleep between retries, ~80s worst case), so it runs in a thread — event-loop
+        # hygiene: nothing served during the lifespan anyway, but the loop must stay free for other startup
+        # tasks and must never normalize blocking calls in async context.
+        bundle = await run_in_threadpool(
+            fetch_required_secrets,
+            settings.dapr_secret_store,
+            settings.dapr_secret_key,
+            require=settings.dapr_secret_s3_field,
         )
         settings.s3_secret_access_key = SecretStr(bundle[settings.dapr_secret_s3_field])
         log.info("secret_from_dapr_store", extra={"field": settings.dapr_secret_s3_field})

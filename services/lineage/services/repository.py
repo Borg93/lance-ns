@@ -197,6 +197,14 @@ _VERTEX_UNIQUE_KEYS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
     ("Job", ("namespace", "name")),
 )
 
+# Plain (NON-unique) lookup indexes — labels whose MERGE key needs index-speed MATCHes but must NOT get a
+# uniqueness constraint. :Column keeps its deliberate no-unique-index design (duplicate vertices from a
+# rare concurrent first-create are benign and collapsed by DISTINCT reads; a unique index would add
+# abort/retry churn + a lock-ordering obligation to the hot column path — see the _DATASET_COLUMN_NODES
+# comment). Without ANY index though, every column MERGE seq-scans a label table that grows with the
+# estate (§4) — this closes the perf half while preserving the concurrency semantics.
+_VERTEX_LOOKUP_KEYS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (("Column", ("dataset", "field")),)
+
 _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
 )
@@ -223,6 +231,20 @@ _BACKFILL_RUN: Final = (
     "r.job=$job, r.outputs=$outs, "
     "r.started_at=coalesce(r.started_at, $tm), r.events_count=coalesce(r.events_count, 0)+1 RETURN 1"
 )
+# Run retention (§4) — Run nodes (and their READ/WROTE/OF_JOB edges) otherwise grow forever. Opt-in
+# (LINEAGE_RUN_RETENTION_DAYS, 0 = off); the reconcile cron prunes under its cluster-wide advisory lock.
+# ISO-8601 UTC timestamps compare lexicographically, so the string comparison IS a time comparison here
+# (every in-repo producer stamps ``datetime.now(UTC).isoformat()``). Pruning deletes the run's WROTE
+# edges — that is what retention means (per-version schema/stats history goes with it); a dataset whose
+# only runs were pruned reads latest_write_version=None and the next sweep back-fills a fresh reconcile
+# run at the on-disk version, so the graph converges instead of dangling.
+_COUNT_OLD_RUNS: Final = "MATCH (r:Run) WHERE r.event_time < $cutoff RETURN count(r)"
+# BATCHED (LIMIT 500, one transaction per batch): a single all-or-nothing DETACH DELETE over a large
+# backlog would exceed the pool's statement_timeout → QueryCanceled → full rollback → retention never
+# converges (each tick retries the identical oversized delete). Batches keep every statement far under
+# the timeout and make partial progress durable tick over tick.
+_PRUNE_OLD_RUNS_BATCH: Final = "MATCH (r:Run) WHERE r.event_time < $cutoff WITH r LIMIT 500 DETACH DELETE r"
+_PRUNE_BATCH_SIZE: Final = 500
 # The per-version column schema rides the same WROTE edge as the version (#24 prerequisite). Stored as
 # a JSON **string** scalar — params are JSON-encoded and ``_parse`` json.loads each cell, so a scalar
 # round-trips cleanly; an array-in-SET is the risky path AGE 1.5.0 mishandles (same reason tags are a
@@ -826,7 +848,10 @@ class LineageRepository:
         tm = datetime.now(UTC).isoformat()
         job = f"lance-reconcile/reconcile.{name}"
         params = {"rid": rid, "name": name}
-        async with self._pool.connection() as conn:
+        async with self._pool.connection() as conn, conn.transaction():
+            # ONE transaction (like ingest_event) — on autocommit these were 4 independent statements, so a
+            # crash mid-back-fill left a RECONCILED Run with no WROTE/version visible to /runs until the
+            # NEXT sweep re-ran the idempotent MERGEs (§4). Atomic: no half-written window between sweeps.
             # Stamp job + outputs on the run so it appears CONSISTENTLY across views — /runs (governed by
             # the run's outputs) showed nothing for a job/outputs-less run while producers() showed it.
             await run_cypher(
@@ -862,6 +887,24 @@ class LineageRepository:
             event=synthetic,
         )
 
+    async def prune_runs(self, cutoff_iso: str) -> int:
+        """DETACH DELETE runs older than ``cutoff_iso`` in LIMIT-bounded batches (opt-in retention, §4).
+
+        Called by the reconcile cron under its cluster-wide advisory lock (single-flight). Batched, one
+        transaction per batch, so a large backlog (retention enabled late on a grown graph) can never
+        push a single statement past the pool's statement_timeout — an all-or-nothing delete would be
+        cancelled, rolled back, and retried identically forever. Returns the up-front count of prunable
+        runs (approximate under concurrent ingest — the log signal, not an exactness contract).
+        """
+        async with self._pool.connection() as conn:
+            rows = await run_cypher(conn, self._graph, _COUNT_OLD_RUNS, {"cutoff": cutoff_iso})
+            count = int(rows[0][0]) if rows and rows[0] else 0
+            batches = -(-count // _PRUNE_BATCH_SIZE)  # ceil; 0 batches when nothing to prune
+            for _ in range(batches):
+                async with conn.transaction():
+                    await run_cypher(conn, self._graph, _PRUNE_OLD_RUNS_BATCH, {"cutoff": cutoff_iso})
+        return count
+
     async def ensure_events_table(self) -> None:
         """Create the durable events-feed table if absent (idempotent; called once at startup).
 
@@ -883,15 +926,20 @@ class LineageRepository:
             pass
 
     async def ensure_graph_constraints(self) -> None:
-        """Add a UNIQUE index on each AGE vertex label's MERGE key so a CONCURRENT MERGE can't slip in a
-        duplicate vertex (item 6). Idempotent + safe on every replica boot: ``create_vlabel`` materializes
+        """Add the per-label indexes: UNIQUE on each ``_VERTEX_UNIQUE_KEYS`` MERGE key (a CONCURRENT MERGE
+        can't slip in a duplicate vertex, item 6) + plain LOOKUP on ``_VERTEX_LOOKUP_KEYS`` (index-speed
+        MATCHes without the uniqueness churn — :Column, §4). Idempotent + safe on every replica boot:
+        ``create_vlabel`` materializes
         the label's table (suppressed if it already exists), then ``CREATE UNIQUE INDEX IF NOT EXISTS`` on
         the property-access expression. Best-effort — a per-label failure (e.g. pre-existing dup rows on an
         already-populated graph, or an AGE build without the index recipe) is logged, not fatal, so the
         graph keeps ingesting; the guarantee holds wherever the index took. The pool's ``configure`` runs
         each statement autocommit with AGE loaded, so a raised ``create_vlabel`` never poisons the next."""
+        plans = [(label, keys, True) for label, keys in _VERTEX_UNIQUE_KEYS] + [
+            (label, keys, False) for label, keys in _VERTEX_LOOKUP_KEYS
+        ]
         async with self._pool.connection() as conn:
-            for label, keys in _VERTEX_UNIQUE_KEYS:
+            for label, keys, unique in plans:
                 with suppress(Exception):  # label already exists (a prior MERGE created it lazily) → fine
                     await conn.execute(
                         sql.SQL("SELECT create_vlabel({}, {})").format(
@@ -906,8 +954,9 @@ class LineageRepository:
                     ).format(sql.Literal(f'"{key}"'))
                     for key in keys
                 )
-                index = sql.SQL("CREATE UNIQUE INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
-                    sql.Identifier(f"{self._graph}_{label.lower()}_uniq"),
+                index = sql.SQL("CREATE {} INDEX IF NOT EXISTS {} ON {}.{} ({})").format(
+                    sql.SQL("UNIQUE") if unique else sql.SQL(""),
+                    sql.Identifier(f"{self._graph}_{label.lower()}_{'uniq' if unique else 'lookup'}"),
                     sql.Identifier(self._graph),
                     sql.Identifier(label),
                     exprs,

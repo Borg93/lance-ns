@@ -182,26 +182,29 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 - ⛔ **Frontend `poll()` = 1+N+P+3 SEQUENTIAL calls per 2s tick** (N+1 over /datasets; 35+ calls at current
   scale), no overlap guard, no fetch timeout → slow ticks stack unboundedly. Batch (Promise.all), guard
   overlap, add timeouts; consider a bulk endpoint. `frontend/src/lib/store.svelte.ts:51`
-- ⛔ **`backfill_write` is NOT transactional** — 3 Cypher statements on an autocommit connection (unlike
-  `ingest_event`’s single transaction); crash mid-back-fill leaves a RECONCILED Run without WROTE/version.
-  `services/lineage/services/repository.py:737`
+- ✅ **DONE 2026-07-06 — `backfill_write` now runs in ONE transaction** (`conn.transaction()`, like
+  `ingest_event`): no half-written RECONCILED Run window between sweeps. Unit + real-AGE e2e covered.
 - ⛔ **`create_table` is a 3-step dual-write with no compensation** (Lance create → FGA owner grant → lineage
   emit): FGA dying mid-way yields 503 whose retry hits “already exists” — table left with no owner tuple and
   no lineage. `services/catalog/api/v1/endpoints/data.py:103`
-- ⛔ **Insert version attribution races** — WROTE version comes from a separate read-after-write
-  (`current_version`); two concurrent inserts can both record the later version. Get the version from the
-  write result / retry loop. `services/catalog/api/v1/endpoints/data.py:143`
-- ⛔ **AGE pool: no health check, no statement timeout** — after Postgres failover the pool hands out dead
-  sockets; a runaway `*1..` traversal pins a connection forever. Add `check` + `options='-c statement_timeout=…'`.
-  `services/lineage/core/age.py:39`
-- ⛔ **AGE graph: zero property indexes + Run nodes never pruned** — every MERGE (10–30 per ingest) and every
-  fetch-all list seq-scans label tables that grow forever. Add indexes on the MERGE keys + a retention prune.
-  `.docker/lineage-init.sql:7`
+- 🟨 **RESCOPED 2026-07-06 — insert version attribution race is now `/insert`-only.** 5c5461f's single
+  pinned `read_version_and_schema` open fixed it for merge_insert/update/delete (version+schema pinned to
+  the response's version). `/insert` remains read-after-write because the native `InsertIntoTableResponse`
+  carries only a `transaction_id` — blocked upstream; reconcile heals the drift. `data.py` insert endpoint.
+- ✅ **DONE 2026-07-06 — AGE pool hardened**: `check=AsyncConnectionPool.check_connection` (checkout ping —
+  live-verified by force-killing the AGE pod: first post-failover reads all 200) + server-side
+  `statement_timeout` (default 30s, `LINEAGE_AGE_STATEMENT_TIMEOUT_SECONDS`, chart-wired — live-verified:
+  `pg_sleep(35)` → `QueryCanceled`). `services/lineage/core/age.py`
+- ✅ **DONE (two stages) — AGE indexes + Run retention.** Batch-C (e16323a) added UNIQUE indexes on the
+  Run/Dataset/Job MERGE keys (boot-ensured + chart initdb); 2026-07-06 added the `:Column(dataset,field)`
+  NON-unique lookup index (uniqueness deliberately not enforced — DISTINCT-collapse design keeps the hot
+  column path abort-free) + an opt-in **batched Run retention prune** (`LINEAGE_RUN_RETENTION_DAYS`,
+  `services.lineage.runRetentionDays`, runs under the reconcile cron's single-flight lock; LIMIT-500
+  batches so a backlog can't exceed the statement timeout). Events feed was already retention-capped.
 - ⛔ **`/events` over-fetch** — 2000 full-JSONB rows per call (frontend hits every 2s), sliced to 500 after
   governance; no cursor, no projection. `services/lineage/api/v1/endpoints/runs.py:21`
-- ⛔ **`fetch_dapr_secret` blocks the event loop at boot** — sync `httpx.get` + `time.sleep` called from async
-  lifespans; up to ~80s stall (10 × (5s timeout + 3s backoff)). Run in a thread or use async client.
-  `services/common/secrets.py:38`
+- ✅ **DONE 2026-07-06 — secret fetch off the event loop**: all three lifespans (catalog/lineage/compaction)
+  wrap the sync fetch in `run_in_threadpool`; `common/secrets.py` documents the sync-by-design contract.
 - ⛔ **Demo peek re-reads EVERY Lance version of every dataset per call** (one S3 dataset-open per version),
   polled every 2s — linear latency growth with cascade runs. Cache or cap versions. `services/lineage/api/v1/endpoints/demo.py:63`
 - ✅ **DONE 2026-07-05 — RustFS conditional-write (CAS) VALIDATED (PASS).** `tests/e2e/test_object_store_cas_e2e.py`
@@ -410,12 +413,15 @@ builds every medallion app's OpenAPI. ALL of §5 live-verified on the cluster (h
 - ✅ **`common/dapr_auth.py` — ZERO tests at any tier** — FIXED with the §1 sweep: `tests/unit/test_dapr_auth.py`
   covers `require_dapr_token` (open default, match, mismatch/missing/non-ASCII 403) + `assert_app_token_configured`
   (fail-closed, blank token, no-ops) + the lineage reconcile-mount coupling.
-- ⛔ **AGE-backed e2e not in CI** — CI runs `-m "not e2e"`; no job/Make target spins the AGE Postgres (the auth
-  e2e DID get a docker-compose CI job — mirror it). `.github/workflows/ci.yml:39`
+- ✅ **DONE 2026-07-06 — AGE-backed e2e in CI via Dagger**: `dagger call test-lineage` runs the lineage
+  e2e against a hermetic apache/age service container — identical locally (`make e2e-lineage`) and in CI
+  (`lineage-e2e` job). Suite grew a §4 test: batched Run-prune + per-version schema + Column-index DDL
+  against real AGE. `.github/workflows/ci.yml`, `.dagger/e2e.go`
 - ⛔ **/events Postgres surface never executes against a real DB** — record_event INSERT+prune, list_events
   SELECT, lineage_reads audit rows. `services/lineage/services/repository.py:802`
-- ⛔ **`dataset_schema` real Cypher never exercised against AGE** — the code documents its own silent
-  int-vs-string `$ver` failure mode that only a real-AGE test catches. `services/lineage/services/repository.py:633`
+- ✅ **DONE 2026-07-06 — `dataset_schema` at-version exercised against real AGE**: the Dagger/CI lineage
+  e2e asserts per-version schema resolution (v1 vs v2 fields) on a live apache/age — the int-vs-string
+  `$ver` quirk is now regression-gated. `tests/e2e/test_lineage_e2e.py`
 - ⛔ **`RunEvent.progress` + `_SET_PROGRESS` + /runs progress surfacing** — no test at any tier. `services/lineage/models.py:264`
 - ⛔ **Reconcile cron route** (POST handler, OPTIONS ack, token wiring, response shape) — no test. `services/lineage/api/reconcile_cron.py:31`
 - ⛔ **Demo router** (/demo/datasets Lance-on-S3 reads, per-version schemas, gold JSONB) — no behavioral test;

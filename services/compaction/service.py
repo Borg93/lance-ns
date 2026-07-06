@@ -17,6 +17,7 @@ from contextlib import asynccontextmanager, suppress
 from common.dapr_auth import assert_app_token_configured
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.responses import JSONResponse
 
 from compaction.api.routes import router
@@ -35,7 +36,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Consume the S3 secret from the Dapr secret store (OpenBao) before the first cron sweep, so the
     # sweep's S3 access uses a store-sourced key and the plaintext secret never ships in pod env — the
     # audit's secret-consumption fix. Mutates the cached settings in place; fails closed if unavailable.
-    apply_dapr_secrets(settings)
+    # In a thread: the fetch is sync (blocking httpx + retry sleeps) and must not stall the event loop.
+    await run_in_threadpool(apply_dapr_secrets, settings)
     # Fail fast at boot if the S3 secret is still empty (neither the store nor plaintext env provided it) —
     # the sweep is a real S3 consumer, so a silent empty key would otherwise fail every later compaction
     # with a cryptic S3 SignatureDoesNotMatch instead of a clear startup error (parity with the catalog's

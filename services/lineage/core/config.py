@@ -27,6 +27,11 @@ class LineageSettings(BaseSettings):
         alias="LINEAGE_DATABASE_URL",
     )
     graph: str = Field(default="lineage", alias="LINEAGE_GRAPH")
+    # Server-side per-statement timeout on every pooled AGE connection — bounds a runaway Cypher traversal
+    # so it can't pin a pooled connection forever (§4). Generous: normal statements are point MERGEs.
+    age_statement_timeout_seconds: float = Field(
+        default=30.0, ge=1.0, alias="LINEAGE_AGE_STATEMENT_TIMEOUT_SECONDS"
+    )
 
     # --- OIDC (authn) — verifies the bearer token on reads + ingest --------------------
     oidc_enabled: bool = Field(default=False, alias="LINEAGE_OIDC_ENABLED")
@@ -83,6 +88,12 @@ class LineageSettings(BaseSettings):
     # (older rows pruned on ingest). 0 = unbounded. The feed is a secondary projection of the AGE graph
     # (the authoritative provenance), so capping it bounds the high-volume log without losing lineage.
     events_retention: int = Field(default=20000, ge=0, alias="LINEAGE_EVENTS_RETENTION")
+
+    # --- Run-node retention (§4) — prune graph :Run nodes older than this many days on each reconcile
+    # sweep (under its cluster-wide lock). 0 = off (the dev/demo default: keep full provenance). Pruning a
+    # run deletes its WROTE edges — per-version schema/stats history goes with it, which is what retention
+    # means; the next sweep back-fills a fresh reconcile run for any dataset left without a versioned edge.
+    run_retention_days: int = Field(default=0, ge=0, alias="LINEAGE_RUN_RETENTION_DAYS")
 
     # --- Read/access audit (#6) — record WHO READ which dataset on the gated read endpoints (an access
     # log, complementing the write provenance in the graph). Off by default; needs an authenticated subject,

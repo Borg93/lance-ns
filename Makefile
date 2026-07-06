@@ -43,7 +43,7 @@ BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_RE
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
         gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage \
-        e2e-governance dashboards status k9s tilt-up tilt-ci clean down
+        e2e-governance e2e-governed-union dashboards status k9s tilt-up tilt-ci clean down
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -215,6 +215,27 @@ e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malf
 	 LANCE_E2E_DEX=http://localhost:5556/dex \
 	   uv run pytest tests/e2e/test_governance_e2e.py -v -m e2e; rc=$$?; \
 	 kill $$C $$L $$D 2>/dev/null; exit $$rc
+
+e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+quality ON, openbao OFF — see tests/e2e/test_governed_union_e2e.py)
+	@echo "port-forwarding lance-ray/lineage/dex/openfga/rustfs + the bronze-to-silver mover …"
+	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & R=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & D=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-openfga 8081:8080 >/dev/null 2>&1 & F=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
+	 kubectl port-forward deploy/$(RELEASE)-bronze-to-silver 8003:8000 >/dev/null 2>&1 & M=$$!; \
+	 sleep 4; \
+	 OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh; \
+	 TOKEN=$$(kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- printenv APP_API_TOKEN 2>/dev/null || true); \
+	 MTOKEN=$$(kubectl exec deploy/$(RELEASE)-bronze-to-silver -c mover -- printenv APP_API_TOKEN 2>/dev/null || true); \
+	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
+	 LANCE_E2E_DEX=http://localhost:5556/dex LANCE_E2E_FGA=http://localhost:8081 \
+	 LANCE_E2E_DAPR_TOKEN=$$TOKEN LANCE_E2E_MOVER_URL=http://localhost:8003 LANCE_E2E_MOVER_TOKEN=$$MTOKEN \
+	 LANCE_E2E_S3_ENDPOINT=http://localhost:9900 LANCE_E2E_S3_BUCKET=$(RUSTFS_BUCKET) \
+	 LANCE_E2E_S3_ACCESS_KEY=$(RUSTFS_ACCESS_KEY) \
+	 LANCE_E2E_S3_SECRET_KEY=$$(kubectl get secret $(RELEASE)-infra-credentials -o jsonpath='{.data.rustfs-secret-key}' | base64 -d) \
+	   uv run pytest tests/e2e/test_governed_union_e2e.py -v -m governed_union; rc=$$?; \
+	 kill $$R $$L $$D $$F $$S $$M 2>/dev/null; exit $$rc
 
 e2e: ## Run the core e2e suite in sequence against the deployed stack (auth-agnostic: obs, medallion, media, gateway, compaction, cas)
 	@echo "▶ full core e2e suite against the deployed $(RELEASE) stack (each suite self-forwards + self-skips if unreachable)"; \

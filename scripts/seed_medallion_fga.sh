@@ -24,15 +24,27 @@ w() { "$BIN/fga" tuple write --api-url "$API" --store-id "$SID" "$@" >/dev/null 
 # medallion stage namespaces under the warehouse (so the rung cascade reaches them) — the MEDIA lane's
 # namespaces included: without them the media mover's can_create_table check on namespace:silver-media
 # finds no parent chain and the governed cascade silently DROPs every media trigger (audit blocker).
+w "$WAREHOUSE" parent namespace:raw
 w "$WAREHOUSE" parent namespace:bronze
 w "$WAREHOUSE" parent namespace:silver
 w "$WAREHOUSE" parent namespace:gold
 w "$WAREHOUSE" parent namespace:bronze-media
 w "$WAREHOUSE" parent namespace:silver-media
+# The cascade DATASETS' table→namespace parent links. The catalog seeds these for tables it creates, but
+# the movers write Lance DIRECTLY — without a parent tuple on table:<dataset> nothing cascades to it, so
+# under LINEAGE_FGA_ENABLED no human (not even a warehouse owner) can can_get_metadata a mover-produced
+# dataset: the whole medallion estate is invisible in /runs, /datasets/*, /graph. Linking each dataset to
+# its stage namespace restores the normal rung inheritance (warehouse reader → stage reader → table reader).
+w namespace:raw parent 'table:raw_events'
+w namespace:bronze parent 'table:bronze$events'
+w namespace:silver parent 'table:silver$features'
+w namespace:gold parent 'table:gold$catalog'
+w namespace:bronze-media parent 'table:bronze-media$objects'
+w namespace:silver-media parent 'table:silver-media$features'
 # writer movers → can_create_table on their stage; the promoter mover → can_promote on gold
 w user:service-raw-to-bronze writer "$WAREHOUSE"
 w user:service-bronze-to-silver writer "$WAREHOUSE"
 w user:service-media-to-silver writer "$WAREHOUSE"
 w user:service-silver-to-gold validator namespace:gold
 
-echo "✓ seeded medallion mover grants (writers incl. media lane + the silver→gold validator) into store $SID"
+echo "✓ seeded medallion grants (mover writers + media lane, silver→gold validator, stage/table parent links) into store $SID"

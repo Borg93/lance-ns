@@ -72,6 +72,7 @@ markers = [
     "compaction: e2e tests for the compaction/GC sweep against real Lance datasets — set LANCE_E2E_*_URL",
     "cas: object-store conditional-write (compare-and-swap) validation against the deployed store — set LANCE_E2E_S3_*",
     "media: e2e tests for the MEDIA lane of the cascade (ingest-media → derived silver) — set LANCE_E2E_*_URL",
+    "governed_union: e2e for the FULL governed union (auth+FGA+compute+quality ON): allow path, FGA-deny→DROP, quality-block, media — make e2e-governed-union",
 ]
 
 [tool.ty.environment]

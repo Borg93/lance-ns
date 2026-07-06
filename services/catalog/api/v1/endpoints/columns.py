@@ -1,10 +1,17 @@
-"""Column / schema endpoints (data-plane add/alter/drop + native backfill)."""
+"""Column / schema endpoints (data-plane add/alter/drop + native backfill).
+
+Every op that changes the schema or bumps the Lance version emits a best-effort lineage ``WROTE`` event so
+the graph's per-version column inventory follows the evolution (``/datasets/{id}/schema`` + ``/columns``).
+``backfill_column`` is the one exception: it returns a ``job_id`` (the backfill runs asynchronously), so the
+resulting version isn't known synchronously — emitting here would assert a version that hasn't been produced.
+"""
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Header
+from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     AlterTableAddColumnsRequest,
     AlterTableAddColumnsResponse,
@@ -20,79 +27,189 @@ from lance_namespace import (
     UpdateTableSchemaMetadataResponse,
 )
 
-from catalog.api.dependencies import NamespaceDep, SettingsDep, StorageOptionsDep
+from catalog.api.dependencies import LineageEmitterDep, NamespaceDep, SettingsDep, StorageOptionsDep
+from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
+from catalog.core.lineage_emit import (
+    ADD_COLUMNS,
+    ALTER_COLUMNS,
+    DROP_COLUMNS,
+    UPDATE_FIELD_METADATA,
+    UPDATE_SCHEMA_METADATA,
+    emit_write_event,
+)
 from catalog.services import dataplane, native
 
 router = APIRouter(prefix="/v1/table", tags=["columns"])
 
 
 @router.post("/{id}/add_columns", response_model_exclude_none=True)
-def add_columns(
-    id: str, body: AlterTableAddColumnsRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
+async def add_columns(
+    id: str,
+    body: AlterTableAddColumnsRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> AlterTableAddColumnsResponse:
-    """Add SQL-expression-computed columns to the table — wraps ``alter_table_add_columns``."""
-    body.id = parse_identifier(id, settings.delimiter)
-    return dataplane.add_columns(ns, so, body)
+    """Add SQL-expression-computed columns to the table — wraps ``alter_table_add_columns``; emits an
+    ADD_COLUMNS event carrying the NEW per-version schema so the graph's column inventory follows the add."""
+    segments = parse_identifier(id, settings.delimiter)
+    body.id = segments
+    response = await run_in_threadpool(dataplane.add_columns, ns, so, body)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=response.version,
+        operation=ADD_COLUMNS,
+        authorization=authorization,
+        schema_fields=schema_fields,
+    )
+    return response
 
 
 @router.post("/{id}/alter_columns", response_model_exclude_none=True)
-def alter_columns(
+async def alter_columns(
     id: str,
     body: AlterTableAlterColumnsRequest,
     ns: NamespaceDep,
     settings: SettingsDep,
     so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> AlterTableAlterColumnsResponse:
-    """Rename, re-type, or change nullability of existing columns — wraps ``alter_table_alter_columns``."""
-    body.id = parse_identifier(id, settings.delimiter)
-    return dataplane.alter_columns(ns, so, body)
+    """Rename, re-type, or change nullability of existing columns — wraps ``alter_table_alter_columns``;
+    emits an ALTER_COLUMNS event with the post-evolution schema (renames/re-types show in the graph)."""
+    segments = parse_identifier(id, settings.delimiter)
+    body.id = segments
+    response = await run_in_threadpool(dataplane.alter_columns, ns, so, body)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=response.version,
+        operation=ALTER_COLUMNS,
+        authorization=authorization,
+        schema_fields=schema_fields,
+    )
+    return response
 
 
 @router.post("/{id}/drop_columns", response_model_exclude_none=True)
-def drop_columns(
+async def drop_columns(
     id: str,
     body: AlterTableDropColumnsRequest,
     ns: NamespaceDep,
     settings: SettingsDep,
     so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> AlterTableDropColumnsResponse:
-    """Drop the named columns from the table — wraps ``alter_table_drop_columns``."""
-    body.id = parse_identifier(id, settings.delimiter)
-    return dataplane.drop_columns(ns, so, body)
+    """Drop the named columns from the table — wraps ``alter_table_drop_columns``; emits a DROP_COLUMNS
+    event with the reduced schema so the dropped columns leave the graph's per-version inventory."""
+    segments = parse_identifier(id, settings.delimiter)
+    body.id = segments
+    response = await run_in_threadpool(dataplane.drop_columns, ns, so, body)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=response.version,
+        operation=DROP_COLUMNS,
+        authorization=authorization,
+        schema_fields=schema_fields,
+    )
+    return response
 
 
 @router.post("/{id}/backfill_column", response_model_exclude_none=True)
 def backfill_column(
     id: str, body: AlterTableBackfillColumnsRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> AlterTableBackfillColumnsResponse:
-    """Backfill values into columns via the native driver — wraps ``alter_table_backfill_columns``."""
+    """Backfill values into columns via the native driver — wraps ``alter_table_backfill_columns``.
+
+    No lineage is emitted here: the response carries a ``job_id`` (the backfill runs asynchronously), so the
+    Lance version it eventually produces isn't known at request time — a synchronous emit would assert a
+    version that hasn't been written. The version bump is recovered by #23 reconcile when the job lands.
+    """
     body.id = parse_identifier(id, settings.delimiter)
     return native.call(ns, "alter_table_backfill_columns", body)
 
 
 @router.post("/{id}/update_field_metadata", response_model_exclude_none=True)
-def update_field_metadata(
+async def update_field_metadata(
     id: str,
     body: UpdateFieldMetadataRequest,
     ns: NamespaceDep,
     settings: SettingsDep,
     so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> UpdateFieldMetadataResponse:
-    """Merge or replace per-field metadata for the given field paths — wraps ``update_field_metadata``."""
-    table_id = parse_identifier(id, settings.delimiter)
+    """Merge or replace per-field metadata for the given field paths — wraps ``update_field_metadata``;
+    emits an UPDATE_FIELD_METADATA event at the new version (columns unchanged, but the WROTE edge keeps
+    the per-version schema populated for every version)."""
+    segments = parse_identifier(id, settings.delimiter)
     updates = [u.model_dump() for u in (body.updates or [])]
-    return dataplane.update_field_metadata(ns, so, table_id, updates)
+    response = await run_in_threadpool(dataplane.update_field_metadata, ns, so, segments, updates)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=response.version,
+        operation=UPDATE_FIELD_METADATA,
+        authorization=authorization,
+        schema_fields=schema_fields,
+    )
+    return response
 
 
 @router.post("/{id}/schema_metadata/update", response_model_exclude_none=True)
-def update_table_schema_metadata(
-    id: str, body: dict[str, Any], ns: NamespaceDep, settings: SettingsDep
+async def update_table_schema_metadata(
+    id: str,
+    body: dict[str, Any],
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> UpdateTableSchemaMetadataResponse:
-    """Set the table's schema-level metadata map — wraps ``update_table_schema_metadata``."""
+    """Set the table's schema-level metadata map — wraps ``update_table_schema_metadata``; emits an
+    UPDATE_SCHEMA_METADATA event (the response omits the version, so the new version is read back)."""
     # REST-only: the spec sends the metadata map directly, or wrapped as {"metadata": {...}}.
+    segments = parse_identifier(id, settings.delimiter)
     nested = body.get("metadata")
     raw = nested if isinstance(nested, dict) else body
     metadata: dict[str, str] = {str(k): str(v) for k, v in raw.items()}
-    req = UpdateTableSchemaMetadataRequest(id=parse_identifier(id, settings.delimiter), metadata=metadata)
-    return native.call(ns, "update_table_schema_metadata", req)
+    req = UpdateTableSchemaMetadataRequest(id=segments, metadata=metadata)
+    response: UpdateTableSchemaMetadataResponse = await run_in_threadpool(
+        native.call, ns, "update_table_schema_metadata", req
+    )
+    version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=version,
+        operation=UPDATE_SCHEMA_METADATA,
+        authorization=authorization,
+        schema_fields=schema_fields,
+    )
+    return response

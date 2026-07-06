@@ -41,6 +41,7 @@ from typing import Any, Final
 
 import psycopg
 from common.openlineage import RUN_EVENT_SCHEMA_URL, run_id_for
+from common.schema import SchemaFields
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
 
@@ -71,9 +72,11 @@ from lineage.schemas import (
 
 log = logging.getLogger(__name__)
 
-# Must match catalog.core.lineage_emit.CREATE_TABLE — the OpenLineage ``lance`` facet operation the
-# catalog emits on create, which keys the (:User)-[:CREATED]->(:Dataset) edge below (wire contract).
-_CREATE_TABLE_OP: Final = "create_table"
+# Ops that bring a table into existence in the catalog → each keys a (:User)-[:CREATED]->(:Dataset) edge.
+# Must match the catalog.core.lineage_emit markers (wire contract): a plain create, a register of an existing
+# location, and a declare of an empty id are all "someone originated this table" events; every other op
+# (insert/update/drop/index/…) is a WROTE, not a CREATED.
+_CREATE_OPS: Final = frozenset({"create_table", "register_table", "declare_table"})
 
 _MERGE_JOB: Final = "MERGE (j:Job {namespace:$ns, name:$nm}) RETURN 1"
 # Where the job's code lives (the standard sourceCodeLocation facet), as a JSON string scalar on the Job
@@ -499,9 +502,9 @@ class LineageRepository:
                             {"on": out.name, "inp": inp.name},
                         )
                 await self._ingest_columns(conn, event)
-            # A successful catalog "create_table" event carries the verified author → record who
-            # created the table as a first-class (:User)-[:CREATED]->(:Dataset) edge.
-            if event.is_success and event.operation == _CREATE_TABLE_OP and event.author:
+            # A successful table-origination event (create/register/declare) carries the verified author →
+            # record who created the table as a first-class (:User)-[:CREATED]->(:Dataset) edge.
+            if event.is_success and event.operation in _CREATE_OPS and event.author:
                 await run_cypher(conn, self._graph, _MERGE_USER, {"name": event.author})
                 for ds in event.outputs:
                     await run_cypher(
@@ -783,7 +786,9 @@ class LineageRepository:
         jobs.sort(key=lambda j: j.name)
         return jobs
 
-    async def backfill_write(self, name: str, version: int) -> None:
+    async def backfill_write(
+        self, name: str, version: int, schema: SchemaFields | None = None
+    ) -> None:
         """Stamp the actual on-disk version onto the graph when a write's lineage event was lost (B4).
 
         The buildable half of the outbox problem: a crash between a Lance write and the sidecar publish drops
@@ -791,7 +796,9 @@ class LineageRepository:
         a synthetic ``reconcile-<name>-v<version>`` run + a versioned ``WROTE`` edge to the dataset —
         idempotent (MERGE on the run id), so re-running never duplicates. The recovered provenance is minimal
         (``author='reconcile'``, no inputs): it records THAT the write happened + its version, not the lost
-        details. The dataset node must already exist (it has the dataSource URI reconciliation read from).
+        details. ``schema`` (the on-disk column schema reconciliation read) rides the same edge so the
+        recovered version carries its per-version schema (#24). The dataset node must already exist (it has
+        the dataSource URI reconciliation read from).
         """
         # Spec-valid UUID runId, deterministic on the (name, version) seed so re-running reconcile MERGEs
         # the same (:Run) instead of duplicating it — the readable seed is not the id.
@@ -807,6 +814,11 @@ class LineageRepository:
             )
             await run_cypher(conn, self._graph, _LINK_WROTE, params)
             await run_cypher(conn, self._graph, _SET_WROTE_VERSION, {**params, "ver": str(version)})
+            # Recover the per-version schema onto the same edge when reconciliation could read it off storage.
+            if schema:
+                await run_cypher(
+                    conn, self._graph, _SET_WROTE_SCHEMA, {**params, "schema": json.dumps(schema)}
+                )
         # A feed row too, so /events also knows the reconcile (the third view). A synthetic but spec-shaped
         # RECONCILED event — the repair is auditable next to the ingested writes it recovered.
         synthetic = {

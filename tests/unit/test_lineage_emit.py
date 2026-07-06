@@ -15,10 +15,12 @@ from typing import Any, cast
 import httpx
 from catalog.core.lineage_emit import (
     CREATE_TABLE,
+    DECLARE_TABLE,
     DEREGISTER_TABLE,
     DROP_TABLE,
     INSERT,
     MERGE_INSERT,
+    REGISTER_TABLE,
     DaprEmitter,
     HttpLineageEmitter,
     LineageEmitter,
@@ -28,7 +30,7 @@ from catalog.core.lineage_emit import (
     make_emitter,
 )
 from lineage.models import RunEvent
-from lineage.services.repository import _CREATE_TABLE_OP
+from lineage.services.repository import _CREATE_OPS
 
 
 def test_build_create_event_shape() -> None:
@@ -134,9 +136,14 @@ def test_build_create_event_without_author_omits_facet() -> None:
     assert event["run"]["facets"]["lance"]["operation"] == "create_table"
 
 
-def test_create_table_operation_string_is_shared() -> None:
-    # The catalog emitter and the lineage repository must agree on the facet operation string.
-    assert CREATE_TABLE == _CREATE_TABLE_OP == "create_table"
+def test_create_operation_strings_are_shared() -> None:
+    # The catalog emitter and the lineage repository must agree on which facet operations key a CREATED
+    # edge — create/register/declare are all "the table came into existence" events (wire contract).
+    assert CREATE_TABLE == "create_table"
+    assert sorted(_CREATE_OPS) == ["create_table", "declare_table", "register_table"]
+    assert CREATE_TABLE in _CREATE_OPS
+    assert REGISTER_TABLE in _CREATE_OPS
+    assert DECLARE_TABLE in _CREATE_OPS
 
 
 def test_emitted_event_round_trips_into_lineage_model() -> None:

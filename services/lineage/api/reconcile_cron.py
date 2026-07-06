@@ -22,6 +22,7 @@ from lineage.core.config import storage_options
 from lineage.core.reconcile import (
     BACKFILLABLE_STATES,
     STORAGE_LOSS_STATES,
+    read_storage_schema,
     read_storage_version,
     reconcile_all,
 )
@@ -53,6 +54,8 @@ async def _on_cron(
             repository,
             lambda uri: run_in_threadpool(read_storage_version, uri, opts),
             backfill=True,
+            # Recover the per-version schema for a back-filled write too (#24), not just its version.
+            read_schema=lambda uri: run_in_threadpool(read_storage_schema, uri, opts),
         )
     backfilled = [s.dataset for s in statuses if s.status in BACKFILLABLE_STATES]
     # Surface STORAGE loss (graph claims data on-disk Lance no longer has) — NOT auto-fixable, so log it

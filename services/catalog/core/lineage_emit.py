@@ -53,6 +53,27 @@ DROP_TABLE = "drop_table"
 #: versionless run (asymmetric with drop, which deletes) so the detach has a provenance marker instead of
 #: leaving the Dataset node looking like a still-live, never-touched table.
 DEREGISTER_TABLE = "deregister_table"
+#: Schema-evolution ops. Each bumps the Lance version; add/alter/drop change the column set, so their WROTE
+#: edge carries the NEW per-version schema facet (the payoff: ``/datasets/{id}/schema`` + ``/columns`` follow
+#: the evolution instead of freezing at create-time). ``update_field_metadata`` / ``update_schema_metadata``
+#: bump the version without changing columns but still record a versioned WROTE for provenance completeness.
+ADD_COLUMNS = "add_columns"
+ALTER_COLUMNS = "alter_columns"
+DROP_COLUMNS = "drop_columns"
+UPDATE_FIELD_METADATA = "update_field_metadata"
+UPDATE_SCHEMA_METADATA = "update_schema_metadata"
+#: Index lifecycle. Building/dropping an index bumps the Lance version (new manifest) without touching data
+#: or schema; recorded so provenance shows when a scalar/vector index was (re)built or removed.
+CREATE_INDEX = "create_index"
+DROP_INDEX = "drop_index"
+#: Restore moves the table's current version to a prior one — a real version-state change, recorded as a
+#: versioned WROTE at the new (restored) version.
+RESTORE_TABLE = "restore_table"
+#: Declare reserves a table id with no data yet (versionless); register attaches an existing storage
+#: location. Both are "the table came into existence in this catalog" events, so — like ``create_table`` —
+#: they key a ``(:User)-[:CREATED]->(:Dataset)`` edge (see ``lineage/repository.py`` ``_CREATE_OPS``).
+DECLARE_TABLE = "declare_table"
+REGISTER_TABLE = "register_table"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
 #: and what a Marquez-style consumer records as the event source).
@@ -386,6 +407,7 @@ async def emit_write_event(
     operation: str,
     authorization: str | None,
     schema_fields: SchemaFields | None = None,
+    source_uri: str | None = None,
 ) -> None:
     """Publish a best-effort lineage ``WROTE`` event for a catalog mutation, awaited INLINE in the handler.
 
@@ -394,6 +416,8 @@ async def emit_write_event(
     (fastapi anti-pattern). ``emit_write`` is best-effort (it swallows a publish failure), so awaiting it
     never fails the catalog write; JetStream message-durability + the lineage consumer's idempotent
     MERGE-on-``run_id`` give the at-least-once delivery. ``version=None`` records the run without a version.
+    ``source_uri`` attaches the standard dataSource facet (the physical storage URI) so #23 reconcile can
+    find the on-disk file — passed by ops that (re)attach a location, e.g. ``register``/``declare``.
     Ids come from ``fga`` so the lineage Dataset == the OpenFGA object == the catalog table id.
     """
     await emitter.emit_write(
@@ -404,5 +428,6 @@ async def emit_write_event(
         operation=operation,
         run_id=str(uuid.uuid4()),
         authorization=authorization,
+        source_uri=source_uri,
         schema_fields=schema_fields,
     )

@@ -11,6 +11,7 @@ from typing import Any, cast
 import lance
 import pyarrow as pa
 import pytest
+from common.schema import SchemaFields
 from lineage.api.reconcile_cron import _on_cron
 from lineage.core.config import LineageSettings
 from lineage.core.reconcile import read_storage_version, reconcile, reconcile_all
@@ -69,6 +70,7 @@ class _FakeRepo:
         self._graph = graph_versions
         self._uris = uris
         self.backfilled: list[tuple[str, int]] = []
+        self.backfilled_schemas: dict[str, object] = {}
 
     async def list_datasets(
         self, namespace: str | None = None, tag: str | None = None
@@ -81,8 +83,12 @@ class _FakeRepo:
     async def latest_write_version(self, name: str) -> int | None:
         return self._graph.get(name)
 
-    async def backfill_write(self, name: str, version: int) -> None:
+    async def backfill_write(
+        self, name: str, version: int, schema: object | None = None
+    ) -> None:
         self.backfilled.append((name, version))
+        if schema is not None:
+            self.backfilled_schemas[name] = schema
 
 
 def _reader(storage: dict[str, int]) -> Callable[[str], Awaitable[int | None]]:
@@ -125,6 +131,22 @@ def test_reconcile_all_read_only_reports_but_writes_nothing() -> None:
 
     assert repo.backfilled == []  # read-only mode never writes
     assert statuses[0].status == ReconcileState.STORAGE_AHEAD
+
+
+def test_reconcile_all_recovers_schema_when_read_schema_wired() -> None:
+    """A back-filled lost write carries the on-disk schema (#24) when a schema reader is injected."""
+    repo = _FakeRepo(datasets=["ahead"], graph_versions={"ahead": 1}, uris={"ahead": "s3://b/ahead"})
+    fields: SchemaFields = [{"name": "id", "type": "int64"}]
+
+    async def read_schema(_uri: str) -> SchemaFields | None:
+        return fields
+
+    asyncio.run(
+        reconcile_all(cast(Any, repo), _reader({"ahead": 3}), backfill=True, read_schema=read_schema)
+    )
+
+    assert repo.backfilled == [("ahead", 3)]  # storage-ahead → back-filled at the on-disk version
+    assert repo.backfilled_schemas["ahead"] == fields  # and the recovered per-version schema rides along
 
 
 # --- item 6: the cron route's single-flight guard ------------------------------------------- #

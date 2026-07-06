@@ -287,6 +287,110 @@ def test_insert_stamps_the_real_version_on_lineage(
     assert captured["version"] == 7  # the real Lance version, not None
 
 
+# --- #110 lineage-emit coverage: schema-evolution / index / restore / register / declare now emit ---
+
+
+def _capture_emit(monkeypatch, module: str) -> dict[str, object]:
+    """Patch the endpoint module's emit_write_event to record its kwargs (stands in for the transport)."""
+    captured: dict[str, object] = {}
+
+    async def _cap(_emitter: object, _segments: object, **kwargs: object) -> None:
+        captured.update(kwargs)
+
+    monkeypatch.setattr(f"catalog.api.v1.endpoints.{module}.emit_write_event", _cap)
+    return captured
+
+
+def test_add_columns_emits_schema_evolution_lineage(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # A schema change must carry the NEW per-version schema so /schema + /columns follow the evolution.
+    from lance_namespace import AlterTableAddColumnsResponse
+
+    monkeypatch.setattr(
+        "catalog.services.dataplane.add_columns", lambda *a, **k: AlterTableAddColumnsResponse(version=4)
+    )
+    monkeypatch.setattr(
+        "catalog.services.dataplane.read_schema_fields", lambda *a, **k: [{"name": "x", "type": "int64"}]
+    )
+    captured = _capture_emit(monkeypatch, "columns")
+
+    resp = client.post("/v1/table/db$t/add_columns", json={"new_columns": [{"name": "x", "expression": "1"}]})
+    assert resp.status_code == 200
+    assert captured["operation"] == "add_columns"
+    assert captured["version"] == 4  # the response's new version
+    assert captured["schema_fields"] == [{"name": "x", "type": "int64"}]  # post-evolution schema rides along
+
+
+def test_create_index_emits_lineage_at_readback_version(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # The native index response carries only a transaction_id → the new manifest version is read back.
+    from lance_namespace import CreateTableIndexResponse
+
+    fake_ns.create_table_index.return_value = CreateTableIndexResponse(transaction_id="tx")
+    dataset = MagicMock()
+    dataset.version = 9
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    monkeypatch.setattr("catalog.services.dataplane.read_schema_fields", lambda *a, **k: [])
+    captured = _capture_emit(monkeypatch, "indices")
+
+    resp = client.post("/v1/table/db$t/create_index", json={"column": "vec", "index_type": "IVF_PQ"})
+    assert resp.status_code == 200
+    assert captured["operation"] == "create_index"
+    assert captured["version"] == 9  # read back off the dataset, not None
+
+
+def test_restore_emits_lineage_at_new_version(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    from lance_namespace import RestoreTableResponse
+
+    fake_ns.restore_table.return_value = RestoreTableResponse(transaction_id="tx")
+    dataset = MagicMock()
+    dataset.version = 12
+    monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    monkeypatch.setattr("catalog.services.dataplane.read_schema_fields", lambda *a, **k: [])
+    captured = _capture_emit(monkeypatch, "tables")
+
+    resp = client.post("/v1/table/db$t/restore", json={"version": 3})
+    assert resp.status_code == 200
+    assert captured["operation"] == "restore_table"
+    assert captured["version"] == 12  # the NEW current version after restore
+
+
+def test_register_emits_versionless_marker_with_source_uri(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # Register attaches an existing (possibly external) location: versionless + source_uri, and it keys a
+    # CREATED edge (register_table ∈ lineage _CREATE_OPS); reconcile back-fills the real on-disk version.
+    from lance_namespace import RegisterTableResponse
+
+    fake_ns.register_table.return_value = RegisterTableResponse(location="s3://bucket/t")
+    captured = _capture_emit(monkeypatch, "tables")
+
+    resp = client.post("/v1/table/db$t/register", json={"location": "s3://bucket/t"})
+    assert resp.status_code == 200
+    assert captured["operation"] == "register_table"
+    assert captured["version"] is None  # versionless — no reopen of a possibly-external location on the path
+    assert captured["source_uri"] == "s3://bucket/t"
+
+
+def test_declare_emits_versionless_marker(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    from lance_namespace import DeclareTableResponse
+
+    fake_ns.declare_table.return_value = DeclareTableResponse(location="s3://bucket/t")
+    captured = _capture_emit(monkeypatch, "tables")
+
+    resp = client.post("/v1/table/db$t/declare", json={})
+    assert resp.status_code == 200
+    assert captured["operation"] == "declare_table"
+    assert captured["version"] is None  # reserved, no data yet
+    assert captured["source_uri"] == "s3://bucket/t"
+
+
 # --- version ops: the native bindings are `request: dict`-typed; native.call must marshal the pydantic ---
 # --- request to a dict, else a TypeError surfaces as a fake 501. These guard that fix (audit finding). ---
 

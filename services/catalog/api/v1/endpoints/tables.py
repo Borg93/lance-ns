@@ -30,11 +30,24 @@ from lance_namespace import (
 )
 
 from catalog.api import fga_deps
-from catalog.api.dependencies import FgaClientDep, LineageEmitterDep, NamespaceDep, SettingsDep
+from catalog.api.dependencies import (
+    FgaClientDep,
+    LineageEmitterDep,
+    NamespaceDep,
+    SettingsDep,
+    StorageOptionsDep,
+)
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
-from catalog.core.lineage_emit import DEREGISTER_TABLE, DROP_TABLE, emit_write_event
-from catalog.services import native
+from catalog.core.lineage_emit import (
+    DECLARE_TABLE,
+    DEREGISTER_TABLE,
+    DROP_TABLE,
+    REGISTER_TABLE,
+    RESTORE_TABLE,
+    emit_write_event,
+)
+from catalog.services import dataplane, native
 
 router = APIRouter(prefix="/v1/table", tags=["table"])
 
@@ -71,15 +84,29 @@ async def declare_table(
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    emitter: LineageEmitterDep,
     body: DeclareTableRequest | None = None,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> DeclareTableResponse:
-    """Declare a new (empty) table at ``id`` via ``declare_table``, then seed the
-    caller's FGA ownership over the new table."""
+    """Declare a new (empty) table at ``id`` via ``declare_table``, then seed the caller's FGA ownership
+    and emit a versionless DECLARE_TABLE marker (the table's first provenance — who reserved it + where)."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or DeclareTableRequest()
     req.id = segments
     response: DeclareTableResponse = await run_in_threadpool(native.call, ns, "declare_table", req)
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    # Versionless (no data yet): records who declared it + the reserved location, and keys the CREATED edge
+    # (declare_table ∈ lineage _CREATE_OPS). Reconcile fills the real version once data lands at the URI.
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=None,
+        operation=DECLARE_TABLE,
+        authorization=authorization,
+        source_uri=response.location,
+    )
     return response
 
 
@@ -184,13 +211,29 @@ async def register_table(
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> RegisterTableResponse:
-    """Register an existing table location at ``id`` via ``register_table``, then
-    seed the caller's FGA ownership over it."""
+    """Register an existing table location at ``id`` via ``register_table``, then seed the caller's FGA
+    ownership and emit a REGISTER_TABLE marker (who attached it + where)."""
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: RegisterTableResponse = await run_in_threadpool(native.call, ns, "register_table", body)
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    # Versionless + source_uri=the attached location, keying the CREATED edge (register_table ∈ _CREATE_OPS).
+    # The registered table already holds data at some version; we don't reopen a possibly-external location on
+    # the request path (a reopen failure must never fail an already-committed register) — #23 reconcile reads
+    # that source_uri and back-fills the real on-disk version (UNTRACKED → in-sync).
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=None,
+        operation=REGISTER_TABLE,
+        authorization=authorization,
+        source_uri=response.location,
+    )
     return response
 
 
@@ -229,12 +272,35 @@ async def rename_table(
 
 
 @router.post("/{id}/restore", response_model_exclude_none=True)
-def restore_table(
-    id: str, body: RestoreTableRequest, ns: NamespaceDep, settings: SettingsDep
+async def restore_table(
+    id: str,
+    body: RestoreTableRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> RestoreTableResponse:
-    """Restore the table at ``id`` to a prior version via ``restore_table``."""
-    body.id = parse_identifier(id, settings.delimiter)
-    return native.call(ns, "restore_table", body)
+    """Restore the table at ``id`` to a prior version via ``restore_table``; emits a RESTORE_TABLE event at
+    the NEW current version (restore mints a fresh version pointing at the restored data)."""
+    segments = parse_identifier(id, settings.delimiter)
+    body.id = segments
+    response: RestoreTableResponse = await run_in_threadpool(native.call, ns, "restore_table", body)
+    # The response carries only a transaction_id — reopen for the new current version + its schema.
+    version = await run_in_threadpool(dataplane.current_version, ns, so, segments)
+    schema_fields = await run_in_threadpool(dataplane.read_schema_fields, ns, so, segments)
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=version,
+        operation=RESTORE_TABLE,
+        authorization=authorization,
+        schema_fields=schema_fields,
+    )
+    return response
 
 
 @router.post("/{id}/stats", response_model_exclude_none=True)

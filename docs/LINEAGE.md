@@ -125,16 +125,24 @@ nodes/edges — see `todo.md` P2 #12b.*
 
 `author` is read from a custom OpenLineage `author` run facet (the OIDC sub of whoever ran
 the job), falling back to the standard `ownership` job facet so events from external producers
-still attribute an owner. On a catalog **create** event (`lance` facet `operation=create_table`,
-emitted by `catalog.core.lineage_emit`), the verified author is also recorded as a first-class
-`(:User)-[:CREATED]->(:Dataset)` edge — the authoritative "who created this table" answer.
+still attribute an owner. On a table-**origination** event (`lance` facet `operation` ∈ `{create_table, register_table,
+declare_table}`, emitted by `catalog.core.lineage_emit`), the verified author is also recorded as a
+first-class `(:User)-[:CREATED]->(:Dataset)` edge — the authoritative "who created this table" answer
+(register/declare are "the table came into existence in this catalog" events, same as create).
 Datasets are MERGEd on `{name}` only, then `namespace` is `SET`, so a dataset referenced by
 several runs is never duplicated.
 
-**The full write surface emits, not just create.** The catalog emits a versioned `WROTE` run for
-`insert`/`merge_insert`/`update`/`delete` and a **versionless `drop_table`** run (the Dataset node
-persists as history — a reader can tell it was deleted, not just last-written). The **compaction
-service** emits a versionless `operation=compaction` maintenance run per materially-compacted dataset
+**The full mutation surface emits, not just create.** The catalog emits a versioned `WROTE` run for
+every op that changes table state: `insert`/`merge_insert`/`update`/`delete`, the schema-evolution ops
+`add_columns`/`alter_columns`/`drop_columns` (carrying the NEW per-version schema, so `/schema` +
+`/columns` follow the evolution) plus `update_field_metadata`/`update_schema_metadata`, the index
+lifecycle `create_index`/`drop_index` (at the new manifest version), and `restore_table` (at the new
+current version). Versionless marker runs cover `drop_table` and `deregister_table` (the Dataset node
+persists as history — a reader can tell it was deleted/detached, not just last-written) and
+`register_table`/`declare_table` (which also record the location as the `dataSource` facet). The one
+mutation that does **not** emit synchronously is `backfill_column` — it returns a `job_id` (the backfill
+runs asynchronously), so its produced version isn't known at request time; reconcile recovers it. The
+**compaction service** emits a versionless `operation=compaction` maintenance run per materially-compacted dataset
 (`services/compaction/core/lineage_emit.py`), so a GC/compaction shows up in `producers()` next to the
 data writes. All of these are awaited **inline** on the durable Dapr/JetStream transport (not FastAPI
 `BackgroundTasks` — no retry, dies with the worker), so a lineage outage never loses provenance.
@@ -157,7 +165,7 @@ consumer — can ingest them unchanged at the same `/api/v1/lineage` path. Our i
 |---|---|---|---|
 | `producer` (event field) | run | the software that emitted the event | `Run.producer` |
 | `author` (custom) → `ownership` | run / job | who ran the job (OIDC sub), standard owner fallback | `Run.author` |
-| `lance` (custom) | run | catalog `operation=create_table` → who-created | `(:User)-[:CREATED]` |
+| `lance` (custom) | run | catalog `operation` (the mutation kind); a table-origination op (`create_table`/`register_table`/`declare_table`) → who-created | `Run.operation`, `(:User)-[:CREATED]` |
 | `jobType` | job | `processingType` BATCH/STREAMING, `integration=RAY`, `jobType` ETL/TRANSFORMATION | (read; surfaced via job) |
 | `sourceCodeLocation` | job | where the job's code lives (git url + path) — a here-dummy (GOAL 3), auto-derived by rask's runner later | `Job.source_location` |
 | `schema` | dataset | column names/types per layer | `WROTE.schema` (per-version) |

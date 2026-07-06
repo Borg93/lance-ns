@@ -128,8 +128,6 @@ def build_session_policy(bucket: str, prefix: str, tier: Tier) -> dict[str, obje
 class ModeBVendor:
     """No vending: data flows through the catalog's server-mediated endpoints."""
 
-    mode: VendingMode = "mode_b"
-
     def vend(
         self, *, table_location: str, tier: Tier, web_identity_token: str | None = None
     ) -> VendedCredentials | None:  # noqa: ARG002
@@ -148,8 +146,6 @@ class StaticPrefixVendor:
     key). Prefer :class:`StsVendor` when the backend supports STS — static keys
     are long-lived and can't be scoped per-table the way a session policy can.
     """
-
-    mode: VendingMode = "static"
 
     def __init__(self, keys_by_bucket: dict[str, dict[str, str]]) -> None:
         self._keys = keys_by_bucket
@@ -182,8 +178,6 @@ class StsVendor:
     RustFS. ``assume_role`` defaults to a lazily-built boto3 STS client's ``assume_role`` and is injectable
     for tests.
     """
-
-    mode: VendingMode = "sts"
 
     def __init__(
         self,
@@ -242,8 +236,6 @@ class WebIdentityVendor:
     (RustFS verifies the JWT, not a request signature); the request goes out UNSIGNED. ``assume`` is the
     boto3 ``assume_role_with_web_identity`` and is injectable for tests.
     """
-
-    mode: VendingMode = "web_identity"
 
     def __init__(
         self,

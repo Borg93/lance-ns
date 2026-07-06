@@ -30,7 +30,8 @@ from opentelemetry import trace
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_denied, record_quality_blocked, record_transition
 from medallion.schemas.events import build_run_event
-from medallion.services.compute import measure, transform_stage
+from medallion.services.compute import has_blob_columns, measure, transform_stage
+from medallion.services.derivers import UnderivableMediaError
 from medallion.services.quality import Assertion, assert_quality, passed
 from medallion.services.ray_submit import submit_stage_job
 
@@ -116,7 +117,21 @@ async def handle_stage(
             async with _write_lock:
                 with tracer.start_as_current_span("medallion.transform") as span:
                     span.set_attribute("lance.medallion.transition", transition)
-                    if settings.ray_enabled:
+                    use_ray = settings.ray_enabled
+                    if use_ray and await run_in_threadpool(
+                        has_blob_columns, settings.from_uri, settings.storage_options()
+                    ):
+                        # The Ray stage job is not yet blob-safe and derives no artifacts, so a
+                        # blob-carrying upstream takes the in-process path even with Ray on — the same
+                        # native-fallback convention as the Ray index path (docs/RAY.md). Observable
+                        # (warned + span-attributed), never silent.
+                        log.warning(
+                            "medallion_ray_blob_fallback",
+                            extra={"transition": transition, "from_uri": settings.from_uri},
+                        )
+                        span.set_attribute("lance.medallion.compute", "in_process_blob_fallback")
+                        use_ray = False
+                    if use_ray:
                         # EVENT-DRIVEN real-Ray: submit the stage transform to the Ray cluster IN RESPONSE
                         # TO this trigger (`ray job submit` via the Ray Jobs REST API), then measure the
                         # written dataset so the lineage emit matches the in-process path. A job
@@ -131,7 +146,8 @@ async def handle_stage(
                         )
                         result = await run_in_threadpool(measure, settings.to_uri, settings.storage_options())
                     else:
-                        span.set_attribute("lance.medallion.compute", "in_process")
+                        if not settings.ray_enabled:  # the blob fallback above already named the path
+                            span.set_attribute("lance.medallion.compute", "in_process")
                         result = await run_in_threadpool(
                             transform_stage,
                             settings.from_uri,
@@ -193,6 +209,37 @@ async def handle_stage(
                 ),
                 data_content_type="application/json",
             )
+    except UnderivableMediaError as exc:
+        # DETERMINISTIC bad media (a payload matched the content probe but cannot decode): redelivery
+        # cannot fix bytes, so mirror the quality-gate contract — record the FAIL run (the audit trail,
+        # idempotent on the token-derived run_id) and DROP instead of a pointless RETRY storm that would
+        # re-read every blob from S3 up to maxDeliver times.
+        record_quality_blocked(transition)
+        log.warning(
+            "medallion_media_underivable",
+            extra={"transition": transition, "token": token, "error": str(exc)},
+        )
+        with suppress(Exception):
+            fail_event = build_run_event(
+                operation=settings.operation,
+                author=settings.author,
+                job_namespace=settings.job_namespace,
+                inputs=[(settings.from_namespace, settings.from_dataset)],
+                output_namespace=settings.to_namespace,
+                output_name=settings.to_dataset,
+                token=token,
+                event_type="FAIL",
+                error_message=str(exc),
+            )
+            await dapr_publish.publish_event(
+                dapr,
+                timeout_seconds=settings.publish_timeout_seconds,
+                pubsub_name=settings.pubsub,
+                topic_name=settings.lineage_topic,
+                data=json.dumps(fail_event),
+                data_content_type="application/json",
+            )
+        return _DROP
     except Exception as exc:  # noqa: BLE001 — transient compute/publish failure → let Dapr redeliver
         log.warning(
             "medallion_stage_failed", extra={"transition": transition, "token": token, "error": str(exc)}

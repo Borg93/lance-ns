@@ -71,6 +71,7 @@ markers = [
     "gateway: e2e tests for the API gateway (Dapr service-invocation routing) — set LANCE_E2E_GATEWAY_URL",
     "compaction: e2e tests for the compaction/GC sweep against real Lance datasets — set LANCE_E2E_*_URL",
     "cas: object-store conditional-write (compare-and-swap) validation against the deployed store — set LANCE_E2E_S3_*",
+    "media: e2e tests for the MEDIA lane of the cascade (ingest-media → derived silver) — set LANCE_E2E_*_URL",
 ]
 
 [tool.ty.environment]

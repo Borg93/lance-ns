@@ -476,6 +476,18 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 
 ## 9 · Feature gaps — ephemeral multimodal lakehouse (→ rask merge)
 
+> **2026-07-06 — the DEPLOYED media loop is closed (the strategic audit's #1 gap).** `POST /ingest-media`
+> (lance-ray, token-guarded, compute-on) lands external media as `bronze-media$objects` (blob-v2 2.2,
+> one lineage input per source URI) → `medallion.media` trigger (durable consumer) → the generic
+> `media-to-silver` mover derives BY CONTENT (`medallion/services/derivers.py`: image → inline
+> thumbnail+embedding; unrecognised media carries untouched; tabular = no-op — zero media config, the
+> platform knows only Lance types) → `silver-media$features` with the blob-aware schema in AGE.
+> Live-proven end-to-end (`make e2e-media`, in the `make e2e` umbrella; skips compute-off). Undecodable
+> media = deterministic FAIL+DROP (quality-gate contract). Governed grants seeded
+> (`seed_medallion_fga.sh`: bronze-media/silver-media parents + service-media-to-silver writer — the
+> audit's blocker). Ray path falls back in-process for blob upstreams (ray job not blob-safe yet).
+> Still open here: registering cascade outputs into the catalog; real encoder plugin; egress lane.
+
 - ✅ **P2 `/produce` (lance-ray) in-cluster auth — DONE (2026-07-04).** BOTH layers now ship
   (defense-in-depth, the Ray-security shape: network isolation primary + token guard):
   (1) `/produce` now depends on `require_dapr_token` (the shared app-api-token) — no-op in dev, enforced

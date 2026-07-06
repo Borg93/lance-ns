@@ -42,7 +42,7 @@ VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
-        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-gateway e2e-compaction e2e-cas e2e-lineage \
+        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage \
         e2e-governance dashboards status k9s tilt-up tilt-ci clean down
 
 help: ## Show this help
@@ -186,6 +186,15 @@ e2e-compaction: ## Run the e2e compaction test (real Lance sweep + OTel metric) 
 e2e-lineage: ## AGE-backed lineage e2e — real Cypher vs a hermetic AGE service container via Dagger (== CI)
 	@dagger call test-lineage
 
+e2e-media: ## Run the e2e MEDIA-lane test (ingest-media → blob bronze → derived silver + lineage) against the deployed stack
+	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & R=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 sleep 4; \
+	 TOKEN=$$(kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- printenv APP_API_TOKEN 2>/dev/null || true); \
+	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 LANCE_E2E_DAPR_TOKEN=$$TOKEN \
+	   uv run pytest tests/e2e/test_media_e2e.py -v -m media; rc=$$?; \
+	 kill $$R $$L 2>/dev/null; exit $$rc
+
 e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit safety) against RustFS
 	@echo "port-forwarding RustFS (9900->9000) …"
 	@kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
@@ -207,10 +216,10 @@ e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malf
 	   uv run pytest tests/e2e/test_governance_e2e.py -v -m e2e; rc=$$?; \
 	 kill $$C $$L $$D 2>/dev/null; exit $$rc
 
-e2e: ## Run the core e2e suite in sequence against the deployed stack (auth-agnostic: obs, medallion, gateway, compaction, cas)
+e2e: ## Run the core e2e suite in sequence against the deployed stack (auth-agnostic: obs, medallion, media, gateway, compaction, cas)
 	@echo "▶ full core e2e suite against the deployed $(RELEASE) stack (each suite self-forwards + self-skips if unreachable)"; \
 	 fail=0; failed=""; \
-	 for t in e2e-obs e2e-medallion e2e-gateway e2e-compaction e2e-cas; do \
+	 for t in e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas; do \
 	   echo; echo "═══════════ $$t ═══════════"; \
 	   $(MAKE) --no-print-directory $$t || { fail=1; failed="$$failed $$t"; }; \
 	 done; \

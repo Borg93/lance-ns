@@ -74,6 +74,13 @@ spec:
             # OpenBao is off — compute + OpenBao is not a shipped combo).
             - { name: MEDALLION_COMPUTE_ENABLED, value: "true" }
             - { name: MEDALLION_RAW_URI, value: "s3://{{ .Values.rustfs.bucket }}/medallion/{{ .Values.medallion.producer.rawNamespace }}" }
+            # The media ingest head (multimodal §9): /ingest-media seeds/reads the source prefix in the
+            # lake bucket (demo stand-in for an external media store), lands bronze-media blobs at the
+            # namespace-derived URI (MUST match the media mover's fromNamespace-derived FROM_URI), and
+            # triggers the media lane. Dataset/namespace/topic/prefix use the code defaults.
+            - { name: MEDALLION_MEDIA_SOURCE_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
+            - { name: MEDALLION_MEDIA_SEED_SAMPLES, value: {{ .Values.medallion.mediaSeedSamples | quote }} }
+            - { name: MEDALLION_MEDIA_BRONZE_URI, value: "s3://{{ .Values.rustfs.bucket }}/medallion/bronze-media" }
             - { name: MEDALLION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" .) }}

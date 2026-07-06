@@ -24,6 +24,7 @@ from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
 
 from medallion.api.health import router as health_router
+from medallion.api.ingest_media import router as ingest_media_router
 from medallion.api.produce import router as produce_router
 from medallion.api.raw_arrival import register_raw_arrival_route
 from medallion.core.config import get_settings
@@ -58,5 +59,8 @@ app = FastAPI(
 )
 app.include_router(health_router)
 app.include_router(produce_router)
+# The multimodal head (§9): POST /ingest-media lands external media as bronze blobs + triggers the
+# media chain (bronze→silver derive) — the deployed twin of the manual media pipeline scripts.
+app.include_router(ingest_media_router)
 # The event-driven cascade head: subscribe to the lineage topic; a raw-dataset write fires medallion.raw.
 register_raw_arrival_route(app)

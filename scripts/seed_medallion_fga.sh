@@ -21,13 +21,18 @@ echo "store: $SID"
 
 w() { "$BIN/fga" tuple write --api-url "$API" --store-id "$SID" "$@" >/dev/null 2>&1 || true; }
 
-# medallion stage namespaces under the warehouse (so the rung cascade reaches them)
+# medallion stage namespaces under the warehouse (so the rung cascade reaches them) — the MEDIA lane's
+# namespaces included: without them the media mover's can_create_table check on namespace:silver-media
+# finds no parent chain and the governed cascade silently DROPs every media trigger (audit blocker).
 w "$WAREHOUSE" parent namespace:bronze
 w "$WAREHOUSE" parent namespace:silver
 w "$WAREHOUSE" parent namespace:gold
+w "$WAREHOUSE" parent namespace:bronze-media
+w "$WAREHOUSE" parent namespace:silver-media
 # writer movers → can_create_table on their stage; the promoter mover → can_promote on gold
 w user:service-raw-to-bronze writer "$WAREHOUSE"
 w user:service-bronze-to-silver writer "$WAREHOUSE"
+w user:service-media-to-silver writer "$WAREHOUSE"
 w user:service-silver-to-gold validator namespace:gold
 
-echo "✓ seeded medallion mover grants (writers + the silver→gold validator) into store $SID"
+echo "✓ seeded medallion mover grants (writers incl. media lane + the silver→gold validator) into store $SID"

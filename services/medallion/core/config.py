@@ -159,6 +159,25 @@ class MedallionSettings(BaseSettings):
     producer_author: str = Field(default="ray", alias="MEDALLION_PRODUCER_AUTHOR")
     raw_topic: str = Field(default="medallion.raw", alias="MEDALLION_RAW_TOPIC")
 
+    # --- media ingest head (multimodal §9) — POST /ingest-media lands external media as bronze blobs and
+    # triggers the media chain. The head reads an external S3 source prefix through the provider-agnostic
+    # SourceAdapter seam (a real deployment points bucket/prefix at IIIF/GCS/HF exports; the demo seeds
+    # sample PNGs there first). Requires compute (there is no dummy media): media_bronze_uri is where the
+    # bronze blob-v2 table lands; the trigger on media_topic drives the media mover (bronze -> silver
+    # derive). Empty media_bronze_uri = the media head is off (POST /ingest-media -> 409). ----------------
+    # The media lane gets its OWN namespaces (bronze-media → silver-media): the chart derives each
+    # mover's from/to URI from the NAMESPACE (s3://<bucket>/medallion/<namespace>), so reusing the events
+    # chain's bronze/silver would collide with bronze$events / silver$features on the same paths.
+    media_source_bucket: str = Field(default="", alias="MEDALLION_MEDIA_SOURCE_BUCKET")
+    media_source_prefix: str = Field(default="media-src/batch", alias="MEDALLION_MEDIA_SOURCE_PREFIX")
+    media_bronze_uri: str = Field(default="", alias="MEDALLION_MEDIA_BRONZE_URI")
+    media_bronze_dataset: str = Field(default="bronze-media$objects", alias="MEDALLION_MEDIA_BRONZE_DATASET")
+    media_bronze_namespace: str = Field(default="bronze-media", alias="MEDALLION_MEDIA_BRONZE_NAMESPACE")
+    media_topic: str = Field(default="medallion.media", alias="MEDALLION_MEDIA_TOPIC")
+    # Seed two deterministic sample PNGs into the source prefix before ingesting (the demo's stand-in for
+    # an external media drop). Prod points the bucket/prefix at real media and turns this off.
+    media_seed_samples: bool = Field(default=True, alias="MEDALLION_MEDIA_SEED_SAMPLES")
+
 
 @lru_cache
 def get_settings() -> MedallionSettings:

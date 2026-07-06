@@ -127,6 +127,9 @@ def test_mover_ray_branch_submits_job_then_emits_measured_lineage(monkeypatch: p
     monkeypatch.setattr(mover, "submit_stage_job", fake_submit)
     measured = WriteResult(version=7, row_count=5, size_bytes=99)
     monkeypatch.setattr(mover, "measure", lambda _uri, _so: measured)
+    # The Ray path is gated on the upstream carrying no blob column (the Ray job is not blob-safe and
+    # derives no artifacts — blob lanes fall back in-process); this events-lane test pins the ray path.
+    monkeypatch.setattr(mover, "has_blob_columns", lambda _uri, _so: False)
     dapr = _FakeDapr()
 
     status = asyncio.run(mover.handle_stage(cast(Any, dapr), _RAY_MOVER, {"data": {"token": "tok"}}))
@@ -180,6 +183,34 @@ def test_mover_write_is_single_flight_under_concurrent_delivery(monkeypatch: pyt
     results = asyncio.run(_run_two())
     assert all(r == {"status": "SUCCESS"} for r in results)
     assert max_active == 1  # serialized — never two writes in flight for the same target at once
+
+
+def test_ray_mover_falls_back_in_process_for_blob_upstreams(monkeypatch: pytest.MonkeyPatch) -> None:
+    """ray_enabled + a blob-carrying upstream: the mover takes the in-process path (the Ray stage job is
+    not blob-safe and derives no artifacts) — observable fallback, never a silent non-derivation."""
+    from medallion.services.compute import WriteResult
+
+    monkeypatch.setattr(mover, "has_blob_columns", lambda _uri, _so: True)
+    submitted: list[str] = []
+
+    async def fake_submit(*_a: Any, **_k: Any) -> None:
+        submitted.append("ray")
+
+    monkeypatch.setattr(mover, "submit_stage_job", fake_submit)
+    transformed: list[str] = []
+
+    def fake_transform(_f: str, _t: str, _so: dict[str, str], *, stage: str) -> WriteResult:
+        transformed.append(stage)
+        return WriteResult(version=2, row_count=1, size_bytes=10)
+
+    monkeypatch.setattr(mover, "transform_stage", fake_transform)
+    dapr = _FakeDapr()
+
+    status = asyncio.run(mover.handle_stage(cast(Any, dapr), _RAY_MOVER, {"data": {"token": "tok"}}))
+
+    assert status == {"status": "SUCCESS"}
+    assert submitted == []  # the Ray job was NOT submitted for a blob upstream
+    assert transformed == ["silver"]  # the in-process transform ran instead
 
 
 def test_terminal_mover_emits_lineage_but_no_next_trigger() -> None:

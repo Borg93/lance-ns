@@ -17,6 +17,21 @@ THUMBNAIL_SIZE = (128, 128)
 EMBEDDING_DIMS = 8
 
 
+def is_image(payload: bytes) -> bool:
+    """Whether ``payload`` decodes as an image — the content probe for artifact derivation.
+
+    A blob column is not necessarily image media (audio/docs are blobs too); the cascade probes the first
+    payload and only derives thumbnails/embeddings for decodable image datasets, carrying anything else
+    forward untouched.
+    """
+    try:
+        with Image.open(io.BytesIO(payload)) as image:
+            image.verify()
+    except Exception:  # noqa: BLE001 — any decode failure means "not an image", never an error
+        return False
+    return True
+
+
 def derive_thumbnail(image_bytes: bytes, size: tuple[int, int] = THUMBNAIL_SIZE) -> bytes:
     """A downscaled PNG thumbnail of ``image_bytes`` — small enough to store INLINE (not a blob)."""
     with Image.open(io.BytesIO(image_bytes)) as image:

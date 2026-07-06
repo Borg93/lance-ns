@@ -8,9 +8,13 @@ provenance.
 
 This is the **same** ``read → transform → write → version`` contract a distributed Ray Data job
 (``lance-ray`` on rask's KubeRay) fills in production; here it runs **in-process** so the cascade is
-end-to-end testable without a Ray cluster. The transform is intentionally generic (carry the rows forward,
-stamp a ``stage`` provenance column) — the realistic per-stage ML transform (embed / caption / aggregate)
-is the distributed job's job at rask. Blocking Lance/S3 IO; callers run it in the threadpool.
+end-to-end testable without a Ray cluster. The compute operates on LANCE TYPES only: every stage carries
+rows forward — tabular columns as tabular, vectors as vectors, blob columns of any media kind
+re-materialised safely — and stamps a ``stage`` provenance column; what a stage derives from blob
+payloads is dispatched on CONTENT by :mod:`medallion.services.derivers` (image → thumbnail+embedding;
+unrecognised → untouched; tabular → no-op), so the same deployed mover binary serves every lane with
+zero media config. Heavier per-stage ML (real encoders, captioning) is the distributed job's job at
+rask. Blocking Lance/S3 IO; callers run it in the threadpool.
 """
 
 from __future__ import annotations
@@ -22,6 +26,8 @@ import pyarrow as pa
 from common import blobs, schema
 from lance import blob_array, blob_field
 from pydantic import BaseModel, Field
+
+from medallion.services.derivers import derive_artifacts
 
 _STAGE_COLUMN = "stage"
 
@@ -88,19 +94,30 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> Wri
     return measure(uri, storage_options)
 
 
+def has_blob_columns(uri: str, storage_options: dict[str, str]) -> bool:
+    """Whether the dataset carries any blob-v2 column — the mover's Ray-path gate (blocking IO).
+
+    The Ray stage job is not yet blob-safe (plain ``read_lance().map_batches()`` hits the ``to_table``
+    blob-demotion landmine) and runs no artifact derivation, so a blob-carrying upstream must take the
+    in-process path even when Ray is enabled.
+    """
+    return bool(blobs.blob_field_names(lance.dataset(uri, storage_options=storage_options).schema))
+
+
 def transform_stage(
     from_uri: str, to_uri: str, storage_options: dict[str, str], *, stage: str
 ) -> WriteResult:
-    """Read the upstream Lance dataset, stamp the ``stage`` provenance column, write the downstream dataset.
+    """Read the upstream Lance dataset, transform, write the downstream dataset (the generic stage).
 
-    The generic fake-Ray compute: real rows flow forward and the target version advances, so the cascade
-    produces actual versioned data + lineage. ``stage`` is set (not appended twice) so re-running over an
-    already-stamped upstream replaces the value rather than colliding on the column name. A blob-v2 (media)
-    column is carried through intact — see ``_carry_forward``. Returns the new downstream Lance version +
-    the measured output statistics (rows + on-disk bytes) for the emit.
+    Every stage stamps the ``stage`` provenance column (set, not appended twice, so re-running over an
+    already-stamped upstream replaces the value), carries blob columns of ANY media kind through intact
+    (``_carry_forward``), and derives whatever the blob CONTENT supports (``derive_artifacts`` — image →
+    thumbnail+embedding, unrecognised → untouched, tabular → no-op). Returns the new downstream Lance
+    version + the measured output statistics (rows + on-disk bytes) for the emit.
     """
     ds = lance.dataset(from_uri, storage_options=storage_options)
-    out = _carry_forward(ds, stage)
+    out, blob_payloads = _carry_forward(ds, stage)
+    out = derive_artifacts(out, blob_payloads)
     # 2.2 + stable row ids like seed_raw: every dataset the cascade writes is on the current format (so a blob
     # column never trips "Blob v2 requires file version >= 2.2" mid-cascade) and keeps durable row identity.
     lance.write_dataset(
@@ -114,16 +131,18 @@ def transform_stage(
     return measure(to_uri, storage_options)
 
 
-def _carry_forward(ds: lance.LanceDataset, stage: str) -> pa.Table:
+def _carry_forward(ds: lance.LanceDataset, stage: str) -> tuple[pa.Table, dict[str, list[bytes]]]:
     """Read the upstream table and stamp the ``stage`` column, carrying any blob-v2 column through intact.
 
     A plain ``to_table()`` demotes a blob column to its descriptions struct (tagged with the legacy
     ``lance-encoding:blob`` key), which the 2.2 write then rejects — so blob columns are re-materialised
-    via ``read_blobs`` + ``blob_array``. A stage with no blob column keeps the cheap straight-through path.
+    via ``read_blobs`` + ``blob_array``. A stage with no blob column keeps the cheap straight-through
+    path. Returns the stamped table AND the materialised blob payloads per column, so a media stage can
+    derive artifacts without a second ``read_blobs`` pass.
     """
     blob_cols = blobs.blob_field_names(ds.schema)
     if not blob_cols:
-        return _stamp_stage(ds.to_table(), stage)
+        return _stamp_stage(ds.to_table(), stage), {}
 
     # Full-materialise each blob column into memory (read_blobs by positional indices 0..N-1) — fine for
     # this in-process fake-Ray stand-in over the cascade's small overwrite-written datasets (contiguous
@@ -135,11 +154,13 @@ def _carry_forward(ds: lance.LanceDataset, stage: str) -> pa.Table:
     )
     columns: dict[str, Any] = {}
     fields: list[pa.Field] = []
+    blob_payloads: dict[str, list[bytes]] = {}
     for f in ds.schema:
         if f.name == _STAGE_COLUMN:
             continue  # re-stamped below so the value reflects this stage, not the upstream's
         if f.name in blob_cols:
             payloads = [payload for _addr, payload in ds.read_blobs(f.name, indices=list(range(rows)))]
+            blob_payloads[f.name] = payloads
             fields.append(blob_field(f.name))
             columns[f.name] = blob_array(payloads)
         else:
@@ -147,7 +168,7 @@ def _carry_forward(ds: lance.LanceDataset, stage: str) -> pa.Table:
             columns[f.name] = plain.column(f.name)
     fields.append(pa.field(_STAGE_COLUMN, pa.string()))
     columns[_STAGE_COLUMN] = pa.array([stage] * rows, pa.string())
-    return pa.table(columns, schema=pa.schema(fields))
+    return pa.table(columns, schema=pa.schema(fields)), blob_payloads
 
 
 def _stamp_stage(table: pa.Table, stage: str) -> pa.Table:

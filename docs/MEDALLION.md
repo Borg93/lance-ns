@@ -81,10 +81,23 @@ raw→gold cascade and asserts both the data and the `DERIVED_FROM` chain).
 | **raw→bronze** | `raw-to-bronze` | `medallion.mover:app` | `medallion.raw` | `medallion.bronze` + lineage |
 | **bronze→silver** | `bronze-to-silver` | `medallion.mover:app` | `medallion.bronze` | `medallion.silver` + lineage |
 | **silver→gold** | `silver-to-gold` | `medallion.mover:app` | `medallion.silver` | — (terminal) + lineage |
+| **lance-ray** (media head) | `lance-ray` | `medallion.producer:app` | `POST /ingest-media` | bronze-media write lineage + `medallion.media` |
+| **media→silver** (media lane) | `media-to-silver` | `medallion.mover:app` | `medallion.media` | — (terminal) + lineage |
 
-The 3 movers are the **same module**, differing only by `MEDALLION_*` env (from/to dataset, sub/pub
+The 4 movers are the **same module**, differing only by `MEDALLION_*` env (from/to dataset, sub/pub
 topic, operation, author) — see `chart/values.yaml` `medallion.movers`. Triggers ride a dedicated
 `MEDALLION` JetStream stream (`medallion.>`); the OpenLineage events ride the existing `LINEAGE` stream.
+
+**The MEDIA lane (multimodal §9).** `POST /ingest-media` on lance-ray (token-guarded like `/produce`;
+compute-on only — 409 otherwise) lands external media as a bronze **blob-v2** table at format 2.2
+(`bronze-media$objects`, one lineage input per source URI) and publishes `medallion.media`; the
+`media-to-silver` mover — the SAME generic mover binary, zero media config — carries the blob forward
+and derives whatever the blob **content** supports (`medallion/services/derivers.py`: image →
+inline `thumbnail` + `embedding`; unrecognised media carries through untouched; tabular datasets are a
+no-op), writing `silver-media$features`. Undecodable-after-probe payloads are deterministic bad data:
+the run FAILs in lineage and the trigger is DROPPED (the quality-gate contract), never retried.
+Live-regression-guarded by `make e2e-media` (part of the `make e2e` umbrella; skips on compute-off
+stacks). Governed mode needs the media grants — `scripts/seed_medallion_fga.sh` seeds them.
 
 **`/produce` auth (the cascade head).** `/produce` is a direct operator trigger (not sidecar-delivered), so
 it is guarded by `require_dapr_token` (the shared `APP_API_TOKEN`): **no-op in dev** (unset token — `make

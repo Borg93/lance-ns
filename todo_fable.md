@@ -646,7 +646,21 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   KubeRay `RayJob` CR under Kueue at the rask merge (contracts unchanged, transport swaps).
   Implementation = #115a–c below.
 
-- ⛔ **#115a — `/train` head + training topic + submit-and-ack trainer consumer** (execution-spec'd per
+- 🟡 **#115a — `/train` head + training topic + submit-and-ack trainer consumer — CODE-COMPLETE
+  2026-07-10, unit tier (16 tests); LIVE DRIVE + chart/seed PENDING.** Built as spec'd + hardened by the
+  adversarial review, which caught: the producer lifespan never built `app.state.fga` (the trainer gate
+  would have been silently OFF with MEDALLION_FGA_ENABLED=true — an authz bypass; now built exactly like
+  the movers'); version-less/malformed/empty feature lists now DROP at the consumer (a floating-LATEST
+  feature or a vacuous gate never reaches the job); the trigger `config` is claim-check-capped (8 KiB) at
+  the head AND actually forwarded to the job env (it was published-then-discarded); the httpx timeout
+  kwarg is now assert-pinned in the fake (the ack-window bound had no tripwire). ACCEPTED deviation from
+  the spec: `submit_train_job` is a documented SIBLING of `submit_stage_job` rather than an extracted
+  shared core — their re-attach semantics differ at the terminal-failure branch (train NEVER
+  delete-resubmits); the module header now tells maintainers to mirror protocol fixes across both.
+  REMAINING before flipping ✅: chart env passthrough (train topic/entrypoint/trainer identity — defaults
+  work but should be values-wired) + the #115c seed grants + the live kind drive (in §7a RESIDUAL).
+  Original spec below:
+  (execution-spec'd per
   docs/RAY-TRAIN.md D1+D2+D6). Build: `POST /train` on lance-ray (token-guarded; resolves omitted
   feature versions to LATEST at the head); publish `{token, model, features:[{dataset,version}], config}`
   to `MEDALLION_TRAIN_TOPIC` (default `training.jobs`); a durable subscription (own queue group) whose

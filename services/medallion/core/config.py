@@ -158,6 +158,15 @@ class MedallionSettings(BaseSettings):
     producer_operation: str = Field(default="lance_ray_ingest", alias="MEDALLION_PRODUCER_OPERATION")
     producer_author: str = Field(default="ray", alias="MEDALLION_PRODUCER_AUTHOR")
     raw_topic: str = Field(default="medallion.raw", alias="MEDALLION_RAW_TOPIC")
+    # --- Ray TRAIN head (#115a, docs/RAY-TRAIN.md): OWN topic (D1 — long-running, terminal-on-failure;
+    # never a field on the stage trigger) + submit-and-ack consumer (D2). The trainer has its OWN service
+    # identity + rung (D5): reader on the feature namespaces, writer on namespace:<models> ONLY.
+    train_topic: str = Field(default="training.jobs", alias="MEDALLION_TRAIN_TOPIC")
+    train_entrypoint: str = Field(
+        default="python /app/scripts/ray_train_job.py", alias="MEDALLION_TRAIN_ENTRYPOINT"
+    )
+    trainer_identity: str = Field(default="service-trainer", alias="MEDALLION_TRAINER_IDENTITY")
+    models_namespace: str = Field(default="models", alias="MEDALLION_MODELS_NAMESPACE")
 
     # --- media ingest head (multimodal §9) — POST /ingest-media lands external media as bronze blobs and
     # triggers the media chain. The head reads an external S3 source prefix through the provider-agnostic

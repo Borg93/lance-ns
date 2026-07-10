@@ -19,6 +19,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
+from common import fga
 from common.dapr_auth import assert_app_token_configured
 from common.lance_metrics import instrument_lance_if_available
 from dapr.aio.clients import DaprClient
@@ -28,6 +29,8 @@ from medallion.api.health import router as health_router
 from medallion.api.ingest_media import router as ingest_media_router
 from medallion.api.produce import router as produce_router
 from medallion.api.raw_arrival import register_raw_arrival_route
+from medallion.api.train import register_train_trigger_route
+from medallion.api.train import router as train_router
 from medallion.core.config import get_settings
 
 
@@ -42,6 +45,12 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # The Dapr client targets the local sidecar (localhost) — cheap to build, no broker reachability
     # needed at boot. The sidecar persists publishes to NATS JetStream; no DLQ (docs/RESILIENCE.md gap #2).
     app.state.dapr = DaprClient()
+    # The trainer consumer (#115a) gates as its own identity — the client MUST exist here or the gate
+    # is silently off with MEDALLION_FGA_ENABLED=true (review 2026-07-10 caught exactly that bypass).
+    app.state.fga = None
+    if get_settings().fga_enabled:
+        store_id, model_id = await fga.provision(get_settings().fga_api_url)
+        app.state.fga = fga.make_client(get_settings().fga_api_url, store_id, model_id)
     app.state.startup_complete = True
     try:
         yield
@@ -49,6 +58,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         app.state.shutting_down = True
         with suppress(Exception):
             await app.state.dapr.close()
+        fga_client = getattr(app.state, "fga", None)
+        if fga_client is not None:
+            with suppress(Exception):
+                await fga_client.close()
 
 
 _docs = get_settings().docs_enabled  # gate /docs + /openapi.json (off in prod), like the catalog
@@ -65,4 +78,7 @@ app.include_router(produce_router)
 # media chain (bronze→silver derive) — the deployed twin of the manual media pipeline scripts.
 app.include_router(ingest_media_router)
 # The event-driven cascade head: subscribe to the lineage topic; a raw-dataset write fires medallion.raw.
-register_raw_arrival_route(app)
+_dapr_app = register_raw_arrival_route(app)
+# The Ray TRAIN head (#115a): POST /train + the training-trigger subscription (own topic; submit-and-ack).
+app.include_router(train_router)
+register_train_trigger_route(app, _dapr_app)

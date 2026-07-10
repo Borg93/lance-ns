@@ -13,10 +13,14 @@ redelivers; on redelivery a terminally FAILED/STOPPED job with the same id is DE
 (so the retry runs on a healthy worker rather than re-observing the same failure), while a still-running job
 is re-attached and polled. Production KubeRay handles in-job task retry/orchestration.
 
-Known limitation (assessment): the handler blocks until the job finishes, so a job that runs longer than
-maxDeliver × ackWait (~2.5 min at the defaults) exhausts redelivery and the trigger is dropped with no DLQ —
-the ray path suits bounded-duration stage transforms; genuinely long jobs need the async-completion redesign
-(submit + ack, the job or a webhook triggers the next stage). See docs/RESILIENCE.md.
+Known limitation (STAGE path only): ``submit_stage_job`` blocks until the job finishes, so a job that runs
+longer than maxDeliver × ackWait (~2.5 min at the defaults) exhausts redelivery — it suits bounded-duration
+stage transforms. The TRAIN path (``submit_train_job``, #115a) is exactly the async-completion redesign this
+paragraph used to call future work: submit-and-ack, the job emits its own lifecycle, and — unlike the stage
+path — a terminally FAILED prior job is NEVER deleted-and-resubmitted. The two functions deliberately share
+``_submission_id`` but keep separate submit protocols (accepted #115a deviation from "extract one core":
+their re-attach semantics differ at the terminal-failure branch; if you fix the shared POST/GET protocol in
+one, mirror it in the other). See docs/RESILIENCE.md + docs/RAY-TRAIN.md.
 """
 
 from __future__ import annotations
@@ -137,3 +141,57 @@ async def _await_success(client: httpx.AsyncClient, submission_id: str, poll_int
             return
         if status in _TERMINAL_BAD:
             raise RayJobError(f"ray stage job {submission_id} {status}: {payload.get('message')}")
+
+
+async def submit_train_job(
+    settings: MedallionSettings, *, model: str, features_json: str, config_json: str = "{}", token: str
+) -> str:
+    """SUBMIT-AND-ACK for a TRAINING job (docs/RAY-TRAIN.md D2) — never block on completion.
+
+    Training is the "genuinely long job" the module docstring's limitation names, so this path inverts
+    the stage contract: submit (or re-attach to) the job and RETURN — the JOB emits its own OpenLineage
+    lifecycle; the caller acks the trigger immediately. Deterministic ``ray-train-<token>`` id = the
+    redelivery idempotency key. Unlike the stage path, a terminally FAILED prior job is **NOT** deleted
+    and resubmitted (D2: training compute is expensive; a failed run is terminal until a human POSTs
+    /train with a fresh token) — it returns ``"already_failed"`` so the handler can DROP, attributably.
+    Every HTTP call is bounded by ``ray_request_timeout_seconds``, keeping the handler inside the 30s
+    Dapr ack window. Returns ``"submitted"`` | ``"attached"`` | ``"already_failed"``; raises
+    :class:`RayJobError` on transport/submit errors (the handler maps that to RETRY).
+    """
+    submission_id = _submission_id("train", token)
+    body = {
+        "entrypoint": settings.train_entrypoint,
+        "submission_id": submission_id,
+        "runtime_env": {
+            "env_vars": {
+                "MODEL": model,
+                "FEATURES": features_json,
+                "CONFIG": config_json,
+                "TOKEN": token,
+                "MODELS_NAMESPACE": settings.models_namespace,
+                "S3_ENDPOINT": settings.s3_endpoint,
+                "S3_KEY": settings.s3_access_key_id,
+                "S3_SECRET": settings.s3_secret_access_key.get_secret_value(),
+                "S3_REGION": settings.s3_region,
+            }
+        },
+    }
+    async with httpx.AsyncClient(
+        base_url=settings.ray_address, timeout=settings.ray_request_timeout_seconds
+    ) as client:
+        try:
+            response = await client.post("/api/jobs/", json=body)
+            if response.status_code < 400:
+                log.info("ray_train_job_submitted", extra={"submission_id": submission_id, "model": model})
+                return "submitted"
+            existing = await client.get(f"/api/jobs/{submission_id}")
+            if existing.status_code == 200:
+                if existing.json().get("status") in _TERMINAL_BAD:
+                    log.warning("ray_train_job_previously_failed", extra={"submission_id": submission_id})
+                    return "already_failed"
+                log.info("ray_train_job_reattach", extra={"submission_id": submission_id})
+                return "attached"
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RayJobError(f"failed to submit ray train job {submission_id}: {exc}") from exc
+    return "submitted"

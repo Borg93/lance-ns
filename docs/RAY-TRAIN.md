@@ -138,6 +138,29 @@ authz shapes survive.
   REST. The trigger contract, lineage contract, and authz contract in this note DO NOT CHANGE —
   only the submit transport swaps, which is why the submit core is extracted behind one seam.
 
+## MLflow (or any registry product) — optional by design, three integration shapes
+
+MLflow is not blocked; it was made **unnecessary for the governed loop**. If it's wanted later:
+
+- **Shape A (recommended if tracking UX is needed): MLflow as experiment tracking, Lance stays
+  the registry of record.** The job additionally logs params/metrics to an MLflow server for the
+  human UX (curves, run comparison, sweeps — the part D4 deliberately does NOT cover); the
+  governed publish (bytes → registry commit → lineage) is unchanged. MLflow holds no authority
+  and is disposable.
+- **Shape B: MLflow as the registry of record.** Possible via the external-pointer seam (the
+  lineage model node points at the MLflow artifact URI through the #92 allowlist) — but it
+  clashes with three pinned theses: a tracking-server backend DB is new relational
+  state-of-record (against "Postgres = AGE + OpenFGA only"), OSS MLflow authz sits outside
+  OpenFGA (one ungoverned surface in a fail-closed stack), and its tracking DB duplicates run
+  metadata the graph can't traverse. Choose consciously, e.g. if rask arrives already operating
+  MLflow as an org standard.
+- **Shape C: MLflow client conventions only, no server.** The plain-path artifact dirs under
+  `models/<model>/<token>/` can simply BE MLflow-format model directories (`MLmodel`,
+  signatures, `pyfunc` layout) so downstream tools load them natively — zero infra.
+
+The D4 record/bytes split is what keeps all three cheap: adopting any of them changes pointer
+targets and adds a logging call, never the record, lineage, or authz shapes.
+
 ## Out of scope (explicitly)
 
 Hyperparameter sweeps / Ray Tune (each trial = one run under a parent — needs the `parent` run

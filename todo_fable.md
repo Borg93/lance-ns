@@ -823,7 +823,20 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   (guide.md +~150, file_format.md ±~20 around §conflicts); the load-bearing cites were re-pinned in the
   same batch (CAS item: file_format 4778→4765, 4836→~4801, guide 2964→3080; defer_index_remap: guide
   3013→3150; conflict taxonomy: file_format ~5261→~5253) — treat any OTHER pre-2026-07-10 line cite in
-  this file as approximate.
+  this file as approximate. **Follow-up decisions (same day, probed against the INSTALLED packages per
+  §0):** (1) **describe-at-tag FIXED** — the native dir backend at pylance 8.0.0 silently IGNORES a
+  describe `tag` (probed: a NONEXISTENT tag described the latest version with no error), so the
+  catalog now resolves tag→version itself via the dataplane tag store (`?tag=` on /describe; 404 on
+  unknown, 400 with `version`; moto-pinned) — which also surfaced+fixed a pre-existing 500: pylance's
+  `tags.get_version` RAISES ValueError on a missing tag (never returns None), so `/tags/version` on an
+  unknown tag was a 500, now 404. (2) **`lance.otel` is ABSENT at pylance 8.0.0** (9.0 feature) — adopt
+  `instrument_lance_metrics()` in catalog/medallion/compaction AT THE PYLANCE 9 BUMP (native Lance IO
+  metrics into the existing OTLP→Greptime pipeline for free); until then nothing to do. (3)
+  **AutoCleanupConfig IS present at 8.0.0 but NOT adopted** — it would run GC inside writer request
+  paths (movers/catalog) rather than the maintenance window, its tagged-version interplay at 8.0.0 is
+  unprobed (our sweep explicitly sets error_if_tagged_old_versions=False for the promotion tags), and
+  it would bypass the compaction FAIL-visibility just built; the sweep stays the one GC owner.
+  Re-evaluate only if the sweep itself becomes a bottleneck.
 - 📌 **Native pylance/spec capabilities surfaced by the 2026-07-05 lance_docs full-read** — exploit before
   building bespoke: (a) `dataset::delta` CDC — `list_transactions` + `get_inserted_rows`/`get_updated_rows`
   between versions (`guide.md:2291`); with stable row ids (already ON for cascade writes) a change-data-feed is

@@ -507,10 +507,13 @@ def create_tag(ns: LanceNamespace, so: StorageOptions, req: CreateTableTagReques
 def get_tag_version(
     ns: LanceNamespace, so: StorageOptions, req: GetTableTagVersionRequest
 ) -> GetTableTagVersionResponse:
-    """Return the table version a tag points to."""
+    """Return the table version a tag points to (404 on an unknown tag)."""
     tags = open_dataset(ns, so, _table_id(req)).tags
-    version = tags.get_version(req.tag)
-    if version is None:
+    try:
+        version = tags.get_version(req.tag)
+    except ValueError as exc:  # pylance 8 raises ("Ref not found"), it does NOT return None
+        raise TableTagNotFoundError(f"tag {req.tag!r} not found") from exc
+    if version is None:  # kept for a future pylance that returns None instead
         raise TableTagNotFoundError(f"tag {req.tag!r} not found")
     # Echo the branch the tag lives on (None for main) so a non-main tag isn't reported as main.
     entry = tags.list().get(req.tag) or {}

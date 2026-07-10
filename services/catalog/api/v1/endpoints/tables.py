@@ -18,6 +18,8 @@ from lance_namespace import (
     DropTableResponse,
     GetTableStatsRequest,
     GetTableStatsResponse,
+    GetTableTagVersionRequest,
+    InvalidInputError,
     ListTablesRequest,
     ListTablesResponse,
     RegisterTableRequest,
@@ -47,7 +49,7 @@ from catalog.core.lineage_emit import (
     RESTORE_TABLE,
     emit_write_event,
 )
-from catalog.services import native
+from catalog.services import dataplane, native
 
 router = APIRouter(prefix="/v1/table", tags=["table"])
 
@@ -115,15 +117,29 @@ def describe_table(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    so: StorageOptionsDep,
     with_table_uri: bool | None = None,
     load_detailed_metadata: bool | None = None,
     check_declared: bool | None = None,
     version: int | None = None,
+    tag: str | None = None,
 ) -> DescribeTableResponse:
-    """Describe the table at ``id`` (schema / uri / detailed metadata, optionally at ``?version=N``)
-    via ``describe_table``."""
+    """Describe the table at ``id`` (schema / uri / detailed metadata) via ``describe_table``,
+    optionally at ``?version=N`` or ``?tag=<name>`` (spec 0.9: mutually exclusive).
+
+    ``tag`` is resolved to its version HERE via the dataplane's tag store: the native backend at
+    pylance 8.0.0 silently IGNORES a describe-request ``tag`` (probed 2026-07-10 — a nonexistent tag
+    described the LATEST version with no error), so forwarding it would lie; the catalog resolves
+    (404 on an unknown tag, like ``/tags/version``) and describes at the resolved version instead.
+    """
+    segments = parse_identifier(id, settings.delimiter)
+    if tag is not None:
+        if version is not None:
+            raise InvalidInputError("`tag` cannot be used together with `version` (spec 0.9)")
+        resolved = dataplane.get_tag_version(ns, so, GetTableTagVersionRequest(id=segments, tag=tag))
+        version = resolved.version
     req = DescribeTableRequest(
-        id=parse_identifier(id, settings.delimiter),
+        id=segments,
         with_table_uri=with_table_uri,
         load_detailed_metadata=load_detailed_metadata,
         check_declared=check_declared,

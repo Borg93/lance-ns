@@ -234,3 +234,40 @@ def test_compensation_matrix_never_drops_a_replaced_or_kept_table() -> None:
     assert _compensation_allowed("overwrite", overwrote_existing=True) is False  # replaced a table
     assert _compensation_allowed("exist_ok", overwrote_existing=False) is False
     assert _compensation_allowed("ExistOk", overwrote_existing=False) is False
+
+
+# --------------------------------------------------------------------------- #
+# spec 0.9: describe-at-tag — resolved by the CATALOG (the native backend silently ignores `tag`)
+# --------------------------------------------------------------------------- #
+
+
+def test_describe_at_tag_resolves_via_the_catalog(moto_client: TestClient) -> None:
+    """The native dir backend at pylance 8.0.0 IGNORES a describe `tag` (probed: a nonexistent tag
+    described the LATEST version, no error) — so the catalog must resolve tag→version itself. Pins:
+    tag describes the TAGGED version, unknown tag 404s (never silently the latest), tag+version 400s
+    (spec: mutually exclusive)."""
+    rows = pa.table({"id": pa.array([1], pa.int64())})
+    assert moto_client.post("/v1/table/dtag$t/create", content=_ipc(rows), headers=ARROW).status_code == 200
+    assert (
+        moto_client.post(
+            "/v1/table/dtag$t/insert?mode=append",
+            content=_ipc(pa.table({"id": pa.array([2], pa.int64())})),
+            headers=ARROW,
+        ).status_code
+        == 200
+    )  # → v2 on disk; v1 is history
+    assert (
+        moto_client.post("/v1/table/dtag$t/tags/create", json={"tag": "stable", "version": 1}).status_code
+        == 200
+    )
+
+    tagged = moto_client.post("/v1/table/dtag$t/describe?tag=stable&load_detailed_metadata=true", json={})
+    assert tagged.status_code == 200, tagged.text
+    assert tagged.json()["version"] == 1  # the TAGGED version, not the latest
+    latest = moto_client.post("/v1/table/dtag$t/describe?load_detailed_metadata=true", json={})
+    assert latest.json()["version"] == 2  # untagged describe unchanged
+
+    missing = moto_client.post("/v1/table/dtag$t/describe?tag=nope", json={})
+    assert missing.status_code == 404, missing.text  # unknown tag is an ERROR, never silently latest
+    both = moto_client.post("/v1/table/dtag$t/describe?tag=stable&version=2", json={})
+    assert both.status_code == 400, both.text  # spec 0.9: tag and version are mutually exclusive

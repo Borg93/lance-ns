@@ -19,6 +19,7 @@ from contextlib import asynccontextmanager, suppress
 
 from common import fga
 from common.dapr_auth import assert_app_token_configured
+from common.lance_metrics import instrument_lance_if_available
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
 
@@ -36,6 +37,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.startup_complete = False
     app.state.shutting_down = False
     assert_app_token_configured(dapr_enabled=_settings.dapr_enabled)
+    instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     app.state.dapr = DaprClient()  # local sidecar; persists publishes to NATS JetStream
     app.state.fga = None
     settings = get_settings()

@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager, suppress
 import httpx
 from common import fga
 from common.exceptions import problem_detail
+from common.lance_metrics import instrument_lance_if_available
 from common.oidc import OIDCVerifier
 from common.secrets import fetch_required_secrets
 from dapr.aio.clients import DaprClient
@@ -43,6 +44,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.settings = settings
     app.state.shutting_down = False
     app.state.startup_complete = False
+    instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # Consume the sensitive S3 secret from the Dapr secret store (OpenBao) — the store is the SOLE source
     # of truth, NOT a fallback (the audit's 'wired but never read' / 'plaintext still ships' fix). With
     # secrets_from_dapr on, the chart does not put the secret in pod env, so reading the env would yield

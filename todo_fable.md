@@ -829,9 +829,13 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   catalog now resolves tag→version itself via the dataplane tag store (`?tag=` on /describe; 404 on
   unknown, 400 with `version`; moto-pinned) — which also surfaced+fixed a pre-existing 500: pylance's
   `tags.get_version` RAISES ValueError on a missing tag (never returns None), so `/tags/version` on an
-  unknown tag was a 500, now 404. (2) **`lance.otel` is ABSENT at pylance 8.0.0** (9.0 feature) — adopt
-  `instrument_lance_metrics()` in catalog/medallion/compaction AT THE PYLANCE 9 BUMP (native Lance IO
-  metrics into the existing OTLP→Greptime pipeline for free); until then nothing to do. (3)
+  unknown tag was a 500, now 404. (2) **`lance.otel` is ABSENT at pylance 8.0.0** (9.0 feature) — and 8.0.0 IS the newest
+  PyPI release (verified same day: 9.0 exists only as unreleased source betas), so there is nothing to
+  bump TO yet. **PRE-WIRED instead (2026-07-10)**: `common/lance_metrics.py::instrument_lance_if_available`
+  (guarded, never fails startup; 3 unit-tested paths) is called from all five lifespans
+  (catalog/lineage/compaction/medallion producer+mover) — when pylance 9 ships, the bump + switching the
+  pin to `pylance[otel]` (pyproject comment marks the spot) lights Lance-native IO metrics up in the
+  existing OTLP→Greptime pipeline with zero further code. (3)
   **AutoCleanupConfig IS present at 8.0.0 but NOT adopted** — it would run GC inside writer request
   paths (movers/catalog) rather than the maintenance window, its tagged-version interplay at 8.0.0 is
   unprobed (our sweep explicitly sets error_if_tagged_old_versions=False for the promotion tags), and

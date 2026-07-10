@@ -15,6 +15,7 @@ from pathlib import Path
 from common import fga
 from common.dapr_auth import assert_app_token_configured
 from common.exceptions import problem_detail
+from common.lance_metrics import instrument_lance_if_available
 from common.oidc import OIDCVerifier
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -41,6 +42,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # shutting_down, so k8s pulls the pod from rotation during boot and graceful drain.
     app.state.startup_complete = False
     app.state.shutting_down = False
+    instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # Fail closed if ANY sidecar-delivered route mounts — the pub/sub ingest (dapr_enabled) OR the cron
     # reconcile binding — but the app-api-token is unset: either route would otherwise be an
     # unauthenticated forgery/graph-mutation path (the audit's 'blanked token' residual + its

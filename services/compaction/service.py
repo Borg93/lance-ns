@@ -15,6 +15,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 from common.dapr_auth import assert_app_token_configured
+from common.lance_metrics import instrument_lance_if_available
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -30,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.startup_complete = False
     app.state.shutting_down = False
     settings = get_settings()
+    instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # Fail closed if behind a Dapr sidecar but the app-token is unset — the cron route would otherwise be an
     # open forged-sweep path (symmetric with the lineage service). No-op in dev (dapr_enabled off).
     assert_app_token_configured(dapr_enabled=settings.dapr_enabled)

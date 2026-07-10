@@ -5,6 +5,9 @@ description = "Lance Namespace REST Catalog (FastAPI over native pylance Directo
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    # 8.0.0 is the NEWEST PyPI release (verified 2026-07-10; 9.0 exists only as unreleased betas).
+    # AT THE 9.0 BUMP: switch to "pylance[otel]" — common/lance_metrics.py + the five lifespan hooks
+    # are pre-wired and light up Lance-native IO metrics automatically (guarded no-op until then).
     "pylance>=8.0.0",
     "pyarrow",
     "fastapi",

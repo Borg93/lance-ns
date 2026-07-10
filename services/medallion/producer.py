@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 from common.dapr_auth import assert_app_token_configured
+from common.lance_metrics import instrument_lance_if_available
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
 
@@ -37,6 +38,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.startup_complete = False
     app.state.shutting_down = False
     assert_app_token_configured(dapr_enabled=get_settings().dapr_enabled)
+    instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # The Dapr client targets the local sidecar (localhost) — cheap to build, no broker reachability
     # needed at boot. The sidecar persists publishes to NATS JetStream; no DLQ (docs/RESILIENCE.md gap #2).
     app.state.dapr = DaprClient()

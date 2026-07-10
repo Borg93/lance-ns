@@ -393,9 +393,10 @@ is accurate and the list is removed rather than left contradicting it.)*
 - ✅ **DONE 2026-07-06 — `dataset_schema` at-version exercised against real AGE**: the Dagger/CI lineage
   e2e asserts per-version schema resolution (v1 vs v2 fields) on a live apache/age — the int-vs-string
   `$ver` quirk is now regression-gated. `tests/e2e/test_lineage_e2e.py`
-- ✅ **DONE 2026-07-06 — `RunEvent.progress` tested at all three tiers**: facet parse (both-fields-or-None),
-  the conditional `_SET_RUN_PROGRESS` at ingest (never clobbered back to null), and the 12-col /runs fold.
-  `tests/unit/test_lineage.py`
+- ✅ **DONE 2026-07-06 — `RunEvent.progress` tested at three layers (all unit-tier)**: facet parse
+  (both-fields-or-None; non-coercible → None since 2026-07-10), the conditional `_SET_RUN_PROGRESS` at
+  ingest (never clobbered back to null), and the 12-col /runs fold — plus, since 2026-07-10, the
+  real-AGE `list_runs` column-order pin in the e2e tier. `tests/unit/test_lineage.py`
 - ✅ **DONE 2026-07-06 — Reconcile cron route**: OPTIONS ack (no token — Dapr's discovery probe), exact
   binding-name registration, 403 on missing/wrong token (sweep never runs), tokened POST → full report
   shape incl. pruned_runs. `tests/unit/test_reconcile.py`
@@ -420,58 +421,87 @@ is accurate and the list is removed rather than left contradicting it.)*
 The governed-union e2e itself PASSED live (4/4, 126s) and is pushed; these harden the harness + close
 what the audit proved the tests DON'T yet prove. Every item verified against code with file:line.
 
-- ⛔ **(MAJOR) writer-gate deny never proven + 12s grace window too short vs 30s redelivery** —
-  `tests/e2e/test_governed_union_e2e.py` test 2: add a sub-phase revoking
+> **2026-07-10 close-out batch (remote session — no kind cluster available):** every item below is
+> implemented; §0 gate green (ruff format+check over services/tests, `uvx ty check` 0 diagnostics,
+> 342 unit + 95 integration passed, e2e files collect clean, make recipe + seed script `bash -n`
+> clean). The §0 adversarial self-audit ran as an 8-angle review (line-scan / removed-behavior /
+> cross-file / reuse / simplification / efficiency / altitude / conventions); every surviving finding
+> was applied in the same batch — the headline one KILLED the s3:// positive-control sub-item as
+> unimplementable (see that item below). Honest §0 caveat: items in the e2e suites / Makefile are
+> 🟡 **code-complete, LIVE RUN PENDING** — the next `make e2e-governed-union` (kind union stack) +
+> `make e2e-lineage` (Dagger, needs docker) is the done-done proof; ✅ *(unit-proven)* items are fully
+> verified here. Also in this batch: removed the now-unused `ty: ignore[missing-argument]` in
+> `catalog/core/config.py` (current ty flags it, failing CI's unpinned `uvx ty check`); refreshed the
+> stale `docs/COVERAGE.md` test tally (320 → 437 measured); seed-script `w()` now fails loudly on
+> non-duplicate write errors (the Makefile seed-abort was unreachable for grant failures otherwise).
+>
+> - ⛔ **RESIDUAL — the done-done pass:** on the kind union stack run `make e2e-governed-union` and
+>   `make e2e-lineage` green with these changes, and rebuild+roll the shared catalog image so the
+>   `RunEvent.progress` poison-guard actually ships. Until then nothing below counts as §0-done.
+
+- 🟡 *(code-complete, live run pending)* **(MAJOR) writer-gate deny never proven + 12s grace window too short vs 30s
+  redelivery** — DONE as spec'd: test 2 now has sub-phase A revoking
   `user:service-bronze-to-silver writer warehouse:lance_catalog` → drive → bronze COMPLETE, silver
-  absent → restore; keep the validator sub-phase; then AFTER the positive-control drive completes
-  (~60s later, past the 30s ackWait/backOff window) re-assert BOTH denied run-ids are STILL absent —
-  that closes the false-pass window AND distinguishes "checked-and-denied" from "never checked".
-- ⛔ **(MAJOR) Makefile `e2e-governed-union`**: seed failure is silenced by `;` — change to
-  `scripts/seed_medallion_fga.sh || { kill $$R…; exit 1; }`; replace bare `sleep 4` with a bounded
-  readiness loop (curl lineage/lance-ray /livez + fga /healthz); re-run the seed AFTER pytest
-  (`|| true`) so an interrupted/failed run still restores the validator grant.
-- ⛔ **(MAJOR) events-feed e2e ordering masks the INSERT-time dedup** — `tests/e2e/test_lineage_e2e.py`:
-  capture `list_events()` BEFORE the third `ensure_events_table()` (its DDL dedup DELETEs currently
-  make the assertion pass even if ON CONFLICT did nothing). Same test: add a destructive-DB guard
-  (skip unless DSN host is localhost/`@age:` — retention=1 wipes `public.lineage_events` on ANY DB it
-  points at) + unique reader per run (`user:analyst-<uuid>`; plain INSERT makes exact-equality
-  non-re-runnable).
-- ⛔ **(MAJOR) reconcile route mounted only on a synthetic app** — extract
-  `mount_reconcile_cron(app, binding_name)` in `services/lineage/main.py:197-200` (no-op on empty),
-  call it at module level, unit-test the PRODUCTION function both ways in `tests/unit/test_reconcile.py`.
-- ⛔ **(prod, small) `RunEvent.progress` int() poison-message** — `services/lineage/models.py:271-274`:
-  non-int-coercible `done`/`total` raises at ingest → RETRY loop; wrap in try/except → None; add the
-  non-coercible unit case; the test docstring's "malformed → None" then becomes true (today it
-  overclaims). Needs the shared catalog image rebuilt + rolled at next deploy.
-- ⛔ **(small) `_poll` hardening** — lazy failure message (the f-string evaluates `_run_states` BEFORE
-  polling starts → diagnostic shows pre-poll state) + treat `requests.RequestException` in the
-  predicate as not-ready (one dropped port-forward packet currently aborts the 90s budget).
-- ⛔ **(small) alice fixture residue** — yield + teardown deleting her warehouse reader tuple (a
-  durable broad grant otherwise persists in the shared store across runs).
-- ⛔ **(small) test 3 order-independence** — guard on bronze existing (drive `/produce` + wait if
-  `lance.dataset(bronze_uri)` raises) instead of implicitly depending on test 1 having run.
-- ⛔ **(small) test 4 positive control for the s3:// filter** — grant alice reader on
-  `table:s3://<bucket>/media-src/batch/img-a.png`, assert exactly that source appears while img-b
-  stays hidden, then delete the tuple (today the negative is vacuously green if sources were never
-  recorded). Related design note: s3:// source datasets are invisible to EVERY governed principal
-  (no parent tuples) — decide whether source provenance should be governable (e.g. seed a
-  `namespace:source` parent) or document invisibility as the contract.
-- ⛔ **(small) /graph route↔filter structural binding** — `tests/unit/test_lineage_auth.py`: assert
-  `get_dataset_filter` is among the /graph route's dependant tree (handler-level test alone stays
-  green if the route loses `FilterDep`).
-- ⛔ **(small) pin `_LIST_RUNS` column order on real AGE** — add a `repo.list_runs()` assertion to
-  `test_discovery_lists_against_age` (the unit fold test mirrors a hand-built row, so a reordered
-  RETURN would pass unit + break prod).
-- ⛔ **(small) todo wording** — the progress flip says "all three tiers"; all three tests are
-  unit-tier (model / ingest-write / fold). Reword.
-- ⛔ **(design, log only) /events keep-first-terminal vs graph last-wins** — a re-executed run
-  (same deterministic run_id, RETRY-after-trigger-failure re-emits COMPLETE with a NEW version)
-  updates /runs + /producers + WROTE but the /events row keeps the FIRST terminal forever
-  (`repository.py:150-165` partial index + ON CONFLICT DO NOTHING). Decide: upsert-latest for
-  terminal rows, or document keep-first as the feed's contract. The e2e currently pins keep-first.
-- ⛔ **(doc) seed-script comment** — note that table→namespace parent links deliberately extend the
-  warehouse rung cascade (a warehouse writer gains `can_write_data` on medallion tables); intended
-  (rung inheritance), but say so where the tuples are written.
+  absent → restore (finally-guarded); the validator sub-phase kept as sub-phase B; and after the
+  positive control, BOTH denied run-ids are re-asserted STILL absent behind a MEASURED wait —
+  `time.monotonic()` stamped at each trigger publish, slept to `REDELIVERY_WINDOW (30s, pinned to
+  dapr-component.yaml) + 5s` (review: on a warm stack the positive control alone can finish inside
+  30s, which would have left the false-pass window open) — separating "checked-and-DENIED (DROP)"
+  from "never checked (RETRY lands late)".
+- 🟡 *(code-complete, live run pending)* **(MAJOR) Makefile `e2e-governed-union`** — DONE, beyond spec after review:
+  bounded 30×1s readiness loop over ALL SIX forwards (lance-ray/lineage/mover /livez, fga /healthz,
+  dex openid-config, rustfs TCP; each curl `-m 2` so one wedged probe can't hang the budget — the
+  spec'd 3-probe loop would have let a slow dex forward green-SKIP the whole suite); seed failure
+  kills the forwards and aborts before pytest; the seed re-runs after pytest (`|| true`, output
+  visible) so a failed run still restores revoked grants; one `PIDS` list instead of three hand-kept
+  kill lists. `bash -n` clean; not yet driven against a cluster.
+- 🟡 *(code-complete, needs `make e2e-lineage` re-run)* **(MAJOR) events-feed e2e ordering masks the INSERT-time
+  dedup** — DONE as spec'd: `list_events()` captured BEFORE the post-insert `ensure_events_table()`
+  (plus an after-DDL recapture asserting the re-boot changes nothing); destructive-DB guard skips any
+  DSN whose host isn't localhost/127.0.0.1/`age:`; reader is `user:analyst-<uuid>` per run.
+- ✅ *(unit-proven)* **(MAJOR) reconcile route mounted only on a synthetic app** — DONE: extracted
+  `mount_reconcile_cron(app, binding_name) -> bool` in `services/lineage/main.py` (no-op on empty),
+  called at module level; `test_mount_reconcile_cron_production_gate` drives the PRODUCTION function
+  both ways.
+- ✅ *(unit-proven; image rebuild + roll still due at next deploy)* **(prod, small) `RunEvent.progress`
+  int() poison-message** — DONE: non-coercible `done`/`total` now returns None (try/except around the
+  int() pair), never a raise → no ingest RETRY loop; non-coercible unit cases added; the test
+  docstring's "malformed → None" is now literally true.
+- 🟡 *(code-complete, live run pending)* **(small) `_poll` hardening** — DONE: `message` accepts a callable evaluated
+  AT failure (test 1's live-state diagnostic converted, single fetch); TRANSPORT errors only
+  (`ConnectionError`/`Timeout`) count as not-ready — deliberately NOT the whole `RequestException`
+  (review: that would swallow `HTTPError`, burning 90s on a persistent 401/403/500 and misreporting a
+  real regression as a timeout).
+- 🟡 *(code-complete, live run pending)* **(small) alice fixture residue** — DONE: yield + teardown deletes her
+  warehouse reader tuple.
+- 🟡 *(code-complete, live run pending)* **(small) test 3 order-independence** — DONE: guards on bronze existing
+  (drives `/produce` + polls if `lance.dataset(bronze_uri)` raises).
+- ✅ **(small) test 4 positive control for the s3:// filter — RESOLVED AS IMPOSSIBLE, not implemented**
+  (2026-07-10 review, verified against OpenFGA's tuple validation, `pkg/tuple/tuple.go`): an OpenFGA
+  object id must contain EXACTLY ONE `:`, so the audit's suggested grant on
+  `table:s3://<bucket>/media-src/batch/img-a.png` can never be written — the Write RPC 400s (and
+  `batch_check` on such ids folds to not-allowed, which is WHY the filter hides them today). The first
+  cut of this batch implemented the grant as spec'd; the review caught it before any live run. So:
+  s3:// sources are **structurally ungovernable per-object → invisible to every governed principal by
+  construction** — documented as the contract in the test comment; the negative stays non-vacuous
+  because the auth-off `tests/e2e/test_media_e2e.py:99` pins source PRESENCE on the same stack.
+  Residual design decision (only if source browsing becomes a real need): an id-encoding scheme or a
+  `namespace:source` parent with encoded ids.
+- ✅ *(unit-proven)* **(small) /graph route↔filter structural binding** — DONE:
+  `test_graph_route_wires_the_dataset_filter` asserts `get_dataset_filter` in the real /graph route's
+  dependant tree.
+- 🟡 *(code-complete, needs `make e2e-lineage` re-run)* **(small) pin `_LIST_RUNS` column order on real AGE** — DONE:
+  `test_discovery_lists_against_age` now folds `repo.list_runs()` and asserts typed field-by-field on
+  two known sample runs (state/job/author/outputs/timestamps + FAIL error slot) — any RETURN
+  transposition breaks it.
+- ✅ **(small) todo wording** — DONE: the §7 progress flip now says "at three layers, all unit-tier".
+- ✅ **(design, log only) /events keep-first-terminal vs graph last-wins** — DECIDED (keep-first) and
+  documented at the `_INSERT_EVENT` site in `repository.py`: /events is the append-only observation
+  log ("what arrived first"), the graph views are last-wins current state; upsert-latest would let a
+  redelivery rewrite audit history. The e2e pins keep-first.
+- ✅ **(doc) seed-script comment** — DONE: `seed_medallion_fga.sh` now states the intended side effect
+  (parent links extend the FULL warehouse rung cascade — a warehouse writer gains `can_write_data` on
+  linked medallion tables) + the grant guidance (browsers get `reader`, never `writer`).
 - ✅ **(fixed in this batch) `_tuples` blanket-400 tolerance** — now only the two idempotency
   messages pass; malformed writes fail at the call site with the real OpenFGA error.
 - Refuted (no action): quality-block try/finally restore (the healing `/produce` IS the restore, and

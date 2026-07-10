@@ -91,7 +91,7 @@ def test_discovery_lists_against_age(dsn: str) -> None:
 
     events = [RunEvent.model_validate(e) for e in json.loads(_SAMPLE.read_text())]
 
-    async def run() -> tuple[list, list, list, list]:
+    async def run() -> tuple[list, list, list, list, list]:
         pool = make_pool(dsn)
         await pool.open()
         try:
@@ -102,11 +102,12 @@ def test_discovery_lists_against_age(dsn: str) -> None:
             silver = await repo.list_datasets(namespace="silver")
             tagged = await repo.list_datasets(tag="layer=silver")
             jobs = await repo.list_jobs()
-            return all_ds, silver, tagged, jobs
+            runs = (await repo.list_runs()).runs
+            return all_ds, silver, tagged, jobs, runs
         finally:
             await pool.close()
 
-    all_ds, silver, tagged, jobs = asyncio.run(run())
+    all_ds, silver, tagged, jobs, runs = asyncio.run(run())
 
     # /datasets — every medallion dataset is listed, name-sorted, with its namespace + tags carried.
     names = [d.name for d in all_ds]
@@ -120,6 +121,20 @@ def test_discovery_lists_against_age(dsn: str) -> None:
     assert all("layer=silver" in d.tags for d in tagged)
     # /jobs — a job's WROTE edges are folded into its output set; some job wrote silver$features.
     assert jobs and any("silver$features" in j.outputs for j in jobs)
+    # /runs — pin the _LIST_RUNS RETURN column ORDER against real AGE (§7a): the unit fold test mirrors
+    # a hand-built row, so a reordered RETURN would pass unit and silently scramble every field in prod.
+    # Typed field-by-field assertions on known sample runs catch any transposition.
+    by_id = {r.run_id: r for r in runs}
+    ingest = by_id["11111111-1111-1111-1111-111111111111"]
+    assert ingest.state == "COMPLETE"
+    assert ingest.job == "ray-jobs/ingest_events"
+    assert ingest.author == "alice"  # the ownership-facet fallback (column 2 — not the state/job slots)
+    assert ingest.outputs == ["bronze$events"]
+    assert ingest.events >= 1
+    assert ingest.started_at and ingest.updated_at  # timestamps landed in their own slots
+    failed = by_id["22222222-2222-2222-2222-222222222220"]
+    assert failed.state == "FAIL"
+    assert failed.error_message and "OOM" in failed.error_message  # error slot, not swapped with a timestamp
 
 
 def test_reconcile_backfills_a_dropped_write(dsn: str, tmp_path: Path) -> None:
@@ -352,15 +367,29 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
     """§7: the durable /events feed + read-audit log against REAL Postgres — the DDL (idempotent on a
     populated DB), the at-least-once dedup (exact redelivery via the 3-col natural key; a redelivered
     TERMINAL with a FRESH eventTime via the partial index — while a RUNNING progress trail keeps every
-    distinct time), the newest-first jsonb round-trip, the seq-window retention prune, and record_read."""
+    distinct time), the newest-first jsonb round-trip, the seq-window retention prune, and record_read.
+
+    The dedup capture happens BEFORE any post-insert ``ensure_events_table`` (§7a: its DDL-time dedup
+    DELETEs would silently repair a broken ON CONFLICT and make the assertion vacuous)."""
     import uuid
+
+    # DESTRUCTIVE guard (§7a): the retention sub-test prunes public.lineage_events on WHATEVER DB the
+    # DSN names — refuse anything that doesn't look like the local/CI throwaway AGE. Parsed with
+    # urlsplit (the config module's own idiom), NOT string surgery: a credential-less DSN has no '@'
+    # and a naive rsplit would false-skip a genuinely local database.
+    from urllib.parse import urlsplit
 
     from lineage.core.age import make_pool
     from lineage.services.repository import LineageRepository
 
-    rid, rid2 = str(uuid.uuid4()), str(uuid.uuid4())
+    host = urlsplit(dsn).hostname or ""
+    if host not in {"localhost", "127.0.0.1", "::1", "age", "lineage-postgres"}:
+        pytest.skip(f"destructive (prunes public.lineage_events): refusing non-local DSN host {host!r}")
 
-    async def run() -> tuple[list, list, list]:
+    rid, rid2 = str(uuid.uuid4()), str(uuid.uuid4())
+    reader = f"user:analyst-{uuid.uuid4().hex[:8]}"  # unique per run — the audit log is a plain INSERT
+
+    async def run() -> tuple[list, list, list, list]:
         pool = make_pool(dsn)
         await pool.open()
         try:
@@ -387,8 +416,12 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
             # a redelivered TERMINAL re-emitted with a FRESH eventTime (retry-after-partial-success) —
             # the 3-col key can't catch this; the partial (run_id, event_type) terminal index must.
             await repo.record_event(event_type="COMPLETE", event_time="2026-07-06T00:00:09+00:00", **kw(rid))
-            await repo.ensure_events_table()  # the dedup DELETEs are valid SQL on a populated table too
+            # Capture BEFORE any further DDL: this list must reflect what ON CONFLICT alone kept.
             records = [r for r in await repo.list_events() if r.event.get("run", {}).get("runId") == rid]
+            # The DDL-time dedup DELETEs are valid SQL on a populated table too — and a re-boot must not
+            # change what the INSERT-time dedup already settled.
+            await repo.ensure_events_table()
+            after_ddl = [r for r in await repo.list_events() if r.event.get("run", {}).get("runId") == rid]
 
             # retention: a repo bootstrapped with a keep-window prunes older rows on the next insert.
             pruning = LineageRepository(pool, "lineage", events_retention=1)
@@ -396,21 +429,23 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
             survivors = await pruning.list_events()
 
             await repo.ensure_reads_table()
-            await repo.record_read(reader="user:analyst", dataset="silver$features")
+            await repo.record_read(reader=reader, dataset="silver$features")
             async with pool.connection() as conn:
                 cur = await conn.execute(
                     "SELECT reader, dataset FROM public.lineage_reads "
-                    "WHERE reader = 'user:analyst' AND dataset = 'silver$features'"
+                    "WHERE reader = %s AND dataset = 'silver$features'",
+                    (reader,),
                 )
                 reads = await cur.fetchall()
-            return records, survivors, reads
+            return records, after_ddl, survivors, reads
         finally:
             await pool.close()
 
-    records, survivors, reads = asyncio.run(run())
+    records, after_ddl, survivors, reads = asyncio.run(run())
 
-    # 5 record_event calls → 3 rows: both redeliveries (exact + fresh-time terminal) were dropped, the
-    # first COMPLETE won, and the RUNNING trail kept both distinct times. Newest-first by seq.
+    # 5 record_event calls → 3 rows AT INSERT TIME: both redeliveries (exact + fresh-time terminal) were
+    # dropped by ON CONFLICT, the first COMPLETE won, and the RUNNING trail kept both distinct times.
+    # Newest-first by seq.
     assert [(r.event_type, r.event_time) for r in records] == [
         ("COMPLETE", "2026-07-06T00:00:03+00:00"),
         ("RUNNING", "2026-07-06T00:00:02+00:00"),
@@ -418,6 +453,9 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
     ]
     assert records[0].inputs == ["bronze$events"]  # jsonb round-trip
     assert records[0].outputs == ["silver$features"]
+    # a DDL re-run on the populated table is a no-op on already-settled rows (full model equality —
+    # a DDL-time dedup that mangled payload/seq while preserving type+time would still be caught)
+    assert after_ddl == records
     # the prune kept only the newest seq window: rid2's row survives, every older row is gone.
     assert [r.event.get("run", {}).get("runId") for r in survivors] == [rid2]
-    assert reads == [("user:analyst", "silver$features")]  # the read-audit row landed
+    assert reads == [(reader, "silver$features")]  # the read-audit row landed (unique reader → re-runnable)

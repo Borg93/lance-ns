@@ -274,6 +274,17 @@ def test_ingest_route_requires_authentication() -> None:
     assert security.authenticate in calls
 
 
+def test_graph_route_wires_the_dataset_filter() -> None:
+    """§7a: the handler-level /graph filter tests below construct the filter EXPLICITLY, so they stay
+    green even if the route loses ``FilterDep`` — bind the structure: the real /graph route's dependant
+    tree must carry ``get_dataset_filter`` (the transitive-disclosure filter's provider)."""
+    from lineage.main import app
+
+    route = next(r for r in _api_routes(app) if r.path == "/datasets/{name}/graph")
+    calls = [d.call for d in route.dependant.dependencies]
+    assert fga_deps.get_dataset_filter in calls
+
+
 # --------------------------------------------------------------------------- #
 # DatasetFilter — transitive-disclosure filtering (audit w8u4rc2tg, security medium)
 # --------------------------------------------------------------------------- #

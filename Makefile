@@ -218,14 +218,25 @@ e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malf
 
 e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+quality ON, openbao OFF — see tests/e2e/test_governed_union_e2e.py)
 	@echo "port-forwarding lance-ray/lineage/dex/openfga/rustfs + the bronze-to-silver mover …"
-	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & R=$$!; \
-	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
-	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & D=$$!; \
-	 kubectl port-forward svc/$(RELEASE)-openfga 8081:8080 >/dev/null 2>&1 & F=$$!; \
-	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
-	 kubectl port-forward deploy/$(RELEASE)-bronze-to-silver 8003:8000 >/dev/null 2>&1 & M=$$!; \
-	 sleep 4; \
-	 OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh; \
+	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & PIDS=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-openfga 8081:8080 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward deploy/$(RELEASE)-bronze-to-silver 8003:8000 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 ready=0; for i in $$(seq 1 30); do \
+	   curl -fsS -m 2 -o /dev/null http://localhost:8002/livez 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:8000/livez 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:8081/healthz 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:5556/dex/.well-known/openid-configuration 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:8003/livez 2>/dev/null \
+	     && curl -s -m 2 -o /dev/null http://localhost:9900/ 2>/dev/null \
+	     && { ready=1; break; }; \
+	   sleep 1; \
+	 done; \
+	 [ $$ready -eq 1 ] || { echo "!! port-forwards never became ready (lance-ray/lineage/openfga/dex/mover/rustfs)"; kill $$PIDS 2>/dev/null; exit 1; }; \
+	 OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh \
+	   || { echo "!! FGA seed failed — aborting before pytest (a silent seed failure reads as a 90s poll timeout)"; kill $$PIDS 2>/dev/null; exit 1; }; \
 	 TOKEN=$$(kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- printenv APP_API_TOKEN 2>/dev/null || true); \
 	 MTOKEN=$$(kubectl exec deploy/$(RELEASE)-bronze-to-silver -c mover -- printenv APP_API_TOKEN 2>/dev/null || true); \
 	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
@@ -235,7 +246,8 @@ e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+q
 	 LANCE_E2E_S3_ACCESS_KEY=$(RUSTFS_ACCESS_KEY) \
 	 LANCE_E2E_S3_SECRET_KEY=$$(kubectl get secret $(RELEASE)-infra-credentials -o jsonpath='{.data.rustfs-secret-key}' | base64 -d) \
 	   uv run pytest tests/e2e/test_governed_union_e2e.py -v -m governed_union; rc=$$?; \
-	 kill $$R $$L $$D $$F $$S $$M 2>/dev/null; exit $$rc
+	 OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh || true; \
+	 kill $$PIDS 2>/dev/null; exit $$rc
 
 e2e: ## Run the core e2e suite in sequence against the deployed stack (auth-agnostic: obs, medallion, media, gateway, compaction, cas)
 	@echo "▶ full core e2e suite against the deployed $(RELEASE) stack (each suite self-forwards + self-skips if unreachable)"; \

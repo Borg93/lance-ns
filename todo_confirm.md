@@ -67,6 +67,11 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   allow-path cascade under seeded service grants; **FGA-deny→DROP live** (gold validator tuple
   revoked via the OpenFGA API → gold's run never lands; re-grant restores — attributable enforcement);
   ungranted user 403; transitive-disclosure filter hides ungranted datasets incl. s3:// sources.
+  🟡 2026-07-10: the suite grew the §7a hardenings (WRITER-gate deny sub-phase + measured
+  past-redelivery-window re-asserts, fixture teardown, order independence; the s3://-filter positive
+  control was RESOLVED AS IMPOSSIBLE — OpenFGA object ids can't hold an s3 URI, see todo_fable §7a) —
+  code-complete + gate-green, but the 4/4 live evidence above predates them: re-run
+  `make e2e-governed-union` on the union stack to re-confirm.
 - ✅ **Governed lineage visibility for humans** — the seed script now writes table→namespace parent
   tuples for mover datasets (before 2026-07-06 the medallion estate was invisible to ALL humans under
   LINEAGE_FGA_ENABLED — found + fixed while building the union e2e).

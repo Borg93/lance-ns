@@ -260,6 +260,24 @@ def test_cron_route_post_with_token_returns_sweep_report(monkeypatch: pytest.Mon
     assert body == {"checked": 0, "backfilled": [], "storage_loss": [], "pruned_runs": 0}
 
 
+def test_mount_reconcile_cron_production_gate() -> None:
+    """§7a: the PRODUCTION mount decision (``lineage.main.mount_reconcile_cron``) driven both ways —
+    the synthetic-app tests above pin the router's behavior, but not the gate that decides whether the
+    real app mounts it at all. No binding name → nothing mounts; a name → the route serves there."""
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from lineage.main import mount_reconcile_cron
+
+    bare = FastAPI()
+    assert mount_reconcile_cron(bare, None) is False
+    assert mount_reconcile_cron(bare, "") is False
+    assert TestClient(bare).options("/reconcile-cron").status_code == 404  # nothing mounted
+
+    mounted = FastAPI()
+    assert mount_reconcile_cron(mounted, "reconcile-cron") is True
+    assert TestClient(mounted).options("/reconcile-cron").status_code == 200  # the Dapr discovery ack
+
+
 def test_storage_loss_states_flag_graph_ahead_and_missing_not_insync() -> None:
     # The states that mean STORAGE lost data the graph still records (surfaced as WARN, not auto-fixed) —
     # distinct from the back-fillable "graph lost the event" set. Guards the classification the cron reports.

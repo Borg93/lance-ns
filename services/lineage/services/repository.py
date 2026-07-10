@@ -157,6 +157,12 @@ _CREATE_TERMINAL_INDEX: Final = (
     "CREATE UNIQUE INDEX IF NOT EXISTS lineage_events_terminal_key "
     f"ON public.lineage_events (run_id, event_type) WHERE event_type IN {_TERMINAL_TYPES}"
 )
+# DECIDED (2026-07-10, §7a design item): the feed KEEPS THE FIRST terminal row per (run_id, event_type) —
+# a re-executed run (same deterministic run_id, e.g. RETRY-after-trigger-failure re-emitting COMPLETE with
+# a new version) updates the GRAPH views last-wins (/runs, /producers, the WROTE edge) but never rewrites
+# its /events row. That asymmetry is the contract: /events is the append-only observation log ("what
+# arrived first"), the graph is current state — upsert-latest here would let a redelivery silently rewrite
+# audit history. Pinned by the feed e2e (test_events_feed_and_read_audit_against_postgres).
 _INSERT_EVENT: Final = (
     "INSERT INTO public.lineage_events "
     "(run_id, event_type, event_time, job, author, inputs, outputs, event) "

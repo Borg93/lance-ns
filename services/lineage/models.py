@@ -266,11 +266,16 @@ class RunEvent(BaseModel):
         """Batch progress ``(done, total)`` from our custom ``progress`` run facet, if present.
 
         The facet rides RUNNING events (OpenLineage has no standard progress facet); the live
-        run-status board reads it to render a % bar. Returns ``None`` when the event omits it.
+        run-status board reads it to render a % bar. Returns ``None`` when the event omits it —
+        or carries non-numeric fields: a raise here would poison-message the Dapr ingest (RETRY
+        redelivers the same malformed event forever), so malformed means no progress, never a 500.
         """
         facet = (self.run.facets or {}).get("progress")
-        if isinstance(facet, dict) and facet.get("done") is not None and facet.get("total") is not None:
-            return int(facet["done"]), int(facet["total"])
+        if isinstance(facet, dict):
+            try:
+                return int(facet["done"]), int(facet["total"])
+            except (KeyError, TypeError, ValueError):
+                return None
         return None
 
     @property

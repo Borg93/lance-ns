@@ -19,7 +19,18 @@ SID="$("$BIN/fga" store list --api-url "$API" \
   | python3 -c "import sys,json;print([s['id'] for s in json.load(sys.stdin)['stores'] if s['name']=='lance-catalog'][0])")"
 echo "store: $SID"
 
-w() { "$BIN/fga" tuple write --api-url "$API" --store-id "$SID" "$@" >/dev/null 2>&1 || true; }
+# Idempotent write: a duplicate-tuple error is fine (re-run), ANY OTHER failure aborts the script
+# (set -e) so callers see a non-zero exit — a blanket `|| true` here made the Makefile's seed-failure
+# abort unreachable for grant-write failures (2026-07-10 review: model-not-provisioned / renamed
+# relation failed every write while the script still printed "✓ seeded" and exited 0).
+w() {
+  local out
+  if out=$("$BIN/fga" tuple write --api-url "$API" --store-id "$SID" "$@" 2>&1); then return 0; fi
+  case "$out" in
+    *already\ exists*|*duplicate*) return 0 ;;
+    *) echo "!! seed write failed: $* — $out" >&2; return 1 ;;
+  esac
+}
 
 # medallion stage namespaces under the warehouse (so the rung cascade reaches them) — the MEDIA lane's
 # namespaces included: without them the media mover's can_create_table check on namespace:silver-media
@@ -35,6 +46,10 @@ w "$WAREHOUSE" parent namespace:silver-media
 # under LINEAGE_FGA_ENABLED no human (not even a warehouse owner) can can_get_metadata a mover-produced
 # dataset: the whole medallion estate is invisible in /runs, /datasets/*, /graph. Linking each dataset to
 # its stage namespace restores the normal rung inheritance (warehouse reader → stage reader → table reader).
+# INTENDED SIDE EFFECT (say it where the tuples are written): the parent links extend the FULL warehouse
+# rung cascade, not just reads — a warehouse *writer* also gains can_write_data on every linked medallion
+# table (that concentric inheritance is the model working as designed, not a leak). Grant warehouse rungs
+# accordingly: humans who should only browse the estate get `reader`, never `writer`.
 w namespace:raw parent 'table:raw_events'
 w namespace:bronze parent 'table:bronze$events'
 w namespace:silver parent 'table:silver$features'

@@ -193,11 +193,24 @@ async def readyz(request: Request) -> JSONResponse:
 if get_settings().demo_data_enabled:
     app.include_router(demo.router)
 
+
 # Periodic storage->graph reconciliation cron route (B4) — mounted only when a Dapr cron binding names it.
-if get_settings().reconcile_binding_name:
+def mount_reconcile_cron(target: FastAPI, binding_name: str | None) -> bool:
+    """Mount the reconcile cron route iff a Dapr cron binding names it; return whether it mounted.
+
+    A named function (not inline module-level wiring) so the unit tier can drive the PRODUCTION
+    mount decision both ways — the audit's gap was the route being tested only on a synthetic app,
+    leaving this gate itself unpinned.
+    """
+    if not binding_name:
+        return False
     from lineage.api.reconcile_cron import build_reconcile_cron_router
 
-    app.include_router(build_reconcile_cron_router(get_settings().reconcile_binding_name))
+    target.include_router(build_reconcile_cron_router(binding_name))
+    return True
+
+
+mount_reconcile_cron(app, get_settings().reconcile_binding_name)
 
 # Thin demo UI — a single self-contained page that polls the query endpoints to render the live
 # medallion DAG (see scripts/medallion_demo.py). Mounted last so it never shadows an API route.

@@ -634,11 +634,15 @@ def _running_event(facets: dict[str, Any]) -> RunEvent:
 
 def test_progress_facet_parses_only_when_both_fields_present() -> None:
     """``RunEvent.progress`` is our custom ``progress`` run facet (OpenLineage has no standard one):
-    ``(done, total)`` when both ride, ``None`` for absent/partial/malformed — never a KeyError 500."""
+    ``(done, total)`` when both ride, ``None`` for absent/partial/malformed — never a raise: a raise at
+    ingest would poison-message the Dapr RETRY loop (the same malformed event redelivered forever)."""
     assert _running_event({"progress": {"done": 3, "total": 10}}).progress == (3, 10)
     assert _running_event({}).progress is None
     assert _running_event({"progress": {"done": 3}}).progress is None  # partial → None, not (3, ???)
     assert _running_event({"progress": "3/10"}).progress is None  # non-dict facet ignored
+    # non-int-coercible fields → None, not a ValueError (the §7a poison-message case)
+    assert _running_event({"progress": {"done": "3/10", "total": 10}}).progress is None
+    assert _running_event({"progress": {"done": [3], "total": 10}}).progress is None
 
 
 def test_ingest_sets_run_progress_only_when_the_facet_rides(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -32,7 +32,8 @@ import json
 import os
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from typing import Any
 
 import pytest
 import requests
@@ -54,6 +55,11 @@ S3_SECRET_KEY = os.environ.get("LANCE_E2E_S3_SECRET_KEY", "")
 
 WAREHOUSE = "warehouse:lance_catalog"
 GOLD_VALIDATOR = {"user": "user:service-silver-to-gold", "relation": "validator", "object": "namespace:gold"}
+#: the bronze→silver mover's writer rung — revoked in test 2's writer-gate sub-phase (can_create_table).
+SILVER_WRITER = {"user": "user:service-bronze-to-silver", "relation": "writer", "object": WAREHOUSE}
+#: JetStream first-redelivery window: backOff[0] == ackWait, pinned to chart/templates/dapr-component.yaml
+#: (backOff: 30s,…). Test 2 must observe a denied run stay absent PAST this, measured — not choreographed.
+REDELIVERY_WINDOW = 30.0
 #: stage operation names (chart values) — each stage's run id is uuid5-derived from "<operation>-<token>".
 OPERATIONS = ("lance_ray_ingest", "ingest_events", "embed_features", "aggregate_gold")
 
@@ -141,12 +147,17 @@ def _sub(token: str) -> str:
 
 
 @pytest.fixture(scope="module")
-def alice(stack: tuple[str, str], fga_store: tuple[str, str]) -> dict[str, str]:
+def alice(stack: tuple[str, str], fga_store: tuple[str, str]) -> Iterator[dict[str, str]]:
     """An authenticated READER over the medallion estate: warehouse reader + the seed script's
-    table→namespace parent links give her can_get_metadata on every cascade dataset."""
+    table→namespace parent links give her can_get_metadata on every cascade dataset.
+
+    Teardown deletes the grant — it's a durable BROAD read grant in the SHARED OpenFGA store, and
+    leaving it behind would quietly widen alice's access for everything run after this suite."""
     token = _token("alice@example.com")
-    _tuples(fga_store, writes=[{"user": f"user:{_sub(token)}", "relation": "reader", "object": WAREHOUSE}])
-    return {"Authorization": f"Bearer {token}"}
+    grant = {"user": f"user:{_sub(token)}", "relation": "reader", "object": WAREHOUSE}
+    _tuples(fga_store, writes=[grant])
+    yield {"Authorization": f"Bearer {token}"}
+    _tuples(fga_store, deletes=[grant])
 
 
 def _run_id_for(operation: str, token: str) -> str:
@@ -170,13 +181,22 @@ def _producer_for(lineage: str, headers: dict[str, str], dataset: str, run_id: s
     return next((p for p in resp.json().get("producers", []) if p["run_id"] == run_id), None)
 
 
-def _poll(predicate: Callable[[], bool], *, timeout: float = 90.0, message: str) -> None:
+def _poll(predicate: Callable[[], bool], *, timeout: float = 90.0, message: str | Callable[[], str]) -> None:
+    """Poll until ``predicate`` is true, else fail with ``message`` (a callable is evaluated AT failure —
+    an f-string call-site message that reads live state would show the PRE-poll state, not the final one).
+    A transient TRANSPORT error inside the predicate (one dropped port-forward packet) counts as
+    not-ready rather than aborting the whole budget — but ONLY transport errors: an HTTP error status
+    (401/403/500 via raise_for_status) is a real regression that must surface immediately, not burn 90s
+    and get misreported as a timeout."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if predicate():
-            return
+        try:
+            if predicate():
+                return
+        except (requests.ConnectionError, requests.Timeout):
+            pass  # transient plumbing hiccup — keep polling until the budget is spent
         time.sleep(3)
-    pytest.fail(message)
+    pytest.fail(message if isinstance(message, str) else message())
 
 
 def _produce(lance_ray: str) -> str:
@@ -198,11 +218,19 @@ def test_governed_allow_full_cascade_with_quality_verdicts(
     rids = {op: _run_id_for(op, token) for op in OPERATIONS}
 
     # All four stage runs land COMPLETE under the seeded service grants — correlated to THIS drive by the
-    # deterministic run ids (not by counts), so a stale graph can't false-pass.
+    # deterministic run ids (not by counts), so a stale graph can't false-pass. The diagnostic is a
+    # CALLABLE so a timeout reports the final observed states, not the pre-poll snapshot (one fetch,
+    # not one per operation — a per-op fetch would be 4 round-trips of 4 different snapshots).
+    def _states_diag() -> str:
+        states = _run_states(lineage, alice)
+        return (
+            f"governed cascade did not complete for token {token}: "
+            f"{ {op: states.get(rid) for op, rid in rids.items()} }"
+        )
+
     _poll(
         lambda: all(_run_states(lineage, alice).get(rid) == "COMPLETE" for rid in rids.values()),
-        message=f"governed cascade did not complete for token {token}: "
-        f"{ {op: _run_states(lineage, alice).get(rid) for op, rid in rids.items()} }",
+        message=_states_diag,
     )
 
     # The quality gate ran on real compute output and recorded its verdict on the WROTE edge.
@@ -220,41 +248,87 @@ def test_governed_allow_full_cascade_with_quality_verdicts(
 
 
 # --------------------------------------------------------------------------- #
-# 2. FGA-deny → DROP, live: revoke the gold validator, the cascade stops at silver
+# 2. FGA-deny → DROP, live: revoke a WRITER rung (bronze→silver) and the VALIDATOR rung
+#    (silver→gold) in turn — each deny stops the cascade at exactly its stage
 # --------------------------------------------------------------------------- #
 
 
-def test_fga_deny_drops_gold_promotion_and_regrant_restores(
+def test_fga_deny_drops_promotion_and_regrant_restores(
     stack: tuple[str, str], alice: dict[str, str], fga_store: tuple[str, str]
 ) -> None:
     lance_ray, lineage = stack
+
+    # -- sub-phase A: WRITER-gate deny — revoke the bronze→silver mover's writer rung. The cascade must
+    # reach bronze (raw→bronze keeps its grant) and stop there: silver's run never lands. This was the
+    # audit's untested half — only the validator (can_promote) deny was ever proven.
+    _tuples(fga_store, deletes=[SILVER_WRITER])
+    try:
+        w_token = _produce(lance_ray)
+        bronze_rid = _run_id_for("ingest_events", w_token)
+        denied_silver_rid = _run_id_for("embed_features", w_token)
+        _poll(
+            lambda: _run_states(lineage, alice).get(bronze_rid) == "COMPLETE",
+            message=f"bronze never completed for writer-deny-drive token {w_token}",
+        )
+        # The silver trigger publishes at bronze COMPLETE — stamp the moment the redelivery clock starts.
+        silver_denied_at = time.monotonic()
+        # First look at the negative (the definitive still-absent re-check comes after the positive
+        # control below, once the redelivery window has MEASURABLY elapsed).
+        time.sleep(12)
+        assert _run_states(lineage, alice).get(denied_silver_rid) is None, (
+            f"silver run {denied_silver_rid} appeared despite the revoked writer tuple — gate NOT enforcing"
+        )
+    finally:
+        _tuples(fga_store, writes=[SILVER_WRITER])  # restore even if the assert above fails
+
+    # -- sub-phase B: VALIDATOR deny — revoke the gold validator, the cascade stops at silver.
     _tuples(fga_store, deletes=[GOLD_VALIDATOR])
     try:
         token = _produce(lance_ray)
         silver_rid = _run_id_for("embed_features", token)
-        gold_rid = _run_id_for("aggregate_gold", token)
+        denied_gold_rid = _run_id_for("aggregate_gold", token)
 
-        # The cascade reaches silver (writers still granted) …
+        # The cascade reaches silver (writers restored/granted) …
         _poll(
             lambda: _run_states(lineage, alice).get(silver_rid) == "COMPLETE",
             message=f"silver never completed for deny-drive token {token}",
         )
+        # The gold trigger publishes at silver COMPLETE — the second redelivery clock starts here.
+        gold_denied_at = time.monotonic()
         # … and the silver→gold mover, denied can_promote, DROPs BEFORE any emit: gold's run never lands.
-        # (The deny is instant relative to the silver COMPLETE we just observed — the trigger was already
-        # delivered — but give redelivery windows a grace period before asserting the negative.)
         time.sleep(12)
-        assert _run_states(lineage, alice).get(gold_rid) is None, (
-            f"gold run {gold_rid} appeared despite the revoked validator tuple — FGA gate NOT enforcing"
+        assert _run_states(lineage, alice).get(denied_gold_rid) is None, (
+            f"gold run {denied_gold_rid} appeared despite the revoked validator tuple — gate NOT enforcing"
         )
     finally:
         _tuples(fga_store, writes=[GOLD_VALIDATOR])  # restore even if the assert above fails
 
-    # Positive control: with the tuple back, the next drive cascades to gold — the tuple was the only delta.
+    # Positive control: with both tuples back, the next drive cascades to gold — the tuple was the only
+    # delta each time.
     token2 = _produce(lance_ray)
     gold2 = _run_id_for("aggregate_gold", token2)
     _poll(
         lambda: _run_states(lineage, alice).get(gold2) == "COMPLETE",
-        message=f"gold did not cascade after re-granting the validator (token {token2})",
+        message=f"gold did not cascade after re-granting the writer + validator (token {token2})",
+    )
+
+    # Re-assert the negatives only after BOTH denied triggers' redelivery windows have MEASURABLY
+    # elapsed (grants restored the whole time) — on a fast/warm stack the positive control alone can
+    # finish inside 30s, which would leave the exact false-pass window this re-check exists to close.
+    # This is what separates "checked-and-DENIED" (DROP acked the trigger; the run can never appear) from
+    # "never checked" (a crashed handler RETRYs; the redelivered trigger would sail through the restored
+    # grant and land the run late).
+    remaining = max(silver_denied_at, gold_denied_at) + REDELIVERY_WINDOW + 5 - time.monotonic()
+    if remaining > 0:
+        time.sleep(remaining)
+    final_states = _run_states(lineage, alice)
+    assert final_states.get(denied_silver_rid) is None, (
+        f"silver run {denied_silver_rid} landed AFTER the writer grant was restored — the deny was a "
+        f"RETRY (never actually checked), not a DROP"
+    )
+    assert final_states.get(denied_gold_rid) is None, (
+        f"gold run {denied_gold_rid} landed AFTER the validator grant was restored — the deny was a "
+        f"RETRY (never actually checked), not a DROP"
     )
 
 
@@ -282,9 +356,27 @@ def test_quality_gate_blocks_bad_batch_and_records_verdict(
     }
     bronze_uri = f"s3://{S3_BUCKET}/medallion/bronze"
 
+    # Order-independence: this test corrupts bronze IN PLACE, so bronze must exist first. Earlier tests
+    # usually leave one behind, but don't depend on execution order (or on -k selections) — drive a
+    # produce and wait for bronze if it isn't there. One open serves both the guard and the read.
+    def _open_bronze() -> Any:
+        try:
+            return lance.dataset(bronze_uri, storage_options=opts)
+        except Exception:  # noqa: BLE001 — any open failure means "not there yet" for this guard
+            return None
+
+    dataset = _open_bronze()
+    if dataset is None:
+        _produce(lance_ray)
+        _poll(
+            lambda: _open_bronze() is not None,
+            message=f"bronze never materialized at {bronze_uri} for the quality-block test",
+        )
+        dataset = _open_bronze()
+
     # Corrupt bronze IN PLACE (same schema, ids nulled) — the shape of an upstream writer landing a bad
     # batch that lineage-side governance can't see coming.
-    table = lance.dataset(bronze_uri, storage_options=opts).to_table()
+    table = dataset.to_table()
     id_field = table.schema.field("id")
     bad = table.set_column(table.schema.get_field_index("id"), id_field, pa.nulls(len(table), id_field.type))
     lance.write_dataset(bad, bronze_uri, mode="overwrite", storage_options=opts)
@@ -361,9 +453,18 @@ def test_media_lane_derives_under_governance(stack: tuple[str, str], alice: dict
     upstream = requests.get(f"{lineage}/datasets/silver-media$features/upstream", headers=alice, timeout=8)
     upstream.raise_for_status()
     assert "bronze-media$objects" in {d["name"] for d in upstream.json().get("related", [])}
-    # The external s3:// SOURCE objects are recorded in the graph (the auth-off media e2e asserts their
-    # presence) but alice holds no grant on them — the transitive-disclosure filter must DROP them from
-    # her governed view rather than leak external-source names through a related-datasets side channel.
+    # The external s3:// SOURCE objects are recorded in the graph (the auth-off media e2e —
+    # tests/e2e/test_media_e2e.py via `make e2e-media` — asserts their PRESENCE, which is what keeps
+    # this negative non-vacuous) but alice holds no grant on them — the transitive-disclosure filter
+    # must DROP them from her governed view rather than leak external-source names through a
+    # related-datasets side channel.
+    #
+    # NO per-object positive control is possible here, BY CONSTRUCTION (2026-07-10 review, verified
+    # against OpenFGA's tuple validation): an OpenFGA object id must contain exactly one ':', so
+    # `table:s3://…` can never be written as a tuple — s3:// source datasets are structurally
+    # ungovernable-per-object and therefore invisible to EVERY governed principal. That is the
+    # contract; making sources governable would need an id-encoding scheme or a `namespace:source`
+    # parent with encoded ids (logged in todo_fable §7a as the open design decision).
     sources = requests.get(f"{lineage}/datasets/bronze-media$objects/upstream", headers=alice, timeout=8)
     sources.raise_for_status()
     assert not any(d["name"].startswith("s3://") for d in sources.json().get("related", []))

@@ -180,4 +180,4 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     """Return the process-wide cached settings instance."""
-    return Settings()  # ty: ignore[missing-argument]  # required fields are read from the environment
+    return Settings()  # required fields are read from the environment

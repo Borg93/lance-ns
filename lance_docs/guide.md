@@ -9,6 +9,7 @@ Directory structure:
     ├── json.md
     ├── migration.md
     ├── object_store.md
+    ├── observability.md
     ├── performance.md
     ├── read_and_write.md
     ├── tags_and_branches.md
@@ -17,6 +18,7 @@ Directory structure:
 
 
 Files Content:
+
 
 ================================================
 FILE: docs/src/guide/arrays.md
@@ -142,11 +144,11 @@ calling `lance.arrow.ImageTensorArray.to_encoded`.
 
 A `lance.arrow.EncodedImageArray.to_tensor` method is provided to decode
 encoded images and return them as `lance.arrow.FixedShapeImageTensorArray`, from
-which they can be converted to numpy arrays or TensorFlow tensors.
+which they can be converted to numpy arrays.
 For decoding images, it will first attempt to use a decoder provided via the optional
 function parameter. If decoder is not provided it will attempt to use
-[Pillow](https://pillow.readthedocs.io/en/stable/) and [tensorflow](https://www.tensorflow.org/api_docs/python/tf/io/encode_png) in that
-order. If neither library or custom decoder is available an exception will be raised.
+[Pillow](https://pillow.readthedocs.io/en/stable/). If neither Pillow nor a custom
+decoder is available an exception will be raised.
 
 ```python
 from lance.arrow import ImageURIArray
@@ -155,13 +157,16 @@ uris = [os.path.join(os.path.dirname(__file__), "images/1.png")]
 encoded_images = ImageURIArray.from_uris(uris).read_uris()
 print(encoded_images.to_tensor())
 
-def tensorflow_decoder(images):
-    import tensorflow as tf
+def pillow_decoder(images):
+    import io
     import numpy as np
+    from PIL import Image
 
-    return np.stack(tf.io.decode_png(img.as_py(), channels=3) for img in images.storage)
+    return np.stack(
+        np.asarray(Image.open(io.BytesIO(img.as_py()))) for img in images.storage
+    )
 
-print(encoded_images.to_tensor(tensorflow_decoder))
+print(encoded_images.to_tensor(pillow_decoder))
 # <lance.arrow.FixedShapeImageTensorArray object at 0x...>
 # [[42, 42, 42, 255]]
 # <lance.arrow.FixedShapeImageTensorArray object at 0x...>
@@ -187,8 +192,8 @@ created by calling `lance.arrow.ImageArray.from_array` and passing in a
 It can be encoded into to `lance.arrow.EncodedImageArray` by calling
 `lance.arrow.FixedShapeImageTensorArray.to_encoded` and passing custom encoder
 If encoder is not provided it will attempt to use
-[tensorflow](https://www.tensorflow.org/api_docs/python/tf/io/encode_png) and [Pillow](https://pillow.readthedocs.io/en/stable/) in that order. Default encoders will
-encode to PNG. If neither library is available it will raise an exception.
+[Pillow](https://pillow.readthedocs.io/en/stable/). The default encoder will encode
+to PNG. If neither Pillow nor a custom encoder is available it will raise an exception.
 
 ```python
 from lance.arrow import ImageURIArray
@@ -199,7 +204,7 @@ tensor_images.to_encoded()
 # <lance.arrow.EncodedImageArray object at 0x...>
 # [...
 # b'\x89PNG\r\n\x1a...'
-``` 
+```
 
 
 ================================================
@@ -578,7 +583,6 @@ This section contains commonly noticed issues or errors, and explains how to add
 **Fix**: Provide exactly one of `ids`, `indices`, or `addresses`.
 
 
-
 ================================================
 FILE: docs/src/guide/data_evolution.md
 ================================================
@@ -829,7 +833,6 @@ print(dataset.schema)
 # embedding: fixed_size_list<item: halffloat>[128]
 #   child 0, item: halffloat
 ```
-
 
 
 ================================================
@@ -1273,7 +1276,6 @@ This maps to Lance's `FixedSizeList(Float32, 384)` type, which is optimized for:
 - [Performance Guide](performance.md) - Optimization tips for large-scale deployments
 
 
-
 ================================================
 FILE: docs/src/guide/distributed_indexing.md
 ================================================
@@ -1472,7 +1474,6 @@ unreferenced index files.
 
 This split keeps distributed scheduling outside the storage engine while still
 letting Lance own the on-disk index format.
-
 
 
 ================================================
@@ -1743,7 +1744,6 @@ Output:
 6   7  Gracie     88
 7   8   Henry     82
 ```
-
 
 
 ================================================
@@ -2184,7 +2184,6 @@ All JSON functions are available when using Lance with Apache DataFusion for SQL
 - JSON functions are currently only available for filtering, not for projection in query results
 
 
-
 ================================================
 FILE: docs/src/guide/migration.md
 ================================================
@@ -2301,7 +2300,6 @@ The `DirectoryNamespace` and `RestNamespace` interfaces have been refactored to 
 The `DirectoryNamespace` also now uses Lance ObjectStore for IO instead of directly depending on Apache OpenDAL.
 
 
-
 ================================================
 FILE: docs/src/guide/object_store.md
 ================================================
@@ -2347,6 +2345,35 @@ These options apply to all object stores.
 | `proxy_excludes`             | List of hosts that bypass proxy. This is a comma separated list of domains and IP masks. Any subdomain of the provided domain will be bypassed. For example, `example.com, 192.168.1.0/24` would bypass `https://api.example.com`, `https://www.example.com`, and any IP in the range `192.168.1.0/24`. |
 | `client_max_retries`         | Number of times for the object store client to retry the request. Default, `3`.                                                                                                                                                                                                                         |
 | `client_retry_timeout`       | Timeout for the object store client to retry the request in seconds. Default, `180`.                                                                                                                                                                                                                    |
+
+## Per-Base Configuration
+
+A dataset can register additional base paths that store part of its data, and each
+base may live in a different bucket, account, or storage provider. A storage option
+key of the form `base_<id>.<key>` applies `<key>` only to the base path with that
+manifest id. Every base inherits the unscoped options; base-scoped entries add to or
+override them for that base only.
+
+```python
+import lance
+ds = lance.dataset(
+    "az://account-a/path",
+    storage_options={
+        # Shared defaults, used by the primary dataset and inherited by bases
+        "account_name": "account-a",
+        "account_key": "key-a",
+        # Overrides for the base path with id 1
+        "base_1.account_name": "account-b",
+        "base_1.account_key": "key-b",
+    },
+)
+```
+
+Base ids are assigned when bases are registered (`initial_bases` ids are assigned
+sequentially starting at 1, in order) and can be inspected through the manifest base
+paths. Keys that do not match `base_<id>.<key>` exactly (e.g. `base_url`) are treated
+as regular storage options. Exact per-base parameter maps (`base_store_params`,
+keyed by base path URI) take precedence over base-scoped keys for that base.
 
 ## S3 Configuration
 
@@ -2762,6 +2789,79 @@ The following keys can be used as both environment variables or keys in the
     ```
 
 
+================================================
+FILE: docs/src/guide/observability.md
+================================================
+# Observability
+
+Lance can publish operational metrics to your monitoring stack. The table below
+is the authoritative catalogue of the metrics Lance emits, shared verbatim with
+the Rust [`lance::metrics`](https://docs.rs/lance/latest/lance/metrics/) module
+documentation.
+
+--8<-- "rust/lance/src/metrics.md"
+
+## Collecting metrics
+
+Lance emits through the [`metrics`](https://docs.rs/metrics) crate facade, so it
+is not tied to a specific backend — you install a recorder/exporter and route
+the metrics wherever you like. Metrics are available from **both** the Rust and
+Python APIs.
+
+### Rust
+
+Enable the `metrics` feature on the `lance` crate:
+
+```toml
+lance = { version = "...", features = ["metrics"] }
+```
+
+Then install any `metrics`-compatible recorder once at startup, before opening
+datasets. For example, with
+[`metrics-exporter-prometheus`](https://docs.rs/metrics-exporter-prometheus):
+
+```rust
+metrics_exporter_prometheus::PrometheusBuilder::new()
+    .install()
+    .expect("install Prometheus recorder");
+```
+
+Any recorder works — Prometheus, StatsD, an OpenTelemetry bridge, and so on.
+When no recorder is installed, emission is a cheap no-op.
+
+### Python
+
+Unlike Rust, the Python bindings do not let you plug in an arbitrary recorder:
+bridging one across the FFI boundary into the Rust `metrics` facade would be
+complicated and inefficient. Instead `pylance` standardizes on OpenTelemetry,
+which has good Python support, as its recorder.
+
+The `pylance` wheels are built with the `metrics` feature enabled. Install the
+OpenTelemetry extra and call `instrument_lance_metrics`, which registers Lance's
+metrics as observable instruments on your OpenTelemetry `MeterProvider`:
+
+```bash
+pip install "pylance[otel]"
+```
+
+```python
+from lance.otel import instrument_lance_metrics
+
+# Uses the global MeterProvider; pass meter_provider=... to target a specific one.
+instrument_lance_metrics()
+```
+
+From there the metrics flow through whatever OpenTelemetry pipeline you have
+configured (OTLP, Prometheus, console, …). Because OpenTelemetry has no
+asynchronous histogram instrument, histograms are exported Prometheus-style as
+three observable counters: `<name>_bucket`, `<name>_count`, and `<name>_sum`.
+Each `<name>_bucket` sample carries an `le` ("less than or equal") attribute
+giving that bucket's inclusive upper bound in the metric's unit; the bucket
+count is cumulative, covering every observation at or below `le`. For example, a
+`lance_object_store_request_duration_seconds_bucket` sample with `le="0.5"`
+counts all requests that completed in 0.5 seconds or less, while `le="+Inf"` is
+the total count.
+
 
 ================================================
 FILE: docs/src/guide/performance.md
@@ -2987,6 +3087,37 @@ use cases. For example, S3 can typically get up to 5000
 req/s and with these settings we should get there in about
 10 seconds.
 
+## Fragment Sizing
+
+A Lance table is a collection of fragments tracked by a manifest. How you size those fragments
+trades off two classes of work:
+
+- **Manifest-level operations** scale with the *number* of fragments. Every dataset mutation
+  (appends, metadata updates, schema changes, compactions, etc.) rewrites the manifest, so a
+  larger fragment list makes every write slower. Reads pay a similar cost up front: opening a
+  dataset, listing fragments, planning a scan, and resolving transaction conflicts at the
+  dataset level all walk the manifest.
+- **Fragment-level operations** scale with the *size* of a fragment. These include scans
+  against a matching fragment, compaction, updates, deletes, and `merge_insert`. Conflict
+  detection for these operations is also done at the fragment level.
+
+Fewer, larger fragments make manifest-level operations cheap but make each fragment-level
+operation heavier and increase the chance of conflicts when many writers target the same
+fragment. More, smaller fragments do the reverse.
+
+Practical guidance:
+
+- The default of 1M rows per fragment works well up to ~1B rows. Past that, bumping toward
+  ~100M rows per fragment is reasonable, though fragment-count limits are rarely the bottleneck
+  in practice.
+- Tens of thousands of fragments per table is generally fine.
+- Keep individual fragments well under object-store object-size limits (S3 caps at 5 TB, and
+  stores tend to misbehave well before that). 10 GB–100 GB per fragment is a reasonable upper
+  range; 1 TB is a hard ceiling.
+- If you run many concurrent updates, deletes, or `merge_insert` operations, err toward more
+  fragments — conflict detection is per-fragment, so too few fragments leads to excess
+  retries.
+
 ## Conflict Handling
 
 Lance supports concurrent operations on the same table using optimistic concurrency control. When two
@@ -3190,7 +3321,6 @@ rows with 768 dimensions and 1 bit per dimension:
 ```
 100M * (768 / 8 + 16) = ~10.8 GiB
 ```
-
 
 
 ================================================
@@ -3655,6 +3785,148 @@ of this, it's recommended to rewrite files before re-building indices.
 
 <!-- TODO: remove this last comment once stable row ids are default. -->
 
+### Cleanup old versions
+
+Lance is an immutable format — every write creates a new version. The new version
+only writes the data that changed, so an insert writes the new rows and an update
+rewrites the affected columns for the affected rows. Even a delete creates a
+small deletion file. However, old versions still reference the previous data
+files, so those files are kept on disk until explicitly removed. Over time this
+means storage grows with each operation — inserts, updates, and deletes alike.
+
+Keeping old versions has important benefits: readers that opened an older version
+can continue reading it without interference from concurrent writers, providing
+snapshot isolation. Old versions also enable time travel queries, letting you
+read the dataset as it existed at any prior point in time.
+
+`cleanup_old_versions` deletes old version metadata and any data files that are
+no longer referenced by any version, reclaiming the accumulated storage.
+
+!!! warning
+
+    Once old versions are cleaned up, time travel queries to those versions are
+    no longer possible. Choose your retention window (`older_than`) accordingly —
+    any version removed by cleanup cannot be recovered.
+
+```python
+import lance
+
+dataset = lance.dataset("./my_dataset.lance")
+dataset.cleanup_old_versions()
+```
+
+By default, versions older than 7 days are removed. You can override this with
+the `older_than` parameter (a `timedelta`):
+
+```python
+from datetime import timedelta
+
+dataset.cleanup_old_versions(older_than=timedelta(days=1))
+```
+
+!!! note
+
+    Tagged versions are exempt from cleanup. See [Tags and Branches](tags_and_branches.md)
+    for details.
+
+By default, Lance only removes files that it can **verify** are no longer needed.
+A file is verified when Lance can see that it was referenced by an older version
+and is no longer referenced by any newer version. However, some orphaned files
+cannot be verified this way — for example, files left behind by aborted or failed
+commits that were never recorded in any version. These files are
+indistinguishable from files being written by an in-progress operation.
+
+Cleanup will never delete the current (active) version. This means passing
+`older_than=timedelta(0)` is safe and will delete all versions except the current
+one.
+
+The `delete_unverified` flag enables a more aggressive strategy that will also
+delete these unverified files:
+
+```python
+dataset.cleanup_old_versions(
+    older_than=timedelta(hours=2),
+    delete_unverified=True,
+)
+```
+
+!!! danger
+
+    Only use `delete_unverified=True` when you are confident that no other
+    concurrent operation has been in-progress for longer than the `older_than`
+    duration. Lance uses the file's age to decide whether an unverified file is
+    safe to remove, so any operation that is still running past the `older_than`
+    window risks having its files deleted out from under it.
+
+    In particular, combining `delete_unverified=True` with `older_than=timedelta(0)`
+    is **extremely dangerous** — if any other operation is in-progress at all,
+    its data files may be deleted, leading to dataset corruption.
+
+### Automatic cleanup
+
+Instead of calling `cleanup_old_versions` manually, you can configure Lance to
+clean up old versions automatically during writes. When auto cleanup is enabled,
+Lance will run cleanup every *N* commits (the **interval**), removing versions
+older than a specified duration.
+
+Auto cleanup can be enabled when creating a new dataset:
+
+```python
+import lance
+import pyarrow as pa
+from lance.dataset import AutoCleanupConfig
+
+table = pa.table({"id": range(100)})
+ds = lance.write_dataset(
+    table,
+    "./my_dataset.lance",
+    auto_cleanup_options=AutoCleanupConfig(
+        interval=20,             # run cleanup every 20 commits
+        older_than_seconds=3600, # remove versions older than 1 hour
+    ),
+)
+```
+
+Or enabled on an existing dataset:
+
+```python
+ds = lance.dataset("./my_dataset.lance")
+ds.optimize.enable_auto_cleanup(
+    AutoCleanupConfig(
+        interval=20,
+        older_than_seconds=3600,
+    )
+)
+```
+
+And disabled again:
+
+```python
+ds.optimize.disable_auto_cleanup()
+```
+
+Auto cleanup parameters can also be set directly via dataset config keys:
+
+```python
+ds.update_config({
+    "lance.auto_cleanup.interval": "20",
+    "lance.auto_cleanup.older_than": "3600s",
+})
+```
+
+!!! warning
+
+    Auto cleanup runs as part of the commit path. If your writer does not have
+    delete permissions, or you are doing high-frequency writes where the extra
+    latency matters, pass `skip_auto_cleanup=True` to `write_dataset` to skip it
+    on a per-write basis.
+
+### Other cleanup strategies
+
+It is common to run cleanup as a periodic background task on a dedicated server
+(for example, via a cron job or scheduled workflow). This keeps cleanup off the
+write path entirely, avoiding any impact to write latency, but requires setting
+up and maintaining additional infrastructure.
 
 
 ================================================
@@ -3787,7 +4059,6 @@ print(ds.branches.list_ordered(order="desc"))
     Delete unused branches to allow their referenced files to be cleaned up by `cleanup_old_versions()`.
 
 
-
 ================================================
 FILE: docs/src/guide/tokenizer.md
 ================================================
@@ -3884,7 +4155,6 @@ segmenter:
 Put your language model into `LANCE_LANGUAGE_MODEL_HOME`.
 
 
-
 ================================================
 FILE: docs/src/guide/.pages
 ================================================
@@ -3896,11 +4166,11 @@ nav:
   - JSON Support: json.md
   - Tags and Branches: tags_and_branches.md
   - Object Store Configuration: object_store.md
+  - Observability: observability.md
   - Distributed Write: distributed_write.md
   - Distributed Indexing: distributed_indexing.md
   - Migration Guide: migration.md
   - Performance Guide: performance.md
   - Tokenizer: tokenizer.md
   - Extension Arrays: arrays.md
-
 

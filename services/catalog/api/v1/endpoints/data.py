@@ -18,6 +18,7 @@ from lance_namespace import (
     DeleteFromTableRequest,
     DeleteFromTableResponse,
     DescribeTableRequest,
+    DropTableRequest,
     ExplainTableQueryPlanRequest,
     InsertIntoTableRequest,
     InsertIntoTableResponse,
@@ -58,6 +59,18 @@ ARROW_FILE = "application/vnd.apache.arrow.file"
 _MAX_INJECT_BYTES = 64 * 1024 * 1024
 
 router = APIRouter(prefix="/v1/table", tags=["data"])
+
+
+def _compensation_allowed(mode: str | None, overwrote_existing: bool) -> bool:
+    """Whether a failed owner grant may compensate by DROPPING the table — only for a FRESH id.
+
+    Never for ExistOk (it may have KEPT a pre-existing table this request never wrote) and never for
+    an Overwrite that REPLACED an existing table (the id still holds the prior incarnation's
+    time-travel history; dropping would escalate a transient FGA blip into irreversible data loss —
+    review 2026-07-10). Pure so the Overwrite arm is unit-testable (it needs FGA on, unreachable in
+    the moto harness).
+    """
+    return (mode or "").lower() not in ("existok", "exist_ok") and not overwrote_existing
 
 
 def _table_exists(ns: LanceNamespace, segments: list[str]) -> bool:
@@ -152,7 +165,29 @@ async def create_table(
     if overwrote_existing:
         await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     # Make the caller owner + link the new table to its parent so it inherits the cascade.
-    await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    # COMPENSATION (§4 dual-write): if the grant fails here (FGA outage → 503), the table exists on
+    # storage but has NO owner tuple — the client's retry would hit "already exists", stranding it
+    # forever. Best-effort delete what THIS request wrote so the retry starts clean — but ONLY for a
+    # FRESH id (review 2026-07-10): never for ExistOk (it may have KEPT a pre-existing table this
+    # request never wrote) and never when Overwrite REPLACED an existing table (the id still holds the
+    # prior incarnation's time-travel history — a compensating drop would escalate a transient FGA
+    # blip into irreversible loss; stranded-but-admin-recoverable beats destroyed). The compensation
+    # also REVOKES any tuples that did land (a grant can commit server-side while its response is
+    # lost; a stale owner tuple on a freed id silently grants its holder the NEXT table created there
+    # — the reused-id privilege bleed the real drop path also guards).
+    # Residual (documented): a process CRASH between the write and the grant still strands the table
+    # (no in-process compensation can cover it); the deeper fix is a declare→grant→write reorder.
+    try:
+        await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    except Exception:
+        if _compensation_allowed(mode, overwrote_existing):
+            try:  # compensation is best-effort; the GRANT error below stays the response either way
+                await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+                await run_in_threadpool(native.call, ns, "drop_table", DropTableRequest(id=segments))
+                log.warning("create_compensated", extra={"table": table_id, "reason": "grant_failed"})
+            except Exception as drop_exc:  # noqa: BLE001 — a failed compensation must still be visible
+                log.warning("create_compensation_failed", extra={"table": table_id, "error": str(drop_exc)})
+        raise
     # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget
     # (after the response, best-effort) so the lineage service can never block/fail a create. The
     # canonical id keeps the lineage Dataset == the OpenFGA object id == the catalog table id; the
@@ -242,7 +277,17 @@ async def merge_insert_into_table(
     authorization: Annotated[str | None, Header()] = None,
 ) -> MergeInsertIntoTableResponse:
     """Upsert Arrow-IPC rows — ``merge_insert_into_table``; emits a MERGE_INSERT lineage event.
-    The ``*_filt`` SQL filters, ``timeout``, ``use_index`` and ``branch`` are spec-0.9 query params."""
+    The ``*_filt`` SQL filters, ``timeout``, ``use_index`` and ``branch`` are spec-0.9 query params.
+
+    IMPLICIT DDL (§4): after the merge commits, a best-effort BTREE index is ensured on the ``on``
+    key (pylance's ``use_index`` only helps *if an index exists*, and nothing else ever builds one —
+    without it every upsert full-scans). The FIRST merge on a ``(table, on)`` pays the build
+    synchronously; later merges pay one cheap list call. Passing ``use_index=false`` opts out of the
+    implicit build too (a caller declining index USAGE shouldn't be charged index CREATION). The
+    build commits its OWN Lance version with no lineage event (consistent with
+    ``/create_scalar_index`` today), so the first indexed merge leaves the table at
+    ``response.version + 1`` while the MERGE_INSERT lineage points at ``response.version`` — a
+    version gap, not a lost write."""
     segments = parse_identifier(id, settings.delimiter)
     req = MergeInsertIntoTableRequest(
         id=segments,
@@ -272,6 +317,12 @@ async def merge_insert_into_table(
         authorization=authorization,
         pin_version=response.version,
     )
+    # AFTER the merge and the emit (matching the emit pattern; §0 forbids BackgroundTasks): ensure the
+    # merge key is BTREE-indexed so subsequent upserts stop full-scanning. Best-effort inside — no
+    # exception reaches this response (the merge above already committed). use_index=False is the
+    # caller's explicit opt-out of index acceleration → also skips the implicit build.
+    if use_index is not False:
+        await run_in_threadpool(dataplane.ensure_merge_key_index, ns, segments, on, branch=branch)
     return response
 
 

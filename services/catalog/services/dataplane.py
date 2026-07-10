@@ -31,6 +31,7 @@ from lance_namespace import (
     AlterTableDropColumnsResponse,
     CreateTableBranchRequest,
     CreateTableBranchResponse,
+    CreateTableIndexRequest,
     CreateTableRequest,
     CreateTableResponse,
     CreateTableTagRequest,
@@ -50,6 +51,7 @@ from lance_namespace import (
     LanceNamespace,
     ListTableBranchesRequest,
     ListTableBranchesResponse,
+    ListTableIndicesRequest,
     ListTableTagsRequest,
     ListTableTagsResponse,
     TableNotFoundError,
@@ -575,3 +577,54 @@ def delete_branch(
     """Delete a branch from the table."""
     open_dataset(ns, so, _table_id(req)).branches.delete(req.name)
     return DeleteTableBranchResponse()
+
+
+def ensure_merge_key_index(
+    ns: LanceNamespace, segments: list[str], on: str | None, *, branch: str | None = None
+) -> None:
+    """Best-effort BTREE index on a merge key, built AFTER the first ``/merge_insert`` commits (§4).
+
+    pylance's ``use_index=True`` default only helps *"if an index is available"*, and no automatic
+    data-flow ever builds one — so without this, every upsert full-scans the ``on`` column and merge
+    latency decays as the table grows (the namespace spec's own ``__manifest`` design mandates exactly
+    this pairing: merge-insert PK dedup WITH a BTREE on the key).
+
+    LIST FIRST is required, not an optimization: pylance's ``create_scalar_index`` defaults
+    ``replace=True``, so an unconditional build would full-scan and REBUILD the column on every upsert
+    — turning the fix into a regression. The build goes through the native op path
+    (``create_table_scalar_index``) because it is the only path that carries ``branch``.
+    NOTE: whether the dir backend honors ``branch`` on an index build is unverified at pylance 8.0.0
+    (branch surfaces are dataplane-backed) — flagged for the live pass; the param is forwarded either way.
+
+    Best-effort by contract: an index-build failure or a CreateIndex commit conflict must never fail
+    the write that already committed — any failure logs and returns.
+    """
+    if not on:
+        return
+    try:
+        listing = native.call(ns, "list_table_indices", ListTableIndicesRequest(id=segments, branch=branch))
+        for index in listing.indexes or []:
+            if on in (index.columns or []):
+                # An existing index of ANY type covering the key skips the build (never rebuild —
+                # replace=True!). Accepted per the §4 spec wording; a non-BTREE index on the key
+                # (BITMAP/INVERTED) therefore also suppresses the BTREE — revisit only if merge dedup
+                # proves unable to use those.
+                return
+        native.call(
+            ns,
+            "create_table_scalar_index",
+            CreateTableIndexRequest(id=segments, column=on, index_type="BTREE", branch=branch),
+        )
+        log.info("merge_key_index_built", extra={"table": "/".join(segments), "column": on})
+    except UnsupportedOperationError as exc:
+        # A backend that 501s the list/build ops will NEVER get the accelerator — distinct event so
+        # operators can tell "permanently unsupported here" from a transient failure below.
+        log.warning(
+            "merge_key_index_unsupported",
+            extra={"table": "/".join(segments), "column": on, "error": str(exc)},
+        )
+    except Exception as exc:  # noqa: BLE001 — the merge already committed; indexing is an accelerator
+        log.warning(
+            "merge_key_index_skipped",
+            extra={"table": "/".join(segments), "column": on, "error": str(exc)},
+        )

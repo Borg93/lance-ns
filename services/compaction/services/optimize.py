@@ -67,7 +67,7 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
     result = DatasetResult(uri=uri)
     try:
         # defer_index_remap: with the Fragment Reuse Index the row-id remap is deferred, so compaction and
-        # index maintenance "no longer conflict" (lance_docs/guide.md:3013) — cuts the CommitConflict class
+        # index maintenance "no longer conflict" (lance_docs/guide.md:3150) — cuts the CommitConflict class
         # of maintain: failures at the source. The optimize_indices() right below folds the compacted
         # fragments into the indices; the interplay is pinned by
         # tests/unit/test_compaction_optimize.py::test_compact_one_defer_index_remap_keeps_indices_working.

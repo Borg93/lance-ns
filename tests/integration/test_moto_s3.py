@@ -8,6 +8,7 @@ Lance data. This is the deterministic, infra-free counterpart to the Docker e2e.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from typing import Any
 
 import boto3
 import pyarrow as pa
@@ -90,3 +91,146 @@ def test_catalog_roundtrip_on_moto_s3(moto_client: TestClient) -> None:
     query = moto_client.post("/v1/table/m1$t/query", json={"k": 10, "filter": "id >= 2", "vector": {}})
     assert query.headers["content-type"].startswith("application/vnd.apache.arrow.file")
     assert ipc.open_file(pa.BufferReader(query.content)).read_all().num_rows == 3
+
+
+# --------------------------------------------------------------------------- #
+# §4: merge_insert ensures a BTREE on its merge key (implicit DDL, idempotent, best-effort)
+# --------------------------------------------------------------------------- #
+
+
+def _merge(client: TestClient, table: str, rows: pa.Table) -> Any:
+    return client.post(
+        f"/v1/table/{table}/merge_insert?on=id&when_matched_update_all=true&when_not_matched_insert_all=true",
+        content=_ipc(rows),
+        headers=ARROW,
+    )
+
+
+def _index_columns(client: TestClient, table: str) -> list[tuple[str, list[str]]]:
+    listing = client.post(f"/v1/table/{table}/index/list", json={})
+    assert listing.status_code == 200, listing.text
+    # index_type casing is backend-flavored ("BTree" from the dir backend) — normalize for asserting.
+    return [(ix["index_type"].upper(), ix["columns"]) for ix in listing.json().get("indexes", [])]
+
+
+def test_merge_insert_builds_btree_on_the_merge_key_exactly_once(moto_client: TestClient) -> None:
+    """Two consecutive merges on the same (table, on) trigger EXACTLY ONE index build — the list-first
+    guard is load-bearing (create_scalar_index defaults replace=True: an unconditional build would
+    full-rebuild the column on every upsert, turning the accelerator into a regression).
+
+    A DEDICATED MonkeyPatch context scopes the spy: the function-scoped `monkeypatch` fixture is the
+    SAME instance the moto_client fixture used for its env vars, so undo()/teardown ordering with it
+    is a foot-gun (review 2026-07-10)."""
+    import catalog.services.dataplane as dp
+
+    rows = pa.table({"id": pa.array([1, 2, 3], pa.int64()), "v": ["a", "b", "c"]})
+    assert moto_client.post("/v1/table/mk$t/create", content=_ipc(rows), headers=ARROW).status_code == 200
+
+    builds: list[str] = []
+    real_call = dp.native.call
+
+    def counting_call(ns: Any, method: str, *args: Any) -> Any:
+        if method == "create_table_scalar_index":
+            builds.append(method)
+        return real_call(ns, method, *args)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(dp.native, "call", counting_call)
+        first = _merge(moto_client, "mk$t", pa.table({"id": pa.array([2, 4], pa.int64()), "v": ["B", "d"]}))
+        assert first.status_code == 200, first.text
+        assert ("BTREE", ["id"]) in _index_columns(moto_client, "mk$t")  # visible via the list endpoint
+        second = _merge(moto_client, "mk$t", pa.table({"id": pa.array([5], pa.int64()), "v": ["e"]}))
+        assert second.status_code == 200, second.text
+    assert builds == ["create_table_scalar_index"]  # ONE build across two merges (idempotence)
+    assert int(moto_client.post("/v1/table/mk$t/count_rows", json={}).text) == 5  # upsert applied
+
+
+@pytest.mark.parametrize("failing_method", ["list_table_indices", "create_table_scalar_index"])
+def test_merge_insert_survives_index_ensure_failure(moto_client: TestClient, failing_method: str) -> None:
+    """The index is an accelerator: a failure in EITHER half of the ensure path — the list-first
+    check or the build itself (the spec's named CreateIndex-commit-conflict case) — must never fail
+    the merge that already committed. Parametrized so a refactor splitting the two out of one
+    try-block can't silently lose the build-failure coverage (review 2026-07-10)."""
+    import catalog.services.dataplane as dp
+
+    table = f"mf{failing_method[:4]}$t"
+    rows = pa.table({"id": pa.array([1], pa.int64()), "v": ["a"]})
+    create = moto_client.post(f"/v1/table/{table}/create", content=_ipc(rows), headers=ARROW)
+    assert create.status_code == 200, create.text
+
+    real_call = dp.native.call
+
+    def failing_call(ns: Any, method: str, *args: Any) -> Any:
+        if method == failing_method:
+            raise RuntimeError("index backend down")
+        return real_call(ns, method, *args)
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(dp.native, "call", failing_call)
+        merged = _merge(moto_client, table, pa.table({"id": pa.array([2], pa.int64()), "v": ["b"]}))
+        assert merged.status_code == 200, merged.text  # the write result, not the accelerator's
+    assert int(moto_client.post(f"/v1/table/{table}/count_rows", json={}).text) == 2
+
+
+# --------------------------------------------------------------------------- #
+# §4: create_table dual-write compensation — a failed owner grant must not strand the table
+# --------------------------------------------------------------------------- #
+
+
+def test_create_compensates_when_the_owner_grant_fails(moto_client: TestClient) -> None:
+    """Grant fails after the Lance write → the create 5xxs AND the table is deleted, so the client's
+    retry starts clean instead of hitting 'already exists' on a forever-ownerless table."""
+    import catalog.api.v1.endpoints.data as data_ep
+    from lance_namespace import ServiceUnavailableError
+
+    async def failing_seed(*_a: object, **_kw: object) -> None:
+        raise ServiceUnavailableError("fga down mid-create")  # what a real FGA outage surfaces as
+
+    rows = pa.table({"id": pa.array([1], pa.int64())})
+    with pytest.MonkeyPatch.context() as mp:  # dedicated context — never the fixture's instance
+        mp.setattr(data_ep.fga_deps, "seed_ownership", failing_seed)
+        failed = moto_client.post("/v1/table/comp$t/create", content=_ipc(rows), headers=ARROW)
+    assert failed.status_code == 503, failed.text  # the grant failure surfaces (compensation ran)
+    # the compensation deleted the half-created table…
+    assert moto_client.post("/v1/table/comp$t/describe", json={}).status_code == 404
+    # …so, with FGA "recovered", the plain retry succeeds
+    retried = moto_client.post("/v1/table/comp$t/create", content=_ipc(rows), headers=ARROW)
+    assert retried.status_code == 200, retried.text
+
+
+def test_create_existok_never_compensates_away_a_kept_table(moto_client: TestClient) -> None:
+    """ExistOk may have KEPT a pre-existing table this request never wrote — compensation deleting it
+    would destroy someone else's data. ExistOk is retry-safe end-to-end anyway (the retry re-runs the
+    grant), so it must never trigger the delete."""
+    import catalog.api.v1.endpoints.data as data_ep
+    from lance_namespace import ServiceUnavailableError
+
+    rows = pa.table({"id": pa.array([1, 2], pa.int64())})
+    assert moto_client.post("/v1/table/keep$t/create", content=_ipc(rows), headers=ARROW).status_code == 200
+
+    async def failing_seed(*_a: object, **_kw: object) -> None:
+        raise ServiceUnavailableError("fga down mid-create")
+
+    with pytest.MonkeyPatch.context() as mp:  # dedicated context — never the fixture's instance
+        mp.setattr(data_ep.fga_deps, "seed_ownership", failing_seed)
+        failed = moto_client.post("/v1/table/keep$t/create?mode=exist_ok", content=_ipc(rows), headers=ARROW)
+    assert failed.status_code == 503, failed.text
+    # the pre-existing table SURVIVED the failed ExistOk…
+    assert int(moto_client.post("/v1/table/keep$t/count_rows", json={}).text) == 2
+    # …and the ExistOk retry heals (grant re-runs against the kept table).
+    healed = moto_client.post("/v1/table/keep$t/create?mode=exist_ok", content=_ipc(rows), headers=ARROW)
+    assert healed.status_code == 200, healed.text
+
+
+def test_compensation_matrix_never_drops_a_replaced_or_kept_table() -> None:
+    """The Overwrite-of-existing arm can't be driven in this harness (needs FGA on), so the decision
+    is a pure function and pinned here: compensation may drop ONLY a fresh-id create — never an
+    ExistOk (may have kept a table) and never an Overwrite that replaced one (its time-travel
+    history would be destroyed by a transient FGA blip — review 2026-07-10)."""
+    from catalog.api.v1.endpoints.data import _compensation_allowed
+
+    assert _compensation_allowed(None, overwrote_existing=False) is True  # plain create, fresh id
+    assert _compensation_allowed("overwrite", overwrote_existing=False) is True  # fresh-id overwrite
+    assert _compensation_allowed("overwrite", overwrote_existing=True) is False  # replaced a table
+    assert _compensation_allowed("exist_ok", overwrote_existing=False) is False
+    assert _compensation_allowed("ExistOk", overwrote_existing=False) is False

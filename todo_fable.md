@@ -184,9 +184,22 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   overlap, add timeouts; consider a bulk endpoint. `frontend/src/lib/store.svelte.ts:51`
 - ✅ **DONE 2026-07-06 — `backfill_write` now runs in ONE transaction** (`conn.transaction()`, like
   `ingest_event`): no half-written RECONCILED Run window between sweeps. Unit + real-AGE e2e covered.
-- ⛔ **`create_table` is a 3-step dual-write with no compensation** (Lance create → FGA owner grant → lineage
-  emit): FGA dying mid-way yields 503 whose retry hits “already exists” — table left with no owner tuple and
-  no lineage. `services/catalog/api/v1/endpoints/data.py:103`
+- ✅ **DONE 2026-07-10 — `create_table` dual-write now COMPENSATES** (was: Lance create → FGA owner grant →
+  lineage emit with no compensation; an FGA outage mid-way yielded a 503 whose retry hit "already exists"
+  (Create) or 403'd the Overwrite owner-gate — the table stranded ownerless forever). Fix: the grant is
+  try/except-wrapped — on failure the compensation REVOKES any tuples that did land (a grant can commit
+  server-side while its response is lost; a stale owner tuple on a freed id = the reused-id privilege
+  bleed) then best-effort `drop_table`s what THIS request wrote so the plain retry starts clean, and the
+  grant error re-raises. ONLY for a FRESH id (review 2026-07-10 hardening): NEVER for ExistOk (may have
+  KEPT a pre-existing table — deleting would destroy data; its retry re-runs the grant and heals) and
+  NEVER for an Overwrite that REPLACED an existing table (the id still holds the prior incarnation's
+  time-travel history — the review caught that compensating there would escalate a transient FGA blip
+  into irreversible loss; stranded-but-admin-recoverable beats destroyed). Moto-proven against the real
+  app + storage (compensate→404→retry-200; ExistOk-kept table SURVIVES + heals on retry) + the pure
+  `_compensation_allowed` matrix pins the Overwrite arm (unreachable in the FGA-off moto harness).
+  **Documented residual:** a process CRASH between write and grant still strands the table (no in-process
+  compensation covers it) — the deeper fix is a declare→grant→write reorder, out of proportion for now.
+  `services/catalog/api/v1/endpoints/data.py`, `tests/integration/test_moto_s3.py`
 - 🟨 **RESCOPED 2026-07-06 — insert version attribution race is now `/insert`-only.** 5c5461f's single
   pinned `read_version_and_schema` open fixed it for merge_insert/update/delete (version+schema pinned to
   the response's version). `/insert` remains read-after-write because the native `InsertIntoTableResponse`
@@ -216,7 +229,7 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 - ~~⛔~~ **RustFS conditional-write (CAS) support has NEVER been validated — Lance commit safety rests on it**
   (added 2026-07-05, firnflow/lance_docs audit; execution-spec'd same day after an Opus fresh-implementer
   dry-run). Every Lance commit publishes a new manifest via put-if-not-exists (`If-None-Match: *`); the
-  format REQUIRES the store to guarantee exactly one writer wins (`lance_docs/file_format.md:4778`), and
+  format REQUIRES the store to guarantee exactly one writer wins (`lance_docs/file_format.md:4765`), and
   NOTHING detects a store that silently ignores the header (proven failure mode elsewhere: GCS S3-interop
   accepted both PUTs → silently lost writes; only a contended stress catches it). Our concurrent writers are
   real — catalog inserts, medallion overwrites, Ray appends, the 120s compaction sweep with no overlap guard
@@ -230,9 +243,9 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   `s3://<bucket>/__cas_stress/<uuid>` (compaction's discovery skips `__` dirs): SEED-CREATE the dataset first
   in the parent process (v1, 2.2 + stable row ids per §0) — concurrent creates would be Overwrite races,
   which DO conflict — then 8 append-only writers; Append⊥Append never logically conflicts
-  (`file_format.md:4836`) so ALL must land: assert count_rows()==800 AND len(ds.versions())==9 (v1 seed + 8
+  (`file_format.md:~4801`) so ALL must land: assert count_rows()==800 AND len(ds.versions())==9 (v1 seed + 8
   appends); assert DATA invariants, not exception names (none are documented). Raise `lance_aimd_max_rate`
-  very high in storage_options (there is NO full-disable for S3 stores, `guide.md:2964`) so client throttling
+  very high in storage_options (there is NO full-disable for S3 stores, `guide.md:3080`) so client throttling
   can't mask store behavior; clean up both prefixes even on assertion failure (§0). TWO-LAYER VERDICT —
   report separately: tiers 1-2 prove the STORE honors If-None-Match; tier 3 proves pylance's object_store
   actually SENDS conditional puts to this custom endpoint (a store can pass 1-2 while Lance still loses
@@ -252,8 +265,19 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   to "at least one" (that is the silent-ignore hole) · a tier-3 pass alone is NOT store validation (pylance
   auto-retry masks) · no hardcoded creds (env/Secret only, §0) · if ANY tier fails: STOP, record the verdict,
   do NOT attempt remediation in the same change.
-- ⛔ **`/merge_insert` has no scalar index on its `on` key — every upsert full-scans** (added 2026-07-05;
-  execution-spec'd same day after an Opus fresh-implementer dry-run). pylance's `use_index=True` default only
+- 🟡 **`/merge_insert` has no scalar index on its `on` key — CODE-COMPLETE 2026-07-10, live /merge_insert
+  on kind PENDING** (added 2026-07-05; execution-spec'd same day after an Opus fresh-implementer dry-run).
+  **2026-07-10 status vs the DONE WHEN checklist:** implemented exactly as spec'd —
+  `dataplane.ensure_merge_key_index` (no-op on falsy `on`; LIST FIRST + skip when any index covers the key
+  — the replace=True rebuild guard; build via the native `create_table_scalar_index` with branch forwarded;
+  broad try/except, never fails the write), hooked inline via `run_in_threadpool` after the merge + emit;
+  endpoint docstring documents the implicit DDL + the version gap. Moto-proven against the real app: two
+  consecutive merges → exactly ONE build (call-count spy) · BTree on `id` visible via the list endpoint ·
+  monkeypatched list+build failure → merge still 200 with the upsert applied. **Branch propagation on the
+  index build is documented UNVERIFIABLE at pylance 8.0.0** (branch surfaces are dataplane-backed on the
+  dir backend; the param is forwarded — flagged for the live pass). **NOT done: the DONE WHEN live check**
+  (one real /merge_insert on kind) — in the §7a RESIDUAL. Original spec kept below as the contract:
+  pylance's `use_index=True` default only
   helps "if an index is available"; no automatic data-flow ever builds one (the only build call sites are the
   smoke test's endpoint POSTs and the Ray demo's BTREE on `id`), so merge latency decays as a table grows.
   The namespace spec's own `__manifest` design mandates exactly the fix — merge-insert PK dedup **with**
@@ -320,7 +344,7 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   not relitigate):
   - EMIT ONLY for `maintain:`-prefixed errors (escaped compact_files/cleanup = post-auto-retry terminal);
     skip `open:` errors (unreadable/declared-only dirs — transient non-dataset noise). Conflict taxonomy is
-    THREE-way (`file_format.md:~5261`): Rebasable (auto-retried inside the commit layer, never reaches
+    THREE-way (`file_format.md:~5253`): Rebasable (auto-retried inside the commit layer, never reaches
     Python — never report), Retryable (app must re-run), Incompatible (non-retryable).
   - Event shape: mirror `build_maintenance_event` with eventType=FAIL + a standard `errorMessage` run facet
     (message + programmingLanguage="PYTHON"). The compaction COMPLETE event is ALREADY bare/versionless —
@@ -336,7 +360,7 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   - Cap/bound-gather the per-tick FAIL publishes (each bounded by the 5s publish timeout) so a bucket of
     failing datasets can't push the cron handler past the 30s Dapr ack window (§0).
   - Also adopt `compact_files(defer_index_remap=True)` (Fragment Reuse Index — compaction and index-build "no
-    longer conflict", `lance_docs/guide.md:3013`; keyword confirmed present at pylance 8.0.0) to cut failures
+    longer conflict", `lance_docs/guide.md:3150`; keyword confirmed present at pylance 8.0.0) to cut failures
     at the source; PROBE its interplay with the immediate `optimize_indices()` at optimize.py:77 and pin with
     a regression test in the same commit (§0).
   - SCOPED OUT: medallion-nested datasets (`s3://<bucket>/medallion/<ns>` has no catalog id for
@@ -470,6 +494,10 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   **Added 2026-07-10 (Phase 2):** with `compaction.lineageEmit=true` + a rolled compaction image,
 >   fault-inject a dataset (delete one data file under its manifest) and assert exactly ONE FAIL Run
 >   node across ≥2 cron ticks via /runs + /events — the §4 compaction-failure item's live DONE WHEN.
+>   **Added 2026-07-10 (§4 batch 2):** one real `/merge_insert` on kind (observe the merge-key BTREE
+>   land + the documented version gap; also probe whether `branch` is honored on the index build —
+>   unverifiable at pylance 8.0.0 locally), and a rolled catalog image so the merge-index hook + the
+>   create-compensation actually ship.
 
 - 🟡 *(code-complete, live run pending)* **(MAJOR) writer-gate deny never proven + 12s grace window too short vs 30s
   redelivery** — DONE as spec'd: test 2 now has sub-phase A revoking
@@ -774,6 +802,28 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   flip datastore memory→postgres when adopted).
 - ⛔ **P2 Lineage at rask scale** — `parent` facet ingestion, event-volume posture (AGE indexes + pruning from
   §4, /events cursor), `dataQualityMetrics` (deferred, costly on Lance).
+- 📌 **lance_docs mirror currency audit + refresh (2026-07-10, user request)** — cloned BOTH upstream
+  repos and content-diffed every mirror section (not commit dates): `namespace.md` was ALREADY
+  byte-identical to lance-namespace HEAD (v0.9.0, 2026-07-01); `guide.md` + `file_format.md` were STALE
+  vs lance HEAD (9.0.0-beta.21) and are now refreshed to byte-identical. What upstream added since our
+  2026-07-03 snapshot, by relevance: **(a) `cleanup_old_versions` doc'd in depth + NEW
+  `AutoCleanupConfig`/`enable_auto_cleanup`** (auto-GC every N commits — a potential future simplifier
+  for the compaction sweep's GC half; NOT adopted, our sweep also compacts+indexes); **(b) NEW
+  fragment-sizing guidance** (1M rows/fragment fine to ~1B rows; more fragments under heavy concurrent
+  merge_insert since conflict detection is per-fragment — relevant to the merge-key work); **(c) NEW
+  `guide/observability.md`**: pylance ships `lance.otel.instrument_lance_metrics()` (`pylance[otel]`) —
+  native Lance object-store/IO metrics straight into our existing OTel/Greptime pipeline, a cheap
+  observability win to evaluate; **(d) per-base storage options** (`base_<id>.<key>` — multi-bucket
+  datasets); **(e) zonemap+bloom now EXACT for IS NULL** (null-row bitmap); **(f) MemWAL spec heavily
+  restructured (generations/sharding — still future, unimplemented by us); (g) tensorflow decoders
+  dropped from arrays.md (Pillow-only — matches our Pillow deriver).** `spec.yaml` (root + ns_catalog)
+  refreshed to 0.9.0: still 54 ops (conformance test green); additive deltas = optional `context` on
+  responses, 3 formalized response schemas, and `DescribeTableRequest.tag` (describe-at-tag) — our
+  installed 0.9.0 client already carries them all. **Anchor note:** the refresh shifted line numbers
+  (guide.md +~150, file_format.md ±~20 around §conflicts); the load-bearing cites were re-pinned in the
+  same batch (CAS item: file_format 4778→4765, 4836→~4801, guide 2964→3080; defer_index_remap: guide
+  3013→3150; conflict taxonomy: file_format ~5261→~5253) — treat any OTHER pre-2026-07-10 line cite in
+  this file as approximate.
 - 📌 **Native pylance/spec capabilities surfaced by the 2026-07-05 lance_docs full-read** — exploit before
   building bespoke: (a) `dataset::delta` CDC — `list_transactions` + `get_inserted_rows`/`get_updated_rows`
   between versions (`guide.md:2291`); with stable row ids (already ON for cascade writes) a change-data-feed is

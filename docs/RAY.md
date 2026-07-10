@@ -6,6 +6,10 @@ event-driven loop is testable without a cluster. This doc covers the **real** th
 kind + `ray job submit`, proving Lance's distributed capabilities against RustFS. Production is KubeRay (a
 `RayCluster` CR) via the rask merge; this is the raw-cluster proof that the seam is real, not fake.
 
+> Everything here is the Ray **DATA** shape (bounded stage transforms). The Ray **TRAIN** shape —
+> long-running training jobs, model-as-Lance-dataset, `jobType=TRAINING` lineage — is a separate,
+> decided design: see [`docs/RAY-TRAIN.md`](RAY-TRAIN.md) (task #115).
+
 ## What runs
 
 | Piece | File |

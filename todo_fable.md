@@ -599,18 +599,62 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 > LargeBinary, typing stripped) + Pillow/deriver in the ray image. Small task, then drop the gate.
 > Still open here: registering cascade outputs into the catalog; real encoder plugin; egress lane.
 
-- ⛔ **Ray TRAIN vs Ray DATA distinction** (added 2026-07-06, user request; task #115 + todo_confirm §4).
-  The platform must host BOTH batch/ETL (today's cascade = Ray Data shape) and TRAINING workloads
-  (Ray Train). Design first, then implement — open questions: (1) head shape — a separate producer
-  endpoint (`/train`) vs a workload-type field on the trigger payload (and its own topic? training is
-  long-running, not a stage hop); (2) lineage shape for a training run — use the OFFICIAL OpenLineage
-  `jobType` job facet (processingType=BATCH, integration=RAY, jobType=TRAINING vs ETL), inputs = the
-  versioned feature datasets read, output = the model artifact — and DECIDE where the model lives
-  (a Lance dataset in a `models` namespace keeps provenance uniform; an external registry needs the
-  external-pointer seam); (3) authz — a training job likely needs its own service identity + rung
-  (reader on features, writer on models — NOT the medallion writer rung); (4) whether `ray job submit`
-  seam is shared or training gets a KubeRay RayJob shape at the rask merge. Deliverable: design note +
-  execution-spec'd items here; OpenLineage stays spec-true (official facets only, no invented ones).
+- ✅ **Ray TRAIN vs Ray DATA distinction — DESIGN DECIDED 2026-07-10** (added 2026-07-06, user request;
+  task #115 + todo_confirm §4). **The contract is [`docs/RAY-TRAIN.md`](RAY-TRAIN.md)** — all four open
+  questions pinned: (D1) separate `POST /train` head + OWN topic (`training.jobs`) — NOT a field on the
+  stage trigger (stage-hop semantics don't fit a long-running terminal-on-failure workload); (D2) the
+  trainer consumer is SUBMIT-AND-ACK (deterministic `ray-train-<token>` id, re-attach on redelivery, NO
+  auto-resubmit of a failed run) — resolves ray_submit's documented long-job limitation instead of
+  inheriting it; the JOB emits its own OpenLineage lifecycle; (D3) official `JobTypeJobFacet`
+  processingType=BATCH/integration=RAY/**jobType=TRAINING**, inputs carry per-feature
+  `DatasetVersionDatasetFacet` pins, deterministic `run_id_for("train-<token>")`, progress facet reuse,
+  FAIL = bare output + errorMessage; (D4) **model = a Lance dataset `models$<model>`** (one row per
+  artifact: weights/config/metrics/card; blob v2, 2.2, stable row ids) — versioning via time-travel,
+  promotion via tags + the `validator` rung; external registry later via the #92 external-pointer seam;
+  (D5) dedicated `user:service-trainer` (per-namespace `reader` on features + `writer` on
+  `namespace:models` ONLY — never the medallion writer rung); (D6) shared Ray Jobs-REST core now,
+  KubeRay `RayJob` CR under Kueue at the rask merge (contracts unchanged, transport swaps).
+  Implementation = #115a–c below.
+
+- ⛔ **#115a — `/train` head + training topic + submit-and-ack trainer consumer** (execution-spec'd per
+  docs/RAY-TRAIN.md D1+D2+D6). Build: `POST /train` on lance-ray (token-guarded; resolves omitted
+  feature versions to LATEST at the head); publish `{token, model, features:[{dataset,version}], config}`
+  to `MEDALLION_TRAIN_TOPIC` (default `training.jobs`); a durable subscription (own queue group) whose
+  handler FGA-gates (D5) then submits via the generic core EXTRACTED from
+  `medallion/services/ray_submit.py::submit_stage_job` (entrypoint+env+deterministic id; stage path
+  keeps its block-poll, training path returns after submit/re-attach) and acks SUCCESS.
+  ✅ DONE WHEN: /train → 202 + trigger published (unit, fake publisher) · handler with a hung Ray API
+  still acks within the 30s window (unit: submit bounded by the request timeout) · redelivered trigger
+  re-attaches (same submission id, no second job — unit vs a fake Jobs API) · a terminally FAILED prior
+  job is NOT resubmitted on redelivery (unit — the D2 no-auto-retry pin) · FGA deny → DROP before any
+  submit; FGA outage → RETRY (unit) · stage movers' existing ray tests stay green (the extraction is
+  behavior-preserving) · live on kind: one `POST /train` drives the stub job end to end.
+  🚧 GUARDRAILS: never block the handler on job completion · trigger carries pointers only (no config
+  blobs > a few KB — claim-check) · do NOT touch the stage movers' block-poll semantics · the extracted
+  core must keep the delete-and-resubmit-on-terminal behavior FOR THE STAGE PATH only.
+- ⛔ **#115b — `scripts/ray_train_job.py` + model-as-Lance write + lifecycle lineage** (per D3+D4).
+  Build: the job script (baked into the ray-lance image) reads each feature dataset AT ITS PINNED
+  version, trains the demo-tier CPU model, writes `models$<model>` (one row per artifact, blob v2
+  payload, via the shared cascade-write helper — 2.2 + stable row ids, §0 create-time-only rule), emits
+  START → RUNNING(progress {done:epoch,total}) → COMPLETE with jobType=TRAINING + input version facets +
+  output version/schema facets; on failure emits FAIL (bare output, errorMessage facet, no version).
+  ✅ DONE WHEN: event-shape round-trip unit tests through `lineage.models.RunEvent` (TRAINING jobType
+  parsed; input versions surfaced; FAIL parses with no fabricated version) · a local-Lance unit test
+  drives the job's write path (pinned-version read + model dataset schema) · live on kind:
+  `upstream(models$<m>)` shows the feature datasets WITH the pinned versions, /runs shows the training
+  run's progress trail, and the FAIL path is fault-injected once.
+  🚧 GUARDRAILS: official OpenLineage facets only (jobType is a free-string field — no invented facet) ·
+  FAIL never carries a version/DERIVED_FROM · the model write goes through the shared helper (never
+  hand-copied kwargs) · the job reads features ONLY at the pinned versions (no floating LATEST inside
+  the job).
+- ⛔ **#115c — trainer authz seed + gates** (per D5). Build: seed-script additions (`namespace:models`
+  parent + per-model table parents + `service-trainer` grants), the handler's pre-submit checks
+  (`can_read_data` on every input, `can_create_table` on `namespace:models`).
+  ✅ DONE WHEN: seed idempotent re-run green · unit: deny on ANY input → DROP; deny on models → DROP;
+  outage → RETRY · live under the governed union: ungranted trainer → DROP (no job submitted), granted →
+  model lands + humans with warehouse reader can see `models$<m>` in governed /runs.
+  🚧 GUARDRAILS: trainer NEVER gets the warehouse writer rung · model promotion tags stay behind the
+  `validator` rung (not writer) · grants live in the seed script next to the mover grants (one place).
 
 - ✅ **P2 `/produce` (lance-ray) in-cluster auth — DONE (2026-07-04).** BOTH layers now ship
   (defense-in-depth, the Ray-security shape: network isolation primary + token guard):

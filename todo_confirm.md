@@ -51,12 +51,13 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
 - ✅ **Real Ray cluster driven by the cascade**: `ray job submit` per stage trigger; distributed
   write / scalar+vector index / schema evolution / compaction proven vs RustFS (`make ray-demo`,
   docs/RAY.md — incl. the documented pylance-8↔lance-ray version landmines and native fallbacks).
-- ⛔ **Ray Train vs Ray Data distinction** (added 2026-07-06, user): the platform must host BOTH
-  batch/ETL (today's cascade) and TRAINING workloads. Open design: separate head endpoint
-  (`/train`?) vs a workload-type field on the trigger; a training run's lineage shape (OpenLineage
-  `jobType` job facet — processingType/integration/jobType — inputs = versioned feature datasets,
-  output = model artifact… stored where: Lance dataset? registry?); whether training gets its own
-  FGA service identity + rung. Needs a design note + execution spec before code. (Task #115.)
+- 🟡 **Ray Train vs Ray Data distinction — DESIGN DECIDED 2026-07-10** (added 2026-07-06, user;
+  task #115): the contract is `docs/RAY-TRAIN.md` — separate `/train` head + own topic,
+  submit-and-ack trainer (no auto-resubmit), official jobType=TRAINING facet with per-feature
+  version pins, **model = Lance dataset `models$<model>`** (time-travel = model versioning; tags +
+  validator rung = promotion), dedicated `service-trainer` identity (features reader + models
+  writer only), shared Jobs-REST seam now → KubeRay RayJob at the rask merge. Implementation open:
+  todo_fable §9 #115a–c (execution-spec'd).
 
 ## 5 · Auth / authz (can and can't)
 

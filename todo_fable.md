@@ -608,9 +608,11 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   inheriting it; the JOB emits its own OpenLineage lifecycle; (D3) official `JobTypeJobFacet`
   processingType=BATCH/integration=RAY/**jobType=TRAINING**, inputs carry per-feature
   `DatasetVersionDatasetFacet` pins, deterministic `run_id_for("train-<token>")`, progress facet reuse,
-  FAIL = bare output + errorMessage; (D4) **model = a Lance dataset `models$<model>`** (one row per
-  artifact: weights/config/metrics/card; blob v2, 2.2, stable row ids) — versioning via time-travel,
-  promotion via tags + the `validator` rung; external registry later via the #92 external-pointer seam;
+  FAIL = bare output + errorMessage; (D4, sharpened 2026-07-10) **model REGISTRY = a Lance dataset
+  `models$<model>` whose rows POINT (external blob, #92 allowlist) at plain-path S3 artifact objects**
+  (`models/<model>/<token>/…`, bytes-then-commit = atomic registration; inline only for tiny models) —
+  versioning via time-travel, promotion via tags + the `validator` rung, serving loads the plain path;
+  an external registry product later only changes the pointer targets;
   (D5) dedicated `user:service-trainer` (per-namespace `reader` on features + `writer` on
   `namespace:models` ONLY — never the medallion writer rung); (D6) shared Ray Jobs-REST core now,
   KubeRay `RayJob` CR under Kueue at the rask merge (contracts unchanged, transport swaps).
@@ -632,21 +634,30 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   🚧 GUARDRAILS: never block the handler on job completion · trigger carries pointers only (no config
   blobs > a few KB — claim-check) · do NOT touch the stage movers' block-poll semantics · the extracted
   core must keep the delete-and-resubmit-on-terminal behavior FOR THE STAGE PATH only.
-- ⛔ **#115b — `scripts/ray_train_job.py` + model-as-Lance write + lifecycle lineage** (per D3+D4).
-  Build: the job script (baked into the ray-lance image) reads each feature dataset AT ITS PINNED
-  version, trains the demo-tier CPU model, writes `models$<model>` (one row per artifact, blob v2
-  payload, via the shared cascade-write helper — 2.2 + stable row ids, §0 create-time-only rule), emits
-  START → RUNNING(progress {done:epoch,total}) → COMPLETE with jobType=TRAINING + input version facets +
-  output version/schema facets; on failure emits FAIL (bare output, errorMessage facet, no version).
+- ⛔ **#115b — `scripts/ray_train_job.py` + model REGISTRY write + lifecycle lineage** (per D3 + the
+  SHARPENED D4: registry record vs artifact bytes). Build: the job script (baked into the ray-lance
+  image) reads each feature dataset AT ITS PINNED version, trains the demo-tier CPU model, then
+  publishes in the crash-safe order — (1) artifact BYTES as plain S3 objects under
+  `models/<model>/<token>/` (token-keyed → retry-idempotent), (2) the REGISTRY record `models$<model>`
+  as ONE Lance commit (rows = artifacts, `payload` = external blob POINTER to the plain paths via the
+  #92 allowlist; inline only ≲ a few MB; shared write helper — 2.2 + stable row ids, §0
+  create-time-only rule) — the commit IS the atomic registration; emits START → RUNNING(progress
+  {done:epoch,total}) → COMPLETE with jobType=TRAINING + input version facets + output version/schema
+  facets; on failure emits FAIL (bare output, errorMessage facet, no version).
   ✅ DONE WHEN: event-shape round-trip unit tests through `lineage.models.RunEvent` (TRAINING jobType
   parsed; input versions surfaced; FAIL parses with no fabricated version) · a local-Lance unit test
-  drives the job's write path (pinned-version read + model dataset schema) · live on kind:
-  `upstream(models$<m>)` shows the feature datasets WITH the pinned versions, /runs shows the training
-  run's progress trail, and the FAIL path is fault-injected once.
+  drives the publish path (pinned-version read; artifacts land BEFORE the registry commit; pointer rows
+  resolve; a simulated crash between the two steps leaves NO registry entry; the retry converges on the
+  same token paths) · `models/` added to the registered external-blob bases + covered by its existing
+  allowlist tests · live on kind: `upstream(models$<m>)` shows the feature datasets WITH the pinned
+  versions, /runs shows the progress trail, a serving-shaped read loads weights from the PLAIN path
+  (no Lance reader), and the FAIL path is fault-injected once.
   🚧 GUARDRAILS: official OpenLineage facets only (jobType is a free-string field — no invented facet) ·
-  FAIL never carries a version/DERIVED_FROM · the model write goes through the shared helper (never
-  hand-copied kwargs) · the job reads features ONLY at the pinned versions (no floating LATEST inside
-  the job).
+  FAIL never carries a version/DERIVED_FROM · bytes-then-commit order is mandatory (a registry entry
+  must never point at objects that don't exist yet) · the model write goes through the shared helper
+  (never hand-copied kwargs) · the job reads features ONLY at the pinned versions (no floating LATEST
+  inside the job) · GC must never collect `models/<model>/<token>/` objects referenced by a registry
+  row (§9 blob-pointer lifecycle is load-bearing here — orphan-janitor is future work, document it).
 - ⛔ **#115c — trainer authz seed + gates** (per D5). Build: seed-script additions (`namespace:models`
   parent + per-model table parents + `service-trainer` grants), the handler's pre-submit checks
   (`can_read_data` on every input, `can_create_table` on `namespace:models`).

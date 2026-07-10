@@ -54,10 +54,12 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
 - 🟡 **Ray Train vs Ray Data distinction — DESIGN DECIDED 2026-07-10** (added 2026-07-06, user;
   task #115): the contract is `docs/RAY-TRAIN.md` — separate `/train` head + own topic,
   submit-and-ack trainer (no auto-resubmit), official jobType=TRAINING facet with per-feature
-  version pins, **model = Lance dataset `models$<model>`** (time-travel = model versioning; tags +
-  validator rung = promotion), dedicated `service-trainer` identity (features reader + models
-  writer only), shared Jobs-REST seam now → KubeRay RayJob at the rask merge. Implementation open:
-  todo_fable §9 #115a–c (execution-spec'd).
+  version pins, **model registry = Lance dataset `models$<model>` pointing at plain-path S3
+  artifact objects** (bytes first, one atomic registry commit second; time-travel = model
+  versioning; tags + validator rung = promotion; serving loads the plain path, no Lance reader),
+  dedicated `service-trainer` identity (features reader + models writer only), shared Jobs-REST
+  seam now → KubeRay RayJob at the rask merge. Implementation open: todo_fable §9 #115a–c
+  (execution-spec'd).
 
 ## 5 · Auth / authz (can and can't)
 

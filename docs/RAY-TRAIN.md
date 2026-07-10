@@ -68,24 +68,50 @@ run is terminal until a human (or future automation) POSTs `/train` again with a
   `downstream(silver$features)` = "which models did this bad batch contaminate" (model recall).
 - **Output**: `models$<model>` with the version facet + blob-aware schema facet on COMPLETE.
 
-## D4 — The model artifact lives in Lance: `models$<model>` (DECIDED — no external registry now)
+## D4 — The model REGISTRY is a Lance dataset; the artifact BYTES are plain S3 objects (DECIDED,
+## sharpened 2026-07-10 after design review)
 
-One Lance dataset per model in a `models` namespace, one row per artifact:
+The one-liner is NOT "the model is stuffed into a table". Split the registry *record* from the
+artifact *bytes*:
 
-| column | type | content |
-|---|---|---|
-| `artifact` | string | `weights` \| `config` \| `metrics` \| `card` |
-| `payload` | blob (v2, 2.2, stable row ids — the shared cascade-write helper) | the bytes (inline-or-pointer) |
-| `meta` | JSON | framework, metric values, epochs, the pinned feature `{dataset: version}` map |
+1. **Bytes first, plain paths**: the training job writes ordinary S3 objects serving tools can
+   load directly — `s3://<bucket>/models/<model>/<token>/{weights.safetensors,config.json,
+   metrics.json}` — keyed by the run token so a retried job overwrites its own paths
+   (idempotent).
+2. **Registry record second, one atomic commit**: `models$<model>` — one Lance dataset per model
+   in the `models` namespace, one row per artifact, `payload` = an **external blob pointer**
+   (`Blob.from_uri`) at those plain paths:
 
-Why Lance-native (and not MLflow/HF/registry infra): provenance stays uniform — the model IS a
-dataset, so the `WROTE` edge + Lance version give **model versioning via time-travel for free**,
-the CAS-validated commit path guarantees write safety, blob v2 carries GB-scale weights, and
-`/reconcile` + the quality gate apply unchanged. Model promotion (`staging`/`prod`) = catalog
-**tags** on the models dataset, gated by the `validator` rung on `namespace:models` — the same
-promotion story as silver→gold. An external registry later is the already-built external-pointer
-seam (the registered external-blob base allowlist, #92): a `weights` row can point at a registry
-URL without breaking the one-identity rule.
+   | column | type | content |
+   |---|---|---|
+   | `artifact` | string | `weights` \| `config` \| `metrics` \| `card` |
+   | `payload` | blob v2 (2.2, stable row ids — the shared write helper) | **pointer** to the plain-path object (inline ONLY for small models, ≲ a few MB, where self-containment is worth it) |
+   | `meta` | JSON | framework, metric values, epochs, the pinned feature `{dataset: version}` map |
+
+   Publishing a model version IS this commit — the CAS-validated Lance commit is the atomic
+   registration step. A crash between (1) and (2) leaves orphan artifact files but never a
+   half-registered model; the token-keyed paths make the retry converge.
+3. **Versioning + promotion for free**: model version N = Lance version N of the registry
+   dataset (time-travel = full model history); promotion (`staging`/`prod`) = catalog **tags**
+   on it, gated by the `validator` rung on `namespace:models` — the silver→gold promotion story,
+   reused.
+4. **Consumption is registry-optional**: serving reads the registry row → gets a plain path →
+   loads it directly (no Lance reader in the serving path). Training reads Lance feature tables
+   at pinned versions on the input side.
+5. **Governance closes the loop**: the `models/` prefix is added to the registered external-blob
+   **base allowlist** (#92 — built for exactly this), so pointers are governed; D5's rungs apply
+   unchanged. Stated cost: the artifact objects live OUTSIDE the dataset directory, so GC must
+   never collect them as orphans — the §9 blob-pointer-lifecycle item is now load-bearing for
+   models, and crashed-run orphan artifacts under `models/<model>/<token>/` need a (future)
+   janitor keyed on registry-referenced tokens.
+
+Why Lance-native for the registry layer (and not MLflow/HF infra): every registry decomposes
+into artifact bytes on object storage + a metadata/versioning layer; this stack already HAS the
+metadata layer (Lance manifests) wired into identity (dataset name == OpenFGA object == lineage
+node), atomic commits, and tags. A registry *service* would duplicate that layer with its own
+DB, its own auth outside OpenFGA, and a second identity axis the lineage graph must bridge. If
+rask later adopts a registry product, only the pointer targets change — the record, lineage, and
+authz shapes survive.
 
 ## D5 — AuthZ: a dedicated trainer identity + rung, NOT the medallion writer rung
 

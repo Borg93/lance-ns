@@ -129,6 +129,11 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
 
 - ✅ **OTLP-direct pipeline** (GreptimeDB + Vector + Perses), distributed traces across Dapr,
   `make e2e-obs` regression guard.
+- 🟡 **Lance-native IO metrics PRE-WIRED (2026-07-10)** — all five Lance-I/O lifespans call the guarded
+  `common.lance_metrics.instrument_lance_if_available()`; a no-op at pylance 8.0.0 (the NEWEST PyPI
+  release — verified; `lance.otel` is a 9.0 feature). Activation = switch the pin to `pylance[otel]`
+  at the 9.0 bump (pyproject marks the spot), then re-run `make e2e-cas` (data-plane major bump
+  re-opens the commit-safety verdict) + the real-Lance tripwire tests. 3 unit tests pin the guard.
 - 🟡 **Greptime/Perses are unauthenticated in-cluster** — acceptable on kind; prod hardening parked
   with §12.
 

@@ -77,6 +77,11 @@
 - **Secret manager:** OpenBao (Vault-API / KV-v2 compatible).
 - **Object store = S3-compatible** (MinIO is the default test backend; AWS S3, Ceph RGW, RustFS,
   GCS-via-interop). HCP was dropped — no non-standard backends.
+- **OpenDAL: evaluated and REJECTED (2026-07-10)** — interoperability lives at the PROTOCOL layer
+  (S3-compatible-only, above) + the standard surfaces (Namespace REST / OpenLineage / OpenFGA), not in a
+  unified client library: the hot path is pylance's internal `object_store` (not ours to swap), the CAS
+  gate validates THAT layer specifically, and a third S3 client stack would multiply signing/addressing
+  drift. Revisit triggers: a hard non-S3 backend requirement, or upstream Lance adopting OpenDAL.
 - **Data plane = vending-first, pluggable `CredentialVendor`:**
   - **`StsVendor`** (short-TTL, per-table-scoped `AssumeRole`) — the **recommended path**; works on
     any STS-capable S3 (MinIO, Ceph RGW, AWS).
@@ -134,6 +139,27 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
 - **Mergeability bar:** the lakehouse + Dapr core must stay **low-coupled** — services talk only over
   Dapr/NATS + HTTP, never a shared DB or each other's code; `common` is a flat shared lib. This (not infra)
   is the priority to validate before contributing.
+
+### Shipped this session (2026-07-10)
+- ✅ **§7a governed-union audit follow-ups** (4 majors + smalls; the s3:// positive control RESOLVED AS
+  IMPOSSIBLE — OpenFGA object ids hold exactly one `:`) and **compaction failure visibility** (FAIL
+  RunEvent per maintain:-errored dataset, deterministic flood-guard run id, `defer_index_remap`) — both
+  adversarially reviewed; live re-runs consolidated in todo_fable §7a RESIDUAL.
+- ✅ **Ray TRAIN vs Ray DATA design DECIDED** — `docs/RAY-TRAIN.md`: separate `/train` head + own topic,
+  submit-and-ack trainer, jobType=TRAINING lineage with per-feature version pins, **model registry = a
+  Lance dataset pointing at plain-path S3 artifacts** (bytes-then-commit = atomic registration; MLflow
+  optional in three documented shapes). Implementation = todo_fable §9 #115a–c (execution-spec'd).
+- ✅ **§4 reliability pair**: `/merge_insert` now ensures a BTREE on its merge key (list-first, idempotent,
+  best-effort, `use_index=false` opt-out) and `create_table` COMPENSATES a failed owner grant
+  (revoke + drop, fresh-id only — never ExistOk-kept or Overwrite-replaced tables).
+- ✅ **lance_docs currency audit + refresh** (upstream content-diffed; namespace was current, guide/format
+  refreshed; spec.yaml → 0.9.0, still 54 ops) → **describe-at-tag FIXED** (native silently ignores `tag`;
+  the catalog resolves it — also fixed the pre-existing /tags/version 500 on unknown tags).
+- ✅ **Lance-native IO metrics pre-wired** (`common/lance_metrics.py` in all five Lance-I/O lifespans;
+  pylance 8.0.0 is the NEWEST PyPI release — activation is the future `pylance[otel]` 9.0 bump).
+- 📌 Decision pins: OpenDAL evaluated-and-rejected (protocol-level interop via S3-compatible-only +
+  the standard REST/OpenLineage/OpenFGA surfaces; revisit on a hard non-S3 requirement or upstream Lance
+  adoption); AutoCleanupConfig available but NOT adopted (sweep stays the one GC owner).
 
 ### Shipped this session (2026-06-30)
 - ✅ Security/durability/authz hardening: RustFS PVC durability, external-endpoint hooks (P1),
@@ -273,7 +299,10 @@ After reading the Lance Namespace spec docs (`lance-namespace/docs`) + an advers
     microfrontends later as a portable component. *(Fast-follow: schema-diffing between Lance versions.)*
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
-14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows · **OTel** traces/metrics.
+14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows. *(The old "OTel
+    traces/metrics" third of this line SHIPPED: OTLP-direct → GreptimeDB + Vector + Perses,
+    `make e2e-obs` — see todo_confirm §11; Lance-NATIVE IO metrics are pre-wired and activate at
+    the pylance 9 bump.)*
 15. ✅ **Live medallion demo + SvelteKit UI** — `scripts/medallion_demo.py` *executes* the flow against
     the real stack (RustFS + lineage/AGE): writes bronze (blob `payload`), adds `embedding` then
     `caption` to silver (Lance write + add-column → v1, v2), aggregates gold with the embedded

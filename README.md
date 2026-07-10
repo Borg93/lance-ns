@@ -300,3 +300,6 @@ Quality gates: `uvx ruff check .` · `uvx ty check` · `make ci` (hermetic, via 
 > external sink), and a **real Ray compute seam** — `make ray-demo` runs a genuine Ray cluster in kind and
 > `ray job submit`s a distributed Lance write/index/evolve/compact against RustFS; the movers can submit
 > their stage transform as a Ray job on their Dapr trigger (`medallion.ray`) — [`docs/RAY.md`](docs/RAY.md).
+> The **Ray TRAIN workload class** (training jobs producing governed, versioned model artifacts — the
+> model registry is itself a Lance dataset pointing at plain-path S3 weights) is a decided design awaiting
+> implementation: [`docs/RAY-TRAIN.md`](docs/RAY-TRAIN.md).

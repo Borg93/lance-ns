@@ -109,14 +109,18 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   /runs folds) — unit + governed-union live.
 - 🟡 **`/insert` version attribution** — read-after-write (upstream response carries only a
   transaction_id); reconcile heals drift. Blocked upstream; documented.
-- ⛔ **Compaction FAILURES invisible to lineage/APIs** — spec'd (FAIL RunEvent per maintain:-errored
-  dataset, deterministic run_id flood guard, defer_index_remap). = Phase 2, next up.
+- 🟡 **Compaction FAILURES invisible to lineage/APIs — CODE-COMPLETE (2026-07-10)**: FAIL RunEvent per
+  maintain:-errored dataset (deterministic run_id flood guard, errorMessage facet, capped concurrent
+  fan-out, `defer_index_remap=True` + real-Lance interplay regression) — 10 unit tests green. Pending:
+  the live fault-injection proof on kind (ONE FAIL node across ≥2 cron ticks, lineageEmit=true) +
+  compaction image roll. Re-verify: `uv run pytest tests/unit/test_compaction_lineage.py
+  tests/unit/test_compaction_optimize.py` + the §7a RESIDUAL live check.
 
 ## 10 · Compaction / GC
 
 - ✅ **Sweep works**: real compact+GC per dataset, measured reclaim, `make e2e-compaction`; Ray
   distributed compaction in `make ray-demo`.
-- ⛔ **Failure visibility** — see §9 last row (same item).
+- 🟡 **Failure visibility** — see §9 last row (same item; code-complete 2026-07-10, live proof pending).
 
 ## 11 · Observability
 

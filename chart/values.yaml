@@ -491,8 +491,13 @@ compaction:
   bindingName: compaction-cron
   schedule: "@every 120s" # demo cadence (prod: e.g. "0 */30 * * * *")
   olderThanDays: 7 # version GC keeps this much history
-  # Emit a maintenance lineage event per materially-compacted dataset (shows GC in produc() next to writes).
-  # Off by default (opt-in, like the medallion toggles); on → compaction joins the pubsub scope + publishes.
+  # Emit a maintenance lineage event per materially-compacted dataset (shows GC in producers() next to
+  # writes) AND a FAIL event per maintain:-errored dataset (deterministic per-dataset run id — the flood
+  # guard). Off by default (opt-in, like the medallion toggles); on → compaction joins the pubsub scope +
+  # publishes. NOTE: the compaction FAILURE surface (§4 visibility) exists only when this is ON — left
+  # off, a persistently failing dataset is visible only in OTel spans + the cron response body. When ON,
+  # also consider services.lineage.runRetentionDays > 0: a recovered dataset's FAIL Run node otherwise
+  # persists in /runs indefinitely (the deterministic id means exactly one node per dataset).
   lineageEmit: false
 
 # --- Backups — a FALLBACK for the SELF-CONTAINED in-cluster path only. OFF by default. When you run the

@@ -66,7 +66,12 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
         return DatasetResult(uri=uri, error=f"open: {exc}")
     result = DatasetResult(uri=uri)
     try:
-        metrics: Any = ds.optimize.compact_files()
+        # defer_index_remap: with the Fragment Reuse Index the row-id remap is deferred, so compaction and
+        # index maintenance "no longer conflict" (lance_docs/guide.md:3013) — cuts the CommitConflict class
+        # of maintain: failures at the source. The optimize_indices() right below folds the compacted
+        # fragments into the indices; the interplay is pinned by
+        # tests/unit/test_compaction_optimize.py::test_compact_one_defer_index_remap_keeps_indices_working.
+        metrics: Any = ds.optimize.compact_files(defer_index_remap=True)
         result.fragments_removed = int(getattr(metrics, "fragments_removed", 0))
         result.fragments_added = int(getattr(metrics, "fragments_added", 0))
         # Keep secondary indices (vector ANN / scalar / FTS) covering the new fragments. WITHOUT this a
@@ -75,7 +80,12 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
         # via lance-ray; here single-process). Idempotent. Own guard so a no-index dataset can't fail it.
         try:
             ds.optimize.optimize_indices()
-            result.indices_optimized = len(ds.list_indices())
+            # Count USER indices only: defer_index_remap creates the ``__lance_frag_reuse`` SYSTEM index,
+            # which would otherwise report every ever-compacted dataset as "index maintained" forever —
+            # phantom signal in the reclaim metrics (review 2026-07-10, verified on pylance 8.0.0).
+            result.indices_optimized = len(
+                [ix for ix in ds.list_indices() if not ix["name"].startswith("__")]
+            )
         except Exception as exc:  # noqa: BLE001 — no indices / transient → don't fail the whole sweep
             log.warning("optimize_indices_skipped", extra={"uri": uri, "error": str(exc)})
         # error_if_tagged_old_versions=False: tagged versions are EXEMPT from GC (they survive until the tag

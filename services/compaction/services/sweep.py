@@ -6,6 +6,9 @@ aggregation (:func:`summarize`) stays unit-testable without S3.
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import random
 from datetime import timedelta
 from typing import Any
 
@@ -18,6 +21,17 @@ from compaction.core.config import CompactionSettings
 from compaction.core.lineage_emit import MaintenanceEmitter, table_id_from_uri
 from compaction.core.metrics import record_reclaimed, record_run
 from compaction.services.optimize import DatasetResult, compact_one, discover_dataset_uris
+
+log = logging.getLogger(__name__)
+
+#: Per-tick cap on FAIL-event publishes. Each publish is already bounded by the emitter's 5s timeout and
+#: the batch is gathered concurrently, but an unbounded fan-out over a bucket where EVERYTHING is failing
+#: could still push the cron handler past the 30s Dapr ack window — cap it, and LOG what was dropped
+#: (a silent cap would read as "covered everything"). The over-cap set is SHUFFLED before the cut: the
+#: discovery listing order is deterministic, so a fixed head-slice would re-drop the SAME datasets every
+#: tick and their FAIL would never emit — shuffling gets every failing dataset through within a few ticks,
+#: converging on its deterministic run id (review 2026-07-10).
+_MAX_FAIL_EMITS_PER_TICK = 25
 
 # Each compact+GC is blocking Lance/S3 work invisible to auto-instrumentation — a per-dataset INTERNAL
 # span lets a slow or failing compaction be localized in the trace instead of hiding in the cron handler.
@@ -77,23 +91,63 @@ def _did_material_work(result: DatasetResult) -> bool:
 async def emit_sweep_lineage(
     emitter: MaintenanceEmitter, results: list[DatasetResult], *, delimiter: str
 ) -> None:
-    """Emit a best-effort maintenance event per dataset the sweep MATERIALLY compacted/GC'd (#7b).
+    """Emit a best-effort maintenance event per swept dataset: COMPLETE for material work, FAIL for a
+    terminal per-dataset failure (#7b + the §4 failure-visibility item).
 
-    Skips datasets that errored (the pass didn't complete), that reclaimed nothing (a no-op tick), or whose
-    URI isn't the catalog's ``<uuid>_<table_id>`` layout (no id to key on). The parent namespace is derived
-    from the id via :func:`common.fga.parent_namespace_id` so the event lands on the SAME ``(:Dataset)`` the
-    catalog created and never clobbers its namespace. Awaited inline so each publish reaches the durable
-    Dapr/JetStream transport before the cron handler returns; ``emit_maintenance`` is itself best-effort, so
-    this loop never raises into the sweep.
+    Selection:
+
+    * ``maintain:``-errored → a **FAIL** event (compact/GC escaped Lance's own auto-retry — terminal for
+      this tick; before this, a persistently failing dataset surfaced only in OTel spans + a cron response
+      body nobody reads).
+    * ``open:``-errored → **no event** (unreadable / declared-only dir — transient non-dataset noise).
+    * no error + material work → the **COMPLETE** event (unchanged); no-op ticks skipped.
+    * URI not the catalog's ``<uuid>_<table_id>`` layout → skipped either way (no id to key on). This is
+      the DOCUMENTED blind spot for the medallion-nested datasets (``s3://<bucket>/medallion/<ns>`` has no
+      catalog id to reconstruct — a URI→id map is out of proportion here).
+
+    The parent namespace is derived via :func:`common.fga.parent_namespace_id` so events land on the SAME
+    ``(:Dataset)`` the catalog created. COMPLETE emits stay awaited inline (unchanged semantics); the FAIL
+    batch is gathered CONCURRENTLY (each publish already bounded by the emitter's 5s timeout) and capped
+    at ``_MAX_FAIL_EMITS_PER_TICK`` so a bucket of failing datasets can't push the cron handler past the
+    30s Dapr ack window. Every emit is best-effort internally, so nothing here raises into the sweep.
     """
+    # One pass derives (table_id, namespace) for BOTH branches — the cap below then counts actual emits
+    # (an unparseable maintain:-errored URI must not consume a cap slot while emitting nothing).
+    failed: list[tuple[str, str, str]] = []  # (table_id, namespace, error)
     for result in results:
-        if result.error is not None or not _did_material_work(result):
-            continue
         table_id = table_id_from_uri(result.uri)
         if table_id is None:
             continue
         namespace = fga.parent_namespace_id(table_id, delimiter=delimiter) or ""
+        if result.error is not None:
+            if result.error.startswith("maintain:"):
+                failed.append((table_id, namespace, result.error))
+            continue
+        if not _did_material_work(result):
+            continue
         await emitter.emit_maintenance(table_id=table_id, namespace=namespace)
+
+    if len(failed) > _MAX_FAIL_EMITS_PER_TICK:
+        log.warning(
+            "maintenance_fail_emits_capped",
+            extra={"failing": len(failed), "emitted": _MAX_FAIL_EMITS_PER_TICK},
+        )
+        random.shuffle(failed)  # fairness under a mass incident — see the cap constant's comment
+        failed = failed[:_MAX_FAIL_EMITS_PER_TICK]
+    # Raise-proof by construction, not by convention: the emitters swallow internally, but the guardrail
+    # ("a publish failure must never fail the sweep") must hold even for a mis-wired emitter — an
+    # AttributeError building a coro or a raise inside one is logged per dataset and never reaches the
+    # cron handler.
+    try:
+        outcomes = await asyncio.gather(
+            *(emitter.emit_maintenance_failed(table_id=t, namespace=ns, error=err) for t, ns, err in failed),
+            return_exceptions=True,
+        )
+        for (table_id, _ns, _err), outcome in zip(failed, outcomes, strict=True):
+            if isinstance(outcome, BaseException):
+                log.warning("maintenance_fail_emit_error", extra={"table": table_id, "error": str(outcome)})
+    except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a sweep
+        log.warning("maintenance_fail_emit_error", extra={"error": str(exc)})
 
 
 def summarize(results: list[DatasetResult]) -> dict[str, Any]:

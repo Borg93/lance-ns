@@ -2,9 +2,11 @@
 
 A maintenance sweep compacts small fragments + GCs old versions of each Lance dataset; when
 ``lineage_emit_enabled`` is on it records each *materially-compacted* dataset as an OpenLineage
-``RunEvent`` (output = the dataset, ``operation=compaction``) published to the **Dapr**
-``pubsub.jetstream`` component — the SAME pubsub component + topic the catalog publishes to and the
-lineage service subscribes to, so a compaction run shows up in ``producers()`` alongside the writes.
+``RunEvent`` (output = the dataset, ``operation=compaction``) — and each ``maintain:``-FAILED dataset
+as a ``FAIL`` event with the standard ``errorMessage`` facet (§4 failure visibility; deterministic
+per-dataset run id as the flood guard) — published to the **Dapr** ``pubsub.jetstream`` component —
+the SAME pubsub component + topic the catalog publishes to and the lineage service subscribes to, so
+compaction runs (and failures) show up in ``producers()`` alongside the writes.
 The sidecar owns retry/backoff + trace-propagation (no DLQ — see docs/RESILIENCE.md gap #2) as component
 config (no broker client here).
 
@@ -34,7 +36,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from common import dapr_publish
-from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
 from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
@@ -47,6 +49,78 @@ COMPACTION = "compaction"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required).
 _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/services/compaction/core/lineage_emit.py"
+
+#: Standard ``ErrorMessageRunFacet`` schema URL — the SAME one the medallion FAIL emitter stamps
+#: (``medallion/schemas/events.py``), so both failure surfaces are one spec version.
+_ERROR_FACET_SCHEMA_URL = (
+    "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json#/$defs/ErrorMessageRunFacet"
+)
+
+#: Exception strings embed full s3:// URIs and Rust backtraces — cap the facet message so a failing
+#: dataset can't turn every FAIL event into a multi-KB payload (events must stay small JSON).
+_ERROR_MESSAGE_MAX_CHARS = 1000
+
+
+def classify_retryable(error: str) -> bool | None:
+    """BEST-EFFORT retryable classification from the error text — there is no ground-truth signal.
+
+    pylance 8.0.0 raises no typed conflict exception (``lance.commit.CommitConflictError`` exists but is
+    never raised), and Rebasable conflicts are auto-retried inside the commit layer so they never reach
+    Python. Per the three-way taxonomy (``lance_docs/file_format.md`` ~5261) the string heuristic maps
+    Retryable (a re-run may succeed) vs Incompatible (it won't); ``None`` when the text says neither.
+    NEGATED forms are checked FIRST — real object_store/Lance messages say things like "not retryable"
+    or "retry limit exceeded", and a bare substring match would stamp exactly those terminal errors
+    ``retryable=true`` (review 2026-07-10).
+    """
+    lowered = error.lower()
+    if "incompatible" in lowered:
+        return False
+    if (
+        "non-retryable" in lowered
+        or "not retryable" in lowered
+        or "retries exhausted" in lowered
+        or "retry limit" in lowered
+    ):
+        return False
+    if "conflict" in lowered or "retry" in lowered:
+        return True
+    return None
+
+
+def build_maintenance_fail_event(
+    *, table_id: str, namespace: str, job_namespace: str, run_id: str, event_time: str, error: str
+) -> dict[str, Any]:
+    """The FAIL twin of :func:`build_maintenance_event` — a per-dataset maintenance FAILURE (§4).
+
+    Same job identity and the same BARE output (name only — the lineage repo then makes the ``WROTE``
+    edge so ``producers()``/``/runs`` surface the failing maintenance next to the writes) but
+    ``eventType=FAIL`` and the standard ``errorMessage`` run facet carrying why. NO version / schema /
+    statistics facets and no inputs — a failed maintenance pass must never fabricate lineage. The
+    best-effort ``retryable`` classification rides the facet as a custom extra field (the lineage model
+    parses facets extra-tolerantly) only when the heuristic is confident.
+    """
+    error_facet: dict[str, Any] = {
+        "_producer": _PRODUCER,
+        "_schemaURL": _ERROR_FACET_SCHEMA_URL,
+        "message": error[:_ERROR_MESSAGE_MAX_CHARS],
+        "programmingLanguage": "PYTHON",
+    }
+    retryable = classify_retryable(error)
+    if retryable is not None:
+        error_facet["retryable"] = retryable
+    # Derive from the COMPLETE builder rather than duplicating the envelope: the two events MUST share the
+    # job identity + bare-output key or a dataset's failures and successes split across different Job /
+    # Dataset nodes in the graph — building on one core makes that drift impossible.
+    event = build_maintenance_event(
+        table_id=table_id,
+        namespace=namespace,
+        job_namespace=job_namespace,
+        run_id=run_id,
+        event_time=event_time,
+    )
+    event["eventType"] = "FAIL"
+    event["run"]["facets"]["errorMessage"] = error_facet
+    return event
 
 
 def table_id_from_uri(uri: str) -> str | None:
@@ -89,15 +163,22 @@ def build_maintenance_event(
 
 @runtime_checkable
 class MaintenanceEmitter(Protocol):
-    """Emits a compaction maintenance event to the lineage service (best-effort)."""
+    """Emits compaction maintenance events (success + failure) to the lineage service (best-effort)."""
 
     async def emit_maintenance(self, *, table_id: str, namespace: str) -> None: ...
+
+    async def emit_maintenance_failed(self, *, table_id: str, namespace: str, error: str) -> None: ...
 
 
 class NoopEmitter:
     """The emitter used when lineage emission is disabled (or unwired) — does nothing."""
 
     async def emit_maintenance(self, *, table_id: str, namespace: str) -> None:  # noqa: ARG002
+        return None
+
+    async def emit_maintenance_failed(  # noqa: ARG002
+        self, *, table_id: str, namespace: str, error: str
+    ) -> None:
         return None
 
 
@@ -120,6 +201,8 @@ class DaprMaintenanceEmitter:
         self._timeout_seconds = timeout_seconds
 
     async def emit_maintenance(self, *, table_id: str, namespace: str) -> None:
+        # uuid4 ON PURPOSE: each materially-compacting tick is a distinct successful run (§4 decided —
+        # do NOT make COMPLETE deterministic; only the FAIL path below needs the flood guard).
         event = build_maintenance_event(
             table_id=table_id,
             namespace=namespace,
@@ -127,6 +210,29 @@ class DaprMaintenanceEmitter:
             run_id=str(uuid.uuid4()),
             event_time=datetime.now(UTC).isoformat(),
         )
+        await self._publish(event, table_id)
+
+    async def emit_maintenance_failed(self, *, table_id: str, namespace: str, error: str) -> None:
+        # DETERMINISTIC run id — the flood guard: the cron re-sweeps every ~2 min, so a persistently
+        # failing dataset would otherwise mint a fresh never-pruned (:Run) node per tick. One id per
+        # dataset → every tick MERGEs onto ONE node in AGE, and the /events partial-unique
+        # (run_id, event_type) index dedups the redelivered FAIL rows. Accepted consequences (§4 +
+        # 2026-07-10 review): (a) after recovery the FAIL node stays until the Run-retention prune
+        # (LINEAGE_RUN_RETENTION_DAYS — enable it alongside lineageEmit) sweeps it; (b) across DISTINCT
+        # failure episodes the split is: the (:Run) node is last-wins (/runs shows the LATEST error),
+        # while /events keeps the FIRST FAIL row (its keep-first terminal contract) — /runs is the live
+        # view, /events the first-observation log.
+        event = build_maintenance_fail_event(
+            table_id=table_id,
+            namespace=namespace,
+            job_namespace=self._job_namespace,
+            run_id=run_id_for(f"compaction-fail-{table_id}"),
+            event_time=datetime.now(UTC).isoformat(),
+            error=error,
+        )
+        await self._publish(event, table_id)
+
+    async def _publish(self, event: dict[str, Any], table_id: str) -> None:
         try:
             await dapr_publish.publish_event(  # bounded so a hung sidecar can't stall the sweep
                 self._client,

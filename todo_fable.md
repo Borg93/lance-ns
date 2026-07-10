@@ -284,9 +284,38 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   exception from the ensure path may reach the HTTP response · build only AFTER the merge commits · BTREE
   only, this endpoint only (no auto-index creep into other write paths).
   `services/catalog/api/v1/endpoints/data.py:175`
-- ⛔ **Compaction failures are invisible to every API** (added 2026-07-05; execution-spec'd same day after an
-  Opus fresh-implementer dry-run). `compact_one` never raises (error → string) and `emit_sweep_lineage` SKIPS
-  errored datasets, so a persistently failing dataset surfaces only in OTel spans + a cron response body
+- 🟡 **Compaction failures are invisible to every API — CODE-COMPLETE 2026-07-10, live fault-injection
+  PENDING** (added 2026-07-05; execution-spec'd same day after an Opus fresh-implementer dry-run).
+  **2026-07-10 status vs the DONE WHEN checklist:** implemented as spec'd, then hardened by a 4-angle
+  adversarial review of the diff — `build_maintenance_fail_event` (derives from the COMPLETE builder so
+  the job/output key can't drift) + `emit_maintenance_failed` (deterministic
+  `run_id_for("compaction-fail-<id>")` flood guard; COMPLETE keeps uuid4 semantics — its two touched
+  tests were EXTENDED, assertions unweakened, and the unprefixed-error branch got explicit coverage
+  back), maintain-only selection (open: → nothing AND bare "boom" → nothing, both test-pinned),
+  errorMessage facet (message capped 1000 chars + programmingLanguage + best-effort `retryable` custom
+  field with NEGATION handling — "not retryable"/"retries exhausted" → False, review caught the
+  inversion), FAIL batch derived-then-capped (cap counts ACTUAL emits — unparseable URIs can't starve
+  slots), shuffled before the cut (a deterministic head-slice would re-drop the same datasets every
+  tick), gathered concurrently with `return_exceptions` + an outer guard (raise-proof even for a
+  mis-wired emitter), `compact_files(defer_index_remap=True)` + real-Lance interplay regression
+  (`tests/unit/test_compaction_optimize.py` drives the shipped `compact_one`; `indices_optimized` now
+  counts USER indices only — the review found the new `__lance_frag_reuse` SYSTEM index inflating the
+  metric, verified on pylance 8.0.0), composed boundedness test (30 failures through the REAL emitter
+  vs a hung sidecar completes in ~one publish timeout), chart `lineageEmit` comment documents
+  failure-surface-requires-on + the runRetentionDays pairing; medallion-nested blind spot documented in
+  the emit docstring. **Known limitations (review, accepted + documented in code):** across DISTINCT
+  failure episodes /events keeps the FIRST FAIL row while /runs shows the LATEST error (the feed's
+  keep-first contract × the deterministic id — /runs is the live view); with retention off (default) a
+  recovered dataset's FAIL node persists in /runs; under LINEAGE_FGA_ENABLED a FAIL for a DROPPED table
+  whose dir lingers is hidden from governed readers (tuples revoked on drop — the ungoverned
+  reconcile/ops readers still see it); namespace derivation assumes catalog/compaction delimiter
+  agreement (both default `$`; nothing enforces it — pre-existing, shared with the COMPLETE event).
+  **NOT done (needs the cluster): the DONE WHEN live check** — fault-inject a dataset (delete a data
+  file under its manifest), assert exactly ONE FAIL Run node across ≥2 cron ticks via /runs + /events
+  with lineageEmit=true; also rebuild+roll the compaction image. Listed in the §7a RESIDUAL. Original
+  spec below (kept as the contract):
+  `compact_one` never raises (error → string) and `emit_sweep_lineage` used to SKIP
+  errored datasets, so a persistently failing dataset surfaced only in OTel spans + a cron response body
   nobody reads. Emit an OpenLineage FAIL RunEvent per errored dataset. Scope + mechanics (all decided — do
   not relitigate):
   - EMIT ONLY for `maintain:`-prefixed errors (escaped compact_files/cleanup = post-auto-retry terminal);
@@ -438,6 +467,9 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 > - ⛔ **RESIDUAL — the done-done pass:** on the kind union stack run `make e2e-governed-union` and
 >   `make e2e-lineage` green with these changes, and rebuild+roll the shared catalog image so the
 >   `RunEvent.progress` poison-guard actually ships. Until then nothing below counts as §0-done.
+>   **Added 2026-07-10 (Phase 2):** with `compaction.lineageEmit=true` + a rolled compaction image,
+>   fault-inject a dataset (delete one data file under its manifest) and assert exactly ONE FAIL Run
+>   node across ≥2 cron ticks via /runs + /events — the §4 compaction-failure item's live DONE WHEN.
 
 - 🟡 *(code-complete, live run pending)* **(MAJOR) writer-gate deny never proven + 12s grace window too short vs 30s
   redelivery** — DONE as spec'd: test 2 now has sub-phase A revoking

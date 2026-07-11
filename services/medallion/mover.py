@@ -22,10 +22,11 @@ from common.dapr_auth import assert_app_token_configured
 from common.lance_metrics import instrument_lance_if_available
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
+from fastapi.concurrency import run_in_threadpool
 
 from medallion.api.events import register_stage_route
 from medallion.api.health import router as health_router
-from medallion.core.config import get_settings
+from medallion.core.config import apply_dapr_secrets, get_settings
 
 _settings = get_settings()
 
@@ -37,6 +38,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.startup_complete = False
     app.state.shutting_down = False
     assert_app_token_configured(dapr_enabled=_settings.dapr_enabled)
+    # Consume the S3 secret from the Dapr secret store when configured (Batch 7 — strict sole source,
+    # fails closed; no-op in dev). Threadpool: the fetch blocks + retries while the store seeds.
+    await run_in_threadpool(apply_dapr_secrets, _settings)
     instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     app.state.dapr = DaprClient()  # local sidecar; persists publishes to NATS JetStream
     app.state.fga = None

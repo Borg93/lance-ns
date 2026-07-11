@@ -108,6 +108,15 @@ class MedallionSettings(BaseSettings):
     s3_access_key_id: str = Field(default="", alias="MEDALLION_S3_ACCESS_KEY_ID")
     # SecretStr so it's redacted in repr/model_dump (parity with the catalog) — .get_secret_value() to read.
     s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="MEDALLION_S3_SECRET_ACCESS_KEY")
+    # --- Secret consumption from the Dapr secret store (OpenBao) — symmetric with catalog + lineage +
+    # compaction (Batch 7, 2026-07-11: the movers/producer were the LAST real S3 consumers still shipping
+    # the key in plaintext pod env). When on, the S3 secret comes from the store at boot as the STRICT
+    # sole source (the chart omits the plaintext env entirely); a store miss FAILS CLOSED — an env
+    # fallback would contradict "OpenBao is the sole source" (the audit's original finding).
+    secrets_from_dapr: bool = Field(default=False, alias="MEDALLION_SECRETS_FROM_DAPR")
+    dapr_secret_store: str = Field(default="lance-secrets", alias="MEDALLION_DAPR_SECRET_STORE")
+    dapr_secret_key: str = Field(default="lance", alias="MEDALLION_DAPR_SECRET_KEY")
+    dapr_secret_s3_field: str = Field(default="rustfs-secret-key", alias="MEDALLION_DAPR_SECRET_S3_FIELD")
     s3_region: str = Field(default="us-east-1", alias="MEDALLION_S3_REGION")
 
     def storage_options(self) -> dict[str, str]:
@@ -201,3 +210,22 @@ class MedallionSettings(BaseSettings):
 def get_settings() -> MedallionSettings:
     """The process-wide medallion settings (read once from env)."""
     return MedallionSettings()
+
+
+def apply_dapr_secrets(settings: MedallionSettings) -> None:
+    """Consume the S3 secret from the Dapr secret store (OpenBao) and set it on ``settings`` in place.
+
+    When ``secrets_from_dapr`` is on the store is the STRICT sole source: a store miss FAILS CLOSED
+    (raises), never falling back to a plaintext env value — the chart ships none, and silently using
+    one would contradict 'OpenBao is the sole source'. No-op (and no fetch) when off. Symmetric with
+    ``compaction.core.config.apply_dapr_secrets`` / lineage / the catalog lifespan. SYNC by design
+    (the fetch retries while the store seeds) — lifespans call it via ``run_in_threadpool``.
+    """
+    if not settings.secrets_from_dapr:
+        return
+    from common.secrets import fetch_required_secrets
+
+    bundle = fetch_required_secrets(
+        settings.dapr_secret_store, settings.dapr_secret_key, require=settings.dapr_secret_s3_field
+    )
+    settings.s3_secret_access_key = SecretStr(bundle[settings.dapr_secret_s3_field])

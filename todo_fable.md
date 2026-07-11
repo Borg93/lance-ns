@@ -629,6 +629,17 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   failure) — all three tiers verified green locally before landing; (b) `FACET_MAX_FIELDS=512`
 >   in the shared schema_facet builder (spec-true truncation + warning; full schema stays
 >   readable from storage). Tests + assertions on the flipped §7/§9 lines. Gate: 519 green.
+>   PROVEN IN CI same day (run 29160855426 fully green) after two CI-loop catches: the local ty
+>   gate had been scoped narrower than CI's unscoped `uvx ty check` (now gate CI-exact), and the
+>   live-AGE lineage-e2e caught the stale-redelivery reseed the unit fakes couldn't (fixed by
+>   recency-gating the seeding — see the Batch 5 flips).
+>
+>   **BATCH 7 (added + ✅ DONE 2026-07-11) — medallion secrets via the Dapr store.** The service
+>   half of a latent chart gap: store-on deployments omitted medallion's plaintext S3 env but
+>   nothing consumed the store (credential-less movers). `MEDALLION_SECRETS_FROM_DAPR` +
+>   `apply_dapr_secrets` in both lifespans (strict sole source, fails closed, symmetric with the
+>   other three services) + chart else-branches; skipVerify sub-item verified already-shipped.
+>   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
 >   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
 >   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
@@ -1059,10 +1070,23 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);
   rask has no tenancy/operator of its own — this stays ours. FGA-as-registry + declarative seeding is the
   interim.
-- ⛔ **P1 Externalization hardening** (ties to §1/§2): Vault skipVerify conditional, observability-s3 behind
-  ESO, NATS external hooks + stream replicas, Dex→Keycloak swap = issuer/audience config only (verify no
-  dex-specific claims parsing), OpenFGA stays in-cluster reusing rask’s subchart (we are its first consumer —
-  flip datastore memory→postgres when adopted).
+- 🟡 **P1 Externalization hardening** (ties to §1/§2) — PARTIALLY DONE 2026-07-11 (Batch 7):
+  ✅ Vault skipVerify conditional (verified already shipped: `dapr-component.yaml` ternaries
+  skipVerify on the vault addr scheme — https verifies, plain-http dev OpenBao skips; was
+  render-verified both ways when it landed); ✅ **medallion secret consumption** — the
+  movers/producer were the LAST real S3 consumers shipping the key in plaintext pod env, and WORSE:
+  the chart already omitted that env when `secretsViaDapr` was on but nothing told the service to
+  consume the store, so a store-on deployment left medallion CREDENTIAL-LESS (latent breakage,
+  found in Batch 7). Now: `MEDALLION_SECRETS_FROM_DAPR` + `apply_dapr_secrets` (strict sole
+  source, fails closed — symmetric with catalog/lineage/compaction), called via threadpool in
+  BOTH lifespans; chart else-branches set the flag (CI helm-template is the render gate). TESTS
+  (tests/unit/test_medallion_secrets.py): `test_flag_off_is_a_no_op_and_never_fetches` (default
+  boot byte-identical; fetch monkeypatched to AssertionError proves no store call),
+  `test_flag_on_store_is_the_sole_source` (store value replaces env residue; repr never leaks the
+  secret), `test_flag_on_store_miss_fails_closed` (REAL fetch_required_secrets path → RuntimeError
+  'failing closed'; settings untouched on failure). REMAINING ⛔: observability-s3 behind ESO,
+  NATS external hooks + stream replicas, Dex→Keycloak swap verification, OpenFGA
+  datastore memory→postgres at adoption.
 - ⛔ **P2 Lineage at rask scale** — `parent` facet ingestion, event-volume posture (AGE indexes + pruning from
   §4, /events cursor), `dataQualityMetrics` (deferred, costly on Lance).
 - 📌 **lance_docs mirror currency audit + refresh (2026-07-10, user request)** — cloned BOTH upstream

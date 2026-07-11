@@ -85,6 +85,11 @@ spec:
             - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" .) }}
             - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
+            {{- else }}
+            # A secret store is configured → the S3 secret comes ONLY from it at boot; not in pod env
+            # (Batch 7 closes the gap: the env was already omitted here but nothing told the service to
+            # consume the store — a store-on deployment left medallion credential-less). Fails closed.
+            - { name: MEDALLION_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
@@ -183,6 +188,9 @@ spec:
             - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ $root.Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" $root) }}
             - { name: MEDALLION_S3_SECRET_ACCESS_KEY, value: {{ $root.Values.rustfs.secretKey | quote }} }
+            {{- else }}
+            # Store-on → sole source at boot (see the producer block above). Fails closed.
+            - { name: MEDALLION_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}
             {{- if $root.Values.medallion.ray }}
             # Event-driven real-Ray: the mover submits its stage transform as a `ray job submit` to the

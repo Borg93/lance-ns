@@ -510,6 +510,62 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   land + the documented version gap; also probe whether `branch` is honored on the index build —
 >   unverifiable at pylance 8.0.0 locally), and a rolled catalog image so the merge-index hook + the
 >   create-compensation actually ship.
+>
+> - 📋 **PICK-UP HERE — NEXT CODE BATCHES, execution-spec'd 2026-07-11** (chosen because every 🟡
+>   above waits on the user's kind session; these four need NO cluster. Ordered by risk: docs first,
+>   deletion-adjacent last. Each batch = its own commit + the full §0 gate + adversarial review.)
+>
+>   **BATCH 1 — stale-docs sweep (the §8 ⛔ list, 12 items).**
+>   ✅ DONE WHEN: every ⛔ line in the §8 stale-docs list is fixed in its named file · each rewrite is
+>   verified against CODE first (count the real vending shapes; re-measure the COVERAGE tally from a
+>   live `--co -q` collect; `grep -r deadLetterTopic` before touching DLQ wording) — never rewritten
+>   from the todo's own summary · the RASK-INTEGRATION seam contract UNAMBIGUOUSLY forbids the future
+>   Ray producer job publishing `medallion.raw` (the post-B2 double-fire is the merge's
+>   highest-stakes doc bug) · every fixed line flips ✅ (dated) in §8.
+>   🚧 GUARDRAILS: wording-only — NO behavior change rides along; if verifying a doc claim exposes a
+>   real code bug, FILE it as a new todo item, don't fix it in this batch · LINEAGE.md JSONB item =
+>   reword to demo-only (do NOT implement mover embedding here) · DLQ items = fix the wording (do NOT
+>   configure a deadLetterTopic here).
+>
+>   **BATCH 2 — docs/DATA-CONTRACT.md (§9 P1, currently exists only in chat).**
+>   ✅ DONE WHEN: the doc covers (a) the bus contract — trigger payloads + "facet `_schemaURL`s ARE
+>   the contract" + the claim-check rule (pointers never data, NATS ~1MB); (b) the storage contract —
+>   "the Lance manifest is the schema, the version is the handshake" (self-describing, immutable
+>   versions, no schema registry); (c) an enforcement-points table — quality gate (promotion-time),
+>   FGA (access-time), reconcile (drift-time); (d) blob inline-vs-pointer read semantics; (e) the
+>   model-registry addendum (D4: the registry commit IS the registration; artifact base stable per
+>   model); (f) the known gap — breaking-change detection, pointing at the §9 schema-declaration
+>   item · linked from README + ARCHITECTURE · the §9 P1 line flips ✅.
+>   🚧 GUARDRAILS: document REALITY only — every claim traceable to shipped code/tests (cite files);
+>   the P2 schema-declaration MECHANISM stays un-built; no new invariants invented mid-doc.
+>
+>   **BATCH 3 — read-path perf trio (§2 ⛔s: /events over-fetch · demo-peek re-reads · frontend
+>   poll fan-out).**
+>   ✅ DONE WHEN: (a) `/events` takes keyset pagination (`?after=<cursor>&limit=`, server cap ≤500,
+>   NEVER OFFSET) + a column projection instead of full-JSONB rows, returns the next cursor, and the
+>   governance filter provably applies BEFORE the slice (unit-pinned); frontend store threads the
+>   cursor · (b) demo peek does ZERO S3 dataset-opens on a poll tick whose latest version is
+>   unchanged (per-dataset version-keyed cache; immutable versions make entries permanent) + a
+>   last-K-versions cap — a counting-fake unit test pins the open-count drop · (c) frontend `poll()`
+>   batches its per-dataset calls (Promise.all), guards overlap (no tick starts while one runs), and
+>   aborts on timeout — no unbounded stacking.
+>   🚧 GUARDRAILS: existing response SHAPES unchanged for current callers (new params optional;
+>   defaults = today's behavior) · governance filtering must never move AFTER a cap/slice (pagination
+>   must not leak) · demo endpoints STAY demo-only (adding auth is the separate tracked posture item)
+>   · no new frontend dependencies.
+>
+>   **BATCH 4 — orphan-artifact janitor (§9 blob-pointer lifecycle, scoped to the model lane the
+>   #115b design made load-bearing).**
+>   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
+>   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
+>   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
+>   unit tests on local Lance + tmp dirs pin: a REFERENCED token is never deleted (even past TTL);
+>   unreferenced-but-young is kept; unreferenced+old deletes ONLY with the flag; registry-dataset
+>   directories are never touched · the invariant test ("referenced ⇒ never collected") exists and
+>   passes BEFORE any delete code is written.
+>   🚧 GUARDRAILS: fail-safe direction is KEEP — any listing/read error skips that token with a log,
+>   never deletes · never enumerate or touch paths outside the artifact base · the deployed default
+>   stays dry-run until a live kind pass proves the report against a real crashed-run orphan.
 
 - 🟡 *(code-complete, live run pending)* **(MAJOR) writer-gate deny never proven + 12s grace window too short vs 30s
   redelivery** — DONE as spec'd: test 2 now has sub-phase A revoking

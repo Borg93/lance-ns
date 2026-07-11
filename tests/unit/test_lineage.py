@@ -699,3 +699,123 @@ def test_list_runs_folds_progress_onto_the_status_board(monkeypatch: pytest.Monk
     assert (runs[0].progress_done, runs[0].progress_total) == (3, 10)
     assert runs[0].state == "RUNNING"
     assert runs[0].operation is None  # "" maps back to None (no lance-facet operation)
+
+
+# --------------------------------------------------------------------------- #
+# Batch 5 (2026-07-11): terminal lifecycle stamp + column-inventory GC
+# --------------------------------------------------------------------------- #
+
+
+def test_dropped_at_derives_from_the_latest_successful_run(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ASSERTS: dropped_at() is READ-TIME DERIVATION over run history (never a stored flag — a
+    # stored flag was last-delivery-wins under redelivery): latest successful op drop_table → the
+    # drop's event time; latest successful op create_table (the recreate) → None; no runs → None.
+    # Also pins the load-bearing filter: FAILed runs keep WROTE edges, so the query MUST restrict
+    # to event_type COMPLETE or a failed drop would count.
+    import lineage.services.repository as repo_mod
+
+    seen_queries: list[str] = []
+    canned: list[list[object]] = []
+
+    async def _fake_fetch(_pool: object, _graph: str, query: str, params: dict, *, columns: int = 1):
+        seen_queries.append(query)
+        assert params == {"name": "table:doomed"} and columns == 2
+        return canned
+
+    monkeypatch.setattr(repo_mod, "fetch", _fake_fetch)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+
+    canned[:] = [["drop_table", "2026-07-11T09:00:00Z"]]
+    assert asyncio.run(repo.dropped_at("table:doomed")) == "2026-07-11T09:00:00Z"
+
+    canned[:] = [["create_table", "2026-07-11T10:00:00Z"]]  # the recreate outranks the drop
+    assert asyncio.run(repo.dropped_at("table:doomed")) is None
+
+    canned[:] = []
+    assert asyncio.run(repo.dropped_at("table:doomed")) is None
+
+    assert all("r.event_type = 'COMPLETE'" in q for q in seen_queries)  # failed drops assert nothing
+
+
+def _capture_with_graph_version(
+    monkeypatch: pytest.MonkeyPatch, event: dict[str, Any], graph_version: str | None
+) -> list[tuple[str, dict]]:
+    """Ingest one event; the fake answers the latest-WROTE-version probe with ``graph_version``."""
+    import lineage.services.repository as repo_mod
+
+    calls: list[tuple[str, dict]] = []
+
+    async def _capture(_conn: object, _graph: str, query: str, params: dict) -> list[list[object]]:
+        calls.append((query, params))
+        if "ORDER BY r.event_time DESC" in query and "w.version" in query:
+            return [[graph_version]] if graph_version is not None else []
+        return []
+
+    monkeypatch.setattr(repo_mod, "run_cypher", _capture)
+    repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
+    asyncio.run(repo.ingest_event(RunEvent.model_validate(event)))
+    return calls
+
+
+def _overwrite_event(version: str) -> dict[str, Any]:
+    return {
+        "eventType": "COMPLETE",
+        "eventTime": "2026-07-11T09:00:00Z",
+        "run": {"runId": "o1", "facets": {"lance": {"operation": "create_table"}}},
+        "job": {"namespace": "lance-catalog", "name": "create_table"},
+        "outputs": [
+            {
+                "namespace": "silver",
+                "name": "silver$features",
+                "facets": {
+                    "version": {"datasetVersion": version},
+                    "schema": {"fields": [{"name": "x", "type": "int64"}, {"name": "y", "type": "double"}]},
+                    "columnLineage": {
+                        "fields": {
+                            "z": {
+                                "inputFields": [
+                                    {"namespace": "bronze", "name": "bronze$events", "field": "id"}
+                                ]
+                            }
+                        }
+                    },
+                },
+            }
+        ],
+    }
+
+
+def test_ingest_schema_facet_prunes_stale_column_inventory(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ASSERTS: an output at version 5 (>= the graph's latest, 4) carrying schema {x,y} + a
+    # columnLineage out_field z issues the HAS_COLUMN unlink with fields == [x,y,z] (the COMPLETE
+    # current set) — an overwrite's replaced columns ({a,b}->{x,y}) stop being listed as CURRENT.
+    calls = _capture_with_graph_version(monkeypatch, _overwrite_event("5"), graph_version="4")
+    unlinks = [p for q, p in calls if "DELETE r" in q and "HAS_COLUMN" in q]
+    assert unlinks == [{"ds": "silver$features", "fields": ["x", "y", "z"]}]
+
+
+def test_ingest_stale_redelivery_never_prunes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ASSERTS: the recency gate — a redelivered OLD event (version 2 < the graph's latest, 9) must
+    # NOT unlink the live columns (it degrades to the pre-existing grow-only behavior); and a
+    # version-less schema event never prunes either (ordering unknowable).
+    calls = _capture_with_graph_version(monkeypatch, _overwrite_event("2"), graph_version="9")
+    assert not any("DELETE r" in q for q, _ in calls)
+
+    event = _overwrite_event("2")
+    del event["outputs"][0]["facets"]["version"]
+    calls = _capture_with_graph_version(monkeypatch, event, graph_version=None)
+    assert not any("DELETE r" in q for q, _ in calls)
+
+
+def test_ingest_without_schema_facet_never_prunes(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ASSERTS: no schema facet = PARTIAL knowledge of the column set — pruning is skipped entirely
+    # (a facet-less mover event must never wipe the inventory a create built).
+    event = {
+        "eventType": "COMPLETE",
+        "eventTime": "2026-07-11T09:00:00Z",
+        "run": {"runId": "m1", "facets": {"lance": {"operation": "ingest_events"}}},
+        "job": {"namespace": "lance-medallion", "name": "ingest_events"},
+        "outputs": [{"namespace": "bronze", "name": "bronze$events"}],
+    }
+    calls = _capture_with_graph_version(monkeypatch, event, graph_version="1")
+    assert not any("DELETE r" in q for q, _ in calls)

@@ -64,11 +64,16 @@ class _FakeRepo:
     """Records back-fills; returns canned graph versions + dataSource URIs (no DB)."""
 
     def __init__(
-        self, datasets: list[str], graph_versions: dict[str, int], uris: dict[str, str | None]
+        self,
+        datasets: list[str],
+        graph_versions: dict[str, int],
+        uris: dict[str, str | None],
+        dropped: dict[str, str] | None = None,
     ) -> None:
         self._datasets = [DatasetSummary(name=n) for n in datasets]
         self._graph = graph_versions
         self._uris = uris
+        self._dropped = dropped or {}
         self.backfilled: list[tuple[str, int]] = []
         self.backfilled_schemas: dict[str, object] = {}
 
@@ -79,6 +84,9 @@ class _FakeRepo:
 
     async def source_uri(self, name: str) -> str | None:
         return self._uris.get(name)
+
+    async def dropped_at(self, name: str) -> str | None:
+        return self._dropped.get(name)
 
     async def latest_write_version(self, name: str) -> int | None:
         return self._graph.get(name)
@@ -120,6 +128,30 @@ def test_reconcile_all_backfills_only_lost_write_states() -> None:
     assert by_status["insync"] == ReconcileState.IN_SYNC
     assert by_status["graph_ahead"] == ReconcileState.GRAPH_AHEAD  # graph newer than disk — not a lost write
     assert "no_uri" not in by_status  # skipped: no dataSource URI to read
+
+
+def test_reconcile_all_skips_dropped_datasets() -> None:
+    # Terminal lifecycle (2026-07-11): a drop_table-stamped dataset is SKIPPED entirely — its
+    # absence on storage is expected, so it must not appear in the report (where it would be
+    # WARNed as missing_on_storage on every tick) and its storage must not even be read.
+    read_uris: list[str] = []
+
+    async def read(uri: str) -> int | None:
+        read_uris.append(uri)
+        return None
+
+    repo = _FakeRepo(
+        datasets=["alive", "dropped_ds"],
+        graph_versions={"alive": 1, "dropped_ds": 3},
+        uris={"alive": "s3://b/alive", "dropped_ds": "s3://b/dropped_ds"},
+        dropped={"dropped_ds": "2026-07-11T00:00:00Z"},
+    )
+
+    statuses = asyncio.run(reconcile_all(cast(Any, repo), read, backfill=True))
+
+    assert [s.dataset for s in statuses] == ["alive"]  # the dropped dataset is not in the report
+    assert read_uris == ["s3://b/alive"]  # …and its storage was never touched
+    assert repo.backfilled == []
 
 
 def test_reconcile_all_read_only_reports_but_writes_nothing() -> None:

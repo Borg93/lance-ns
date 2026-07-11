@@ -73,6 +73,7 @@ class _ReconcileRepo(Protocol):
         self, namespace: str | None = ..., tag: str | None = ...
     ) -> list[DatasetSummary]: ...
     async def source_uri(self, name: str) -> str | None: ...
+    async def dropped_at(self, name: str) -> str | None: ...
     async def latest_write_version(self, name: str) -> int | None: ...
     async def backfill_write(self, name: str, version: int, schema: SchemaFields | None = None) -> None: ...
 
@@ -109,6 +110,11 @@ async def reconcile_all(
     for summary in await repository.list_datasets():
         uri = await repository.source_uri(summary.name)
         if uri is None:
+            continue
+        if await repository.dropped_at(summary.name):
+            # Deliberately drop_table'd (terminal lifecycle stamp, 2026-07-11): absence on storage
+            # is the EXPECTED state — sweeping it would WARN missing_on_storage forever on every
+            # tick. A recreate clears the stamp on ingest and re-enters the sweep automatically.
             continue
         graph_version = await repository.latest_write_version(summary.name)
         storage_version = await read_version(uri)

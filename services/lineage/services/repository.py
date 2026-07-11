@@ -234,6 +234,19 @@ _MERGE_DATASET: Final = "MERGE (d:Dataset {name:$name}) SET d.namespace=$ns RETU
 # Storage location + governance tags are SET only when the event carries them, so a later run
 # that omits the dataSource/tags facet never clobbers what an earlier run recorded.
 _SET_DATASET_SRC: Final = "MATCH (d:Dataset {name:$name}) SET d.source_uri=$src RETURN 1"
+# Terminal lifecycle (2026-07-11): dropped-ness is DERIVED AT READ TIME from run history — the most
+# recent SUCCESSFUL run that wrote the dataset being a drop_table means "deliberately dropped", so
+# the reconcile sweep skips it (absence on storage is the EXPECTED state, not storage loss — it
+# previously WARNed missing_on_storage forever via the stale source_uri). Derivation instead of a
+# mutable stamp is deliberate (review 2026-07-11): a stamped flag was last-DELIVERY-wins — a stale
+# redelivered drop event after a recreate would re-stamp a LIVE dataset and silently remove it from
+# the sweep. Run nodes MERGE idempotently on run_id, so ordering by their event_time at read time is
+# redelivery-proof by construction. FAILed runs keep WROTE edges (producers() shows the attempt), so
+# the event_type=COMPLETE filter is load-bearing: a failed drop asserts nothing.
+_DATASET_LAST_SUCCESS_OP: Final = (
+    "MATCH (r:Run)-[:WROTE]->(d:Dataset {name:$name}) WHERE r.event_type = 'COMPLETE' "
+    "RETURN r.operation, r.event_time ORDER BY r.event_time DESC LIMIT 1"
+)
 _SET_DATASET_TAGS: Final = "MATCH (d:Dataset {name:$name}) SET d.tags=$tags RETURN 1"
 _LINK_READ: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:READ]->(d) RETURN 1"
 # The WROTE edge carries the Lance dataset version this run produced (from the OpenLineage
@@ -355,6 +368,14 @@ _MERGE_COLUMN_TYPED: Final = (
 )
 _LINK_HAS_COLUMN: Final = (
     "MATCH (d:Dataset {name:$ds}),(c:Column {dataset:$ds, field:$fld}) MERGE (d)-[:HAS_COLUMN]->(c) RETURN 1"
+)
+# Column-inventory GC (2026-07-11): a schema facet is the COMPLETE current column set by contract, so
+# after seeding it, HAS_COLUMN links to fields outside it are STALE inventory (an overwrite replaced
+# the schema — {a,b}→{x,y} used to leave a,b listed forever). Only the LINK is deleted: the :Column
+# node and its COL_DERIVED_FROM edges stay, so historical column lineage (and per-version schemas on
+# WROTE) are untouched — this prunes what dataset_column_graph() presents as CURRENT.
+_UNLINK_STALE_COLUMNS: Final = (
+    "MATCH (d:Dataset {name:$ds})-[r:HAS_COLUMN]->(c:Column) WHERE NOT c.field IN $fields DELETE r RETURN 1"
 )
 # DISTINCT label (NOT the dataset-level DERIVED_FROM): AGE's *1.. constrains only path ENDPOINTS, not
 # intermediate edge labels, so reusing DERIVED_FROM would let a column traversal silently cross onto the
@@ -580,6 +601,18 @@ class LineageRepository:
                         {"name": event.author, "ds": ds.name, "tm": event.event_time},
                     )
 
+    async def _prune_allowed(self, conn, name: str, version: str) -> bool:
+        """True when ``version`` is at least the newest WROTE version the graph records for ``name``
+        — the recency gate that makes the column-inventory prune idempotent under redelivery
+        reordering. Unparseable versions → False (never prune on uncertain ordering)."""
+        rows = await run_cypher(conn, self._graph, _LATEST_WRITE_VERSION, {"name": name}) or []
+        if not rows or rows[0][0] is None:
+            return True  # nothing recorded yet — this event defines the inventory
+        try:
+            return int(version) >= int(rows[0][0])
+        except (TypeError, ValueError):
+            return False
+
     async def _merge_dataset(self, conn, ds: Dataset) -> None:
         await run_cypher(
             conn,
@@ -613,6 +646,21 @@ class LineageRepository:
                 )
                 await run_cypher(conn, self._graph, _LINK_HAS_COLUMN, {"ds": out.name, "fld": col["name"]})
             version = event.output_version(out.name) or ""
+            if out.fields and version and await self._prune_allowed(conn, out.name, version):
+                # The schema facet is the COMPLETE current schema — unlink inventory entries outside
+                # it (∪ the column-edge out_fields ingested below, which are also current columns) so
+                # an overwrite's replaced columns stop being listed as CURRENT (2026-07-11). Skipped
+                # when no schema facet rides the event (partial knowledge must never prune) AND when
+                # this event is not the newest version the graph knows (review 2026-07-11: a STALE
+                # redelivered event's schema must never unlink the live columns — without the gate,
+                # redelivery reordering could present a superseded schema as current; with it, a
+                # stale delivery degrades to the pre-existing grow-only behavior).
+                current = sorted(
+                    {col["name"] for col in out.fields} | {e["out_field"] for e in out.column_edges}
+                )
+                await run_cypher(
+                    conn, self._graph, _UNLINK_STALE_COLUMNS, {"ds": out.name, "fields": current}
+                )
             for edge in out.column_edges:
                 in_ds, in_fld, out_fld = edge["name"], edge["field"], edge["out_field"]
                 # Skip ONLY a true identity self-loop (same dataset AND same field — a no-op carry-forward).
@@ -753,6 +801,22 @@ class LineageRepository:
         lineage graph believes is current), or ``None`` if ``name`` was never successfully written. (#23)"""
         rows = await fetch(self._pool, self._graph, _LATEST_WRITE_VERSION, {"name": name}, columns=1)
         return int(rows[0][0]) if rows and rows[0][0] is not None else None
+
+    async def dropped_at(self, name: str) -> str | None:
+        """When ``name`` is TERMINALLY dropped — the event time of its most recent SUCCESSFUL run
+        being a ``drop_table`` — else None.
+
+        DERIVED from run history at read time, never a stored flag (review 2026-07-11: a mutable
+        stamp was last-delivery-wins under at-least-once redelivery — a stale redelivered drop
+        after a recreate would remove a live dataset from the reconcile sweep). A recreate is
+        simply a newer successful non-drop run, so the derivation flips back automatically. The
+        reconcile sweep skips dropped datasets: after a deliberate drop, absence on storage is the
+        EXPECTED state — flagging it missing_on_storage forever was the false-alarm bug.
+        """
+        rows = await fetch(self._pool, self._graph, _DATASET_LAST_SUCCESS_OP, {"name": name}, columns=2)
+        if rows and rows[0][0] == "drop_table":
+            return rows[0][1] or ""
+        return None
 
     async def source_uri(self, name: str) -> str | None:
         """The storage location (``dataSource`` URI) recorded for ``name``, or ``None`` if unknown. (#23)"""

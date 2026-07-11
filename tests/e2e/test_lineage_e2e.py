@@ -459,3 +459,65 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
     # the prune kept only the newest seq window: rid2's row survives, every older row is gone.
     assert [r.event.get("run", {}).get("runId") for r in survivors] == [rid2]
     assert reads == [(reader, "silver$features")]  # the read-audit row landed (unique reader → re-runnable)
+
+
+def test_terminal_lifecycle_and_column_gc_against_age(dsn: str) -> None:
+    """Batch 5 (2026-07-11) — the three new Cypher shapes live on real AGE (unit tests only pin the
+    issued query STRINGS; AGE 1.5.0 has a history of quirks only a live run catches).
+
+    ASSERTS, in order: (1) after a successful drop_table event, ``dropped_at()`` returns the drop's
+    event time (the read-time derivation over run history executes on AGE, incl. the
+    event_type='COMPLETE' filter + ORDER BY/LIMIT); (2) after a later create_table on the same
+    name, ``dropped_at()`` is None again (the recreate outranks the drop — no stored flag to
+    clear); (3) an overwrite-shaped event whose schema facet replaces {a,b} with {x,y} leaves
+    ``dataset_column_graph()`` listing ONLY the new fields (the NOT..IN list-param DELETE of
+    HAS_COLUMN links executes on AGE), while a STALE redelivery of the old-schema event afterwards
+    changes nothing (the recency gate consults the real WROTE version).
+    """
+    from lineage.core.age import make_pool
+    from lineage.models import RunEvent
+    from lineage.services.repository import LineageRepository
+
+    name = "e2e$lifecycle_gc"
+
+    def event(run_id: str, op: str, tm: str, fields: list[str] | None, version: str | None) -> RunEvent:
+        facets: dict = {}
+        if fields is not None:
+            facets["schema"] = {"fields": [{"name": f, "type": "int64"} for f in fields]}
+        if version is not None:
+            facets["version"] = {"datasetVersion": version}
+        return RunEvent.model_validate(
+            {
+                "eventType": "COMPLETE",
+                "eventTime": tm,
+                "run": {"runId": run_id, "facets": {"lance": {"operation": op}}},
+                "job": {"namespace": "lance-catalog", "name": op},
+                "outputs": [{"namespace": "e2e", "name": name, "facets": facets}],
+            }
+        )
+
+    async def run() -> tuple[str | None, str | None, list[str], list[str]]:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            # v1 with schema {a,b} → drop → dropped_at derives the drop
+            await repo.ingest_event(event("lc-1", "create_table", "2026-07-11T09:00:00Z", ["a", "b"], "1"))
+            await repo.ingest_event(event("lc-2", "drop_table", "2026-07-11T09:05:00Z", None, None))
+            dropped = await repo.dropped_at(name)
+            # recreate at v2 with the REPLACED schema {x,y} → alive again, inventory pruned to {x,y}
+            await repo.ingest_event(event("lc-3", "create_table", "2026-07-11T09:10:00Z", ["x", "y"], "2"))
+            alive = await repo.dropped_at(name)
+            inventory = [c.field for c in (await repo.dataset_column_graph(name)).columns]
+            # STALE redelivery of the v1 old-schema event — the recency gate must not resurrect {a,b}
+            await repo.ingest_event(event("lc-1", "create_table", "2026-07-11T09:00:00Z", ["a", "b"], "1"))
+            after_stale = [c.field for c in (await repo.dataset_column_graph(name)).columns]
+            return dropped, alive, inventory, after_stale
+        finally:
+            await pool.close()
+
+    dropped, alive, inventory, after_stale = asyncio.run(run())
+    assert dropped == "2026-07-11T09:05:00Z"  # (1) the drop is derived from real run history
+    assert alive is None  # (2) the recreate outranks it — nothing stored, nothing to clear
+    assert inventory == ["x", "y"]  # (3) the replaced columns are GONE from the CURRENT inventory
+    assert after_stale == ["x", "y"]  # …and a stale redelivery cannot bring them back

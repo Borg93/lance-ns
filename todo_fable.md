@@ -534,6 +534,11 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   dry-run against the crashed token (`model_artifact_janitor.py --registry-uri … --artifact-base
 >   …`) and verify the report lists it as a candidate and the published tokens as
 >   kept_referenced; only then exercise `--delete` once.
+>   **Added 2026-07-11 (Batch 5):** `make e2e-lineage` now also runs
+>   `test_terminal_lifecycle_and_column_gc_against_age` — the three new Cypher shapes (read-time
+>   dropped derivation with the COMPLETE filter; NOT..IN list-param HAS_COLUMN DELETE; the
+>   version-recency gate) executing on REAL AGE 1.5.0, asserting: drop→dropped_at==drop time;
+>   recreate→None; inventory==[x,y] after the schema replacement; stale redelivery changes nothing.
 >   **Added 2026-07-10 (§4 batch 2):** one real `/merge_insert` on kind (observe the merge-key BTREE
 >   land + the documented version gap; also probe whether `branch` is honored on the index build —
 >   unverifiable at pylance 8.0.0 locally), and a rolled catalog image so the merge-index hook + the
@@ -597,6 +602,19 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   #115b design made load-bearing). ✅ DONE 2026-07-11** — every DONE-WHEN met incl. the
 >   invariant-test-first guardrail; details on the flipped §9 sub-item. Live dry-run proof on
 >   kind added to §7a. Spec below:
+>
+>   **BATCH 5 (added + ✅ DONE 2026-07-11) — claim-check publish guard + lineage graph hygiene.**
+>   (a) payload guard in the ONE publish choke point (`common.dapr_publish`): >900 KiB →
+>   ValueError naming the claim-check rule before any I/O, >64 KiB → warning; behavior-preserving
+>   (broker would refuse anyway; every caller already handles the failure path). (b) column-
+>   inventory GC on overwrite + (c) reconcile skips deliberately-dropped datasets via READ-TIME
+>   derivation over run history. Adversarial review KILLED the first (b)/(c) design — a stored
+>   dropped_at stamp and an ungated prune were both last-delivery-wins under at-least-once
+>   redelivery (a stale redelivered drop/schema could deactivate or rewrite a LIVE dataset) —
+>   rebuilt as derivation + a version-recency gate, both redelivery-proof by construction. Tests
+>   named per item on the flipped §2/§9 lines; the three new Cypher shapes additionally get a
+>   LIVE AGE e2e (`test_terminal_lifecycle_and_column_gc_against_age`) queued in §7a. Gate: 517
+>   unit+integration green, ruff+ty clean.
 >   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
 >   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
 >   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
@@ -960,9 +978,20 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     only (at-least-once + idempotent handlers; NATS ~1MB bound is why claim-check exists), and the
     Lakekeeper diff (Iceberg-spec contract vs Lance manifest + our gates; neither is a registry).
     Linked from README + ARCHITECTURE. Every claim cites shipped code per the batch guardrail.
-  - ⛔ P1 enforce the claim-check invariant: events carry POINTERS (dataset/version/URI), never data — add a
-    payload-size guard at every publish site + a doc'd rule "no base64/embeddings/data-shaped content in
-    facets" (NATS default max message ~1MB; events must stay small JSON regardless of what the rows hold).
+  - ✅ P1 **claim-check invariant enforced — DONE 2026-07-11 (Batch 5).** The guard lives in the ONE
+    choke point every publish site funnels through (`common.dapr_publish.publish_event` —
+    grep-verified: catalog + compaction emitters, medallion produce/media/transform/train/
+    ingest_trigger; no bypasses): >900 KiB (just under NATS's ~1 MiB default, verified un-overridden
+    in the chart; streams use --max-msg-size=-1) → `ValueError` naming the rule BEFORE any I/O —
+    behavior-preserving by construction since the broker would refuse it anyway, and every caller
+    already wraps in best-effort/RETRY handling; >64 KiB → `dapr_publish_payload_large` WARNING
+    (facet-bloat early visibility; the real truncation cap stays the §9 P2 item). Doc'd rule:
+    docs/DATA-CONTRACT.md §2/§5. TESTS (tests/unit/test_dapr_publish.py):
+    `test_oversize_payload_raises_before_any_io` (ValueError matching "POINTERS"; sidecar never
+    called), `test_large_payload_warns_but_still_publishes` (published unchanged + the warning
+    record), `test_normal_payload_publishes_silently` (no warning — default path byte-identical),
+    `test_bytes_payloads_are_measured_too`, `test_hung_sidecar_still_raises_timeout` (the original
+    timeout contract survives the guard).
   - ⛔ P2 facet metadata bloat cap: a table with thousands of columns makes the schema/columnLineage facets
     themselves large (metadata bloat, not data bloat) — cap/truncate with a count + pointer to /schema instead
     of inlining every field, before rask-scale tables hit the message-size ceiling.
@@ -1105,12 +1134,36 @@ caught. **Fixed + live-verified in AGE this session:**
 - ✅ **:Column dup double-listing** — `_DATASET_COLUMN_NODES` now `RETURN DISTINCT`.
 
 **Deferred (documented, not dev-blocking):**
-- ⛔ **Overwrite accumulates stale column nodes** on the reused id (schema {a,b}→{x,y} leaves a,b in the
-  HAS_COLUMN inventory). Same root as the drop-lineage-GC future-work; `dataset_schema()` is unaffected
-  (per-version snapshot), only `dataset_column_graph()` inventory. Needs column-GC on overwrite/drop.
-- ⛔ **reconcile false-flags dropped/renamed-away tables** as `MISSING_ON_STORAGE` — their node keeps a stale
-  `source_uri` (deleted/moved) so the sweep WARNs storage-loss on a deliberate drop. Fix: a terminal
-  lifecycle flag on the Dataset node that reconcile skips. (Pre-existing, now also reachable via rename-source.)
+- 🟡 **DONE 2026-07-11 (Batch 5) — column-inventory GC on overwrite; live AGE re-run pending.** A
+  schema facet is the COMPLETE current schema by contract (review-verified across every emitter:
+  catalog pinned-read, medallion facet_fields of the written dataset, train job's fixed registry
+  schema; compaction sends none), so ingest now UNLINKs HAS_COLUMN entries outside (schema ∪
+  column-edge out_fields) — {a,b}→{x,y} no longer lists a,b as CURRENT. Only the LINK is deleted:
+  :Column nodes + COL_DERIVED_FROM history + per-version WROTE schemas untouched. REVIEW-CAUGHT +
+  fixed: a stale REDELIVERED event's schema must never unlink live columns → the prune is gated on
+  `_prune_allowed` (event version ≥ the graph's latest WROTE version; version-less or unparseable →
+  never prune — stale deliveries degrade to the old grow-only behavior). TESTS:
+  `test_ingest_schema_facet_prunes_stale_column_inventory` (v5≥graph-v4 → unlink issued with
+  fields=[x,y,z]), `test_ingest_stale_redelivery_never_prunes` (v2<graph-v9 → no unlink;
+  version-less → no unlink), `test_ingest_without_schema_facet_never_prunes`; LIVE:
+  `test_terminal_lifecycle_and_column_gc_against_age` (e2e, needs LINEAGE_DATABASE_URL) executes
+  the NOT..IN list-param DELETE on real AGE and asserts inventory==[x,y] + stale redelivery
+  changes nothing.
+- 🟡 **DONE 2026-07-11 (Batch 5) — reconcile no longer false-flags deliberate drops; live AGE re-run
+  pending.** Dropped-ness is DERIVED AT READ TIME (`repository.dropped_at`): the dataset's most
+  recent SUCCESSFUL run being a `drop_table` ⇒ the sweep SKIPs it (absence on storage is expected).
+  The first design (a stored dropped_at stamp + clear) was KILLED by the adversarial review as
+  last-DELIVERY-wins: a stale redelivered drop after a recreate would re-stamp a LIVE dataset out
+  of the sweep — derivation over idempotently-MERGEd Run history is redelivery-proof by
+  construction, and the `event_type='COMPLETE'` filter is load-bearing (FAILed drops keep WROTE
+  edges for /producers and must assert nothing). TESTS:
+  `test_dropped_at_derives_from_the_latest_successful_run` (drop→time, recreate-outranks→None,
+  no-runs→None, COMPLETE filter pinned in the query string),
+  `test_reconcile_all_skips_dropped_datasets` (dropped dataset absent from the report AND its
+  storage never read); LIVE: the same e2e above asserts dropped_at derives on real AGE and flips
+  back after the recreate. The rename-source variant rides the same derivation (a rename emit is
+  a successful non-drop run on the target; the abandoned SOURCE name still needs a rename-aware
+  emit before it benefits — rename is 501 on the shipped dir backend, unchanged).
 - 🟨 **:Column has no UNIQUE index by choice** — dup column vertices from a rare concurrent first-create are
   benign (the DISTINCT masks the only visible symptom) and an index would add abort/retry churn to the hot
   column path. Reconsider only if column dedup becomes load-bearing.

@@ -57,6 +57,43 @@ jobs:
             | tar xz -C /usr/local/bin fga
           fga model test --tests services/common/auth/model.fga.yaml
 
+  # Frontend suites (§7 "not in CI" gap, closed 2026-07-11): svelte-check (types over the runes
+  # store + generated OpenAPI types), the bun unit tests, and the Playwright e2e — which was BUILT
+  # hermetic for CI (playwright.config.ts mocks every /api/** via page.route; the webServer is the
+  # real SSR dev server, so hydration + routing are exercised with zero backend).
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: svelte-check (0 errors gate)
+        run: bun run check
+
+      - name: Unit tests (bun)
+        run: bun test src/lib
+
+      - name: Install Playwright chromium
+        run: bunx playwright install --with-deps chromium
+
+      - name: Playwright e2e (hermetic — /api mocked in-page)
+        run: bun run test:e2e
+
+      - name: Upload Playwright traces on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: frontend/test-results/
+          retention-days: 7
+
   # AGE-backed lineage e2e (§7): the graph repository's REAL Cypher runs against a real Apache AGE
   # Postgres — the unit fakes can't catch AGE dialect behavior (the int-vs-string $ver at-version
   # match, the RETURN-less DETACH DELETE prune, the functional-index DDL). Runs via the Dagger module

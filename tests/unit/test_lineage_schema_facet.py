@@ -67,3 +67,35 @@ def test_failed_event_omits_schema_facet() -> None:
         error_message="oom",
     )
     assert "schema" not in event["outputs"][0].get("facets", {})  # a FAIL keeps a bare output
+
+
+def test_schema_facet_caps_metadata_bloat(caplog) -> None:
+    # ASSERTS (§9 P2, 2026-07-11): >512 fields → the facet carries EXACTLY the first 512 + a
+    # schema_facet_truncated warning; the _schemaURL stays the shared spec pin (a shorter fields
+    # list is still a valid SchemaDatasetFacet — spec-true truncation, full schema stays readable
+    # from storage where the manifest IS the schema).
+    import logging
+
+    from common import openlineage as ol
+
+    wide = [{"name": f"c{i}", "type": "int64"} for i in range(ol.FACET_MAX_FIELDS + 88)]
+    with caplog.at_level(logging.WARNING):
+        facet = ol.schema_facet("producer", wide)
+    assert len(facet["fields"]) == ol.FACET_MAX_FIELDS
+    assert facet["fields"][0]["name"] == "c0" and facet["fields"][-1]["name"] == "c511"
+    assert facet["_schemaURL"] == ol.SCHEMA_FACET_SCHEMA_URL
+    assert any(r.message == "schema_facet_truncated" for r in caplog.records)
+
+
+def test_schema_facet_under_cap_is_untouched(caplog) -> None:
+    # ASSERTS: at or below the cap the facet is byte-identical to before — same list object
+    # semantics, no warning (the cap must never perturb the normal path).
+    import logging
+
+    from common import openlineage as ol
+
+    fields = [{"name": "id", "type": "int64"}]
+    with caplog.at_level(logging.WARNING):
+        facet = ol.schema_facet("producer", fields)
+    assert facet["fields"] == fields
+    assert not any(r.message == "schema_facet_truncated" for r in caplog.records)

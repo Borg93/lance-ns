@@ -480,8 +480,13 @@ is accurate and the list is removed rather than left contradicting it.)*
 - ✅ **DONE 2026-07-06 — Demo router behavioral test** (real local-Lance reads): absent→exists:false,
   per-version schema walk across evolution, gold's embedded lineage JSONB round-trip, best-effort
   degradation to None. `tests/unit/test_lineage_demo.py`
-- ⛔ **Frontend suites not in CI** — 3 Playwright tests + bun oidc-core tests run only manually.
-  `frontend/package.json:15` *(PARKED with §9 frontend scope — no frontend work per the 2026-07-06 goal)*
+- ✅ **DONE 2026-07-11 (Batch 6) — frontend suites in CI.** New `frontend` job in ci.yml: bun
+  frozen-lockfile install → `bun run check` (svelte-check, 0-errors gate) → `bun test src/lib`
+  (15 tests) → `bunx playwright install chromium` → `bun run test:e2e` (the 3 hermetic Playwright
+  specs — they mock every /api/** via page.route by design, so no backend; traces uploaded on
+  failure). ALL THREE TIERS VERIFIED LOCALLY before landing: svelte-check 0/0, bun 15/15,
+  Playwright 3/3 passed (23s) against the pre-installed chromium. First GH-Actions run of the new
+  job is the remaining proof (watch the next push's checks).
 - ✅ **DONE 2026-07-06 — /graph transitive-disclosure filter unit test**: hidden node dropped, edges dropped
   in BOTH leak directions, root kept WITHOUT re-checking it. `tests/unit/test_lineage_auth.py`
 - ✅ **DONE 2026-07-06 — governed FULL-UNION e2e** (`make e2e-governed-union`, 4 passed live in 126s on the
@@ -613,8 +618,16 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   redelivery (a stale redelivered drop/schema could deactivate or rewrite a LIVE dataset) —
 >   rebuilt as derivation + a version-recency gate, both redelivery-proof by construction. Tests
 >   named per item on the flipped §2/§9 lines; the three new Cypher shapes additionally get a
->   LIVE AGE e2e (`test_terminal_lifecycle_and_column_gc_against_age`) queued in §7a. Gate: 517
->   unit+integration green, ruff+ty clean.
+>   LIVE AGE e2e (`test_terminal_lifecycle_and_column_gc_against_age`) queued in §7a — AND it
+>   runs automatically in CI's existing `lineage-e2e` Dagger job (real AGE) on the next push, so
+>   the live proof does not wait on the kind session. Gate: 517 unit+integration green,
+>   ruff+ty clean.
+>
+>   **BATCH 6 (added + ✅ DONE 2026-07-11) — frontend suites in CI + facet-bloat cap.** (a) new
+>   ci.yml `frontend` job (svelte-check → bun 15 tests → hermetic Playwright 3 specs, traces on
+>   failure) — all three tiers verified green locally before landing; (b) `FACET_MAX_FIELDS=512`
+>   in the shared schema_facet builder (spec-true truncation + warning; full schema stays
+>   readable from storage). Tests + assertions on the flipped §7/§9 lines. Gate: 519 green.
 >   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
 >   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
 >   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
@@ -992,9 +1005,18 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     record), `test_normal_payload_publishes_silently` (no warning — default path byte-identical),
     `test_bytes_payloads_are_measured_too`, `test_hung_sidecar_still_raises_timeout` (the original
     timeout contract survives the guard).
-  - ⛔ P2 facet metadata bloat cap: a table with thousands of columns makes the schema/columnLineage facets
-    themselves large (metadata bloat, not data bloat) — cap/truncate with a count + pointer to /schema instead
-    of inlining every field, before rask-scale tables hit the message-size ceiling.
+  - ✅ P2 **facet metadata bloat cap — DONE 2026-07-11 (Batch 6).** `FACET_MAX_FIELDS = 512` in the
+    SHARED `common.openlineage.schema_facet` builder (the one place both emitters — catalog +
+    medallion — construct the facet, so no per-emitter drift): >512 fields → the facet carries the
+    first 512 + a `schema_facet_truncated` WARNING; spec-true by construction (a shorter fields
+    list is still a valid SchemaDatasetFacet) and the FULL schema stays readable from storage (the
+    manifest IS the schema — /schema, reconcile's read_storage_schema). Pairs with the Batch 5
+    publish guard: the facet share stays far under the 64 KiB warn line. Honest scope note:
+    /schema-from-graph lists at most 512 fields for wider tables (the WROTE edge stores the capped
+    facet); columnLineage facets are producer-declared per-edge and stay uncapped for now. TESTS:
+    `test_schema_facet_caps_metadata_bloat` (600 fields → exactly c0..c511 + the warning +
+    unchanged _schemaURL), `test_schema_facet_under_cap_is_untouched` (≤512 → byte-identical, no
+    warning).
 - ⛔ **P1 Ephemerality** — ~~RustFS is `emptyDir` in this chart~~ STALE premise (corrected 2026-07-05): RustFS
   now persists on a keep-PVC by default (`rustfs.persistence.enabled=true`, `helm.sh/resource-policy: keep`);
   emptyDir remains only as the `persistence=false` throwaway-CI mode — a stale comment at

@@ -485,8 +485,9 @@ is accurate and the list is removed rather than left contradicting it.)*
   (15 tests) → `bunx playwright install chromium` → `bun run test:e2e` (the 3 hermetic Playwright
   specs — they mock every /api/** via page.route by design, so no backend; traces uploaded on
   failure). ALL THREE TIERS VERIFIED LOCALLY before landing: svelte-check 0/0, bun 15/15,
-  Playwright 3/3 passed (23s) against the pre-installed chromium. First GH-Actions run of the new
-  job is the remaining proof (watch the next push's checks).
+  Playwright 3/3 passed (23s) against the pre-installed chromium. PROVEN IN CI 2026-07-11: the
+  job's first Actions runs went green (svelte-check → bun → Playwright, ~70s; run 29159853966 and
+  the fully-green 29160855426).
 - ✅ **DONE 2026-07-06 — /graph transitive-disclosure filter unit test**: hidden node dropped, edges dropped
   in BOTH leak directions, root kept WITHOUT re-checking it. `tests/unit/test_lineage_auth.py`
 - ✅ **DONE 2026-07-06 — governed FULL-UNION e2e** (`make e2e-governed-union`, 4 passed live in 126s on the
@@ -1156,7 +1157,11 @@ caught. **Fixed + live-verified in AGE this session:**
 - ✅ **:Column dup double-listing** — `_DATASET_COLUMN_NODES` now `RETURN DISTINCT`.
 
 **Deferred (documented, not dev-blocking):**
-- 🟡 **DONE 2026-07-11 (Batch 5) — column-inventory GC on overwrite; live AGE re-run pending.** A
+- ✅ **DONE 2026-07-11 (Batch 5) — column-inventory GC on overwrite; LIVE-PROVEN on real AGE in CI
+  the same day.** The first CI run FAILED the new live test exactly as designed — on real AGE a
+  stale redelivery re-ADDED its old columns (['a','b','x','y']) because the first cut gated only
+  the prune, not the seeding; fixed (recency-gate covers the whole inventory touch; version-less
+  events keep legacy grow-only) and CI run 29160855426 is fully green, lineage-e2e included. A
   schema facet is the COMPLETE current schema by contract (review-verified across every emitter:
   catalog pinned-read, medallion facet_fields of the written dataset, train job's fixed registry
   schema; compaction sends none), so ingest now UNLINKs HAS_COLUMN entries outside (schema ∪
@@ -1171,8 +1176,9 @@ caught. **Fixed + live-verified in AGE this session:**
   `test_terminal_lifecycle_and_column_gc_against_age` (e2e, needs LINEAGE_DATABASE_URL) executes
   the NOT..IN list-param DELETE on real AGE and asserts inventory==[x,y] + stale redelivery
   changes nothing.
-- 🟡 **DONE 2026-07-11 (Batch 5) — reconcile no longer false-flags deliberate drops; live AGE re-run
-  pending.** Dropped-ness is DERIVED AT READ TIME (`repository.dropped_at`): the dataset's most
+- ✅ **DONE 2026-07-11 (Batch 5) — reconcile no longer false-flags deliberate drops; LIVE-PROVEN on
+  real AGE in CI the same day (run 29160855426: drop derives the drop time, the recreate flips it
+  back to None).** Dropped-ness is DERIVED AT READ TIME (`repository.dropped_at`): the dataset's most
   recent SUCCESSFUL run being a `drop_table` ⇒ the sweep SKIPs it (absence on storage is expected).
   The first design (a stored dropped_at stamp + clear) was KILLED by the adversarial review as
   last-DELIVERY-wins: a stale redelivered drop after a recreate would re-stamp a LIVE dataset out

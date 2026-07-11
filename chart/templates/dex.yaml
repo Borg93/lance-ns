@@ -65,6 +65,20 @@ spec:
         {{- include "lance.labels" . | nindent 8 }}
         app.kubernetes.io/component: dex
     spec:
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-dex
+      {{- end }}
+      {{- if .Values.security.infraContexts.enabled }}
+      # Per-image uid/fsGroup from values (the audit: data/secret holders need runAsUser+fsGroup for
+      # their PVCs — no blind helper reuse). Flag default OFF: flip after the kind boot check (§7a).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.security.infraContexts.dex.runAsUser }}
+        {{- with .Values.security.infraContexts.dex.fsGroup }}
+        fsGroup: {{ . }}
+        {{- end }}
+        seccompProfile: { type: RuntimeDefault }
+      {{- end }}
       containers:
         - name: dex
           image: {{ .Values.dex.image }}

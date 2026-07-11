@@ -64,6 +64,24 @@ lifecycle:
 # emptyDir for pyarrow/Lance spill + OTel), flip off only if a workload genuinely needs a writable rootfs.
 security:
   readOnlyRootFilesystem: true
+  # Batch 10 (2026-07-11) — both default OFF (behavior-identical); flip after the §7a live checks.
+  # Dedicated unbound SA per first-party workload, automountServiceAccountToken:false ON THE SA
+  # object (never the pod — the Dapr injector's projected token stays untouched). Pre-flip check:
+  # `dapr mtls -k` must still verify after enabling (the audit's guidance).
+  serviceAccounts:
+    enabled: false
+  # securityContexts for the INFRA pods (app tier is already hardened via lance.securityContext)
+  # + PSA-restricted compliance for the root busybox wait-age init containers (the audit's
+  # sequencing footgun: label the namespace `pod-security.kubernetes.io/enforce=restricted` ONLY
+  # after these boot green — the label itself is a kubectl step, the namespace isn't chart-owned).
+  # Per-image uid/fsGroup (data/secret holders need the RIGHT ids for their PVCs, not helper reuse):
+  infraContexts:
+    enabled: false
+    rustfs: { runAsUser: 1000, fsGroup: 1000 }
+    age: { runAsUser: 999, fsGroup: 999 } # postgres official image uid/gid
+    openbao: { runAsUser: 100, fsGroup: 1000 } # hashicorp vault-family image uid
+    dex: { runAsUser: 1001, fsGroup: 1001 }
+    gateway: { runAsUser: 101 } # nginx worker uid; its conf already pins pid/temp to /tmp
 
 # --- Network isolation (opt-in; requires a policy-enforcing CNI e.g. Calico/Cilium) ---------------
 # kind's default CNI does NOT enforce NetworkPolicy, so this is a no-op there — it is prod hardening.

@@ -540,6 +540,15 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   dry-run against the crashed token (`model_artifact_janitor.py --registry-uri … --artifact-base
 >   …`) and verify the report lists it as a candidate and the published tokens as
 >   kept_referenced; only then exercise `--delete` once.
+>   **Added 2026-07-11 (Batches 9+10, security):** on a POLICY-ENFORCING CNI cluster (Calico/
+>   Cilium — kind's default ignores NetworkPolicy): (1) `--set networkPolicy.enabled=true` →
+>   all pods Ready, e2e suites green, NEGATIVE probe `kubectl exec deploy/<release>-web -- wget
+>   -T3 -qO- http://<release>-openbao:8200/v1/sys/health` TIMES OUT while the catalog still
+>   consumes secrets (positive control); (2) `--set security.serviceAccounts.enabled=true` →
+>   pods Ready + `dapr mtls -k` still verifies (the audit's pre-flip gate); (3)
+>   `--set security.infraContexts.enabled=true` → infra pods Ready, PVC data intact after a
+>   rollout restart (fsGroup proof); (4) ONLY THEN label the namespace
+>   `pod-security.kubernetes.io/enforce=baseline` (→ `restricted` after soak).
 >   **Added 2026-07-11 (Batch 5):** `make e2e-lineage` now also runs
 >   `test_terminal_lifecycle_and_column_gc_against_age` — the three new Cypher shapes (read-time
 >   dropped derivation with the COMPLETE filter; NOT..IN list-param HAS_COLUMN DELETE; the
@@ -1281,19 +1290,30 @@ prod concerns) — deliberately NOT rushed into the dev baseline (footgun-sequen
   🚧 GUARDRAILS: never flip the default in values.yaml (kind default CNI = silent no-op is fine;
   a policy CNI + untested flip could brick flows); ESO deployments MUST set openbaoExtraFrom
   BEFORE flipping or external-secrets loses vault access.
-- ⛔ **~13 first-party pods on the `default` ServiceAccount** with `automountServiceAccountToken` defaulting
-  true → each mounts an unused k8s-API JWT. Fix: a `lance.serviceAccountName` helper (dedicated unbound SA per
-  workload) + `automountServiceAccountToken:false` on the SA object (NOT the pod — leave the Dapr injector's
-  projected token untouched; verify live with `dapr mtls -k` before flipping).
-- ⛔ **Every INFRA pod ships with zero securityContext** (rustfs, age-postgres, openbao, dex, gateway,
-  dapr-dashboard + subcharts nats/openfga/greptimedb/vector). App tier is fully hardened; infra is not.
-  **gateway is a free win** (its nginx already pins pid/temp to /tmp → RO-rootfs-ready). Data/secret holders
-  (openbao, age-postgres, rustfs) need `runAsUser`+`fsGroup` for their PVCs (not blind helper reuse). Subcharts
-  via their own values surface (delegate, don't template).
-- ⛔ **No Pod Security Admission enforcement** — app-tier hardening is unbackstopped, drift admitted silently.
-  Label the namespace `pod-security.kubernetes.io/enforce` (baseline → restricted). **Sequencing footgun:**
-  restricted would REJECT `lineage` + `openfga-migrate` today (their root busybox `wait-age` init containers
-  have no securityContext) → harden the init containers FIRST.
+- 🟡 **Per-workload ServiceAccounts — CODE-COMPLETE 2026-07-11 (Batch 10); live `dapr mtls -k`
+  pre-check pending (the audit's own gate).** `security.serviceAccounts.enabled` (default OFF):
+  `security-sa.yaml` renders a dedicated UNBOUND SA per first-party workload (12 fixed + one per
+  mover from values, 16 total) with `automountServiceAccountToken: false` ON THE SA OBJECT (never
+  the pod — the Dapr injector's projected token stays untouched, per the audit); every first-party
+  pod spec (3 services + producer + movers + compaction + dashboard + 5 infra + all 7 job pods
+  sharing `-sa-jobs`) gains a flag-gated `serviceAccountName`. CI render-and-greps: flags off ⇒
+  zero of our SAs; flags on ⇒ ≥16 SA objects all automount-false + ≥12 pods wired.
+  ✅ DONE WHEN (live, §7a): flag on → all pods Ready, `dapr mtls -k` still verifies, e2e green.
+- 🟡 **Infra securityContexts — CODE-COMPLETE 2026-07-11 (Batch 10); live boot check pending.**
+  `security.infraContexts.enabled` (default OFF): pod-level contexts for rustfs/age/openbao/dex/
+  gateway with PER-IMAGE uid/fsGroup from values (age=999 postgres, openbao=100 vault-family,
+  gateway=101 nginx — the audit: data/secret holders need the RIGHT ids for their PVCs, no blind
+  helper reuse; ids are values-overridable precisely because they are image-version-dependent).
+  Subcharts stay delegated to their own values surfaces (unchanged, per the audit).
+  ✅ DONE WHEN (live, §7a): flag on → every infra pod Ready + rustfs/age/openbao PVC data intact
+  after a restart (fsGroup correctness is only provable against the real volumes).
+- 🟡 **PSA enforcement — PREREQ SHIPPED 2026-07-11 (Batch 10); the label itself is a runbook
+  step.** The audit's sequencing footgun is closed: both root-busybox `wait-age` init containers
+  (lineage + openfga-migrate) now carry restricted-compliant contexts (runAsNonRoot, uid 65532,
+  no-priv-esc, drop ALL, RuntimeDefault) under the infraContexts flag — CI grep-asserts
+  `runAsUser: 65532` renders. The namespace label is kubectl, not chart (`kubectl label ns
+  <ns> pod-security.kubernetes.io/enforce=baseline`, then `restricted` once the infra contexts
+  are live-proven) — added to the §7a runbook in that order.
 - ✅ **Cheap hygiene done this session:** phantom `medallion.producer.port`→`medallion.port` (network-policy);
   pinned `dapr.global.mtls.enabled:true` explicitly (self-documenting, guards an accidental flip); corrected the
   misleading "rolled in-house" docstring in `common/oidc.py` (it wires PyJWT — no hand-rolled crypto).

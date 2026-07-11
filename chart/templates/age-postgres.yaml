@@ -78,6 +78,20 @@ spec:
         {{- include "lance.labels" . | nindent 8 }}
         app.kubernetes.io/component: age
     spec:
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-age
+      {{- end }}
+      {{- if .Values.security.infraContexts.enabled }}
+      # Per-image uid/fsGroup from values (the audit: data/secret holders need runAsUser+fsGroup for
+      # their PVCs — no blind helper reuse). Flag default OFF: flip after the kind boot check (§7a).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.security.infraContexts.age.runAsUser }}
+        {{- with .Values.security.infraContexts.age.fsGroup }}
+        fsGroup: {{ . }}
+        {{- end }}
+        seccompProfile: { type: RuntimeDefault }
+      {{- end }}
       containers:
         - name: postgres
           image: {{ .Values.age.image }}

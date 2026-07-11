@@ -55,6 +55,9 @@ spec:
         app.kubernetes.io/component: dapr-dashboard
     spec:
       serviceAccountName: {{ include "lance.fullname" . }}-dapr-dashboard
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-dapr-dashboard
+      {{- end }}
       containers:
         - name: dashboard
           image: {{ .Values.dapr.dashboard.image }}

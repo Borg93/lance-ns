@@ -29,6 +29,9 @@ spec:
         runAsNonRoot: true
         runAsUser: 65534
         seccompProfile: { type: RuntimeDefault }
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-jobs
+      {{- end }}
       containers:
         - name: set-ttl
           image: curlimages/curl:8.10.1

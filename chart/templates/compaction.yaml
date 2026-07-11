@@ -52,6 +52,9 @@ spec:
     spec:
       # Longer grace than the other apps: an in-flight sweep/Lance write must finish, not be SIGKILLed.
       terminationGracePeriodSeconds: {{ .Values.lifecycle.compactionTerminationGracePeriodSeconds }}
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-compaction
+      {{- end }}
       containers:
         - name: compaction
           image: "{{ include "lance.catalogImage" . }}"

@@ -68,6 +68,28 @@ jobs:
           # the general intra-namespace ingress allow must EXCLUDE the guarded stores
           grep -q "NotIn" /tmp/np.yaml
 
+      # Render-and-grep the SA + infra-context layer (Batch 10, same opt-in discipline):
+      # flags OFF → zero of our SAs, zero serviceAccountName lines, zero infra runAsUser blocks;
+      # flags ON → every first-party workload gets its dedicated unbound SA (automount false ON
+      # THE SA object) and the infra pods + wait-age init containers carry their contexts.
+      - name: Helm render security hardening (flags on) + invariants
+        run: |
+          set -euo pipefail
+          off=$(helm template chart | grep -c -- "-sa-" || true)
+          [ "$off" = "0" ] || { echo "flags OFF must render zero of our SAs, got $off"; exit 1; }
+          helm template chart \
+            --set security.serviceAccounts.enabled=true \
+            --set security.infraContexts.enabled=true > /tmp/sec.yaml
+          sa_objects=$(grep -c "kind: ServiceAccount" /tmp/sec.yaml || true)
+          [ "$sa_objects" -ge 16 ] || { echo "expected >=16 SA objects (12 fixed + 4 movers), got $sa_objects"; exit 1; }
+          automount_off=$(grep -c "automountServiceAccountToken: false" /tmp/sec.yaml || true)
+          [ "$automount_off" -ge 16 ] || { echo "every OUR SA must set automount false, got $automount_off"; exit 1; }
+          wired=$(grep -c "serviceAccountName: .*-sa-" /tmp/sec.yaml || true)
+          # >=12: some workloads are toggle-gated in default values (dex behind auth, backups off)
+          [ "$wired" -ge 12 ] || { echo "expected >=12 pods wired to dedicated SAs, got $wired"; exit 1; }
+          grep -q "runAsUser: 999" /tmp/sec.yaml   # age-postgres context rendered
+          grep -q "runAsUser: 65532" /tmp/sec.yaml # wait-age init hardening rendered (PSA prereq)
+
       # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
       # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.
       - name: OpenFGA model test

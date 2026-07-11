@@ -55,6 +55,20 @@ spec:
         {{- include "lance.labels" . | nindent 8 }}
         app.kubernetes.io/component: rustfs
     spec:
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-rustfs
+      {{- end }}
+      {{- if .Values.security.infraContexts.enabled }}
+      # Per-image uid/fsGroup from values (the audit: data/secret holders need runAsUser+fsGroup for
+      # their PVCs — no blind helper reuse). Flag default OFF: flip after the kind boot check (§7a).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.security.infraContexts.rustfs.runAsUser }}
+        {{- with .Values.security.infraContexts.rustfs.fsGroup }}
+        fsGroup: {{ . }}
+        {{- end }}
+        seccompProfile: { type: RuntimeDefault }
+      {{- end }}
       containers:
         - name: rustfs
           image: {{ .Values.rustfs.image }}
@@ -107,6 +121,9 @@ spec:
   template:
     spec:
       restartPolicy: OnFailure
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-jobs
+      {{- end }}
       containers:
         - name: mc
           image: {{ .Values.rustfs.mcImage }}

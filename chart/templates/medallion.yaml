@@ -36,6 +36,9 @@ spec:
       {{- end }}
     spec:
       terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-lance-ray
+      {{- end }}
       containers:
         - name: lance-ray
           image: {{ $img | quote }}
@@ -142,6 +145,9 @@ spec:
       {{- end }}
     spec:
       terminationGracePeriodSeconds: {{ $root.Values.lifecycle.terminationGracePeriodSeconds }}
+      {{- if $root.Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" $root }}-sa-{{ .name }}
+      {{- end }}
       containers:
         - name: mover
           image: {{ $img | quote }}

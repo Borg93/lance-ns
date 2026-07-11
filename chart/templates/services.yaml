@@ -31,6 +31,9 @@ spec:
       {{- end }}
     spec:
       terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-catalog
+      {{- end }}
       containers:
         - name: catalog
           image: "{{ include "lance.catalogImage" . }}"
@@ -164,6 +167,14 @@ spec:
         - name: wait-age
           image: busybox:1.36
           command: ["sh", "-c", "until nc -z {{ $age }} {{ .Values.age.port }}; do echo wait-age; sleep 3; done"]
+          {{- if .Values.security.infraContexts.enabled }}
+          # PSA-restricted compliance for the root busybox init (the audit's sequencing footgun:
+          # labeling the namespace restricted would REJECT this pod until the init is hardened).
+          securityContext: { runAsNonRoot: true, runAsUser: 65532, allowPrivilegeEscalation: false, capabilities: { drop: [ALL] }, seccompProfile: { type: RuntimeDefault } }
+          {{- end }}
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-lineage
+      {{- end }}
       containers:
         - name: lineage
           image: "{{ include "lance.catalogImage" . }}"
@@ -259,6 +270,9 @@ spec:
         app.kubernetes.io/component: web
     spec:
       terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-web
+      {{- end }}
       containers:
         - name: web
           image: "{{ include "lance.webImage" . }}"

@@ -34,6 +34,9 @@ spec:
                     pg_dump -h {{ include "lance.ageConnectHost" . }} -p {{ .Values.age.port }} -U {{ .Values.age.user }} -d "$db" | gzip > /dump/"$db".sql.gz
                   done
               volumeMounts: [{ name: dump, mountPath: /dump }]
+          {{- if .Values.security.serviceAccounts.enabled }}
+          serviceAccountName: {{ include "lance.fullname" . }}-sa-jobs
+          {{- end }}
           containers:
             - name: upload
               image: {{ .Values.rustfs.mcImage }}

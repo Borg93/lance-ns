@@ -92,6 +92,20 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      {{- if .Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" . }}-sa-gateway
+      {{- end }}
+      {{- if .Values.security.infraContexts.enabled }}
+      # Per-image uid/fsGroup from values (the audit: data/secret holders need runAsUser+fsGroup for
+      # their PVCs — no blind helper reuse). Flag default OFF: flip after the kind boot check (§7a).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: {{ .Values.security.infraContexts.gateway.runAsUser }}
+        {{- with .Values.security.infraContexts.gateway.fsGroup }}
+        fsGroup: {{ . }}
+        {{- end }}
+        seccompProfile: { type: RuntimeDefault }
+      {{- end }}
       containers:
         - name: gateway
           image: {{ .Values.gateway.image }}

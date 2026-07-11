@@ -144,7 +144,14 @@ async def _await_success(client: httpx.AsyncClient, submission_id: str, poll_int
 
 
 async def submit_train_job(
-    settings: MedallionSettings, *, model: str, features_json: str, config_json: str = "{}", token: str
+    settings: MedallionSettings,
+    *,
+    model: str,
+    features_json: str,
+    config_json: str = "{}",
+    token: str,
+    registry_uri: str,
+    artifact_base: str,
 ) -> str:
     """SUBMIT-AND-ACK for a TRAINING job (docs/RAY-TRAIN.md D2) — never block on completion.
 
@@ -169,6 +176,11 @@ async def submit_train_job(
                 "CONFIG": config_json,
                 "TOKEN": token,
                 "MODELS_NAMESPACE": settings.models_namespace,
+                # The D4 publish pointers (derived by the caller — layout convention lives in train.py)
+                # + where the job posts its OWN OpenLineage lifecycle (D2: no Dapr sidecar on Ray pods).
+                "REGISTRY_URI": registry_uri,
+                "ARTIFACT_BASE": artifact_base,
+                "LINEAGE_URL": settings.train_lineage_url,
                 "S3_ENDPOINT": settings.s3_endpoint,
                 "S3_KEY": settings.s3_access_key_id,
                 "S3_SECRET": settings.s3_secret_access_key.get_secret_value(),

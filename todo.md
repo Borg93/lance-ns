@@ -148,7 +148,10 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
 - ✅ **Ray TRAIN vs Ray DATA design DECIDED** — `docs/RAY-TRAIN.md`: separate `/train` head + own topic,
   submit-and-ack trainer, jobType=TRAINING lineage with per-feature version pins, **model registry = a
   Lance dataset pointing at plain-path S3 artifacts** (bytes-then-commit = atomic registration; MLflow
-  optional in three documented shapes). Implementation = todo_fable §9 #115a–c (execution-spec'd).
+  optional in three documented shapes). Implementation #115a–c ALL code-complete (2026-07-10/11,
+  adversarially reviewed at the unit tier — incl. the training job, the D4 registry publish, and a
+  `TRAINING` JetStream stream the deployed bus was missing); live kind drive + chart values
+  passthrough remain, consolidated in todo_fable §7a RESIDUAL.
 - ✅ **§4 reliability pair**: `/merge_insert` now ensures a BTREE on its merge key (list-first, idempotent,
   best-effort, `use_index=false` opt-out) and `create_table` COMPENSATES a failed owner grant
   (revoke + drop, fresh-id only — never ExistOk-kept or Overwrite-replaced tables).

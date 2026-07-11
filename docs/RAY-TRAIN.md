@@ -1,11 +1,15 @@
 # Ray TRAIN vs Ray DATA — the training-workload design (task #115)
 
-**Status: DESIGN DECIDED 2026-07-10; #115a (head + topic + submit-and-ack consumer, D1/D2) and the
-#115c seed grants (D5) LANDED the same day — code-complete + adversarially reviewed at the unit tier
-(the review caught and fixed an FGA-wiring bypass, floating-version admission, and an unforwarded
-config). Open: #115b (the training job + the D4 registry publish), the chart values passthrough
-(deferred until helm render-verification is possible), and the live kind drive — see `todo_fable.md`
-§9 #115a–c for exact per-item state.** The platform must host BOTH batch/ETL
+**Status: DESIGN DECIDED 2026-07-10; #115a (head + topic + submit-and-ack consumer, D1/D2), the
+#115c seed grants (D5), and #115b (`scripts/ray_train_job.py` + the D4 registry publish + lifecycle
+lineage) ALL LANDED — code-complete + adversarially reviewed at the unit tier. The 2026-07-10 review
+caught an FGA-wiring bypass, floating-version admission, and an unforwarded config; the 2026-07-11
+review (lineage/registration/Dapr lenses) caught a missing JetStream stream for `training.jobs` (the
+deployed bus would have rejected every publish — now provisioned), a masked-error window in the
+registry create-vs-append branch, N+1 sequential FGA round trips (now ONE `batch_check`), a missing
+`dataSource` facet (the reconcile back-fill key), and head/consumer name-validation asymmetry (the
+head now 422s what the consumer would DROP). Open: the chart values passthrough (deferred until helm
+render-verification is possible) and the live kind drive — see `todo_fable.md` §9 #115a–c.** The platform must host BOTH batch/ETL
 (today's medallion cascade — the Ray *Data* shape) and TRAINING workloads (Ray *Train*). They are
 different workload classes and get different runtime treatment — but ONE provenance model, ONE
 authz model, and ONE storage substrate.
@@ -34,7 +38,14 @@ authz model, and ONE storage substrate.
   it to mover ack windows and redelivery policy. A separate topic is a separate resiliency
   profile, and a slow training submit can never head-of-line-block a stage mover.
 - Trigger payload: `{token, model, features: [{dataset, version}], config}` — pointers only,
-  never data (the claim-check invariant).
+  never data (the claim-check invariant). Name shapes are enforced SYMMETRICALLY: `model` is a
+  path-safe slug, every `dataset` is exactly `stage$name` (the names become S3 key prefixes, Lance
+  URIs, and lineage namespaces), ≤ 16 features, config ≤ 8 KiB — the head 422s violations, and the
+  consumer independently DROPs them (the bus is a wider trust surface than the token-guarded head).
+- The topic gets its OWN JetStream stream (`TRAINING`, subjects `training.>`, provisioned by the
+  chart's nats-stream Job next to `LINEAGE`/`MEDALLION`) — Dapr's jetstream component does not
+  auto-create streams, and a separate stream keeps durable-consumer names per-stream and training
+  backpressure isolated from the stage cascade.
 
 ## D2 — The trainer consumer: SUBMIT-AND-ACK, never block-and-poll
 
@@ -43,7 +54,9 @@ the job finishes, so anything longer than `maxDeliver × ackWait` (~2.5 min) exh
 That pattern is CORRECT for bounded stage transforms and WRONG for training. The trainer handler
 therefore:
 
-1. FGA-gates (D5) — deny → **DROP** (attributable, like the movers), outage → RETRY;
+1. FGA-gates (D5) — deny → **DROP** (attributable, like the movers), outage → RETRY; the per-input
+   checks go through ONE `batch_check` round trip regardless of feature count, so the gate cannot
+   stack per-check retry budgets past the 30s ack window;
 2. submits the training job via the shared Ray Jobs REST seam with a **deterministic
    `submission_id = ray-train-<token>`**;
 3. **acks SUCCESS immediately after the submit** (or after re-attaching to an already-running
@@ -70,7 +83,18 @@ run is terminal until a human (or future automation) POSTs `/train` again with a
   EXACT Lance version read — the reproducibility key. The graph then answers both directions:
   `upstream(models$m)` = "what data (at which versions) trained this model";
   `downstream(silver$features)` = "which models did this bad batch contaminate" (model recall).
-- **Output**: `models$<model>` with the version facet + blob-aware schema facet on COMPLETE.
+- **Output**: `models$<model>` with the version facet + blob-aware schema facet on COMPLETE; the
+  standard `dataSource` facet (the registry URI) rides on EVERY event type — it is location
+  metadata, not a success claim, and it is what lets the B4 reconcile back-fill recover a model
+  version whose COMPLETE emit was lost (without it the models node has no `source_uri` and the
+  sweep can never repair it).
+- **Emission transport**: Ray pods carry no Dapr sidecar, so the job POSTs to the lineage HTTP
+  ingest (`LINEAGE_URL`, default the in-cluster service) — best-effort, two attempts, never crashes
+  training. **Governed-deployment caveat**: with the chart's `auth.enabled` the ingest 401s
+  unauthenticated POSTs; the job supports an optional `LINEAGE_TOKEN` bearer env for that mode, but
+  nothing provisions such a credential yet — auth-on deployments lose training lifecycle events
+  until a service credential path is wired (the failure is visible: the job logs `HTTP 401` per
+  attempt, distinguishable from an outage). The demo tier runs auth-off.
 
 ## D4 — The model REGISTRY is a Lance dataset; the artifact BYTES are plain S3 objects (DECIDED,
 ## sharpened 2026-07-10 after design review)
@@ -94,7 +118,11 @@ artifact *bytes*:
 
    Publishing a model version IS this commit — the CAS-validated Lance commit is the atomic
    registration step. A crash between (1) and (2) leaves orphan artifact files but never a
-   half-registered model; the token-keyed paths make the retry converge.
+   half-registered model; the token-keyed paths make the retry converge. Two operational rules the
+   implementation pins: the artifact base is registered as the dataset's external-blob base AT
+   CREATE (create-time-only) — so **the base must stay stable per model** (pointers outside it are
+   refused by Lance on append, loudly); and a create that loses the concurrent first-publish CAS
+   race converges as an append instead of terminally failing the run.
 3. **Versioning + promotion for free**: model version N = Lance version N of the registry
    dataset (time-travel = full model history); promotion (`staging`/`prod`) = catalog **tags**
    on it, gated by the `validator` rung on `namespace:models` — the silver→gold promotion story,

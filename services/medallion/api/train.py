@@ -16,23 +16,34 @@ from pydantic import BaseModel, Field
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
 from medallion.core.config import get_settings
-from medallion.services.train import handle_train_trigger, submit_train_request, train_head_enabled
+from medallion.services.train import (
+    DATASET_PATTERN,
+    MAX_FEATURES,
+    MODEL_PATTERN,
+    handle_train_trigger,
+    submit_train_request,
+    train_head_enabled,
+)
 
 router = APIRouter(tags=["train"])
 
 
 class FeatureRef(BaseModel):
-    """One training input: a feature dataset, optionally pinned to an exact Lance version."""
+    """One training input: a ``stage$name`` feature dataset, optionally pinned to an exact version."""
 
-    dataset: str
+    dataset: str = Field(pattern=DATASET_PATTERN)
     version: int | None = None
 
 
 class TrainRequest(BaseModel):
-    """The ``POST /train`` body — pointers only (claim-check): names, pins, and a SMALL config."""
+    """The ``POST /train`` body — pointers only (claim-check): names, pins, and a SMALL config.
 
-    model: str
-    features: list[FeatureRef] = Field(min_length=1)
+    Name shapes and the feature cap mirror the CONSUMER's validation exactly (review 2026-07-11):
+    a request the consumer would DROP is refused HERE with a 422, never 202'd into a silent no-op.
+    """
+
+    model: str = Field(pattern=MODEL_PATTERN)
+    features: list[FeatureRef] = Field(min_length=1, max_length=MAX_FEATURES)
     config: dict[str, Any] = Field(default_factory=dict)
 
 

@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir "lance-ray==0.4.2" "pylance==8.0.0" "pyarrow==19.
 # Bake the jobs so `ray job submit -- python /home/ray/jobs/<job>.py` needs no working-dir upload:
 #   ray_lance_job.py  — the standalone write/index/evolve/compact demo (make ray-demo)
 #   ray_stage_job.py  — the per-stage cascade transform a mover submits (MEDALLION_RAY_ENABLED)
-COPY scripts/ray_lance_job.py scripts/ray_stage_job.py /home/ray/jobs/
+#   ray_train_job.py  — the TRAINING job the trainer consumer submits (#115b, docs/RAY-TRAIN.md D2–D4)
+COPY scripts/ray_lance_job.py scripts/ray_stage_job.py scripts/ray_train_job.py /home/ray/jobs/
 
 ARG BUILD_DATE
 ARG VCS_REF

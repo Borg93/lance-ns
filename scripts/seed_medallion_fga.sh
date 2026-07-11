@@ -66,8 +66,9 @@ w user:service-silver-to-gold validator namespace:gold
 # stages it consumes + WRITER on namespace:models ONLY — never the medallion writer rung (a trainer must
 # not write stages; a mover must not write models). The models namespace parents under the warehouse so
 # humans' warehouse-reader rung cascades to model registry datasets; per-model table→namespace parent
-# links (namespace:models parent table:models$<name>) are seeded when a model first publishes (#115b),
-# exactly like the mover datasets above. Model PROMOTION stays behind the validator rung (not writer).
+# links (namespace:models parent table:models$<name>) are written by the TRAINER CONSUMER at trigger
+# time (#115b — idempotent, before the submit ack), exactly like the pre-seeded mover links above.
+# Model PROMOTION stays behind the validator rung (not writer).
 w "$WAREHOUSE" parent namespace:models
 w user:service-trainer reader namespace:silver
 w user:service-trainer reader namespace:gold

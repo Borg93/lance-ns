@@ -163,10 +163,19 @@ class MedallionSettings(BaseSettings):
     # identity + rung (D5): reader on the feature namespaces, writer on namespace:<models> ONLY.
     train_topic: str = Field(default="training.jobs", alias="MEDALLION_TRAIN_TOPIC")
     train_entrypoint: str = Field(
-        default="python /app/scripts/ray_train_job.py", alias="MEDALLION_TRAIN_ENTRYPOINT"
+        # Must match where ray-lance.dockerfile bakes the jobs (/home/ray/jobs/, like ray_entrypoint).
+        default="python /home/ray/jobs/ray_train_job.py",
+        alias="MEDALLION_TRAIN_ENTRYPOINT",
     )
     trainer_identity: str = Field(default="service-trainer", alias="MEDALLION_TRAINER_IDENTITY")
     models_namespace: str = Field(default="models", alias="MEDALLION_MODELS_NAMESPACE")
+    # The lineage HTTP ingest the TRAINING JOB posts its own RunEvents to (D2/D3: Ray pods carry no
+    # Dapr sidecar, so the job emits over plain HTTP like medallion_demo). Default = the chart's
+    # in-cluster service for the standard `lance-ns` release (same convention as ray_address); set ""
+    # to disable emission, e.g. in environments without the lineage service.
+    train_lineage_url: str = Field(
+        default="http://lance-ns-lineage:8000", alias="MEDALLION_TRAIN_LINEAGE_URL"
+    )
 
     # --- media ingest head (multimodal §9) — POST /ingest-media lands external media as bronze blobs and
     # triggers the media chain. The head reads an external S3 source prefix through the provider-agnostic

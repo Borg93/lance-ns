@@ -498,6 +498,14 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   (topic/entrypoint/trainer identity/models namespace) into chart/templates/medallion.yaml +
 >   values.yaml and render-and-grep it (§0); re-run the seed; then the #115a live DONE WHEN (one POST
 >   /train drives the stub job end to end; ungranted trainer → DROP with no job submitted).
+>   **Added 2026-07-11 (#115b):** rebuild the ray-lance image (it now bakes `ray_train_job.py`) and
+>   re-`helm upgrade` (the nats-stream Job must create the new `TRAINING` stream — without it every
+>   /train publish 503s); then the #115b live DONE WHEN: POST /train → `upstream(models$<m>)` shows
+>   the feature datasets WITH pinned versions, /runs shows the START→RUNNING→COMPLETE trail, a
+>   serving-shaped read loads weights from the PLAIN path (no Lance reader), FAIL path fault-injected
+>   once (bad feature version → FAILed run, versionless output, registry unchanged), and redelivery
+>   of the same token never double-publishes (re-attach observed in mover logs). Set
+>   `vending.externalBlobBases` to include the deployment's `s3://<bucket>/models/` prefix.
 >   **Added 2026-07-10 (§4 batch 2):** one real `/merge_insert` on kind (observe the merge-key BTREE
 >   land + the documented version gap; also probe whether `branch` is honored on the index build —
 >   unverifiable at pylance 8.0.0 locally), and a rolled catalog image so the merge-index hook + the
@@ -680,7 +688,37 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   🚧 GUARDRAILS: never block the handler on job completion · trigger carries pointers only (no config
   blobs > a few KB — claim-check) · do NOT touch the stage movers' block-poll semantics · the extracted
   core must keep the delete-and-resubmit-on-terminal behavior FOR THE STAGE PATH only.
-- ⛔ **#115b — `scripts/ray_train_job.py` + model REGISTRY write + lifecycle lineage** (per D3 + the
+- 🟡 **#115b — `scripts/ray_train_job.py` + model REGISTRY write + lifecycle lineage —
+  CODE-COMPLETE 2026-07-11, unit tier (31 train tests, suite 492); LIVE DRIVE + allowlist value +
+  auth-on lineage credential PENDING.** Built per D3/D4 and hardened by a two-lens adversarial
+  review (lineage+registration / Dapr+consumer — the user's named audit lenses):
+  the job (baked into the ray image at `/home/ray/jobs/`, entrypoint default FIXED — it said
+  `/app/scripts/`) reads features at PINNED versions (unit-proven: pinned v1 means ≠ LATEST means),
+  writes token-keyed artifact bytes FIRST, then ONE Lance commit (2.2 + stable row ids +
+  `initial_bases=[artifact base]`) = atomic registration, model version == Lance version; emits its
+  own START→RUNNING(progress)→COMPLETE|FAIL over lineage HTTP with run ids EQUALITY-PINNED to
+  `common.openlineage.run_id_for` and the version-facet spec pinned to the medallion emitter's
+  (both are drift tripwires in tests/unit/test_train_job.py). REVIEW CATCHES (all fixed): no
+  JetStream stream covered `training.jobs` — every deployed publish would have failed (added
+  `TRAINING training.>` to the nats-stream Job); the registry create-vs-append except-scope masked
+  real append errors as "Dataset already exists" (probe-reproduced; scope narrowed + CAS-race loser
+  now converges as append); N+1 sequential FGA round trips could blow the 30s ack window (now ONE
+  `fga.batch_check` + a 16-feature cap); no `dataSource` facet meant a lost COMPLETE was
+  UNRECOVERABLE by the B4 reconcile (now on every event type); env parsing outside the FAIL guard
+  made misconfigured runs vanish from provenance (now attributable FAIL); head/consumer validation
+  asymmetry 202'd requests the consumer silently DROPped (head now 422s the same shapes — model
+  slug, `stage$name` datasets ONLY (bare names would corrupt the shared graph node's namespace via
+  ingest's `SET d.namespace`), config re-capped at the consumer). Layout convention (lives in
+  train.py ONLY, the job is layout-dumb): registry `…/medallion/models/<model>`, artifacts
+  `s3://<bucket>/models/<model>/<token>/…`; the base must stay STABLE per model (create-time-only
+  registration; foreign-base pointers are refused loudly — unit-pinned).
+  REMAINING before ✅: `vending.externalBlobBases` deploy value must include the models prefix
+  (deploy-specific bucket URI — part of the deferred chart passthrough); auth-on deployments have
+  no lineage credential for the job's HTTP emits (LINEAGE_TOKEN seam exists, 401s are logged
+  distinguishably; demo tier runs auth-off — documented in RAY-TRAIN.md); orphan-artifact janitor
+  stays future work (§9 blob-pointer lifecycle); the live kind DONE WHEN below (§7a RESIDUAL).
+  Original spec below:
+  (per D3 + the
   SHARPENED D4: registry record vs artifact bytes). Build: the job script (baked into the ray-lance
   image) reads each feature dataset AT ITS PINNED version, trains the demo-tier CPU model, then
   publishes in the crash-safe order — (1) artifact BYTES as plain S3 objects under
@@ -708,7 +746,10 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   DONE WHEN pending.** The handler's pre-submit checks shipped with #115a (deny→DROP / outage→RETRY,
   unit-pinned); the seed script now writes the trainer rung (warehouse parent namespace:models;
   service-trainer reader on silver+gold, writer on namespace:models ONLY — verified against model.fga's
-  assignable relations; `bash -n` clean; per-model table parents seed at first publish, #115b).
+  assignable relations; `bash -n` clean). The per-model table parent (`namespace:models parent
+  table:models$<m>`) is written by the TRAINER CONSUMER at trigger time (#115b, 2026-07-11 —
+  idempotent, before the submit ack, outage→RETRY; unit-pinned): without it the published model
+  would be invisible under LINEAGE_FGA_ENABLED.
   REMAINING: (a) chart values passthrough for train topic/entrypoint/trainer identity — DEFERRED with
   reason: helm is unavailable in the remote session (proxy 403) and §0 forbids un-render-verified chart
   changes; defaults work meanwhile; (b) the live governed drive (ungranted trainer → DROP, granted →

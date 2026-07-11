@@ -53,6 +53,16 @@ def test_stage_uri_derives_the_sibling_stage_from_the_raw_uri() -> None:
     assert train.stage_uri_for(_settings(), "gold$catalog") == "s3://lake/medallion/gold"
 
 
+def test_registry_and_artifact_layout_derivation() -> None:
+    # D4: registry dataset beside the stages; artifact bytes in a SEPARATE tree at the bucket root
+    # (never inside a Lance dataset directory — GC/orphan safety + the #92 allowlist prefix).
+    assert train.registry_uri_for(_settings(), "churn") == "s3://lake/medallion/models/churn"
+    assert train.artifact_base_for(_settings(), "churn") == "s3://lake/models/churn"
+    local = _settings(MEDALLION_RAW_URI="/data/medallion/raw")
+    assert train.registry_uri_for(local, "churn") == "/data/medallion/models/churn"
+    assert train.artifact_base_for(local, "churn") == "/data/medallion/model-artifacts/churn"
+
+
 def test_head_resolves_omitted_versions_at_submit_time(monkeypatch: pytest.MonkeyPatch) -> None:
     # D1: an omitted version pins to LATEST *here* — the trigger never carries a floating version.
     monkeypatch.setattr(train, "_resolve_version", lambda _s, dataset: {"silver$features": 7}[dataset])
@@ -133,12 +143,20 @@ _EVENT = {
 }
 
 
-def _gate(allowed: dict[str, bool]) -> Any:
+def _gate(monkeypatch: pytest.MonkeyPatch, allowed: dict[str, bool]) -> None:
+    """Patch BOTH gate seams: inputs go through ONE fga.batch_check round trip (ack-window bound,
+    review 2026-07-11), the models-namespace rung through fga.check."""
+
     async def check(_client: Any, *, user: str, relation: str, obj: str) -> bool:
         assert user == "service-trainer"  # the trainer's OWN identity, never the mover rung (D5)
         return allowed[f"{relation}:{obj}"]
 
-    return check
+    async def batch(_client: Any, *, user: str, relation: str, objects: list[str]) -> dict[str, bool]:
+        assert user == "service-trainer"
+        return {obj: allowed[f"{relation}:{obj}"] for obj in objects}
+
+    monkeypatch.setattr(train.fga, "check", check)
+    monkeypatch.setattr(train.fga, "batch_check", batch)
 
 
 def test_consumer_denied_input_or_models_rung_drops(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -148,18 +166,13 @@ def test_consumer_denied_input_or_models_rung_drops(monkeypatch: pytest.MonkeyPa
         "submit_train_job",
         lambda *a, **k: submitted.append("x"),  # never awaited
     )
-    monkeypatch.setattr(
-        train.fga,
-        "check",
-        _gate({"can_read_data:table:silver$features": False}),
-    )
+    _gate(monkeypatch, {"can_read_data:table:silver$features": False})
     result = asyncio.run(train.handle_train_trigger(_settings(), _EVENT, fga_client=object()))
     assert result == {"status": "DROP"} and submitted == []  # denied BEFORE any compute is spent
 
-    monkeypatch.setattr(
-        train.fga,
-        "check",
-        _gate({"can_read_data:table:silver$features": True, "can_create_table:namespace:models": False}),
+    _gate(
+        monkeypatch,
+        {"can_read_data:table:silver$features": True, "can_create_table:namespace:models": False},
     )
     result = asyncio.run(train.handle_train_trigger(_settings(), _EVENT, fga_client=object()))
     assert result == {"status": "DROP"} and submitted == []
@@ -170,17 +183,58 @@ def test_consumer_fga_outage_retries(monkeypatch: pytest.MonkeyPatch) -> None:
         raise ServiceUnavailableError("fga down")
 
     monkeypatch.setattr(train.fga, "check", outage)
+    monkeypatch.setattr(train.fga, "batch_check", outage)
     result = asyncio.run(train.handle_train_trigger(_settings(), _EVENT, fga_client=object()))
     assert result == {"status": "RETRY"}  # outage ≠ denial
+
+
+def test_consumer_seeds_the_model_parent_link_before_submit(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #115c: without `namespace:models parent table:models$<m>` no human rung cascades to the
+    # registry dataset — the published model would be invisible under LINEAGE_FGA_ENABLED. The
+    # consumer writes it idempotently BEFORE the submit ack; an outage on the write → RETRY.
+    written: list[Any] = []
+
+    async def fake_write(_client: Any, tuples: list[Any], **_kw: Any) -> None:
+        written.extend(tuples)
+
+    async def fake_submit(*_a: Any, **_kw: Any) -> str:
+        return "submitted"
+
+    _gate(
+        monkeypatch,
+        {"can_read_data:table:silver$features": True, "can_create_table:namespace:models": True},
+    )
+    monkeypatch.setattr(train.fga, "write_tuples", fake_write)
+    monkeypatch.setattr(train.ray_submit, "submit_train_job", fake_submit)
+    result = asyncio.run(train.handle_train_trigger(_settings(), _EVENT, fga_client=object()))
+    assert result == {"status": "SUCCESS"}
+    assert (written[0].user, written[0].relation, written[0].object) == (
+        "namespace:models",
+        "parent",
+        "table:models$churn",
+    )
+
+    async def outage(*_a: Any, **_kw: Any) -> None:
+        raise ServiceUnavailableError("fga down")
+
+    monkeypatch.setattr(train.fga, "write_tuples", outage)
+    result = asyncio.run(train.handle_train_trigger(_settings(), _EVENT, fga_client=object()))
+    assert result == {"status": "RETRY"}
 
 
 def test_consumer_submits_and_acks_and_maps_outcomes(monkeypatch: pytest.MonkeyPatch) -> None:
     outcomes = iter(["submitted", "attached", "already_failed"])
     calls: list[str] = []
 
-    async def fake_submit(_s: Any, *, model: str, features_json: str, token: str, **_kw: Any) -> str:
+    async def fake_submit(_s: Any, *, model: str, features_json: str, token: str, **kw: Any) -> str:
         calls.append(token)
-        assert json.loads(features_json) == [{"dataset": "silver$features", "version": 7}]
+        # #115b: the consumer enriches each pinned feature with its Lance URI and derives the D4
+        # publish pointers — the job reads these verbatim (layout convention lives in train.py only).
+        assert json.loads(features_json) == [
+            {"dataset": "silver$features", "version": 7, "uri": "s3://lake/medallion/silver"}
+        ]
+        assert kw["registry_uri"] == "s3://lake/medallion/models/churn"
+        assert kw["artifact_base"] == "s3://lake/models/churn"
         return next(outcomes)
 
     monkeypatch.setattr(train.ray_submit, "submit_train_job", fake_submit)
@@ -212,6 +266,63 @@ def test_consumer_drops_unpinned_or_empty_features(monkeypatch: pytest.MonkeyPat
     assert asyncio.run(train.handle_train_trigger(_settings(), junk)) == {"status": "DROP"}
     empty = {"data": {"token": "t", "model": "m", "features": []}}
     assert asyncio.run(train.handle_train_trigger(_settings(), empty)) == {"status": "DROP"}
+
+
+def test_consumer_drops_path_unsafe_names(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #115b: model/token/dataset from the BUS become S3 key prefixes and Lance URIs — a traversal-shaped
+    # or separator-carrying name is a malformed trigger, DROPped before any URI is derived.
+    async def never(*_a: Any, **_kw: Any) -> str:
+        raise AssertionError("must not submit")
+
+    monkeypatch.setattr(train.ray_submit, "submit_train_job", never)
+    ok = {"dataset": "silver$features", "version": 7}
+    for data in (
+        {"token": "t1", "model": "../etc", "features": [ok]},
+        {"token": "a/b", "model": "churn", "features": [ok]},
+        {"token": "t1", "model": "churn", "features": [{"dataset": "silver$../raw", "version": 1}]},
+        {"token": "t1", "model": "churn", "features": [{"dataset": "a$b$c", "version": 1}]},
+        # a BARE dataset name is rejected too: it would derive a wrong stage URI AND (in the job's
+        # lineage) a namespace equal to the whole name, corrupting the shared graph node's namespace
+        {"token": "t1", "model": "churn", "features": [{"dataset": "raw_events", "version": 1}]},
+    ):
+        assert asyncio.run(train.handle_train_trigger(_settings(), {"data": data})) == {"status": "DROP"}
+
+
+def test_consumer_drops_oversized_or_nondict_config_and_too_many_features(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Review 2026-07-11: the head's claim-check bound must hold at the CONSUMER too — the bus is a
+    # wider trust surface, and config flows verbatim into the Ray Jobs runtime_env.
+    async def never(*_a: Any, **_kw: Any) -> str:
+        raise AssertionError("must not submit")
+
+    monkeypatch.setattr(train.ray_submit, "submit_train_job", never)
+    ok = {"dataset": "silver$features", "version": 7}
+    huge = {"blob": "x" * (train._MAX_CONFIG_BYTES + 1)}
+    for data in (
+        {"token": "t1", "model": "churn", "features": [ok], "config": huge},
+        {"token": "t1", "model": "churn", "features": [ok], "config": ["not-a-dict"]},
+        {"token": "t1", "model": "churn", "features": [ok] * (train.MAX_FEATURES + 1)},
+    ):
+        assert asyncio.run(train.handle_train_trigger(_settings(), {"data": data})) == {"status": "DROP"}
+
+
+def test_train_route_422s_the_names_its_consumer_would_drop() -> None:
+    # Review 2026-07-11: the head refuses what the consumer would DROP — never a 202 into a silent
+    # no-op. Pydantic pattern/max_length gates mirror the consumer's _safe_name/_safe_dataset/cap.
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_dapr] = lambda: None
+    app.dependency_overrides[get_settings] = lambda: _settings()
+    client = TestClient(app)
+    ok_feature = {"dataset": "silver$features", "version": 1}
+    for body in (
+        {"model": "../etc", "features": [ok_feature]},
+        {"model": "churn", "features": [{"dataset": "raw_events", "version": 1}]},  # bare name
+        {"model": "churn", "features": [{"dataset": "silver$../raw", "version": 1}]},
+        {"model": "churn", "features": [ok_feature] * (train.MAX_FEATURES + 1)},
+    ):
+        assert client.post("/train", json=body).status_code == 422
 
 
 def test_head_rejects_an_oversized_config() -> None:
@@ -271,7 +382,14 @@ def _run_submit(monkeypatch: pytest.MonkeyPatch, api: _FakeJobsAPI) -> str:
 
     monkeypatch.setattr(ray_submit.httpx, "AsyncClient", make_client)
     return asyncio.run(
-        ray_submit.submit_train_job(_settings(), model="churn", features_json="[]", token="tok1")
+        ray_submit.submit_train_job(
+            _settings(),
+            model="churn",
+            features_json="[]",
+            token="tok1",
+            registry_uri="s3://lake/medallion/models/churn",
+            artifact_base="s3://lake/models/churn",
+        )
     )
 
 
@@ -280,6 +398,11 @@ def test_submit_train_job_fresh_submit(monkeypatch: pytest.MonkeyPatch) -> None:
     assert _run_submit(monkeypatch, api) == "submitted"
     assert api.posts[0]["submission_id"] == "ray-train-tok1"  # deterministic idempotency key
     assert api.posts[0]["entrypoint"].endswith("ray_train_job.py")
+    env = api.posts[0]["runtime_env"]["env_vars"]
+    # #115b: the job's publish pointers + its lineage ingest travel in the job env verbatim.
+    assert env["REGISTRY_URI"] == "s3://lake/medallion/models/churn"
+    assert env["ARTIFACT_BASE"] == "s3://lake/models/churn"
+    assert env["LINEAGE_URL"] == _settings().train_lineage_url
 
 
 def test_submit_train_job_reattaches_to_a_running_job(monkeypatch: pytest.MonkeyPatch) -> None:

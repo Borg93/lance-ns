@@ -58,8 +58,11 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   artifact objects** (bytes first, one atomic registry commit second; time-travel = model
   versioning; tags + validator rung = promotion; serving loads the plain path, no Lance reader),
   dedicated `service-trainer` identity (features reader + models writer only), shared Jobs-REST
-  seam now → KubeRay RayJob at the rask merge. Implementation open: todo_fable §9 #115a–c
-  (execution-spec'd).
+  seam now → KubeRay RayJob at the rask merge. Implementation #115a–c ALL code-complete
+  (2026-07-10/11, unit tier + adversarial reviews): head + consumer + `scripts/ray_train_job.py`
+  (pinned-version reads, bytes-then-commit registry publish, self-emitted TRAINING lifecycle
+  lineage with a reconcile-recoverable dataSource facet) + trainer grants + the `TRAINING`
+  JetStream stream. Live kind drive + chart values passthrough remain (todo_fable §7a RESIDUAL).
 
 ## 5 · Auth / authz (can and can't)
 

@@ -1,0 +1,359 @@
+"""Ray TRAIN job for the training workload class (#115b, docs/RAY-TRAIN.md D3+D4).
+
+The trainer consumer submits this via the Ray Jobs REST API (submit-and-ack, D2) — the job then owns
+its ENTIRE lifecycle: it emits OpenLineage ``START → RUNNING(progress) → COMPLETE|FAIL`` itself over
+the lineage HTTP ingest (no sidecar on Ray pods), reads every feature dataset AT ITS PINNED version
+(the trigger resolved the pins at the head — nothing floats here), trains the demo-tier model, and
+publishes per the D4 crash-safe order:
+
+1. artifact BYTES first — plain objects under ``<artifact_base>/<token>/`` (token-keyed → a retried
+   job overwrites its own paths, idempotent);
+2. the REGISTRY record second — ONE Lance commit to ``models$<model>`` (rows per artifact, ``payload``
+   = external blob pointer at the plain paths; 2.2 + stable row ids + the artifact base registered as
+   the dataset's external-blob base). The commit IS the atomic registration: a crash between (1) and
+   (2) leaves orphan files, never a half-registered model. Model version N == Lance version N.
+
+Self-contained by design (baked into the ray image; no ``services/`` imports) — the run-id derivation
+mirrors ``common.openlineage.run_id_for`` byte-for-byte and is pinned against it by a unit test.
+
+Env: MODEL FEATURES(json [{dataset,version,uri}]) CONFIG TOKEN MODELS_NAMESPACE REGISTRY_URI
+     ARTIFACT_BASE [LINEAGE_URL] [LINEAGE_TOKEN] S3_ENDPOINT S3_KEY S3_SECRET [S3_REGION].
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import sys
+import urllib.error
+import urllib.request
+import uuid
+from datetime import UTC, datetime
+from typing import Any
+
+_PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/scripts/ray_train_job.py"
+_RUN_SCHEMA = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
+_BASE_FACET = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/BaseFacet"
+#: Same spec pin as the medallion emitter (services/medallion/schemas/events.py) — equality-pinned by
+#: tests/unit/test_train_job.py so the two emitters can never drift on the facet version.
+_VERSION_FACET_SCHEMA = (
+    "https://openlineage.io/spec/facets/1-0-1/DatasetVersionDatasetFacet.json"
+    "#/$defs/DatasetVersionDatasetFacet"
+)
+#: Mirrors common.openlineage._RUN_ID_NAMESPACE (uuid5 of the project URL under NAMESPACE_URL) —
+#: pinned equal by tests/unit/test_train_job.py so the two derivations can never drift.
+_RUN_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/Borg93/lance-ns")
+
+
+def run_id_for(seed: str) -> str:
+    return str(uuid.uuid5(_RUN_ID_NAMESPACE, seed))
+
+
+def _storage_options() -> dict[str, str]:
+    return {
+        "endpoint": os.environ["S3_ENDPOINT"],
+        "access_key_id": os.environ["S3_KEY"],
+        "secret_access_key": os.environ["S3_SECRET"],
+        "region": os.environ.get("S3_REGION", "us-east-1"),
+        "allow_http": "true",
+        "virtual_hosted_style_request": "false",
+    }
+
+
+def build_event(
+    *,
+    event_type: str,
+    token: str,
+    model: str,
+    namespace: str,
+    features: list[dict[str, Any]],
+    registry_uri: str = "",
+    version: int | None = None,
+    progress: tuple[int, int] | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """One spec-true training ``RunEvent`` (D3): official ``jobType=TRAINING`` facet, per-input
+    ``DatasetVersionDatasetFacet`` pins, output version on COMPLETE only — a FAIL keeps a
+    version-less output and the standard ``errorMessage`` facet, never a fabricated version.
+    The output carries ``dataSource`` (the registry URI) on EVERY event type: it is location
+    metadata, not a success claim, and it is what lets the lineage reconcile back-fill recover a
+    model version whose COMPLETE emit was lost (review 2026-07-11 — without it the models node has
+    no source_uri and the B4 sweep can never repair it)."""
+    run_facets: dict[str, Any] = {
+        "lance": {"_producer": _PRODUCER, "_schemaURL": _BASE_FACET, "operation": "training", "token": token}
+    }
+    if progress is not None:
+        run_facets["progress"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _BASE_FACET,
+            "done": progress[0],
+            "total": progress[1],
+        }
+    if error is not None:
+        run_facets["errorMessage"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json"
+            "#/$defs/ErrorMessageRunFacet",
+            "message": error[:1000],
+            "programmingLanguage": "PYTHON",
+        }
+    inputs = [
+        {
+            # The consumer only forwards validated `stage$name` datasets, so this matches the stage
+            # namespace the medallion movers stamp on the SAME graph nodes (never a whole bare name).
+            "namespace": feature["dataset"].split("$", 1)[0],
+            "name": feature["dataset"],
+            "facets": {
+                "version": {
+                    "_producer": _PRODUCER,
+                    "_schemaURL": _VERSION_FACET_SCHEMA,
+                    "datasetVersion": str(feature["version"]),
+                }
+            },
+        }
+        for feature in features
+    ]
+    output_facets: dict[str, Any] = {}
+    if registry_uri:  # location metadata, on ALL event types — the reconcile back-fill key
+        output_facets["dataSource"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/"
+            "DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet",
+            "name": registry_uri,
+            "uri": registry_uri,
+        }
+    if version is not None:  # COMPLETE only — the registry commit that just happened
+        output_facets["version"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": _VERSION_FACET_SCHEMA,
+            "datasetVersion": str(version),
+        }
+        output_facets["schema"] = {
+            "_producer": _PRODUCER,
+            "_schemaURL": "https://openlineage.io/spec/facets/1-1-1/"
+            "SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet",
+            "fields": [
+                {"name": "artifact", "type": "string"},
+                {"name": "payload", "type": "blob"},
+                {"name": "meta", "type": "string"},
+            ],
+        }
+    output: dict[str, Any] = {"namespace": namespace, "name": f"{namespace}${model}"}
+    if output_facets:
+        output["facets"] = output_facets
+    return {
+        "eventType": event_type,
+        "eventTime": datetime.now(UTC).isoformat(),
+        "producer": _PRODUCER,
+        "schemaURL": _RUN_SCHEMA,
+        "run": {"runId": run_id_for(f"train-{token}"), "facets": run_facets},
+        "job": {
+            "namespace": "ray-jobs",
+            "name": f"train.{model}",
+            "facets": {
+                "jobType": {
+                    "_producer": _PRODUCER,
+                    "_schemaURL": "https://openlineage.io/spec/facets/2-0-3/JobTypeJobFacet.json"
+                    "#/$defs/JobTypeJobFacet",
+                    "processingType": "BATCH",
+                    "integration": "RAY",
+                    "jobType": "TRAINING",
+                }
+            },
+        },
+        "inputs": inputs,
+        "outputs": [output],
+    }
+
+
+def emit(event: dict[str, Any]) -> None:
+    """Best-effort POST to the lineage HTTP ingest (Ray pods carry no Dapr sidecar). Two attempts,
+    then give up loudly on stderr — provenance must never crash the training itself.
+
+    LINEAGE_TOKEN (optional) rides as a bearer: with the chart's ``auth.enabled`` the ingest route
+    401s unauthenticated POSTs, so a governed deployment must inject a credential here (documented in
+    docs/RAY-TRAIN.md — the demo tier runs auth-off). An HTTP status in the failure line keeps a 401
+    (credential problem) distinguishable from an outage."""
+    url = os.environ.get("LINEAGE_URL", "").rstrip("/")
+    if not url:
+        return
+    headers = {"content-type": "application/json"}
+    if token := os.environ.get("LINEAGE_TOKEN", ""):
+        headers["authorization"] = f"Bearer {token}"
+    body = json.dumps(event).encode()
+    for attempt in (1, 2):
+        try:
+            req = urllib.request.Request(f"{url}/api/v1/lineage", data=body, headers=headers)
+            urllib.request.urlopen(req, timeout=10)  # noqa: S310 — in-cluster service URL from env
+            return
+        except urllib.error.HTTPError as exc:
+            print(f"lineage emit attempt {attempt} rejected: HTTP {exc.code}", file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 — best-effort by contract
+            print(f"lineage emit attempt {attempt} failed: {exc}", file=sys.stderr)
+
+
+def train_demo_model(tables: list[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Demo-tier CPU 'training': per-numeric-column means over all pinned features → 'weights', plus
+    row-count metrics. Deterministic and dependency-free — the seam a TorchTrainer drops into (D6)."""
+    weights: dict[str, float] = {}
+    rows = 0
+    for table in tables:
+        rows += table.num_rows
+        for column in table.schema.names:
+            if str(table.schema.field(column).type) in ("int64", "int32", "float", "double", "float32"):
+                values = [v for v in table.column(column).to_pylist() if v is not None]
+                if values:
+                    weights[column] = float(sum(values) / len(values))
+    return {"kind": "column-means", "weights": weights}, {"rows_seen": rows, "features": len(tables)}
+
+
+def write_artifacts(artifact_base: str, token: str, files: dict[str, bytes]) -> dict[str, str]:
+    """STEP 1 (bytes first): land plain objects under ``<base>/<token>/`` — token-keyed, so a retry
+    overwrites its own paths. Returns artifact-name → full URI for the pointer rows."""
+    base = artifact_base.rstrip("/")
+    uris: dict[str, str] = {}
+    if base.startswith("s3://"):
+        import pyarrow.fs as pafs
+
+        so = _storage_options()
+        scheme, _, host = so["endpoint"].partition("://")
+        fs = pafs.S3FileSystem(
+            endpoint_override=host,
+            access_key=so["access_key_id"],
+            secret_key=so["secret_access_key"],
+            scheme=scheme or "http",
+            region=so["region"],
+        )
+        for name, payload in files.items():
+            path = f"{base.removeprefix('s3://')}/{token}/{name}"
+            with fs.open_output_stream(path) as out:
+                out.write(payload)
+            uris[name] = f"s3://{path}"
+    else:  # local path — the unit-test tier
+        target = os.path.join(base, token)
+        os.makedirs(target, exist_ok=True)
+        for name, payload in files.items():
+            with open(os.path.join(target, name), "wb") as out:
+                out.write(payload)
+            uris[name] = os.path.join(target, name)
+    return uris
+
+
+def publish_registry(
+    registry_uri: str,
+    artifact_base: str,
+    artifact_uris: dict[str, str],
+    meta: dict[str, Any],
+    storage_options: dict[str, str] | None,
+) -> int:
+    """STEP 2 (the atomic registration): ONE Lance commit of pointer rows into ``models$<model>``.
+
+    First publish CREATES the registry (2.2 + stable row ids — create-time-only — with the artifact
+    base registered as the dataset's external-blob base, which means the base must stay STABLE per
+    model); later publishes APPEND. Returns the new Lance version — the model version.
+
+    The existence probe alone decides create-vs-append (review 2026-07-11: a wider try/except here
+    misclassified append-time failures as "first publish" and masked the real error behind a
+    'Dataset already exists' from the fallback create). A create that loses the concurrent
+    first-publish CAS race converges as an append instead of terminally failing the run.
+    """
+    import lance
+    import pyarrow as pa
+    from lance.blob import Blob, blob_array
+    from lance.dataset import DatasetBasePath
+
+    names = sorted(artifact_uris)
+    table = pa.table(
+        {
+            "artifact": pa.array(names, pa.string()),
+            "payload": blob_array([Blob.from_uri(artifact_uris[n]) for n in names]),
+            "meta": pa.array([json.dumps(meta)] * len(names), pa.string()),
+        }
+    )
+
+    def _append() -> int:
+        return int(
+            lance.write_dataset(table, registry_uri, mode="append", storage_options=storage_options).version
+        )
+
+    try:  # scope: ONLY the existence probe — a failing append must surface its own error
+        lance.dataset(registry_uri, storage_options=storage_options)
+    except (ValueError, OSError):
+        pass  # not found → first publish
+    else:
+        return _append()
+    try:
+        return int(
+            lance.write_dataset(
+                table,
+                registry_uri,
+                data_storage_version="2.2",
+                enable_stable_row_ids=True,
+                initial_bases=[DatasetBasePath(artifact_base.rstrip("/") + "/")],
+                storage_options=storage_options,
+            ).version
+        )
+    except OSError as exc:
+        if "already exists" not in str(exc).lower():
+            raise
+        return _append()  # lost the concurrent first-create race — converge as version 2
+
+
+def main() -> None:
+    # MODEL + TOKEN are the run identity — without them there is nothing to attribute an event to,
+    # so only these two may hard-crash. Everything else parses under the FAIL guard: a malformed
+    # FEATURES/CONFIG or missing S3 env becomes an attributable FAILed run, not a silent vanish
+    # (review 2026-07-11 — the consumer already acked; lineage is the only trace left).
+    model = os.environ["MODEL"]
+    token = os.environ["TOKEN"]
+    namespace = os.environ.get("MODELS_NAMESPACE", "models")
+    registry_uri = os.environ.get("REGISTRY_URI", "")
+    features: list[dict[str, Any]] = []
+
+    def event(**kw: Any) -> dict[str, Any]:
+        return build_event(
+            token=token,
+            model=model,
+            namespace=namespace,
+            features=features,
+            registry_uri=registry_uri,
+            **kw,
+        )
+
+    try:
+        features.extend(json.loads(os.environ["FEATURES"]))
+        config: dict[str, Any] = json.loads(os.environ.get("CONFIG", "{}"))
+        registry_uri = registry_uri or os.environ["REGISTRY_URI"]  # required — KeyError FAILs above
+        artifact_base = os.environ["ARTIFACT_BASE"]
+        so = _storage_options() if registry_uri.startswith("s3://") else None
+    except Exception as exc:
+        emit(event(event_type="FAIL", error=f"train config: {exc}"))
+        raise
+
+    emit(event(event_type="START"))
+    try:
+        import lance
+
+        tables = []
+        for index, feature in enumerate(features, start=1):
+            ds = lance.dataset(feature["uri"], version=feature["version"], storage_options=so)
+            tables.append(ds.to_table())
+            emit(event(event_type="RUNNING", progress=(index, len(features) + 1)))
+        weights, metrics = train_demo_model(tables)
+        artifact_uris = write_artifacts(
+            artifact_base,
+            token,
+            {"weights.json": json.dumps(weights).encode(), "metrics.json": json.dumps(metrics).encode()},
+        )
+        emit(event(event_type="RUNNING", progress=(len(features) + 1, len(features) + 1)))
+        meta = {"config": config, "features": features, "metrics": metrics, "token": token}
+        version = publish_registry(registry_uri, artifact_base, artifact_uris, meta, so)
+        emit(event(event_type="COMPLETE", version=version))
+        print(f"model {namespace}${model} published at registry version {version}")
+    except Exception as exc:
+        emit(event(event_type="FAIL", error=f"train: {exc}"))
+        raise
+
+
+if __name__ == "__main__":
+    main()

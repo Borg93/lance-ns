@@ -211,9 +211,14 @@ class EventRecord(BaseModel):
 
 
 class Events(BaseModel):
-    """The most-recent ingested OpenLineage events (newest first)."""
+    """The most-recent ingested OpenLineage events (newest first).
+
+    ``next_cursor`` (additive, 2026-07-11): pass back as ``?after=`` to page OLDER events (keyset
+    over ``seq``). ``None`` = the feed is exhausted.
+    """
 
     events: list[EventRecord]
+    next_cursor: int | None = None
 
 
 class DemoField(BaseModel):

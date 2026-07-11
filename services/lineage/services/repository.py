@@ -173,6 +173,22 @@ _LIST_EVENTS: Final = (
     "SELECT seq, event_type, event_time, job, author, inputs, outputs, event "
     "FROM public.lineage_events ORDER BY seq DESC LIMIT %s"
 )
+# Keyset variant (§2 perf, 2026-07-11): `seq < %s` walks older pages off the PK index — NEVER OFFSET
+# (OFFSET re-scans and re-drops every skipped row, so page N costs O(N·page)). The summary variants
+# skip the full-JSONB `event` column entirely — the feed's hot poll path doesn't pay for payloads it
+# won't render.
+_LIST_EVENTS_AFTER: Final = (
+    "SELECT seq, event_type, event_time, job, author, inputs, outputs, event "
+    "FROM public.lineage_events WHERE seq < %s ORDER BY seq DESC LIMIT %s"
+)
+_LIST_EVENTS_SUMMARY: Final = (
+    "SELECT seq, event_type, event_time, job, author, inputs, outputs "
+    "FROM public.lineage_events ORDER BY seq DESC LIMIT %s"
+)
+_LIST_EVENTS_SUMMARY_AFTER: Final = (
+    "SELECT seq, event_type, event_time, job, author, inputs, outputs "
+    "FROM public.lineage_events WHERE seq < %s ORDER BY seq DESC LIMIT %s"
+)
 # Retention prune — keep the most-recent N rows (by the monotonic seq), drop older. Cheap (PK-indexed seq).
 _PRUNE_EVENTS: Final = (
     "DELETE FROM public.lineage_events "
@@ -1031,10 +1047,23 @@ class LineageRepository:
         async with self._pool.connection() as conn:
             await conn.execute(_INSERT_READ, (reader, dataset))
 
-    async def list_events(self, limit: int = 500) -> list[EventRecord]:
-        """The most-recent ingested events, newest first (durable — read from Postgres, not memory)."""
+    async def list_events(
+        self, limit: int = 500, *, after: int | None = None, summary: bool = False
+    ) -> list[EventRecord]:
+        """The most-recent ingested events, newest first (durable — read from Postgres, not memory).
+
+        ``after`` = keyset cursor (rows with ``seq < after`` — the previous page's last seq);
+        ``summary`` skips the full-JSONB ``event`` column at the SQL layer (projection, not
+        post-fetch stripping) for pollers that render only the summary fields.
+        """
+        if after is not None:
+            query = _LIST_EVENTS_SUMMARY_AFTER if summary else _LIST_EVENTS_AFTER
+            params: tuple[int, ...] = (after, limit)
+        else:
+            query = _LIST_EVENTS_SUMMARY if summary else _LIST_EVENTS
+            params = (limit,)
         async with self._pool.connection() as conn:
-            cur = await conn.execute(_LIST_EVENTS, (limit,))
+            cur = await conn.execute(query, params)
             rows = await cur.fetchall()
         return [
             EventRecord(
@@ -1045,7 +1074,7 @@ class LineageRepository:
                 author=r[4],
                 inputs=r[5] or [],
                 outputs=r[6] or [],
-                event=r[7] or {},
+                event=(r[7] or {}) if not summary else {},
             )
             for r in rows
         ]

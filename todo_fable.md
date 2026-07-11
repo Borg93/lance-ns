@@ -179,9 +179,17 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
 
 ## 4 · P1 — reliability / ACID
 
-- ⛔ **Frontend `poll()` = 1+N+P+3 SEQUENTIAL calls per 2s tick** (N+1 over /datasets; 35+ calls at current
-  scale), no overlap guard, no fetch timeout → slow ticks stack unboundedly. Batch (Promise.all), guard
-  overlap, add timeouts; consider a bulk endpoint. `frontend/src/lib/store.svelte.ts:51`
+- ✅ **DONE 2026-07-11 (Batch 3c) — frontend `poll()` batched + guarded + bounded.** Per-dataset
+  fan-outs (producers, graphs) now run concurrently in POOLED batches of 8 (review-caught: a bare
+  Promise.all over the catalog's limit=500 list would fire 500 concurrent requests per 2s tick and
+  the browser's per-host queue would eat each request's timeout); overlap guard (`#polling` +
+  finally) so a slow tick skips interval firings instead of stacking; per-request 8s timeout via
+  feature-detected `AbortSignal.timeout` (review-caught: no fallback = silent permanent "offline"
+  on Safari <16 — AbortController fallback added). `fetchEvents` now accepts
+  `{after, limit, summary}`; svelte-check 0 errors, bun 15/15. Deviation from the batch spec, noted
+  honestly: the live board keeps newest-window semantics (no cursor threading in the 2s tick — a
+  cursor pages OLDER history, which the UI doesn't render today); the API helper carries it for
+  when a history view exists. Playwright e2e remain manual-only (separate tracked item).
 - ✅ **DONE 2026-07-06 — `backfill_write` now runs in ONE transaction** (`conn.transaction()`, like
   `ingest_event`): no half-written RECONCILED Run window between sweeps. Unit + real-AGE e2e covered.
 - ✅ **DONE 2026-07-10 — `create_table` dual-write now COMPENSATES** (was: Lance create → FGA owner grant →
@@ -214,12 +222,28 @@ _producer/_schemaURL) + a 6-case round-trip smoke test through `lineage.models.R
   column path abort-free) + an opt-in **batched Run retention prune** (`LINEAGE_RUN_RETENTION_DAYS`,
   `services.lineage.runRetentionDays`, runs under the reconcile cron's single-flight lock; LIMIT-500
   batches so a backlog can't exceed the statement timeout). Events feed was already retention-capped.
-- ⛔ **`/events` over-fetch** — 2000 full-JSONB rows per call (frontend hits every 2s), sliced to 500 after
-  governance; no cursor, no projection. `services/lineage/api/v1/endpoints/runs.py:21`
+- ✅ **DONE 2026-07-11 (Batch 3a) — `/events` keyset pagination + projection.** `?after=<seq>`
+  (keyset off the PK, NEVER OFFSET) + `?limit≤500` + `?summary=true` (drops the full-JSONB `event`
+  column AT THE SQL LAYER — four query variants in repository.py); response gains additive
+  `next_cursor`. The 2000-row over-fetch is now AUTH-ON ONLY (governance headroom); auth off →
+  governed() is pass-through so the fetch collapses to exactly `limit`. Governance-before-slice is
+  unit-PINNED (a hidden row never surfaces on any page; cursor is exclusive so no dup/skip of
+  visible rows — adversarially reviewed, pagination attacks came up clean). Documented decision:
+  `next_cursor` is a WINDOW FLOOR — on a hidden-dense page it can be a hidden row's bare seq
+  (exclusive, content never returned; seqs were already inferable from feed gaps — no new
+  disclosure class). Defaults = the old behavior exactly. LIVE residual: the feed e2e re-run.
 - ✅ **DONE 2026-07-06 — secret fetch off the event loop**: all three lifespans (catalog/lineage/compaction)
   wrap the sync fetch in `run_in_threadpool`; `common/secrets.py` documents the sync-by-design contract.
-- ⛔ **Demo peek re-reads EVERY Lance version of every dataset per call** (one S3 dataset-open per version),
-  polled every 2s — linear latency growth with cascade runs. Cache or cap versions. `services/lineage/api/v1/endpoints/demo.py:63`
+- ✅ **DONE 2026-07-11 (Batch 3b) — demo peek version-keyed cache + newest-K cap.** Steady-state
+  tick = ONE dataset-open (the latest-version probe — irreducible: that read IS the change check;
+  honest refinement of the spec's "zero opens") + the versions() listing; zero per-version opens on
+  an unchanged tick; a NEW version re-opens ONLY itself. Cap `LINEAGE_DEMO_MAX_VERSIONS` (default
+  50) bounds the cold tick too. Review-caught + fixed: incarnation identity — a delete+recreate at
+  the same URI that reaches the SAME (or higher) version count while nobody polls would have been
+  served stale forever under a bare version-number key → every cache hit is validated against the
+  live manifest TIMESTAMP (same (version, stamp) = same immutable manifest); and below-window-floor
+  entries are pruned (the cascade mints a version per tick — unpruned cache = slow unbounded leak).
+  All pinned by counting-fake + same-version-recreate + prune unit tests (test_lineage_demo.py).
 - ✅ **DONE 2026-07-05 — RustFS conditional-write (CAS) VALIDATED (PASS).** `tests/e2e/test_object_store_cas_e2e.py`
   + `make e2e-cas` ran green against the live kind cluster: tier-1 second-put→412; tier-2 exactly one 200 +
   seven 412 per round (5 rounds); tier-3 8-process append → count_rows()==800 + full id set + len(versions())==9.
@@ -545,7 +569,13 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   the P2 schema-declaration MECHANISM stays un-built; no new invariants invented mid-doc.
 >
 >   **BATCH 3 — read-path perf trio (§2 ⛔s: /events over-fetch · demo-peek re-reads · frontend
->   poll fan-out).**
+>   poll fan-out). ✅ DONE 2026-07-11** — all three DONE-WHENs met (details on the flipped §2
+>   items); adversarial review confirmed the pagination attacks clean and caught 5 real issues,
+>   all fixed: same-version-count recreate serving a dead incarnation (timestamp identity),
+>   unbounded 500-request frontend fan-out (pooled batches of 8), AbortSignal.timeout missing on
+>   Safari <16 (feature-detect fallback), _VERSION_FIELDS slow leak (window-floor prune), and the
+>   hidden-seq window-floor cursor (documented as a no-new-disclosure decision). Gate: 500
+>   backend tests, svelte-check 0/0, bun 15/15. Spec below:
 >   ✅ DONE WHEN: (a) `/events` takes keyset pagination (`?after=<cursor>&limit=`, server cap ≤500,
 >   NEVER OFFSET) + a column projection instead of full-JSONB rows, returns the next cursor, and the
 >   governance filter provably applies BEFORE the slice (unit-pinned); frontend store threads the

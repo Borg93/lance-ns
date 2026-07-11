@@ -66,6 +66,10 @@ class LineageSettings(BaseSettings):
     # --- Demo data peek (DEMO ONLY) — reads the real Lance datasets on S3 so the UI can show
     # what is changing in storage (schema/versions/rows). Off by default; never enable in prod.
     demo_data_enabled: bool = Field(default=False, alias="LINEAGE_DEMO_DATA_ENABLED")
+    # Cap on how many (newest) Lance versions the peek reports per dataset — the peek's cost grew
+    # LINEARLY with total versions (one S3 dataset-open per version, polled every 2s) before the
+    # 2026-07-11 version-keyed cache; the cap bounds the very first (cold) tick too.
+    demo_max_versions: int = Field(default=50, ge=1, alias="LINEAGE_DEMO_MAX_VERSIONS")
     s3_endpoint: str | None = Field(default=None, alias="LINEAGE_S3_ENDPOINT")
     s3_access_key_id: str | None = Field(default=None, alias="LINEAGE_S3_ACCESS_KEY_ID")
     # SecretStr so the value is redacted in repr/model_dump (parity with the catalog) — read it with

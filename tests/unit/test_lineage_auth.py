@@ -325,6 +325,7 @@ class _FakeRepo:
     def __init__(self) -> None:
         self.ingested: RunEvent | None = None
         self.events: list[EventRecord] = []
+        self.list_events_calls: list[dict[str, object]] = []
         self.runs: list[RunStatus] = []
         self.write_version: int | None = None
         self.uri: str | None = None
@@ -338,7 +339,10 @@ class _FakeRepo:
     async def record_event(self, **_kwargs: object) -> None:
         return None
 
-    async def list_events(self, limit: int = 500) -> list[EventRecord]:  # noqa: ARG002
+    async def list_events(
+        self, limit: int = 500, *, after: int | None = None, summary: bool = False
+    ) -> list[EventRecord]:
+        self.list_events_calls.append({"limit": limit, "after": after, "summary": summary})
         return self.events
 
     async def list_runs(self) -> Runs:
@@ -408,6 +412,53 @@ def test_get_events_hides_dataset_less_events_when_governed(monkeypatch: pytest.
     flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
     result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings))
     assert result.events == []  # dataset-less event is hidden under governance
+
+
+def test_get_events_pagination_never_leaks_past_governance(monkeypatch: pytest.MonkeyPatch) -> None:
+    # §2 perf (2026-07-11) guardrail pin: the governance filter runs BEFORE the slice on EVERY page —
+    # a small `limit` must page through VISIBLE rows only; a hidden row never appears on any page.
+    from lineage.api.v1.endpoints.runs import get_events
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.events = [
+        EventRecord(seq=3, outputs=["a"], inputs=[], event={}),
+        EventRecord(seq=2, outputs=["b"], inputs=[], event={}),  # hidden — must never surface
+        EventRecord(seq=1, outputs=["a"], inputs=[], event={}),
+    ]
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings, limit=1))
+    assert [e.seq for e in result.events] == [3]
+    assert result.next_cursor == 3  # continue below the last VISIBLE row — not below the hidden one
+    # auth ON keeps the wide fetch window so filtered-out rows don't starve the page
+    assert repo.list_events_calls[-1]["limit"] == 2000
+
+
+def test_get_events_cursor_and_fetch_width(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Auth OFF → governed() is pass-through, so the endpoint reads EXACTLY `limit` rows (the 2s
+    # poll no longer pays a 2000-row window), and the keyset cursor advances / terminates correctly.
+    from lineage.api.v1.endpoints.runs import get_events
+
+    settings = _settings()  # auth off
+    repo = _FakeRepo()
+    flt = fga_deps.DatasetFilter(_request(), settings, None)
+    repo.events = [
+        EventRecord(seq=5, outputs=["a"], inputs=[], event={}),
+        EventRecord(seq=4, outputs=["a"], inputs=[], event={}),
+    ]
+    page = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings, limit=2))
+    assert repo.list_events_calls[-1] == {"limit": 2, "after": None, "summary": False}
+    assert [e.seq for e in page.events] == [5, 4] and page.next_cursor == 4  # full page → continue
+
+    repo.events = [EventRecord(seq=3, outputs=["a"], inputs=[], event={})]
+    page = asyncio.run(get_events(cast(LineageRepository, repo), flt, settings, after=4, limit=2))
+    assert repo.list_events_calls[-1] == {"limit": 2, "after": 4, "summary": False}
+    assert [e.seq for e in page.events] == [3] and page.next_cursor is None  # short page → exhausted
+
+    # summary rides through to the SQL projection layer untouched
+    asyncio.run(get_events(cast(LineageRepository, repo), flt, settings, summary=True))
+    assert repo.list_events_calls[-1]["summary"] is True
 
 
 def test_get_column_upstream_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -356,6 +356,11 @@ export interface paths {
          *     on the feed is filtered like the per-dataset reads — an event is shown only if the caller
          *     ``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the
          *     audit feed never discloses a table outside the caller's reach. Auth off → pass-through. (#22)
+         *
+         *     Pagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous
+         *     page's ``next_cursor``); ``limit`` ≤ 500 (server-capped); ``summary=true`` drops the full-JSONB
+         *     ``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice —
+         *     pagination can never disclose a hidden row (only the visible window advances).
          */
         get: operations["get_events_events_get"];
         put?: never;
@@ -712,10 +717,15 @@ export interface components {
         /**
          * Events
          * @description The most-recent ingested OpenLineage events (newest first).
+         *
+         *     ``next_cursor`` (additive, 2026-07-11): pass back as ``?after=`` to page OLDER events (keyset
+         *     over ``seq``). ``None`` = the feed is exhausted.
          */
         Events: {
             /** Events */
             events: components["schemas"]["EventRecord"][];
+            /** Next Cursor */
+            next_cursor?: number | null;
         };
         /**
          * GraphEdge
@@ -875,6 +885,8 @@ export interface components {
             quality_assertions?: {
                 [key: string]: unknown;
             }[];
+            /** Operation */
+            operation?: string | null;
         };
         /**
          * Producers
@@ -974,6 +986,8 @@ export interface components {
              * @default 0
              */
             events: number;
+            /** Operation */
+            operation?: string | null;
         };
         /**
          * Runs
@@ -1450,7 +1464,11 @@ export interface operations {
     };
     get_events_events_get: {
         parameters: {
-            query?: never;
+            query?: {
+                after?: number | null;
+                limit?: number;
+                summary?: boolean;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -1464,6 +1482,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Events"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

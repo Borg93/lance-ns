@@ -54,43 +54,86 @@ def _read_lineage_jsonb(ds: Any) -> dict[str, Any] | None:
         return None
 
 
-def _read_dataset(name: str, uri: str, opts: dict[str, str]) -> DemoDataset:
+# --- Version-keyed peek cache (§2 perf, 2026-07-11). The peek's cost grew LINEARLY with total
+# versions: one S3 dataset-open PER VERSION per dataset, polled every 2s. Lance versions are
+# IMMUTABLE, so a version's schema entry can never change once read → per-version entries cache
+# until they scroll out of the newest-K window. Incarnation identity (review 2026-07-11): a
+# delete-and-recreate at the same URI restarts version numbers, and the new incarnation can reach
+# ANY version count while nobody polls — so a bare version number is NOT a valid cache key. Every
+# entry is therefore validated against the live manifest TIMESTAMP from ``ds.versions()`` (already
+# fetched each tick — no extra opens): same (version, timestamp) = same immutable manifest; a
+# mismatch = a dead incarnation's entry, rebuilt. Steady-state tick cost: ONE dataset-open (the
+# probe) + the versions() listing, zero per-version opens. Benign races only (demo tier,
+# threadpool): a concurrent rebuild duplicates work, never corrupts.
+_PAYLOADS: dict[str, tuple[int, str | None, DemoDataset]] = {}  # uri -> (version, stamp, payload)
+_VERSION_FIELDS: dict[str, dict[int, DemoVersion]] = {}  # uri -> version -> entry (stamp inside)
+
+
+def _reset_peek_cache() -> None:
+    """Test seam: drop both cache layers."""
+    _PAYLOADS.clear()
+    _VERSION_FIELDS.clear()
+
+
+def _stamp(entry: dict[str, Any]) -> str | None:
+    timestamp = entry.get("timestamp")
+    return timestamp.isoformat() if hasattr(timestamp, "isoformat") else None
+
+
+def _read_dataset(name: str, uri: str, opts: dict[str, str], max_versions: int) -> DemoDataset:
     try:
-        ds = lance.dataset(uri, storage_options=opts)
+        ds = lance.dataset(uri, storage_options=opts)  # the ONE per-tick open: the change probe
     except Exception:  # noqa: BLE001 - not created yet (a pending dataset is normal mid-demo)
         return DemoDataset(name=name, uri=uri, exists=False)
+    current = int(ds.version)
+    entries = list(ds.versions())[-max_versions:]  # newest K — bounds the cold tick too
+    head_stamp = _stamp(entries[-1]) if entries else None
+    cached = _PAYLOADS.get(uri)
+    if cached is not None and cached[0] == current and cached[1] == head_stamp:
+        return cached[2]  # unchanged tick, same incarnation — zero further S3 work
+    known = _VERSION_FIELDS.setdefault(uri, {})
     versions: list[DemoVersion] = []
-    for entry in ds.versions():
+    for entry in entries:
         number = int(entry["version"])
-        timestamp = entry.get("timestamp")
+        stamp = _stamp(entry)
+        hit = known.get(number)
+        if hit is not None and hit.timestamp == stamp:  # same immutable manifest → reuse
+            versions.append(hit)
+            continue
         try:
             at_version = lance.dataset(uri, storage_options=opts, version=number)
             fields = [DemoField(name=f.name, type=schema.type_label(f)) for f in at_version.schema]
         except Exception:  # noqa: BLE001
             fields = []
-        versions.append(
-            DemoVersion(
-                version=number,
-                timestamp=timestamp.isoformat() if hasattr(timestamp, "isoformat") else None,
-                fields=fields,
-            )
-        )
-    return DemoDataset(
+        known[number] = DemoVersion(version=number, timestamp=stamp, fields=fields)
+        versions.append(known[number])
+    # Prune entries below the window floor — the loop above can never serve them again, so keeping
+    # them is a slow leak (the cascade mints a version per tick, indefinitely; review 2026-07-11).
+    floor = versions[0].version if versions else 0
+    for number in [n for n in known if n < floor]:
+        del known[number]
+    payload = DemoDataset(
         name=name,
         uri=uri,
         exists=True,
-        current_version=int(ds.version),
+        current_version=current,
         row_count=ds.count_rows(),
         versions=versions,
         lineage_jsonb=_read_lineage_jsonb(ds) if name == "gold$catalog" else None,
     )
+    _PAYLOADS[uri] = (current, head_stamp, payload)
+    return payload
 
 
 @router.get("/datasets", response_model=DemoDatasets)
 def demo_datasets() -> DemoDatasets:
     """The medallion datasets as they currently exist on S3 — schema per Lance version + rows."""
+    settings = get_settings()
     opts = _storage_options()
-    bucket = get_settings().s3_bucket
+    bucket = settings.s3_bucket
     return DemoDatasets(
-        datasets=[_read_dataset(name, f"s3://{bucket}/{path}", opts) for name, path in _LAYOUT]
+        datasets=[
+            _read_dataset(name, f"s3://{bucket}/{path}", opts, settings.demo_max_versions)
+            for name, path in _LAYOUT
+        ]
     )

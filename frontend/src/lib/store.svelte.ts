@@ -19,6 +19,20 @@ import {
 	type RunStatus
 } from './types';
 
+/** Concurrency cap for the per-dataset fan-outs — the catalog can list up to 500 datasets, and an
+ * unbounded Promise.all would fire them ALL at once every 2s tick (and the browser's per-host
+ * connection queue would eat into each request's 8s timeout while still queued — review
+ * 2026-07-11). Batches of 8 keep the fan-out concurrent but bounded. */
+const POOL = 8;
+
+async function inPools<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
+	const out: R[] = [];
+	for (let i = 0; i < items.length; i += POOL) {
+		out.push(...(await Promise.all(items.slice(i, i + POOL).map(fn))));
+	}
+	return out;
+}
+
 /** Live medallion state, polled from the lineage service. Svelte 5 runes in a class. */
 export class LineageState {
 	nodes = $state<GraphNode[]>([]);
@@ -33,50 +47,64 @@ export class LineageState {
 	selected = $state<string | null>(null);
 	columnGraph = $state<ColumnGraph | null>(null);
 
+	/** Overlap guard: a slow tick must not stack behind the 2s interval (§2 perf, 2026-07-11). */
+	#polling = false;
+
 	/** Load the column-level lineage subgraph for one dataset (the field-to-field view). */
 	async loadColumns(name: string): Promise<void> {
 		this.columnGraph = await fetchColumnGraph(name);
 	}
 
 	async poll(): Promise<void> {
-		// Discover the datasets to render from the governed /datasets catalog (GOAL 4 A1) rather than a
-		// hardcoded list; fall back to the known medallion names when discovery is empty/unavailable so the
-		// demo still renders offline.
-		const cat = await fetchDatasets({ limit: 500 });
-		this.catalog = cat?.datasets ?? [];
-		const names = this.catalog.length ? this.catalog.map((d) => d.name) : [...KNOWN];
+		// Overlap guard + per-request timeouts (api.ts): before 2026-07-11 a tick was 1+N+P+3
+		// SEQUENTIAL fetches with no timeout, so slow backends stacked ticks unboundedly. Now the
+		// per-dataset fan-outs run concurrently (Promise.all) and a tick that is still in flight
+		// simply skips the next interval firing.
+		if (this.#polling) return;
+		this.#polling = true;
+		try {
+			// Discover the datasets to render from the governed /datasets catalog (GOAL 4 A1) rather
+			// than a hardcoded list; fall back to the known medallion names when discovery is
+			// empty/unavailable so the demo still renders offline.
+			const cat = await fetchDatasets({ limit: 500 });
+			this.catalog = cat?.datasets ?? [];
+			const names = this.catalog.length ? this.catalog.map((d) => d.name) : [...KNOWN];
 
-		const producers: Record<string, ProducerInfo[]> = {};
-		const present: string[] = [];
-		for (const id of names) {
-			const p = await fetchProducers(id);
-			producers[id] = p?.producers ?? [];
-			if (producers[id].length) present.push(id);
+			const producers: Record<string, ProducerInfo[]> = {};
+			const producerLists = await inPools(names, (id) => fetchProducers(id));
+			const present: string[] = [];
+			names.forEach((id, i) => {
+				producers[id] = producerLists[i]?.producers ?? [];
+				if (producers[id].length) present.push(id);
+			});
+
+			const nodeMap = new Map<string, GraphNode>();
+			const edgeSet = new Set<string>();
+			const [graphs, events, demo, runs] = await Promise.all([
+				inPools(present, (id) => fetchGraph(id)),
+				fetchEvents(),
+				fetchDemo(),
+				fetchRuns()
+			]);
+			for (const g of graphs) {
+				if (!g) continue;
+				for (const n of g.nodes) nodeMap.set(n.id, n);
+				for (const e of g.edges) edgeSet.add(`${e.source}|${e.target}`);
+			}
+
+			this.runs = runs?.runs ?? [];
+			this.producers = producers;
+			this.nodes = [...nodeMap.values()];
+			this.edges = [...edgeSet].map((key) => {
+				const [source, target] = key.split('|');
+				return { source, target, kind: 'derived_from' };
+			});
+			this.events = events?.events ?? [];
+			this.datasets = demo?.datasets ?? [];
+			this.online = events !== null || present.length > 0;
+			this.lastUpdated = new Date().toLocaleTimeString();
+		} finally {
+			this.#polling = false;
 		}
-
-		const nodeMap = new Map<string, GraphNode>();
-		const edgeSet = new Set<string>();
-		for (const id of present) {
-			const g = await fetchGraph(id);
-			if (!g) continue;
-			for (const n of g.nodes) nodeMap.set(n.id, n);
-			for (const e of g.edges) edgeSet.add(`${e.source}|${e.target}`);
-		}
-
-		const events = await fetchEvents();
-		const demo = await fetchDemo();
-		const runs = await fetchRuns();
-
-		this.runs = runs?.runs ?? [];
-		this.producers = producers;
-		this.nodes = [...nodeMap.values()];
-		this.edges = [...edgeSet].map((key) => {
-			const [source, target] = key.split('|');
-			return { source, target, kind: 'derived_from' };
-		});
-		this.events = events?.events ?? [];
-		this.datasets = demo?.datasets ?? [];
-		this.online = events !== null || present.length > 0;
-		this.lastUpdated = new Date().toLocaleTimeString();
 	}
 }

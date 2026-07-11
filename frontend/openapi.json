@@ -719,8 +719,54 @@
           "query"
         ],
         "summary": "Get Events",
-        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)",
+        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)\n\nPagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous\npage's ``next_cursor``); ``limit`` \u2264 500 (server-capped); ``summary=true`` drops the full-JSONB\n``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice \u2014\npagination can never disclose a hidden row (only the visible window advances).",
         "operationId": "get_events_events_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "after",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "After"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 500,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "summary",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "boolean",
+              "default": false,
+              "title": "Summary"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -731,13 +777,18 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/api/v1/lineage": {
@@ -1431,6 +1482,17 @@
             },
             "type": "array",
             "title": "Events"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
           }
         },
         "type": "object",
@@ -1438,7 +1500,7 @@
           "events"
         ],
         "title": "Events",
-        "description": "The most-recent ingested OpenLineage events (newest first)."
+        "description": "The most-recent ingested OpenLineage events (newest first).\n\n``next_cursor`` (additive, 2026-07-11): pass back as ``?after=`` to page OLDER events (keyset\nover ``seq``). ``None`` = the feed is exhausted."
       },
       "GraphEdge": {
         "properties": {
@@ -1785,6 +1847,17 @@
             },
             "type": "array",
             "title": "Quality Assertions"
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
           }
         },
         "type": "object",
@@ -2052,6 +2125,17 @@
             "type": "integer",
             "title": "Events",
             "default": 0
+          },
+          "operation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Operation"
           }
         },
         "type": "object",

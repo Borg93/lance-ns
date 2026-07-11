@@ -658,6 +658,23 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   KubeRay `RayJob` CR under Kueue at the rask merge (contracts unchanged, transport swaps).
   Implementation = #115a–c below.
 
+- ✅ **Operator adoption + submit-seam boundary — DECIDED + DOCUMENTED 2026-07-11** (user question:
+  "most logical operator? can rask help? is Ray submit more agnostic in rask or here?"). The
+  contract is [`docs/OPERATORS.md`](docs/OPERATORS.md): adoption order KubeRay+Kueue (replaces the
+  weakest hand-rolled thing — the raw Ray head + our submit/poll logic; `RayJob` CR is the missing
+  lifecycle owner) → CloudNativePG (gated by the AGE-extension decision) → rustfs-operator → NACK
+  (optional; would make the `LINEAGE`/`MEDALLION`/`TRAINING` streams declarative CRDs instead of
+  the provision Job); NO custom lance-ns operator, ever (state of record = Lance manifests +
+  Postgres, every control loop already has an owner); rask helps with ALL of it (it already
+  operates every listed operator — adoption = the merge's values flips, nothing installed here);
+  the Ray submit seam is DELIBERATELY the lance-ns side (httpx-only Jobs-REST, no ray/k8s deps —
+  contracts stay here, rask supplies the `RayJob`-CR transport behind the same signatures,
+  deterministic submission id becomes the CR name). Dapr needs no operator story (its control
+  plane IS an operator; components are CRDs; Dapr Workflow stays un-adopted — token-keyed
+  idempotency suffices); Lance needs none (manifest+CAS is the reconciler; the one real gap is the
+  §9 orphan-artifact janitor, already tracked). Linked from README, RASK-INTEGRATION §Pre-flight,
+  RAY-TRAIN D6.
+
 - 🟡 **#115a — `/train` head + training topic + submit-and-ack trainer consumer — CODE-COMPLETE
   2026-07-10, unit tier (16 tests); LIVE DRIVE + chart/seed PENDING.** Built as spec'd + hardened by the
   adversarial review, which caught: the producer lifespan never built `app.state.fga` (the trainer gate

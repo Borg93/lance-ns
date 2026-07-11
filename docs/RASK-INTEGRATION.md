@@ -21,7 +21,10 @@ and what to drop. Grounded in rask's actual chart (`rask/chart/`) + this repo's 
 ## Pre-flight (rask already has these — no action)
 NATS, Dapr, OpenFGA (server), CloudNativePG, rustfs-operator, KubeRay, Kueue, GreptimeDB stack, Traefik. The
 chart pattern is identical (umbrella + `*.enabled` subcharts + externalize-in-prod), so the fold-in is values
-+ templates, not a new paradigm.
++ templates, not a new paradigm. Which of these operators we lean on first, in what order, and why no custom
+lance-ns operator is ever built: [`OPERATORS.md`](OPERATORS.md) (also pins the submit-seam boundary — the
+agnostic Jobs-REST seam stays in lance-ns; rask supplies the `RayJob`-CR transport behind the same
+function signatures).
 
 ## Migration checklist
 

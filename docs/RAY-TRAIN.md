@@ -169,6 +169,8 @@ authz shapes survive.
   scheduling, long-running lifecycle owned by the operator) while stage transforms stay Ray Jobs
   REST. The trigger contract, lineage contract, and authz contract in this note DO NOT CHANGE —
   only the submit transport swaps, which is why the submit core is extracted behind one seam.
+  The full seam-ownership decision (lance-ns = the agnostic Jobs-REST side; rask = the CR
+  transport; deterministic submission id → CR name) lives in [`OPERATORS.md`](OPERATORS.md) §3.
 
 ## MLflow (or any registry product) — optional by design, three integration shapes
 

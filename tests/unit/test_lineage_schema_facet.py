@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import pyarrow as pa
 from common import schema
 from lance import blob_field
@@ -81,8 +83,9 @@ def test_schema_facet_caps_metadata_bloat(caplog) -> None:
     wide = [{"name": f"c{i}", "type": "int64"} for i in range(ol.FACET_MAX_FIELDS + 88)]
     with caplog.at_level(logging.WARNING):
         facet = ol.schema_facet("producer", wide)
-    assert len(facet["fields"]) == ol.FACET_MAX_FIELDS
-    assert facet["fields"][0]["name"] == "c0" and facet["fields"][-1]["name"] == "c511"
+    fields = cast("list[dict[str, str]]", facet["fields"])
+    assert len(fields) == ol.FACET_MAX_FIELDS
+    assert fields[0]["name"] == "c0" and fields[-1]["name"] == "c511"
     assert facet["_schemaURL"] == ol.SCHEMA_FACET_SCHEMA_URL
     assert any(r.message == "schema_facet_truncated" for r in caplog.records)
 

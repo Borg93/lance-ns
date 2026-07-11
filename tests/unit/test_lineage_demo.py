@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import lance
 import pyarrow as pa
@@ -99,7 +100,7 @@ def _counting_dataset(monkeypatch: pytest.MonkeyPatch) -> list[int]:
     opens = [0]
     real = lance.dataset
 
-    def counted(*args: object, **kwargs: object) -> object:
+    def counted(*args: Any, **kwargs: Any) -> Any:
         opens[0] += 1
         return real(*args, **kwargs)
 

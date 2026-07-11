@@ -48,6 +48,26 @@ jobs:
           helm lint chart
           helm template chart >/dev/null
 
+      # Render-and-grep the OPT-IN network-isolation layer (Batch 9): default values must render
+      # ZERO NetworkPolicies beyond nothing (flag off), and the flag ON must produce the audit's
+      # invariants — a default-deny covering Ingress+Egress, the kube-dns egress allow IN THE SAME
+      # RENDER (the audit's named footgun: default-deny egress without it bricks DNS), and the
+      # exclusive openbao client list (the headline gap: openbao was reachable by any pod).
+      - name: Helm render network-policy layer (flag on) + invariants
+        run: |
+          set -euo pipefail
+          off=$(helm template chart --set networkPolicy.enabled=false | grep -c "kind: NetworkPolicy" || true)
+          [ "$off" = "0" ] || { echo "flag OFF must render zero NetworkPolicies, got $off"; exit 1; }
+          helm template chart --set networkPolicy.enabled=true > /tmp/np.yaml
+          count=$(grep -c "kind: NetworkPolicy" /tmp/np.yaml)
+          [ "$count" -ge 9 ] || { echo "expected >=9 NetworkPolicies, got $count"; exit 1; }
+          grep -q "default-deny" /tmp/np.yaml
+          grep -q "allow-dns" /tmp/np.yaml
+          grep -q "k8s-app: kube-dns" /tmp/np.yaml
+          grep -q -- "-openbao" /tmp/np.yaml
+          # the general intra-namespace ingress allow must EXCLUDE the guarded stores
+          grep -q "NotIn" /tmp/np.yaml
+
       # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
       # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.
       - name: OpenFGA model test

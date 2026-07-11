@@ -1,9 +1,221 @@
 {{- if .Values.networkPolicy.enabled }}
-# Network-isolation layer for the /produce cascade head (defense-in-depth on top of the require_dapr_token
-# guard on the route). /produce is a direct operator trigger — not sidecar-delivered — so without isolation
-# any pod that can reach lance-ray:8000 could drive the pipeline / fabricate medallion provenance. This
-# restricts ingress to pods in THIS release; the same-pod daprd sidecar is localhost and unaffected.
-# NOTE: requires a policy-enforcing CNI (Calico/Cilium). kind's default CNI ignores NetworkPolicy.
+# ============================================================================================
+# Network-isolation layer (Batch 9, 2026-07-11 — the security audit's "biggest gap": L3 was
+# effectively open; openbao was reachable by ANY pod). Implements the audit's fix order exactly:
+#   (1) default-deny Ingress+Egress for every pod in the namespace;
+#   (2) the kube-dns egress allow ships IN THIS SAME FILE (default-deny egress without it bricks
+#       name resolution — the audit's named footgun);
+#   (3) targeted ingress allows for the guarded stores (openbao ← secret-consuming app pods only;
+#       age-postgres:5432 ← its real clients; rustfs:9000 ← the data plane) — every OTHER pod gets
+#       plain intra-namespace ingress, EXCLUDING the guarded stores so the targeted lists stay
+#       exclusive (NetworkPolicies are additive: the general allow must NOT cover the stores);
+#   (4) values-prod flips `networkPolicy.enabled` — the LIVE verification runbook is todo_fable
+#       §7a (all pods Ready, e2e suites green, and a negative probe: curl openbao:8200 from the
+#       web pod must time out).
+# Egress posture (tier 1): intra-namespace open + DNS + api-server (Dapr control plane needs it);
+# the INGRESS rules do the guarding — a connection needs BOTH the source's egress and the
+# destination's ingress to allow. Externalized backends (S3/NATS/OTLP off-cluster) need
+# `networkPolicy.extraEgress` entries. NOTE: requires a policy-enforcing CNI (Calico/Cilium);
+# kind's default CNI ignores NetworkPolicy entirely. kubectl port-forward traffic enters via the
+# kubelet (not the CNI data path) and keeps working under default-deny on mainstream CNIs.
+# ============================================================================================
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-default-deny
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Ingress, Egress]
+---
+# (2) DNS — in the SAME change as default-deny egress, per the audit. Both protocols: plain lookups
+# are UDP; large responses retry over TCP.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-allow-dns
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - namespaceSelector:
+            matchLabels: { kubernetes.io/metadata.name: kube-system }
+          podSelector:
+            matchLabels: { k8s-app: kube-dns }
+      ports:
+        - { protocol: UDP, port: 53 }
+        - { protocol: TCP, port: 53 }
+---
+# Egress within the namespace (all pods): app→store, sidecar→NATS/placement/sentry, jobs→stores.
+# The guarded stores' INGRESS policies below are what actually gates who reaches them.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-allow-egress-intra-namespace
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - podSelector: {}
+---
+# API-server egress (namespace-wide): the Dapr control plane (operator/injector/sentry/placement)
+# watches CRDs and leases; external-secrets (when enabled) reconciles via webhooks. Ports only —
+# the api-server's IP is cluster-specific.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-allow-apiserver-egress
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress:
+    - ports:
+        - { protocol: TCP, port: 443 }
+        - { protocol: TCP, port: 6443 }
+{{- with .Values.networkPolicy.extraEgress }}
+---
+# Deployment-specific egress (externalized S3/NATS/OTLP endpoints) — values-supplied, verbatim.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" $ }}-allow-extra-egress
+  labels: {{- include "lance.labels" $ | nindent 4 }}
+spec:
+  podSelector: {}
+  policyTypes: [Egress]
+  egress: {{- toYaml . | nindent 4 }}
+{{- end }}
+---
+# (3a) General intra-namespace INGRESS — every pod EXCEPT the guarded stores (additive-allow
+# semantics: including them here would void their exclusive client lists below).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-allow-ingress-intra-namespace
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: NotIn, values: [openbao, age, rustfs] }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+---
+# (3b) openbao:8200 — THE crown jewel (the audit's headline: "reachable by any pod"). Only the
+# secret-consuming app pods' daprd sidecars may connect: catalog, lineage, compaction, the
+# medallion producer (lance-ray) and every mover. web/gateway/dex/rustfs/age can NEVER reach it.
+# External-secrets (off-namespace, when enabled) needs an entry in networkPolicy.openbaoExtraFrom.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-openbao
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: openbao }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - catalog
+                  - lineage
+                  - compaction
+                  - lance-ray
+                  {{- range .Values.medallion.movers }}
+                  - {{ .name }}
+                  {{- end }}
+        {{- with .Values.networkPolicy.openbaoExtraFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: 8200 }
+---
+# (3c) age-postgres:5432 — the lineage graph + the OpenFGA datastore. Clients: lineage,
+# openfga (subchart pods carry app.kubernetes.io/name=openfga), the openfga-migrate job, the
+# pg backup job, and the catalog (per the audit's client list).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-age-postgres
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: age }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values: [lineage, catalog, openfga-migrate, backup-pg]
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: openfga }
+      ports:
+        - { protocol: TCP, port: {{ .Values.age.port }} }
+---
+# (3d) rustfs:9000 — the lakehouse bytes. Clients: the data-plane services + GreptimeDB (its
+# object storage) + the snapshot backup job. The ray-lance demo pods live outside the release's
+# labels — add them via networkPolicy.rustfsExtraFrom (default provided in values).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-rustfs
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/component: rustfs }
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/component
+                operator: In
+                values:
+                  - catalog
+                  - lineage
+                  - compaction
+                  - lance-ray
+                  - rustfs-backup
+                  {{- range .Values.medallion.movers }}
+                  - {{ .name }}
+                  {{- end }}
+        - podSelector:
+            matchLabels: { app.kubernetes.io/name: greptimedb-standalone }
+        {{- with .Values.networkPolicy.rustfsExtraFrom }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      ports:
+        - { protocol: TCP, port: {{ .Values.rustfs.port }} }
+---
+# The front door: gateway + web accept ingress from ANYWHERE (NodePort/Ingress/port-forward) —
+# they are the intended entry points and carry their own L7 guards (OIDC on the apps behind).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-front-door
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchExpressions:
+      - { key: app.kubernetes.io/component, operator: In, values: [gateway, web] }
+  policyTypes: [Ingress]
+  ingress:
+    - {}
+---
+# The original lance-ray ingress restriction (pre-Batch-9, kept): /produce is a direct operator
+# trigger — in-release pods only, defense-in-depth on top of require_dapr_token.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -17,7 +229,6 @@ spec:
   policyTypes: [Ingress]
   ingress:
     - from:
-        # Only pods belonging to this release (the movers, gateway) may reach the producer's HTTP port.
         - podSelector:
             matchLabels:
               app.kubernetes.io/instance: {{ .Release.Name }}

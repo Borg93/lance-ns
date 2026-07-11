@@ -67,10 +67,27 @@ security:
 
 # --- Network isolation (opt-in; requires a policy-enforcing CNI e.g. Calico/Cilium) ---------------
 # kind's default CNI does NOT enforce NetworkPolicy, so this is a no-op there — it is prod hardening.
-# When enabled, restricts ingress to lance-ray:8000 (the /produce cascade head) to in-release pods only,
-# so an out-of-namespace / external workload can't trigger the pipeline even if it has the app-token.
+# Network-isolation layer (Batch 9 2026-07-11 — was: only the lance-ray ingress restriction).
+# When enabled: namespace default-deny Ingress+Egress, kube-dns egress allow (same change — the
+# audit's footgun), intra-namespace allows, api-server egress, and EXCLUSIVE client lists for the
+# guarded stores (openbao ← secret-consuming app pods ONLY; age-postgres ← its real clients;
+# rustfs ← the data plane + GreptimeDB). Default OFF (kind's default CNI ignores NetworkPolicy
+# anyway); flip in values-prod on a policy-enforcing CNI — live runbook in todo_fable §7a.
 networkPolicy:
   enabled: false
+  # Extra `from` peers for the openbao policy — e.g. the external-secrets operator's namespace when
+  # externalSecrets.enabled: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: external-secrets}}}]
+  openbaoExtraFrom: []
+  # Extra `from` peers for the rustfs policy — the ray-lance demo pods live outside the release's
+  # component labels (deploy/ray-lance-demo.yaml), so grant them here when running `make ray-demo`:
+  rustfsExtraFrom:
+    - podSelector:
+        matchLabels: { app: ray-lance-head }
+    - podSelector:
+        matchLabels: { app: ray-lance-worker }
+  # Extra egress rules (verbatim NetworkPolicy egress entries) for externalized backends —
+  # off-cluster S3, a managed NATS (nats.externalUrl), an external OTLP endpoint.
+  extraEgress: []
 
 # --- Dapr control plane (subchart) — injects the daprd sidecar into annotated pods ----------------
 dapr:

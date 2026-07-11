@@ -649,6 +649,15 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   config only (core-claims-only IDToken, sub is the only consumed claim, no dex-specific
 >   parsing). P1 Externalization hardening is now fully ✅ except the OpenFGA memory→postgres
 >   datastore flip, which belongs to the rask merge. Docs-only batch — zero code, zero risk.
+>
+>   **BATCH 9 (added + 🟡 CODE-COMPLETE 2026-07-11) — the L3 network-isolation layer** (the
+>   security audit's "biggest gap"): full default-deny + DNS-in-same-change + exclusive store
+>   client lists behind the existing `networkPolicy.enabled` flag (default OFF = behavior-
+>   identical); CI render-and-greps the layer both ways. Live flip + negative probe = §7a (needs
+>   a policy-enforcing CNI — kind's default ignores NetworkPolicy). Remaining security items
+>   (per-workload ServiceAccounts with `dapr mtls -k` pre-check, infra securityContexts with
+>   per-image uids, PSA labels after init-container hardening) = Batch 10, each gated the same
+>   way. Details on the flipped §security line.
 >   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
 >   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
 >   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
@@ -1249,12 +1258,29 @@ haven't flipped. Almost all are **prod-only** (kind's default CNI ignores Networ
 prod concerns) — deliberately NOT rushed into the dev baseline (footgun-sequenced). See memory
 `dont-reinvent-k8s-dapr-verdict`.
 
-- ⛔ **Network L3 is effectively open** (biggest gap; prod-only): no namespace **default-deny** NetworkPolicy,
-  **openbao (secret store) reachable by any pod**, `networkPolicy.enabled:false` even in prod. Fix order:
-  (1) default-deny Ingress+Egress, (2) **ship the kube-dns egress allow IN THE SAME CHANGE** (default-deny
-  egress without it bricks name resolution), (3) targeted allows (openbao←catalog/secretstore,
-  age-postgres:5432←catalog/lineage/movers, rustfs←data-plane, nats:4222←sidecar'd pods), (4) flip
-  `networkPolicy.enabled` in values-prod. Tighten the lone lance-ray policy from release-wide to per-component + add Egress.
+- 🟡 **Network L3 layer — CODE-COMPLETE 2026-07-11 (Batch 9); LIVE FLIP ON A POLICY-ENFORCING CNI
+  PENDING.** Implemented the audit's fix order exactly in `chart/templates/network-policy.yaml`
+  (flag `networkPolicy.enabled`, default OFF — kind's default CNI ignores NetworkPolicy, so the
+  default is behavior-identical everywhere): (1) namespace default-deny Ingress+Egress;
+  (2) the kube-dns egress allow IN THE SAME FILE (the audit's footgun honored); (3) targeted
+  EXCLUSIVE ingress for the guarded stores — openbao:8200 ← ONLY the secret-consuming app pods
+  (catalog/lineage/compaction/lance-ray/movers, movers ranged from values; ESO via
+  `networkPolicy.openbaoExtraFrom`), age:5432 ← lineage/catalog/openfga(+migrate)/backup-pg,
+  rustfs:9000 ← data plane + GreptimeDB + backup (+ ray demo pods via `rustfsExtraFrom` default) —
+  and the general intra-namespace ingress allow EXCLUDES the three stores via NotIn so the lists
+  stay exclusive (additive-allow semantics); (4) values-prod flip = the live step. Plus:
+  intra-namespace + api-server egress allows (Dapr control plane), `extraEgress` for externalized
+  backends, front-door ingress (gateway/web), the original lance-ray policy kept.
+  VERIFIED: template stub-parses to 11 well-formed policies; CI now RENDER-AND-GREPS both ways
+  (flag off ⇒ exactly 0 NetworkPolicies; flag on ⇒ ≥9 incl. default-deny + kube-dns-in-same-render
+  + the openbao policy + the NotIn exclusion) — the render gate lives in ci.yml where helm runs.
+  ✅ DONE WHEN (live, §7a): on a Calico/Cilium cluster with the flag on — all pods Ready; make
+  e2e-governed-union + e2e-lineage green; NEGATIVE probe: `kubectl exec <web pod> -- wget -T3
+  openbao:8200` times out (any pod outside the client list), while a catalog pod's sidecar still
+  reads secrets (positive control = the stack boots with secretsViaDapr on).
+  🚧 GUARDRAILS: never flip the default in values.yaml (kind default CNI = silent no-op is fine;
+  a policy CNI + untested flip could brick flows); ESO deployments MUST set openbaoExtraFrom
+  BEFORE flipping or external-secrets loses vault access.
 - ⛔ **~13 first-party pods on the `default` ServiceAccount** with `automountServiceAccountToken` defaulting
   true → each mounts an unused k8s-API JWT. Fix: a `lance.serviceAccountName` helper (dedicated unbound SA per
   workload) + `automountServiceAccountToken:false` on the SA object (NOT the pod — leave the Dapr injector's

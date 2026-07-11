@@ -601,10 +601,11 @@ class LineageRepository:
                         {"name": event.author, "ds": ds.name, "tm": event.event_time},
                     )
 
-    async def _prune_allowed(self, conn, name: str, version: str) -> bool:
+    async def _schema_is_current(self, conn, name: str, version: str) -> bool:
         """True when ``version`` is at least the newest WROTE version the graph records for ``name``
-        — the recency gate that makes the column-inventory prune idempotent under redelivery
-        reordering. Unparseable versions → False (never prune on uncertain ordering)."""
+        — the recency gate that makes the column-inventory seeding AND prune idempotent under
+        redelivery reordering. Unparseable versions → False (never touch the inventory on
+        uncertain ordering)."""
         rows = await run_cypher(conn, self._graph, _LATEST_WRITE_VERSION, {"name": name}) or []
         if not rows or rows[0][0] is None:
             return True  # nothing recorded yet — this event defines the inventory
@@ -637,24 +638,39 @@ class LineageRepository:
         dataset is itself ingested as an output, so the stub never clobbers a real type).
         """
         for out in event.outputs:
-            for col in out.fields:
-                await run_cypher(
-                    conn,
-                    self._graph,
-                    _MERGE_COLUMN_TYPED,
-                    {"ds": out.name, "fld": col["name"], "ns": out.namespace, "type": col.get("type", "")},
-                )
-                await run_cypher(conn, self._graph, _LINK_HAS_COLUMN, {"ds": out.name, "fld": col["name"]})
+            # Recency-gate the ENTIRE schema seeding, not just the prune (live-AGE CI catch,
+            # 2026-07-11: the first cut gated only the unlink, so a STALE redelivered event
+            # re-ADDED its old columns via the grow-only MERGEs — ['a','b','x','y'] on real AGE).
+            # A schema facet is only allowed to touch the CURRENT inventory when its version is at
+            # least the newest the graph knows: same-version redeliveries (the common ackWait case)
+            # replay idempotently; strictly-older events add NOTHING and prune NOTHING (convergent).
+            # A version-LESS schema event (external producers) keeps the legacy grow-only seeding —
+            # ordering is unknowable there, and losing their inventory would be a regression.
             version = event.output_version(out.name) or ""
-            if out.fields and version and await self._prune_allowed(conn, out.name, version):
+            seed_and_prune = bool(out.fields) and (
+                not version or await self._schema_is_current(conn, out.name, version)
+            )
+            if seed_and_prune:
+                for col in out.fields:
+                    await run_cypher(
+                        conn,
+                        self._graph,
+                        _MERGE_COLUMN_TYPED,
+                        {
+                            "ds": out.name,
+                            "fld": col["name"],
+                            "ns": out.namespace,
+                            "type": col.get("type", ""),
+                        },
+                    )
+                    await run_cypher(
+                        conn, self._graph, _LINK_HAS_COLUMN, {"ds": out.name, "fld": col["name"]}
+                    )
+            if seed_and_prune and version:
                 # The schema facet is the COMPLETE current schema — unlink inventory entries outside
                 # it (∪ the column-edge out_fields ingested below, which are also current columns) so
-                # an overwrite's replaced columns stop being listed as CURRENT (2026-07-11). Skipped
-                # when no schema facet rides the event (partial knowledge must never prune) AND when
-                # this event is not the newest version the graph knows (review 2026-07-11: a STALE
-                # redelivered event's schema must never unlink the live columns — without the gate,
-                # redelivery reordering could present a superseded schema as current; with it, a
-                # stale delivery degrades to the pre-existing grow-only behavior).
+                # an overwrite's replaced columns stop being listed as CURRENT. Never pruned for a
+                # version-less event: partial ordering knowledge must never unlink live columns.
                 current = sorted(
                     {col["name"] for col in out.fields} | {e["out_field"] for e in out.column_edges}
                 )

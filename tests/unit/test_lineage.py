@@ -794,17 +794,29 @@ def test_ingest_schema_facet_prunes_stale_column_inventory(monkeypatch: pytest.M
     assert unlinks == [{"ds": "silver$features", "fields": ["x", "y", "z"]}]
 
 
-def test_ingest_stale_redelivery_never_prunes(monkeypatch: pytest.MonkeyPatch) -> None:
-    # ASSERTS: the recency gate — a redelivered OLD event (version 2 < the graph's latest, 9) must
-    # NOT unlink the live columns (it degrades to the pre-existing grow-only behavior); and a
-    # version-less schema event never prunes either (ordering unknowable).
+def test_ingest_stale_redelivery_neither_prunes_nor_reseeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ASSERTS: the recency gate covers the WHOLE inventory touch — a redelivered OLD event
+    # (version 2 < the graph's latest, 9) must neither UNLINK the live columns NOR re-ADD its own
+    # stale ones (live-AGE CI catch 2026-07-11: gating only the prune let the stale event's
+    # grow-only MERGEs resurrect ['a','b'] beside the live ['x','y']). Its column-lineage EDGES
+    # are still ingested (history), but no schema seeding happens.
     calls = _capture_with_graph_version(monkeypatch, _overwrite_event("2"), graph_version="9")
     assert not any("DELETE r" in q for q, _ in calls)
+    seeded = [p["fld"] for q, p in calls if "c.type" in q]  # _MERGE_COLUMN_TYPED = schema seeding
+    assert seeded == []  # the stale schema fields x,y were NOT re-added to the inventory
 
+
+def test_ingest_versionless_schema_event_seeds_but_never_prunes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ASSERTS: a version-LESS schema event (external producers — ordering unknowable) keeps the
+    # legacy grow-only behavior: fields ARE seeded (no inventory regression) but NOTHING is pruned.
     event = _overwrite_event("2")
     del event["outputs"][0]["facets"]["version"]
-    calls = _capture_with_graph_version(monkeypatch, event, graph_version=None)
-    assert not any("DELETE r" in q for q, _ in calls)
+    calls = _capture_with_graph_version(monkeypatch, event, graph_version="9")
+    seeded = {p["fld"] for q, p in calls if "c.type" in q}
+    assert {"x", "y"} <= seeded  # seeded despite no version
+    assert not any("DELETE r" in q for q, _ in calls)  # but never pruned
 
 
 def test_ingest_without_schema_facet_never_prunes(monkeypatch: pytest.MonkeyPatch) -> None:

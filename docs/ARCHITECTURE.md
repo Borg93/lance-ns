@@ -9,6 +9,12 @@ where we are right now, and what's next**. Skim the diagrams; read the section y
 >
 > 🔬 **Are we correct, and what do we lack vs Lakekeeper / Marquez?** See **[`FEATURE-GAP.md`](FEATURE-GAP.md)** —
 > a docs-grounded confidence review (HIGH) + an honest feature-gap map.
+>
+> 📜 **What contract do producers and consumers actually rely on?** See **[`DATA-CONTRACT.md`](DATA-CONTRACT.md)** —
+> "the Lance manifest is the schema, the version is the handshake": the storage/bus/identity
+> contract, its three enforcement points (quality gate / FGA / reconcile), what Dapr+NATS do and
+> don't enforce, the honest prod-readiness split (breaking changes are the known gap), and the
+> Lakekeeper comparison.
 
 > 🖱️ **Prefer to click through it?** Open [`system-diagram.html`](system-diagram.html) — an
 > interactive walk-through of the four core flows (create / read / promote / lineage), with the

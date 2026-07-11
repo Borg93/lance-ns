@@ -307,4 +307,6 @@ Quality gates: `uvx ruff check .` · `uvx ty check` · `make ci` (hermetic, via 
 > self-emitted TRAINING lineage) all ship unit-proven; the live kind drive remains —
 > [`docs/RAY-TRAIN.md`](docs/RAY-TRAIN.md). For which Kubernetes **operators** the platform adopts (KubeRay
 > first), why the Ray submit seam deliberately lives HERE (agnostic Jobs-REST) rather than in rask, and why
-> Dapr/Lance need no operator of their own, see [`docs/OPERATORS.md`](docs/OPERATORS.md).
+> Dapr/Lance need no operator of their own, see [`docs/OPERATORS.md`](docs/OPERATORS.md). The **data
+> contract** producers/consumers rely on ("the manifest is the schema, the version is the handshake" —
+> plus its enforcement points and honest gaps) is [`docs/DATA-CONTRACT.md`](docs/DATA-CONTRACT.md).

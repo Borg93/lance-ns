@@ -530,7 +530,9 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   reword to demo-only (do NOT implement mover embedding here) · DLQ items = fix the wording (do NOT
 >   configure a deadLetterTopic here).
 >
->   **BATCH 2 — docs/DATA-CONTRACT.md (§9 P1, currently exists only in chat).**
+>   **BATCH 2 — docs/DATA-CONTRACT.md (§9 P1, currently exists only in chat). ✅ DONE 2026-07-11** —
+>   all six DONE-WHEN sections present, linked from README + ARCHITECTURE, §9 line flipped with
+>   detail; the doc's §4 is the honest prod-readiness split the guardrail demanded. Spec below:
 >   ✅ DONE WHEN: the doc covers (a) the bus contract — trigger payloads + "facet `_schemaURL`s ARE
 >   the contract" + the claim-check rule (pointers never data, NATS ~1MB); (b) the storage contract —
 >   "the Lance manifest is the schema, the version is the handshake" (self-describing, immutable
@@ -899,12 +901,18 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     **breaking-change detector**: today a producer renaming/dropping a column a downstream reads is caught only
     at runtime (mover fails → RETRY → stall); declared columns turn that into a pre-promotion contract
     violation. Additive evolution is already safe by construction (immutable versions pin readers).
-  - ⛔ P1 **document the data contract** (docs/DATA-CONTRACT.md or an ARCHITECTURE section — currently exists
-    only in chat): the bus contract is `{token, dataset, namespace}` + the OpenLineage spec (facet `_schemaURL`s
-    ARE the contract); the data contract is "the Lance manifest is the schema, the version is the handshake"
-    (self-describing storage, immutable versions, no schema registry needed); enforcement = quality gate
-    (promotion-time) + FGA (access-time) + reconcile (drift-time); known gap = breaking changes (see the
-    schema-declaration item above); blob columns: inline-vs-pointer semantics are part of the read contract.
+  - ✅ P1 **document the data contract — DONE 2026-07-11 (Batch 2): [`docs/DATA-CONTRACT.md`](docs/DATA-CONTRACT.md)**,
+    framed by the user's own questions (what is it / how does it work / is it prod-ready / what do
+    Dapr+NATS enforce / same as Lakekeeper?). Covers: bus contract (pointers-only triggers + facet
+    `_schemaURL`s ARE the contract), storage contract (manifest = schema, version = handshake, CAS
+    validated), identity thread, the three enforcement points (quality gate promotion-time / FGA
+    access-time / reconcile drift-time) + consumer-edge DROP validation, the HONEST prod split
+    (additive evolution + delivery + access are prod-grade; breaking-change detection is NOT —
+    runtime-stall only until the schema-declaration item builds; claim-check = convention + the 8KiB
+    train cap, universal publish-site guard still open below), Dapr/NATS = the DELIVERY contract
+    only (at-least-once + idempotent handlers; NATS ~1MB bound is why claim-check exists), and the
+    Lakekeeper diff (Iceberg-spec contract vs Lance manifest + our gates; neither is a registry).
+    Linked from README + ARCHITECTURE. Every claim cites shipped code per the batch guardrail.
   - ⛔ P1 enforce the claim-check invariant: events carry POINTERS (dataset/version/URI), never data — add a
     payload-size guard at every publish site + a doc'd rule "no base64/embeddings/data-shaped content in
     facets" (NATS default max message ~1MB; events must stay small JSON regardless of what the rows hold).

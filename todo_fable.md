@@ -640,6 +640,15 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   `apply_dapr_secrets` in both lifespans (strict sole source, fails closed, symmetric with the
 >   other three services) + chart else-branches; skipVerify sub-item verified already-shipped.
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
+>   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
+>
+>   **BATCH 8 (added + ✅ DONE 2026-07-11) — externalization leftovers closed by VERIFICATION,
+>   not code.** Fact-check-first (the Batch 1 lesson, again vindicated): observability-s3-behind-
+>   ESO, NATS external hooks, and stream replicas were ALL already shipped in the chart — the todo
+>   line was the stale artifact; and the Dex→Keycloak swap is now AUDITED as issuer/audience
+>   config only (core-claims-only IDToken, sub is the only consumed claim, no dex-specific
+>   parsing). P1 Externalization hardening is now fully ✅ except the OpenFGA memory→postgres
+>   datastore flip, which belongs to the rask merge. Docs-only batch — zero code, zero risk.
 >   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
 >   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
 >   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
@@ -1084,9 +1093,19 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   boot byte-identical; fetch monkeypatched to AssertionError proves no store call),
   `test_flag_on_store_is_the_sole_source` (store value replaces env residue; repr never leaks the
   secret), `test_flag_on_store_miss_fails_closed` (REAL fetch_required_secrets path → RuntimeError
-  'failing closed'; settings untouched on failure). REMAINING ⛔: observability-s3 behind ESO,
-  NATS external hooks + stream replicas, Dex→Keycloak swap verification, OpenFGA
-  datastore memory→postgres at adoption.
+  'failing closed'; settings untouched on failure). **BATCH 8 (2026-07-11) closed the rest by
+  verification** — three sub-items were ALREADY SHIPPED (this list was the stale artifact, same
+  pattern as the §8 docs sweep): ✅ observability-s3 behind ESO (`external-secrets.yaml` owns the
+  same-named Secret when `externalSecrets.enabled`; the static Secret in `observability.yaml` is
+  skipped — two-tier rule holds); ✅ NATS external hooks (`nats.externalUrl` → `lance.natsUrl`
+  threads through BOTH pubsub components and the stream-provision Job, which guards
+  `if or nats.enabled nats.externalUrl`); ✅ stream replicas (`nats.streamReplicas`, default 1, on
+  the add-stream line). ✅ Dex→Keycloak swap VERIFIED config-only (2026-07-11 audit): `IDToken`
+  requires only the five core OIDC claims (iss/sub/aud/exp/iat — mandatory on every conformant
+  provider), the ONLY claim consumed anywhere is `token.sub` (FGA subject + lineage author),
+  `aud` accepts str|list (Keycloak arrays fine), zero dex-specific claim names in services/ (grep:
+  only agnosticism docstrings + the dev-http `allow_insecure` flag). REMAINING (moved to the rask
+  merge, where it belongs): OpenFGA datastore memory→postgres when rask adopts it.
 - ⛔ **P2 Lineage at rask scale** — `parent` facet ingestion, event-volume posture (AGE indexes + pruning from
   §4, /events cursor), `dataQualityMetrics` (deferred, costly on Lance).
 - 📌 **lance_docs mirror currency audit + refresh (2026-07-10, user request)** — cloned BOTH upstream

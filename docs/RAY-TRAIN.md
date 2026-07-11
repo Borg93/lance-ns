@@ -1,7 +1,11 @@
 # Ray TRAIN vs Ray DATA — the training-workload design (task #115)
 
-**Status: DESIGN DECIDED 2026-07-10 (this note is the contract; implementation items are
-execution-spec'd in `todo_fable.md` §9 as #115a–c).** The platform must host BOTH batch/ETL
+**Status: DESIGN DECIDED 2026-07-10; #115a (head + topic + submit-and-ack consumer, D1/D2) and the
+#115c seed grants (D5) LANDED the same day — code-complete + adversarially reviewed at the unit tier
+(the review caught and fixed an FGA-wiring bypass, floating-version admission, and an unforwarded
+config). Open: #115b (the training job + the D4 registry publish), the chart values passthrough
+(deferred until helm render-verification is possible), and the live kind drive — see `todo_fable.md`
+§9 #115a–c for exact per-item state.** The platform must host BOTH batch/ETL
 (today's medallion cascade — the Ray *Data* shape) and TRAINING workloads (Ray *Train*). They are
 different workload classes and get different runtime treatment — but ONE provenance model, ONE
 authz model, and ONE storage substrate.

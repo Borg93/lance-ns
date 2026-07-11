@@ -301,5 +301,7 @@ Quality gates: `uvx ruff check .` · `uvx ty check` · `make ci` (hermetic, via 
 > `ray job submit`s a distributed Lance write/index/evolve/compact against RustFS; the movers can submit
 > their stage transform as a Ray job on their Dapr trigger (`medallion.ray`) — [`docs/RAY.md`](docs/RAY.md).
 > The **Ray TRAIN workload class** (training jobs producing governed, versioned model artifacts — the
-> model registry is itself a Lance dataset pointing at plain-path S3 weights) is a decided design awaiting
-> implementation: [`docs/RAY-TRAIN.md`](docs/RAY-TRAIN.md).
+> model registry is itself a Lance dataset pointing at plain-path S3 weights) is a decided design with the
+> head landed: `POST /train` + the dedicated training topic + the submit-and-ack trainer consumer + the
+> trainer's FGA rung all ship (unit-proven); the training job itself (#115b) and the live drive are open —
+> [`docs/RAY-TRAIN.md`](docs/RAY-TRAIN.md).

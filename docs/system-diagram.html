@@ -901,8 +901,9 @@ Content-Type: application/vnd.apache.arrow.stream`, chips:["Arrow IPC","OIDC"] }
     steps:[
       { from:"client", to:"catalog", color:"--c-user", title:"Open table", route:"GET describe_table",
         desc:"Client asks the catalog to locate the table (and, on S3, to vend scoped credentials).",
-        payload:`GET /v1/table/alpha$silver$features?vend_credentials=true
-Authorization: Bearer <JWT>`, chips:["describe"] },
+        payload:`GET /v1/table/alpha$silver$features            # describe
+POST /v1/table/alpha$silver$features/credentials?tier=read   # vend (own endpoint)
+Authorization: Bearer <JWT>`, chips:["describe","credentials endpoint"] },
       { from:"catalog", to:"oidc", color:"--c-embed", title:"Verify token", route:"JWKS verify",
         desc:"Same fail-closed OIDC verification as every /v1 route.",
         payload:`verify(JWT) -> { sub: "dee" }`, chips:["JWKS cache"] },
@@ -913,11 +914,11 @@ Authorization: Bearer <JWT>`, chips:["describe"] },
   relation: "can_read_data",
   object:   "table:alpha$silver$features"
 }`, chips:["reader rung","cascade"] },
-      { from:"catalog", to:"openbao", color:"--c-seed", title:"Fetch scoped key (planned)", route:"KV v2 read",
-        desc:"<em>Secret-responsibility:</em> only the <em>catalog</em> (and the lineage svc) hold durable secrets in OpenBao — compute jobs never read it. <em>STS vending (planned):</em> the catalog reads its base/role credential here to mint scoped STS creds; <em>Mode B</em> (server-mediated) fetches nothing.",
+      { from:"catalog", to:"openbao", color:"--c-seed", title:"Fetch scoped key", route:"KV v2 read (Dapr secret store)",
+        desc:"<em>Secret-responsibility:</em> only the <em>catalog</em> (and the lineage svc) hold durable secrets in OpenBao — compute jobs never read it. <em>STS vending (built):</em> the catalog reads its base/role credential (two-tier Dapr secret store) to mint scoped creds — four pluggable modes incl. RustFS-native web_identity; <em>Mode B</em> (server-mediated) fetches nothing.",
         payloadOnline:`GET secret/data/storage/lance        # OpenBao KV v2`,
         payloadOffline:`# Mode B: skipped — no credential is fetched or vended`,
-        chips:["OpenBao","planned"] },
+        chips:["OpenBao","built"] },
       { from:"catalog", to:"store", color:"--c-vector", title:"Locate (+ vend creds)", route:"describe -> location",
         desc:"The catalog returns the dataset location. <em>STS vending:</em> it also mints a short-TTL, table-scoped STS token (AssumeRole). <em>Mode B:</em> it returns only the location; data flows server-mediated.",
         payloadOffline:`# Mode B (server-mediated)
@@ -944,7 +945,8 @@ Authorization: Bearer <JWT>`, chips:["describe"] },
     steps:[
       { from:"ray", to:"catalog", color:"--c-compute", title:"Describe bronze", route:"GET describe_table",
         desc:"The promotion job is a <em>catalog client</em>, not an endpoint. It authenticates with <em>workload identity</em> (KubeRay SA / OIDC token) — <em>not</em> a vault secret — gets short-TTL scoped creds from the catalog, and <em>never touches OpenBao</em>.",
-        payload:`GET /v1/table/alpha$bronze$images?vend_credentials=true
+        payload:`GET /v1/table/alpha$bronze$images                # describe
+POST /v1/table/alpha$bronze$images/credentials?tier=read     # vend (own endpoint)
 Authorization: Bearer <workload-identity token>`, chips:["lance-ray job","workload identity"] },
       { from:"catalog", to:"openfga", color:"--c-vector", title:"Authorize read bronze", route:"check can_read_data",
         desc:"Role-as-subject: the job runs as a role whose members get read on bronze.",

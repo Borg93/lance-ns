@@ -515,7 +515,10 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   above waits on the user's kind session; these four need NO cluster. Ordered by risk: docs first,
 >   deletion-adjacent last. Each batch = its own commit + the full §0 gate + adversarial review.)
 >
->   **BATCH 1 — stale-docs sweep (the §8 ⛔ list, 12 items).**
+>   **BATCH 1 — stale-docs sweep (the §8 ⛔ list, 12 items). ✅ DONE 2026-07-11** — fact-check-first
+>   per the guardrail; found 9/12 ALREADY fixed (the todo list was the stale artifact), fixed the
+>   real 3 (system-diagram .md+.html, SYSTEM-SKETCH register/roadmap, COVERAGE tally). See the §8
+>   sweep-result block. Spec kept below for the record:
 >   ✅ DONE WHEN: every ⛔ line in the §8 stale-docs list is fixed in its named file · each rewrite is
 >   verified against CODE first (count the real vending shapes; re-measure the COVERAGE tally from a
 >   live `--co -q` collect; `grep -r deadLetterTopic` before touching DLQ wording) — never rewritten
@@ -650,33 +653,45 @@ SYSTEM-SKETCH) got point-in-time banners pointing at the authoritative current-s
 flagged contradiction fixed (CredentialVendor wired). Detail below.
 
 
-- ⛔ **`docs/RASK-INTEGRATION.md:69` — the seam contract tells the future Ray job to publish `medallion.raw`
-  itself → post-B2 that DOUBLE-FIRES the cascade.** Highest-stakes doc bug for the merge.
-- ⛔ `docs/RASK-INTEGRATION.md:44` — claims producer+movers are “dummy emitters (provenance only, no data)”;
-  stale since the B1 compute toggle.
-- ⛔ `docs/ARCHITECTURE.md:56` — §2 describes vending via a nonexistent `describe_table?vend_credentials=true`
-  param, “three pluggable shapes” (there are four), mis-states RustFS STS support.
-- ⛔ `docs/ARCHITECTURE.md:263` — §8 marks lineage “🔶 deferred” while §7/§9 in the same doc say built+deployed.
-- ⛔ `docs/ARCHITECTURE.md:220` — names a nonexistent Lance API `add_columns_from` (real: `add_columns`).
-- ⛔ `docs/RESILIENCE.md:32` — gap #1 calls the catalog emit “fire-and-forget background task” (it’s awaited
-  inline) and omits the shipped B4 back-fill that mitigates exactly this loss mode.
-- ⛔ `docs/system-diagram.md:38` (+ .html) — stale “still open/planned” markers: insert/delete/compaction emit,
-  lineage authz, OpenBao, vending — all shipped.
-- ⛔ `docs/SYSTEM-SKETCH.md:72` — §2 says CredentialVendor “⛔ not wired”; §1 says “OpenBao (planned)” while §2
-  says ✅ built.
-- ⛔ `docs/DEPLOY.md:121-122` — footer denies the built RustFS STS path and calls the `make governed` demo
-  “deployed-not-wired”.
-- ⛔ `docs/COVERAGE.md:9` — headline tally stale (269/15 vs actual 304/17).
-- ⛔ `docs/LINEAGE.md:206` — “Closing the loop: gold embeds its lineage as JSONB” reads as current pipeline
-  behavior, but only the demo script writes the JSONB — the event-driven cascade does not. Reword (or make the
-  silver→gold mover embed it when compute is on).
-- ⛔ **Stale chart comments from pre-B2** — `chart/templates/medallion.yaml:6` (two comments say POST /produce
-  publishes the first trigger) and `chart/values.yaml:280,325-326` (the false “competing consumers” claims —
-  see §2).
-- ⛔ **DLQ wording residual (from the refuted findings)** — `services/lineage/services/consumer.py:6`
-  (“then dead-letters”), `services/medallion/services/transform.py:41` (“can dead-letter it”),
-  `chart/templates/dapr-component.yaml:3` (header claims sidecar “owns retry/backoff/DLQ”): no deadLetterTopic
-  is configured anywhere; behavior is stream-retention + restart replay. Fix wording or configure the DLQ.
+> **BATCH 1 SWEEP RESULT (2026-07-11):** every line below was FACT-CHECKED against code before
+> touching any doc (the batch's own guardrail) — and 9 of 12 were ALREADY FIXED by earlier passes;
+> this list itself was the stale artifact. The 3 genuinely-stale items were fixed today. Per-item:
+
+- ✅ *(verified already-fixed 2026-07-11)* `docs/RASK-INTEGRATION.md` seam contract — the doc CORRECTLY
+  forbids the job publishing `medallion.raw` (line ~75 warning present); code confirms `/raw-arrival`
+  (`ingest_trigger.py`) publishes the first trigger. No double-fire instruction exists.
+- ✅ *(verified already-fixed)* `docs/RASK-INTEGRATION.md` dummy-emitters claim — now correctly
+  describes the B1 compute toggle (default off, real read→transform→write when on).
+- ✅ *(verified already-fixed)* `docs/ARCHITECTURE.md` vending — now documents the real
+  `POST /v1/table/{id}/credentials?tier=` surface with FOUR modes; RustFS STS via `web_identity`
+  correctly stated.
+- ✅ *(verified already-fixed)* `docs/ARCHITECTURE.md` lineage-deferred — §7/§8 both say built+deployed
+  (the one remaining “deferred” refers to Dapr Workflow, which IS deferred by decision).
+- ✅ *(verified already-fixed)* `add_columns_from` — appears nowhere in docs/ or services/; the real
+  `add_columns` is used throughout (probed against installed pylance).
+- ✅ *(verified already-fixed)* `docs/RESILIENCE.md` — now says “inline-awaited + best-effort … not a
+  BackgroundTasks fire-and-forget” and documents the shipped B4 back-fill as the mitigation.
+- ✅ **FIXED 2026-07-11** `docs/system-diagram.md` + `.html` — body markers refreshed: full write-surface
+  emit (insert/merge_insert/update/delete/compaction), OpenBao “planned”→built (Dapr secret store),
+  vending shown at its REAL endpoint (`POST …/credentials?tier=`, four modes incl. RustFS-native
+  `web_identity`), create-emit “fire-and-forget”→awaited-inline+B4, “what's still open”→points at
+  todo_fable §7a/§9; the un-bannered `.html` payloads (`?vend_credentials=true`, “planned” OpenBao
+  step) rewritten — zero stale occurrences remain (grep-verified).
+- ✅ **FIXED 2026-07-11** `docs/SYSTEM-SKETCH.md` — gap-register rows 3–6 flipped to ✅ CLOSED (vending
+  endpoint, four modes, OpenBao two-tier store, medallion estate) and the roadmap's
+  “wire vending into describe_table” item annotated ✅ superseded-and-shipped (dedicated endpoint).
+- ✅ *(verified already-fixed)* `docs/DEPLOY.md` footer — correctly states RustFS-native scoped STS is
+  BUILT (`web_identity`; plain `AssumeRole` works on AWS/MinIO/Ceph, not RustFS) and scopes
+  “deployed-not-wired” to hierarchy auto-seeding + the end-to-end Dex demo only.
+- ✅ **FIXED 2026-07-11** `docs/COVERAGE.md:9` — tally refreshed to the measured reality: 493 passed
+  (391 unit + 102 integration, 2026-07-11); 47/54-backed unchanged (needs a live backend to re-probe).
+- ✅ *(verified already-fixed)* `docs/LINEAGE.md` gold-JSONB — heading now says “(demo driver only)”
+  with a scope blockquote; code confirms only `medallion_demo.py::write_gold` embeds the column.
+  (Making the silver→gold mover embed it stays a possible future item, deliberately not done here.)
+- ✅ *(verified already-fixed)* chart comments + DLQ wording — `consumer.py`, `transform.py`, and
+  `dapr-component.yaml` all now state the truth: NO deadLetterTopic anywhere (grep-verified);
+  behavior = maxDeliver=5 + backOff, Limits-retention stream keeps messages 168h, lineage's
+  `deliverPolicy: all` replays on restart; DLQ remains RESILIENCE.md gap #2 (roadmap).
 
 ## 9 · Feature gaps — ephemeral multimodal lakehouse (→ rask merge)
 

@@ -62,4 +62,15 @@ w user:service-bronze-to-silver writer "$WAREHOUSE"
 w user:service-media-to-silver writer "$WAREHOUSE"
 w user:service-silver-to-gold validator namespace:gold
 
-echo "✓ seeded medallion grants (mover writers + media lane, silver→gold validator, stage/table parent links) into store $SID"
+# --- Ray TRAIN (#115c, docs/RAY-TRAIN.md D5): the trainer's OWN identity + rung. Feature READER on the
+# stages it consumes + WRITER on namespace:models ONLY — never the medallion writer rung (a trainer must
+# not write stages; a mover must not write models). The models namespace parents under the warehouse so
+# humans' warehouse-reader rung cascades to model registry datasets; per-model table→namespace parent
+# links (namespace:models parent table:models$<name>) are seeded when a model first publishes (#115b),
+# exactly like the mover datasets above. Model PROMOTION stays behind the validator rung (not writer).
+w "$WAREHOUSE" parent namespace:models
+w user:service-trainer reader namespace:silver
+w user:service-trainer reader namespace:gold
+w user:service-trainer writer namespace:models
+
+echo "✓ seeded medallion grants (mover writers + media lane, silver→gold validator, trainer reader/models-writer, stage/table parent links) into store $SID"

@@ -494,6 +494,10 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   **Added 2026-07-10 (Phase 2):** with `compaction.lineageEmit=true` + a rolled compaction image,
 >   fault-inject a dataset (delete one data file under its manifest) and assert exactly ONE FAIL Run
 >   node across ≥2 cron ticks via /runs + /events — the §4 compaction-failure item's live DONE WHEN.
+>   **Added 2026-07-10 (#115a/c):** with helm available: wire the train values passthrough
+>   (topic/entrypoint/trainer identity/models namespace) into chart/templates/medallion.yaml +
+>   values.yaml and render-and-grep it (§0); re-run the seed; then the #115a live DONE WHEN (one POST
+>   /train drives the stub job end to end; ungranted trainer → DROP with no job submitted).
 >   **Added 2026-07-10 (§4 batch 2):** one real `/merge_insert` on kind (observe the merge-key BTREE
 >   land + the documented version gap; also probe whether `branch` is honored on the index build —
 >   unverifiable at pylance 8.0.0 locally), and a rolled catalog image so the merge-index hook + the
@@ -700,7 +704,16 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   (never hand-copied kwargs) · the job reads features ONLY at the pinned versions (no floating LATEST
   inside the job) · GC must never collect `models/<model>/<token>/` objects referenced by a registry
   row (§9 blob-pointer lifecycle is load-bearing here — orphan-janitor is future work, document it).
-- ⛔ **#115c — trainer authz seed + gates** (per D5). Build: seed-script additions (`namespace:models`
+- 🟡 **#115c — trainer authz seed + gates — SEED + GATES LANDED 2026-07-10; chart passthrough + live
+  DONE WHEN pending.** The handler's pre-submit checks shipped with #115a (deny→DROP / outage→RETRY,
+  unit-pinned); the seed script now writes the trainer rung (warehouse parent namespace:models;
+  service-trainer reader on silver+gold, writer on namespace:models ONLY — verified against model.fga's
+  assignable relations; `bash -n` clean; per-model table parents seed at first publish, #115b).
+  REMAINING: (a) chart values passthrough for train topic/entrypoint/trainer identity — DEFERRED with
+  reason: helm is unavailable in the remote session (proxy 403) and §0 forbids un-render-verified chart
+  changes; defaults work meanwhile; (b) the live governed drive (ungranted trainer → DROP, granted →
+  model lands) — §7a RESIDUAL. Original spec below:
+  (per D5). Build: seed-script additions (`namespace:models`
   parent + per-model table parents + `service-trainer` grants), the handler's pre-submit checks
   (`can_read_data` on every input, `can_create_table` on `namespace:models`).
   ✅ DONE WHEN: seed idempotent re-run green · unit: deny on ANY input → DROP; deny on models → DROP;

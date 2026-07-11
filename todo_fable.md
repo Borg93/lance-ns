@@ -530,6 +530,10 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   once (bad feature version → FAILed run, versionless output, registry unchanged), and redelivery
 >   of the same token never double-publishes (re-attach observed in mover logs). Set
 >   `vending.externalBlobBases` to include the deployment's `s3://<bucket>/models/` prefix.
+>   **Added 2026-07-11 (Batch 4):** after the FAIL-path fault injection above, run the janitor
+>   dry-run against the crashed token (`model_artifact_janitor.py --registry-uri … --artifact-base
+>   …`) and verify the report lists it as a candidate and the published tokens as
+>   kept_referenced; only then exercise `--delete` once.
 >   **Added 2026-07-10 (§4 batch 2):** one real `/merge_insert` on kind (observe the merge-key BTREE
 >   land + the documented version gap; also probe whether `branch` is honored on the index build —
 >   unverifiable at pylance 8.0.0 locally), and a rolled catalog image so the merge-index hook + the
@@ -590,7 +594,9 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   · no new frontend dependencies.
 >
 >   **BATCH 4 — orphan-artifact janitor (§9 blob-pointer lifecycle, scoped to the model lane the
->   #115b design made load-bearing).**
+>   #115b design made load-bearing). ✅ DONE 2026-07-11** — every DONE-WHEN met incl. the
+>   invariant-test-first guardrail; details on the flipped §9 sub-item. Live dry-run proof on
+>   kind added to §7a. Spec below:
 >   ✅ DONE WHEN: a sweep lists `models/<model>/<token>/` prefixes, reads the registry's REFERENCED
 >   tokens (meta column, read at a PINNED version), and reports tokens past a TTL that no registry
 >   row references · DRY-RUN (report-only) is the default; deletion only behind an explicit flag ·
@@ -921,8 +927,19 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     catalog — the app guard covers in-cluster ClusterIP callers that bypass the edge.
   - ⛔ P1 serving path for credential-less consumers (frontend/browser): catalog endpoint doing a ranged blob
     read or presigned URL from a blob column — does not exist.
-  - ⛔ P1 blob-pointer lifecycle: compaction/GC + reconcile must understand pointer columns referencing objects
-    OUTSIDE the dataset dir (never GC them as orphans; flag dangling pointers after a bucket wipe).
+  - 🟡 P1 blob-pointer lifecycle — **the models-lane HALF SHIPPED 2026-07-11 (Batch 4):**
+    `scripts/model_artifact_janitor.py` + 7 unit tests. Per-model sweep: registry read at ONE
+    pinned version → referenced-token set from `meta`; tokens = first-level prefixes under the
+    artifact base aged by their NEWEST object; deletable class = unreferenced AND past TTL, ONLY
+    with `--delete` (dry-run default). Fail-safe = KEEP throughout: unreadable registry or ANY
+    unparseable meta row ⇒ the whole pass degrades to report-only even with the flag; unstattable
+    token kept; overlapping registry/artifact trees refuse to run (never enumerates a Lance
+    dataset dir). THE invariant (referenced ⇒ never deleted, even past TTL, even with --delete)
+    was test-pinned BEFORE the delete code existed, per the batch guardrail. REMAINING (this item
+    stays open for): the deployed default stays dry-run until a live kind pass proves the report
+    against a real crashed-run orphan (§7a); the BROADER posture — compaction/GC understanding
+    pointer columns generally + reconcile flagging dangling pointers after a bucket wipe — is
+    untouched by this tool.
   - ⛔ P2 quality gate blob assertion: "the blob pointer resolves" check alongside row_count/not_null.
   - ⛔ P2 per-project schema declaration (embeddings/classification/summarization columns are KNOWN per project):
     register expected columns so the quality gate asserts they landed, FGA pre-registers column masking, and

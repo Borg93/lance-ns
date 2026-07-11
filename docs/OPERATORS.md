@@ -79,7 +79,7 @@ DOES have are already owned elsewhere:
 | Concern | Owner today | Status |
 |---|---|---|
 | background maintenance (compact/optimize) | `services/compaction` sweeper (cron-driven, FAIL-visible) | shipped |
-| orphan-artifact GC (`models/<m>/<token>/` from crashed runs; blob-pointer lifecycle) | future janitor keyed on registry-referenced tokens | §9 open item — **the one real gap**; becomes more load-bearing as models multiply |
+| orphan-artifact GC (`models/<m>/<token>/` from crashed runs; blob-pointer lifecycle) | `scripts/model_artifact_janitor.py` — dry-run default, referenced⇒never-collected unit-pinned | shipped 2026-07-11 (models lane); live drive + the broader pointer-aware-GC posture remain §9 |
 | stream/bucket/grant provisioning | chart Jobs + seed scripts (idempotent) | shipped; NACK could absorb the stream half |
 | version/feature pinning (`pylance`, `lance-ray`, data_storage_version) | image pins + probe-before-callsite (§0) + docs/RAY.md landmines | process, not software |
 

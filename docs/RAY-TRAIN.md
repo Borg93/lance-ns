@@ -134,8 +134,11 @@ artifact *bytes*:
    **base allowlist** (#92 — built for exactly this), so pointers are governed; D5's rungs apply
    unchanged. Stated cost: the artifact objects live OUTSIDE the dataset directory, so GC must
    never collect them as orphans — the §9 blob-pointer-lifecycle item is now load-bearing for
-   models, and crashed-run orphan artifacts under `models/<model>/<token>/` need a (future)
-   janitor keyed on registry-referenced tokens.
+   models, and crashed-run orphan artifacts under `models/<model>/<token>/` are cleaned by
+   `scripts/model_artifact_janitor.py` (2026-07-11): dry-run by default, deletes only
+   unreferenced-AND-past-TTL tokens with an explicit `--delete`, fail-safe direction = keep
+   (unreadable registry or any unparseable meta row ⇒ report-only), and the invariant
+   "registry-referenced ⇒ never collected" is unit-pinned.
 
 Why Lance-native for the registry layer (and not MLflow/HF infra): every registry decomposes
 into artifact bytes on object storage + a metadata/versioning layer; this stack already HAS the

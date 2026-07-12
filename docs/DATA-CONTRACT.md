@@ -53,6 +53,11 @@ features, path-unsafe names, oversized/non-dict config — `services/medallion/s
   old versions stay readable; per-version schemas ride the lineage `WROTE` edge.
 
 **NOT yet prod-grade (tracked, deliberate):**
+- **Freshness is the second known gap (2026-07-12).** A complete contract also promises arrival
+  cadence — a 3-day-stale silver is as broken for a consumer as a missing column. Today the run
+  board and the transitions metric make staleness *visible* but nothing *asserts* it; the planned
+  fix rides the reconcile sweep (compare latest-write age against a per-stage freshness budget,
+  WARN like dangling blobs). Tracked in todo_fable §9.
 - **Breaking changes are the known gap.** A producer renaming/dropping a column a downstream
   reads is caught only at RUNTIME (the mover's transform fails → RETRY → stall) — not at
   promotion time. The fix is the §9 per-project **schema declaration** item (declare expected

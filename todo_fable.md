@@ -1271,6 +1271,14 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     **breaking-change detector**: today a producer renaming/dropping a column a downstream reads is caught only
     at runtime (mover fails → RETRY → stall); declared columns turn that into a pre-promotion contract
     violation. Additive evolution is already safe by construction (immutable versions pin readers).
+  - ⛔ P2 FRESHNESS check (found 2026-07-12 answering the user's "are we missing something?"): a
+    complete data contract also promises ARRIVAL CADENCE — a 3-day-stale silver is as broken for a
+    consumer as a missing column, and today nothing ASSERTS it (the run board shows staleness only
+    if you look; the transitions metric could drive a Perses alert nobody has built). Cheap fit:
+    the reconcile sweep already opens every dataset on a schedule — compare each dataset's latest
+    write timestamp against a per-stage freshness budget (values-configured, e.g.
+    `medallion.freshnessBudgetHours`) and WARN + report `stale: [...]` exactly like dangling
+    blobs. Small batch; pairs naturally with the schema-declaration gate.
   - ✅ P1 **document the data contract — DONE 2026-07-11 (Batch 2): [`docs/DATA-CONTRACT.md`](docs/DATA-CONTRACT.md)**,
     framed by the user's own questions (what is it / how does it work / is it prod-ready / what do
     Dapr+NATS enforce / same as Lakekeeper?). Covers: bus contract (pointers-only triggers + facet

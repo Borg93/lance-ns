@@ -566,6 +566,12 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   above waits on the user's kind session; these four need NO cluster. Ordered by risk: docs first,
 >   deletion-adjacent last. Each batch = its own commit + the full §0 gate + adversarial review.)
 >
+>   📌 **PINNED RULE (user, 2026-07-12): only VALUABLE tests.** Every test added must pin a distinct
+>   contract or a probed failure mode — no restating another test at the same layer, no testing
+>   framework defaults. Unit re-asserting integration (or vice versa) is allowed ONLY when the layers
+>   fail differently (e.g. Range parsing lives in HTTP, window math lives in dataplane). When a batch
+>   ledger lists its tests, each name must earn its line by saying what breaks without it.
+>
 >   **BATCH 1 — stale-docs sweep (the §8 ⛔ list, 12 items). ✅ DONE 2026-07-11** — fact-check-first
 >   per the guardrail; found 9/12 ALREADY fixed (the todo list was the stale artifact), fixed the
 >   real 3 (system-diagram .md+.html, SYSTEM-SKETCH register/roadmap, COVERAGE tally). See the §8

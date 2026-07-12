@@ -6,7 +6,7 @@ this measures which are **backend-backed (200)** vs **spec-correct 501** because
 genuinely stubs them. Dispatch: most ops go to `native` (the Rust `DirectoryNamespace`); several go to the
 in-process `dataplane` (pylance, always 200) — see `services/catalog/services/{native,dataplane}.py`.
 
-**Tally: 47 / 54 backed (200), 7 spec-correct 501.** `uv run pytest tests/unit tests/integration` → 493 passed (391 unit + 102 integration, measured 2026-07-11; e2e suites skipped unless their live backends are set).
+**Tally: 47 / 54 backed (200), 7 spec-correct 501.** `uv run pytest tests/unit tests/integration` → 568 passed (measured 2026-07-12; e2e suites skipped unless their live backends are set).
 
 > **Correction (2026-06-30):** an earlier version of this doc reported 41/54 and listed version + branch
 > ops as "upstream-blocked / no pylance analog". That was **wrong**, and reading the Lance Namespace spec
@@ -30,6 +30,10 @@ in-process `dataplane` (pylance, always 200) — see `services/catalog/services/
 | Transactions (2) | 1 (`describe`) | `alter_transaction` |
 | Materialized views (2) | — | `create` / `refresh` |
 | Credentials + stats (2+) | all | — |
+
+**Beyond-spec extensions** (ours, not counted in the 54): `POST /v1/table/{id}/credentials` (scoped
+credential vending) and `GET /v1/table/{id}/blobs` (credential-less blob serving with RFC 9110 Range +
+ETag/If-Range, 2026-07-12) — both governed by the same router-level authorize (reader tier).
 
 The **7 remaining 501s are genuine native-backend stubs**, not catalog gaps:
 - **`create_materialized_view` / `refresh_materialized_view`** — pylance ships the *complete* typed MV API

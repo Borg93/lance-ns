@@ -660,6 +660,16 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 14 (added + ✅ DONE 2026-07-12) — MFE follow-ups (b)+(c): StatusBoard + the GSAP
+>   animation layer extracted into @lance/ui (structural `RunStatusLike` prop type; the one
+>   SvelteKit tie cut with the same SSR semantics; agnosticism test now recursive + bans `$app`),
+>   and @lance/config tsconfig presets extended by the app AND the lib — which also gained its own
+>   svelte-check task (components were previously only checked through the consumer). bun-isolated-
+>   install gotcha pinned (workspace `extends` needs a declared devDep). New Playwright spec pins
+>   the extracted board's RENDERED rows (the Batch 12 lesson); 5/5 e2e, 4/4 turbo tasks. Review
+>   verdict: ship (3 low findings — README diagram, recursive sweep, stale comment — all fixed
+>   same-batch). Details on the flipped MFE item in §security-adjacent list below.
+>
 >   **BATCH 13 (added + ✅ DONE 2026-07-12) — the P1 credential-less blob serving path.**
 >   `GET /v1/table/{id}/blobs?column=&row=[&version=]` + `dataplane.read_blob`: STREAMED in bounded
 >   8 MiB `read_range` windows (never buffers a payload), full RFC 9110 Range semantics (200/206/
@@ -1133,26 +1143,38 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   `chart/values.yaml:~180` still claims otherwise, fix it. Still open: at merge switch to rask’s
   RustFS-operator Tenant + CNPG-backed AGE. Prove “helm install from zero” fully reproducible
   (FGA seeds, OpenBao seeding, dex clients are still script-manual); backups exist but gated off.
-- 🟡 **MFE follow-ups (Batch 12 leftovers — user: "remember to fix the mfe stuff", 2026-07-12).**
-  The workspace shape is landed + CI-proven; what remains to be FULLY rask-similar:
+- 🟡 **MFE follow-ups (Batch 12 leftovers — user: "remember to fix the mfe stuff", 2026-07-12).
+  (b)+(c) SHIPPED 2026-07-12 (Batch 14); only (a) remains, blocked on rask visibility.**
   (a) ⛔ **exact-convention alignment needs the rask repo visible** — package naming (@lance/ui vs
-  their scheme), their turbo.json task names/caching, shared config packages (tsconfig/eslint
-  presets as workspace packages), runtime composition (separate deploys behind Traefik vs a shell
-  app). BLOCKED on: add the rask repo to a session (it is not in list_repos under any obvious
-  name) or paste its root package.json + turbo.json + one app/package manifest.
-  (b) ⛔ extract `StatusBoard` (and the attachment helpers it needs) into @lance/ui — deferred in
-  Batch 12 because it imports app-local `attachments.ts`/`types.ts`; the lib needs either its own
-  copy of the tiny attachment helpers or structural prop types (keep the transport-agnostic test
-  green either way).
-  (c) ⛔ shared `packages/config` (tsconfig base + prettier/eslint) so a second app (`apps/*`)
-  starts from presets instead of copying apps/web's configs.
+  their scheme), their turbo.json task names/caching, eslint/prettier presets, runtime composition
+  (separate deploys behind Traefik vs a shell app). BLOCKED on: add the rask repo to a session
+  (re-verified 2026-07-12: list_repos has NO repo named rask under any account) or paste its root
+  package.json + turbo.json + one app/package manifest.
+  (b) ✅ **StatusBoard + the GSAP animation layer extracted into @lance/ui (Batch 14).**
+  `StatusBoard.svelte`, `attachments.ts` (all 7 {@attach} factories) and `gsap.ts` git-mv'd into
+  `packages/ui/src`; StatusBoard's prop type is now the lib-owned STRUCTURAL `RunStatusLike`
+  (the app's generated `RunStatus` passes through unchanged — svelte-check proves assignability);
+  gsap.ts's one SvelteKit tie (`$app/environment`) replaced with `typeof window` (same SSR truth
+  table). The transport-agnosticism test now SWEEPS every lib source recursively and bans `$app`
+  alongside `$lib`/fetch. JobNode/MedallionNode/LineageExplorer import from '@lance/ui'; the three
+  app-local files are gone.
+  (c) ✅ **@lance/config shipped (Batch 14):** `packages/config/tsconfig.base.json` holds the 9
+  strict options once; apps/web extends `["./.svelte-kit/tsconfig.json", "@lance/config/…"]`
+  (extends-array: later wins — reviewer verified the effective config is bit-identical to the old
+  inline overrides) and packages/ui extends it too. BONUS: @lance/ui gained its own `check` task
+  (svelte-check 0/0) — lib components were previously type-checked only through the consuming app.
+  bun-workspace gotcha pinned: bun 1.3 installs are ISOLATED (no hoisting), so tsconfig `extends`
+  on a workspace package resolves only if the consumer DECLARES `@lance/config` as a devDep.
+  web.dockerfile copies the new manifest pre-install. TESTS: exports.test.ts (surface = Chip,
+  SearchBar, StatusBoard; recursive agnosticism sweep ≥5 sources), NEW Playwright spec
+  `status board renders live runs from the workspace lib` (2-run mock → RUNNING 1/3 progress
+  label, FAIL error strip, → outputs; pins RENDERED output because Batch 12 proved lib components
+  can compile clean yet break only at render), Playwright 5/5, turbo check/test 4/4 tasks.
   (d) 📌 pinned gotcha for all future lib components: DOM event handlers on workspace-lib
   components did NOT fire under the host app's Svelte 5 event delegation (Batch 12, proven with a
   console-capture spec) — lib components react to bound state via $effect, never rely on
   delegated DOM handlers; documented in SearchBar.svelte.
-  ✅ DONE WHEN: (b)+(c) land with the existing gates (turbo check/test, transport-agnosticism test
-  extended to the new components, Playwright still 4/4); (a) lands as a diff-and-adjust batch once
-  rask is visible.
+  ✅ DONE WHEN (remaining): (a) lands as a diff-and-adjust batch once rask is visible.
 - 🟡 **P1 Search — TIER 1 SHIPPED 2026-07-11 (Batch 11): governed `/search?q=` over the discovery
   estate.** Case-insensitive substring across dataset NAMES, NAMESPACES, TAGS, and the CURRENT
   column inventory (HAS_COLUMN-scoped, so GC'd columns don't resurrect via search); each hit

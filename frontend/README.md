@@ -10,8 +10,10 @@ frontend/
   apps/
     web/            # lance-lineage-web — the lineage explorer (SvelteKit, Svelte 5 runes)
   packages/
-    ui/             # @lance/ui — shared Svelte 5 components (transport-agnostic BY RULE:
-                    #   components never own fetch/API clients; a bun test enforces it)
+    ui/             # @lance/ui — shared Svelte 5 components + GSAP {@attach} factories
+                    #   (transport- AND framework-agnostic BY RULE: no fetch/API clients,
+                    #   no $lib/$app imports; a bun test sweeps every source to enforce it)
+    config/         # @lance/config — shared tsconfig preset (extended by apps/* and packages/*)
 ```
 
 Commands (root): `bun install` · `bunx turbo run build` · `bunx turbo run check test` ·

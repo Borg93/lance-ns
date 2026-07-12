@@ -15,11 +15,9 @@
 	import '@xyflow/svelte/dist/style.css';
 	import { Tabs } from 'bits-ui';
 	import { Radio, Boxes, Cpu, Columns3 } from '@lucide/svelte';
-	import StatusBoard from '$lib/StatusBoard.svelte';
 	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
-	import { enter, stagger, countUp } from '$lib/attachments';
 	import { LineageState } from '$lib/store.svelte';
-	import { SearchBar } from '@lance/ui';
+	import { SearchBar, StatusBoard, enter, stagger, countUp } from '@lance/ui';
 	import { fetchSearch } from '$lib/api';
 	import { LAYER, type DemoDataset } from '$lib/types';
 

@@ -1,9 +1,24 @@
 <script lang="ts">
-	import type { RunStatus } from './types';
+	/** Live run-status board: one row per run with a state pill, animated progress bar, and error
+	 * strip. Transport-agnostic (rask convention: the caller polls and passes `runs`; the lib never
+	 * owns an API client) — `RunStatusLike` is the STRUCTURAL shape this board reads, so any app whose
+	 * generated run type carries these fields can pass it straight through without adapters. */
 	import { CheckCircle2, LoaderCircle, XCircle, CircleDashed } from '@lucide/svelte';
 	import { enter, bar, breathe } from './attachments';
 
-	let { runs }: { runs: RunStatus[] } = $props();
+	export type RunStatusLike = {
+		run_id: string;
+		job?: string | null;
+		state?: string | null;
+		author?: string | null;
+		outputs?: string[] | null;
+		progress_done?: number | null;
+		progress_total?: number | null;
+		error_message?: string | null;
+		updated_at?: string | null;
+	};
+
+	let { runs }: { runs: RunStatusLike[] } = $props();
 
 	const isRunning = (s?: string | null) => /START|RUNNING/i.test(s ?? '');
 	const isFail = (s?: string | null) => /FAIL|ABORT/i.test(s ?? '');
@@ -14,12 +29,12 @@
 
 	const shortJob = (j?: string | null) => (j ?? '').replace(/^ray-jobs\//, '');
 
-	function pct(r: RunStatus): number {
+	function pct(r: RunStatusLike): number {
 		if (r.state === 'COMPLETE') return 100;
 		if (r.progress_total) return Math.round(((r.progress_done ?? 0) / r.progress_total) * 100);
 		return isRunning(r.state) ? 8 : 0;
 	}
-	function label(r: RunStatus): string {
+	function label(r: RunStatusLike): string {
 		if (r.state === 'COMPLETE') return 'COMPLETE';
 		if (isFail(r.state)) return r.state ?? 'FAIL';
 		if (isRunning(r.state)) return `RUNNING ${r.progress_done ?? 0}/${r.progress_total ?? 3}`;

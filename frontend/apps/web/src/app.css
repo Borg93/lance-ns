@@ -98,7 +98,7 @@ code,
 	color: var(--mut) !important;
 }
 
-/* Honour reduced-motion globally (GSAP is gated separately in $lib/gsap). */
+/* Honour reduced-motion globally (GSAP is gated separately in @lance/ui's gsap module). */
 @media (prefers-reduced-motion: reduce) {
 	*,
 	*::before,

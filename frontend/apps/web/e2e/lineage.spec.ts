@@ -40,7 +40,31 @@ test.beforeEach(async ({ page }) => {
 				total: NODES.length
 			});
 		if (path === '/events') return json(route, { events: [] });
-		if (path === '/runs') return json(route, { runs: [] });
+		if (path === '/runs')
+			return json(route, {
+				runs: [
+					{
+						run_id: 'r-1',
+						job: 'ray-jobs/embed_features',
+						state: 'RUNNING',
+						progress_done: 1,
+						progress_total: 3,
+						author: 'alice',
+						outputs: ['silver$features'],
+						updated_at: '2026-07-01T00:00:00Z',
+						events: 2
+					},
+					{
+						run_id: 'r-2',
+						job: 'ray-jobs/promote_gold',
+						state: 'FAIL',
+						author: 'bob',
+						error_message: 'quality gate: row_count below floor',
+						updated_at: '2026-07-01T00:01:00Z',
+						events: 3
+					}
+				]
+			});
 		if (path === '/jobs')
 			return json(route, {
 				jobs: [{ namespace: 'lance-medallion', name: 'embed_features', outputs: ['silver$features'] }],
@@ -127,5 +151,21 @@ test('governed search finds by column and focuses the hit; jobs tab lists comput
 	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
 
 	await page.getByRole('tab', { name: 'Jobs (1)' }).click();
-	await expect(page.getByText('embed_features')).toBeVisible();
+	// Scope to the jobs list's own class — the status board's run row ALSO contains this job name
+	// and bits-ui keeps inactive tab content in the DOM (the Batch 12 collision lesson).
+	await expect(page.locator('.job-name', { hasText: 'embed_features' })).toBeVisible();
+});
+
+test('status board renders live runs from the workspace lib (@lance/ui StatusBoard)', async ({ page }) => {
+	// ASSERTS (Batch 14): the EXTRACTED StatusBoard renders real rows under the host app — the
+	// Batch 12 lesson was that a workspace-lib component can compile clean yet break only at
+	// render/interaction time, so the extraction is pinned by rendered output, not just svelte-check.
+	// One RUNNING row (progress label from progress_done/total) + one FAIL row (error strip).
+	await page.goto('/lineage');
+	await page.getByRole('tab', { name: 'Status (2)' }).click();
+	await expect(page.getByText('embed_features', { exact: false }).first()).toBeVisible();
+	await expect(page.getByText('RUNNING 1/3')).toBeVisible();
+	await expect(page.getByText('FAIL', { exact: true })).toBeVisible();
+	await expect(page.getByText('quality gate: row_count below floor')).toBeVisible();
+	await expect(page.getByText('→ silver$features')).toBeVisible();
 });

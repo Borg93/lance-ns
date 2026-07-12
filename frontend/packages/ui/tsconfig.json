@@ -1,0 +1,10 @@
+{
+	"extends": "@lance/config/tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true,
+		"module": "esnext",
+		"target": "esnext",
+		"types": ["bun"]
+	},
+	"include": ["src"]
+}

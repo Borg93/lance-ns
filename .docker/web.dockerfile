@@ -8,6 +8,7 @@ WORKDIR /app
 COPY frontend/package.json frontend/bun.lock frontend/turbo.json ./
 COPY frontend/apps/web/package.json ./apps/web/package.json
 COPY frontend/packages/ui/package.json ./packages/ui/package.json
+COPY frontend/packages/config/package.json ./packages/config/package.json
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
 # …then the sources; turbo builds the app (and its workspace deps) with its task graph.
 COPY frontend/ ./

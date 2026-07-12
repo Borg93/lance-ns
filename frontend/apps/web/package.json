@@ -15,6 +15,7 @@
 		"test:e2e": "playwright test"
 	},
 	"devDependencies": {
+		"@lance/config": "workspace:*",
 		"@playwright/test": "^1.61.1",
 		"@sveltejs/kit": "^2.8.0",
 		"@sveltejs/vite-plugin-svelte": "^5.0.0",

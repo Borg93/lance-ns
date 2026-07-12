@@ -1,13 +1,13 @@
-// $lib/attachments.ts
-// Reusable GSAP attachments for Svelte 5's {@attach} directive (skill: gsap + svelte-template-directives).
-// Each factory returns an Attachment — `(node) => cleanup` — so it animates on mount and reverts on
-// removal. Every factory is reduced-motion aware and SSR-safe (gsap only runs client-side here).
+// @lance/ui attachments — reusable GSAP attachments for Svelte 5's {@attach} directive
+// (skill: gsap + svelte-template-directives). Each factory returns an Attachment —
+// `(node) => cleanup` — so it animates on mount and reverts on removal. Every factory
+// is reduced-motion aware and SSR-safe (gsap only runs client-side here).
 //
 // Re-run semantics: {@attach fn(arg)} re-runs whenever `arg` changes. Drive the *continuous* ones
 // (breathe/pulse) from a `$derived` primitive so Svelte's value-equality skips no-op re-runs while
 // the dashboard reassigns its data objects every poll. One-shot `enter`/`stagger` take literals.
 import type { Attachment } from 'svelte/attachments';
-import { gsap, reduced } from '$lib/gsap';
+import { gsap, reduced } from './gsap';
 
 /** Fade + rise in once on mount. */
 export function enter(opts: { y?: number; delay?: number; duration?: number } = {}): Attachment<HTMLElement> {

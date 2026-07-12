@@ -131,6 +131,11 @@ class _DiscoveryRepo:
     async def list_jobs(self) -> list[JobSummary]:
         return list(self._jobs)
 
+    columns: list[tuple[str, str]] = []
+
+    async def list_all_columns(self) -> list[tuple[str, str]]:
+        return list(self.columns)
+
 
 def _ds(*names: str) -> list[DatasetSummary]:
     return [DatasetSummary(name=n, namespace=(n.split("$")[0] if "$" in n else None)) for n in names]
@@ -176,3 +181,71 @@ def test_namespaces_endpoint_from_visible_datasets(monkeypatch: pytest.MonkeyPat
     flt = fga_deps.DatasetFilter(_request(fga=cast(Any, object())), settings, _token())
     result = asyncio.run(list_namespaces(cast(Any, repo), flt, settings))
     assert result.namespaces == ["raw"]  # gold hidden — its only dataset isn't visible
+
+
+# --- /search (P1 Search tier 1, 2026-07-11) --------------------------------------------------- #
+
+
+def _search(repo: _DiscoveryRepo, q: str, *, auth: bool = False, allow: tuple[str, ...] = ()) -> Any:
+    from lineage.api.v1.endpoints.discovery import search
+
+    if auth:
+        settings = _settings(**_FULL_AUTH)
+        flt = fga_deps.DatasetFilter(_request(fga=cast(Any, object())), settings, _token())
+    else:
+        settings = _settings()
+        flt = fga_deps.DatasetFilter(_request(), settings, None)
+    return asyncio.run(search(cast(Any, repo), flt, settings, q=q))
+
+
+def test_search_matches_name_tag_namespace_and_column() -> None:
+    # ASSERTS: one query hits across all four match tiers, and every hit names its REASONS —
+    # "which tables have an embedding column" and "what's in layer=gold" are the same endpoint.
+    repo = _DiscoveryRepo(
+        [
+            DatasetSummary(name="silver$features", namespace="silver", tags=["layer=silver"]),
+            DatasetSummary(name="gold$catalog", namespace="gold", tags=["layer=gold"]),
+        ]
+    )
+    repo.columns = [("silver$features", "embedding"), ("gold$catalog", "id")]
+
+    out = _search(repo, "embed")
+    assert [(h.name, h.matches) for h in out.results] == [("silver$features", ["column:embedding"])]
+
+    out = _search(repo, "gold")
+    assert [(h.name, sorted(h.matches)) for h in out.results] == [
+        ("gold$catalog", ["name", "namespace", "tag:layer=gold"])
+    ]
+    assert out.total == 1 and out.query == "gold"
+
+
+def test_search_is_governed_before_the_limit() -> None:
+    # ASSERTS: a matching dataset outside the caller's grants NEVER appears — and total counts the
+    # VISIBLE set only (search must not even disclose the count of hidden matches).
+    import pytest as _pytest
+
+    repo = _DiscoveryRepo(
+        [
+            DatasetSummary(name="silver$features", namespace="silver"),
+            DatasetSummary(name="silver$secrets", namespace="silver"),
+        ]
+    )
+    mp = _pytest.MonkeyPatch()
+    try:
+        mp.setattr(fga, "batch_check", _allow("silver$features"))
+        out = _search(repo, "silver", auth=True)
+    finally:
+        mp.undo()
+    assert [h.name for h in out.results] == ["silver$features"]
+    assert out.total == 1  # the hidden match is not even counted
+
+
+def test_search_orders_by_name_and_caps() -> None:
+    repo = _DiscoveryRepo([DatasetSummary(name=f"z{i:02d}$t", namespace="ns") for i in range(30)])
+    from lineage.api.v1.endpoints.discovery import search
+
+    settings = _settings()
+    flt = fga_deps.DatasetFilter(_request(), settings, None)
+    out = asyncio.run(search(cast(Any, repo), flt, settings, q="z", limit=5))
+    assert len(out.results) == 5 and out.total == 30
+    assert [h.name for h in out.results] == sorted(h.name for h in out.results)

@@ -175,6 +175,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Search
+         * @description Governed search over the discovery estate (P1 Search tier 1, 2026-07-11).
+         *
+         *     Case-insensitive substring over dataset NAMES, NAMESPACES, governance TAGS, and the CURRENT
+         *     COLUMN inventory — each hit says WHY it matched (``name`` / ``namespace`` / ``tag:…`` /
+         *     ``column:…``), so "which tables have an embedding column" and "what's in layer=gold" are one
+         *     query. Governance is identical to ``/datasets``: the visibility filter runs over the FULL hit
+         *     set BEFORE the limit, so search can never disclose (or even count) tables outside the caller's
+         *     reach. 📌 Tier 2 (Lance FTS + FLAT vector content search, the rask pattern) stays decision-
+         *     pinned in todo §9 behind its measured recall gate — this tier is metadata-only by design.
+         */
+        get: operations["search_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs": {
         parameters: {
             query?: never;
@@ -360,7 +388,11 @@ export interface paths {
          *     Pagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous
          *     page's ``next_cursor``); ``limit`` ≤ 500 (server-capped); ``summary=true`` drops the full-JSONB
          *     ``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice —
-         *     pagination can never disclose a hidden row (only the visible window advances).
+         *     pagination can never disclose a hidden row's CONTENT. ``next_cursor`` is a WINDOW FLOOR, not
+         *     necessarily a visible row's seq (on a hidden-dense page it is the fetch window's last seq —
+         *     exclusive, so the hidden row itself is never returned; bare seq numbers were already inferable
+         *     from gaps in the pre-pagination feed, so this adds no new disclosure class — reviewed
+         *     2026-07-11).
          */
         get: operations["get_events_events_get"];
         put?: never;
@@ -1012,6 +1044,32 @@ export interface components {
             /** Description */
             description?: string | null;
         };
+        /**
+         * SearchHit
+         * @description One /search result: the dataset + WHY it matched (name / namespace / tag:* / column:*).
+         */
+        SearchHit: {
+            /** Name */
+            name: string;
+            /** Namespace */
+            namespace?: string | null;
+            /** Tags */
+            tags?: string[];
+            /** Matches */
+            matches?: string[];
+        };
+        /**
+         * SearchResults
+         * @description Governed search results (P1 Search tier 1 — substring over the discovery estate).
+         */
+        SearchResults: {
+            /** Query */
+            query: string;
+            /** Results */
+            results: components["schemas"]["SearchHit"][];
+            /** Total */
+            total: number;
+        };
         /** ValidationError */
         ValidationError: {
             /** Location */
@@ -1263,6 +1321,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Datasets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    search_search_get: {
+        parameters: {
+            query: {
+                q: string;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SearchResults"];
                 };
             };
             /** @description Validation Error */

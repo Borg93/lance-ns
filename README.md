@@ -305,7 +305,9 @@ Quality gates: `uvx ruff check .` · `uvx ty check` · `make ci` (hermetic, via 
 > `POST /train` + the dedicated training topic/stream + the submit-and-ack trainer consumer + the trainer's
 > FGA rung + the training job itself (pinned-version reads, bytes-then-commit atomic registration,
 > self-emitted TRAINING lineage) all ship unit-proven; the live kind drive remains —
-> [`docs/RAY-TRAIN.md`](docs/RAY-TRAIN.md). For which Kubernetes **operators** the platform adopts (KubeRay
+> [`docs/RAY-TRAIN.md`](docs/RAY-TRAIN.md). **Live verification**: [`docs/KIND-RUNBOOK.md`](docs/KIND-RUNBOOK.md) is the one-pass copy-paste
+> runbook (commands + assertions) that flips every code-complete 🟡 to ✅ on a kind cluster.
+> For which Kubernetes **operators** the platform adopts (KubeRay
 > first), why the Ray submit seam deliberately lives HERE (agnostic Jobs-REST) rather than in rask, and why
 > Dapr/Lance need no operator of their own, see [`docs/OPERATORS.md`](docs/OPERATORS.md). The **data
 > contract** producers/consumers rely on ("the manifest is the schema, the version is the handshake" —

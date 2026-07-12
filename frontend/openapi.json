@@ -422,6 +422,68 @@
         }
       }
     },
+    "/search": {
+      "get": {
+        "tags": [
+          "discovery"
+        ],
+        "summary": "Search",
+        "description": "Governed search over the discovery estate (P1 Search tier 1, 2026-07-11).\n\nCase-insensitive substring over dataset NAMES, NAMESPACES, governance TAGS, and the CURRENT\nCOLUMN inventory \u2014 each hit says WHY it matched (``name`` / ``namespace`` / ``tag:\u2026`` /\n``column:\u2026``), so \"which tables have an embedding column\" and \"what's in layer=gold\" are one\nquery. Governance is identical to ``/datasets``: the visibility filter runs over the FULL hit\nset BEFORE the limit, so search can never disclose (or even count) tables outside the caller's\nreach. \ud83d\udccc Tier 2 (Lance FTS + FLAT vector content search, the rask pattern) stays decision-\npinned in todo \u00a79 behind its measured recall gate \u2014 this tier is metadata-only by design.",
+        "operationId": "search_search_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "title": "Q"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 100,
+              "minimum": 1,
+              "default": 25,
+              "title": "Limit"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResults"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/jobs": {
       "get": {
         "tags": [
@@ -719,7 +781,7 @@
           "query"
         ],
         "summary": "Get Events",
-        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)\n\nPagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous\npage's ``next_cursor``); ``limit`` \u2264 500 (server-capped); ``summary=true`` drops the full-JSONB\n``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice \u2014\npagination can never disclose a hidden row (only the visible window advances).",
+        "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)\n\nPagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous\npage's ``next_cursor``); ``limit`` \u2264 500 (server-capped); ``summary=true`` drops the full-JSONB\n``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice \u2014\npagination can never disclose a hidden row's CONTENT. ``next_cursor`` is a WINDOW FLOOR, not\nnecessarily a visible row's seq (on a hidden-dense page it is the fetch window's last seq \u2014\nexclusive, so the hidden row itself is never returned; bare seq numbers were already inferable\nfrom gaps in the pre-pagination feed, so this adds no new disclosure class \u2014 reviewed\n2026-07-11).",
         "operationId": "get_events_events_get",
         "security": [
           {
@@ -2191,6 +2253,72 @@
         ],
         "title": "SchemaField",
         "description": "One column in a dataset's persisted per-version schema (from the standard ``schema`` facet)."
+      },
+      "SearchHit": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "namespace": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Namespace"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "matches": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Matches"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "SearchHit",
+        "description": "One /search result: the dataset + WHY it matched (name / namespace / tag:* / column:*)."
+      },
+      "SearchResults": {
+        "properties": {
+          "query": {
+            "type": "string",
+            "title": "Query"
+          },
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/SearchHit"
+            },
+            "type": "array",
+            "title": "Results"
+          },
+          "total": {
+            "type": "integer",
+            "title": "Total"
+          }
+        },
+        "type": "object",
+        "required": [
+          "query",
+          "results",
+          "total"
+        ],
+        "title": "SearchResults",
+        "description": "Governed search results (P1 Search tier 1 \u2014 substring over the discovery estate)."
       },
       "ValidationError": {
         "properties": {

@@ -1062,9 +1062,18 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   `chart/values.yaml:~180` still claims otherwise, fix it. Still open: at merge switch to rask’s
   RustFS-operator Tenant + CNPG-backed AGE. Prove “helm install from zero” fully reproducible
   (FGA seeds, OpenBao seeding, dex clients are still script-manual); backups exist but gated off.
-- ⛔ **P1 Search** — `/search?q=` over datasets reusing rask’s Lance FTS+vector (`index_catalog.py` /
-  `search_api` pattern); the *list* discovery API shipped in GOAL 4, semantic search did not. Also: wire the
-  already-shipped `/jobs` + `/namespaces` into the Browse UI.
+- 🟡 **P1 Search — TIER 1 SHIPPED 2026-07-11 (Batch 11): governed `/search?q=` over the discovery
+  estate.** Case-insensitive substring across dataset NAMES, NAMESPACES, TAGS, and the CURRENT
+  column inventory (HAS_COLUMN-scoped, so GC'd columns don't resurrect via search); each hit
+  carries its match REASONS (`name`/`namespace`/`tag:…`/`column:…`); governance identical to
+  /datasets — the visibility filter runs over the FULL hit set before the limit, and `total`
+  counts the VISIBLE set only. TESTS (test_lineage_discovery.py):
+  `test_search_matches_name_tag_namespace_and_column` (one query, all four tiers, reasons named),
+  `test_search_is_governed_before_the_limit` (a matching-but-ungranted dataset never appears AND
+  is not counted), `test_search_orders_by_name_and_caps`. REMAINING (pinned, unchanged): tier 2 =
+  Lance FTS + FLAT vector CONTENT search (rask `index_catalog.py`/`search_api` pattern) behind the
+  measured recall gate below; wiring /jobs + /namespaces + /search into the Browse UI (frontend
+  scope, parked per the 2026-07-06 goal).
   📌 Decision pin (2026-07-05, firnflow/lance_docs audit): default = FTS + FLAT exact vector scan (the rask
   pattern builds NO ANN index — correct at our scale); no IVF_PQ/ANN index on an embedding column without a
   measured gate — external BEIR data shows IVF_PQ recall loss GROWS with corpus size (~0 at ≤25k rows, ~22%

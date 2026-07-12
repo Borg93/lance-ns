@@ -297,6 +297,23 @@ class DatasetSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class SearchHit(BaseModel):
+    """One /search result: the dataset + WHY it matched (name / namespace / tag:* / column:*)."""
+
+    name: str
+    namespace: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    matches: list[str] = Field(default_factory=list)
+
+
+class SearchResults(BaseModel):
+    """Governed search results (P1 Search tier 1 — substring over the discovery estate)."""
+
+    query: str
+    results: list[SearchHit]
+    total: int
+
+
 class Datasets(BaseModel):
     """A governed, paginated page of datasets the caller may see (the lineage catalog landing list).
 

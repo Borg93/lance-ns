@@ -111,6 +111,9 @@ _LIST_RUNS: Final = (
 # paginated in Python (the graph's node count is modest), so a caller can browse the estate without already
 # knowing an exact name. Tags ride the Dataset node as a comma-joined string (_tags_from splits them back).
 _LIST_DATASETS: Final = "MATCH (d:Dataset) RETURN d.name, d.namespace, d.tags"
+# The full linked column inventory for /search (P1 Search tier 1, 2026-07-11) — HAS_COLUMN-scoped so
+# only CURRENT inventory matches (pruned/overwritten columns don't resurrect via search).
+_LIST_ALL_COLUMNS: Final = "MATCH (:Dataset)-[:HAS_COLUMN]->(c:Column) RETURN c.dataset, c.field"
 # One row per (job, written-dataset); d.name is null for a job that has only read (OPTIONAL MATCH keeps the
 # job row). Folded into per-job output sets in Python — avoids parsing an agtype array from collect().
 _LIST_JOBS: Final = (
@@ -887,6 +890,11 @@ class LineageRepository:
         ]
         runs.sort(key=lambda run: run.updated_at or "", reverse=True)
         return Runs(runs=runs)
+
+    async def list_all_columns(self) -> list[tuple[str, str]]:
+        """Every (dataset, field) in the CURRENT column inventory — the /search column tier."""
+        rows = await fetch(self._pool, self._graph, _LIST_ALL_COLUMNS, columns=2)
+        return [(r[0], r[1]) for r in rows if r[0] and r[1]]
 
     async def list_datasets(
         self, namespace: str | None = None, tag: str | None = None

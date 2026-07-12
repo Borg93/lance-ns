@@ -85,7 +85,13 @@ def _seed_and_ingest(settings: MedallionSettings) -> IngestResult:
             with fs.open_output_stream(path) as stream:
                 stream.write(_png(color))
     source = S3Source(fs, settings.media_source_bucket, settings.media_source_prefix)
-    return ingest_to_bronze(source, settings.media_bronze_uri, settings.storage_options())
+    return ingest_to_bronze(
+        source,
+        settings.media_bronze_uri,
+        settings.storage_options(),
+        max_objects=settings.ingest_max_objects,
+        max_total_bytes=settings.ingest_max_total_bytes,
+    )
 
 
 async def ingest_media(dapr: DaprClient, settings: MedallionSettings) -> dict[str, str]:

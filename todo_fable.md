@@ -673,6 +673,19 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 22 (added + ✅ DONE 2026-07-12) — ingest ceilings (Batch 20's last open finding) +
+>   contract-clause dogfooding.** `ingest_to_bronze` now consumes its source INCREMENTALLY and
+>   refuses (clear ValueError naming the env knob → 400 problem+json at /ingest-media, which also
+>   fixed the pre-existing empty-source 500) the moment accumulation would exceed
+>   `MEDALLION_INGEST_MAX_OBJECTS` (10k) or `MEDALLION_INGEST_MAX_TOTAL_BYTES` (1 GiB) — memory
+>   high-water ≈ ceiling + one object; a mis-pointed prefix can no longer OOM the producer. TEST:
+>   `test_ingest_ceilings_refuse_before_writing` (both ceilings named in the error, NO partial
+>   bronze written, under-ceiling byte-identical). DOGFOOD: the demo movers now DECLARE
+>   requiredColumns in values (`id` on tabular stages; `id,thumbnail,embedding` on media-to-silver
+>   — if the deriver breaks, promotion blocks) + runbook 3c gives the live positive/negative
+>   asserts for both new contract clauses. True RecordBatch streaming stays the large-media
+>   follow-up (pinned in ingest.py's docstring).
+>
 >   **BATCH 21 (added + ✅ DONE 2026-07-12) — the data contract's last two clauses (user: "why not
 >   just do them now": gap #1 breaking-change detector + gap #2 freshness).** (1) Declared consumer
 >   dependencies: per-mover `requiredColumns` → the quality gate's `column_declared` assertions —

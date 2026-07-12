@@ -30,15 +30,41 @@ class IngestResult(BaseModel):
     fields: list[dict[str, str]]
 
 
-def ingest_to_bronze(source: SourceAdapter, bronze_uri: str, storage_options: dict[str, str]) -> IngestResult:
+def ingest_to_bronze(
+    source: SourceAdapter,
+    bronze_uri: str,
+    storage_options: dict[str, str],
+    *,
+    max_objects: int = 10_000,
+    max_total_bytes: int = 1 << 30,
+) -> IngestResult:
     """Write every object from ``source`` into a bronze blob-v2 table at 2.2 (``id, payload, source_uri``).
 
     Raises ``ValueError`` on an empty source: an empty bronze is almost always a mis-set prefix, and silently
     "succeeding" with zero rows would report a false success (and an input-less lineage edge) up the cascade.
+
+    CEILINGS (audit 2026-07-12, closes the whole-batch-in-memory finding): the batch is still held in
+    memory (bytes are copied again by ``blob_array``), but accumulation is now BOUNDED — the source is
+    consumed incrementally and the ingest refuses (clear ``ValueError``, mapped to a 400 at the route)
+    the moment it would exceed ``max_objects`` or ``max_total_bytes``, so a mis-pointed prefix full of
+    large objects can no longer OOM the producer. Memory high-water ≈ the ceiling + one object. True
+    RecordBatch streaming (overwrite-then-append) remains the large-media follow-up.
     """
-    # Whole batch resident in memory (bytes are copied again by blob_array): fine for the demo's small media;
-    # for large media, stream in RecordBatch chunks (mode="overwrite" then "append") instead of one pa.table.
-    objects = list(source.iter_objects())
+    objects = []
+    total_bytes = 0
+    for obj in source.iter_objects():
+        objects.append(obj)
+        total_bytes += len(obj.data)
+        if len(objects) > max_objects:
+            raise ValueError(
+                f"source exceeds the ingest ceiling of {max_objects} objects "
+                f"(MEDALLION_INGEST_MAX_OBJECTS); narrow the source prefix or raise the ceiling"
+            )
+        if total_bytes > max_total_bytes:
+            raise ValueError(
+                f"source exceeds the ingest ceiling of {max_total_bytes} total bytes "
+                f"(MEDALLION_INGEST_MAX_TOTAL_BYTES); narrow the source prefix or raise the ceiling"
+            )
     if not objects:
         raise ValueError(f"source yielded no objects; refusing to write an empty bronze at {bronze_uri!r}")
     table = pa.table(

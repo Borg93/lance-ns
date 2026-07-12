@@ -54,6 +54,10 @@ class MedallionSettings(BaseSettings):
     # When set, the quality gate adds a `column_declared` assertion per name — a promotion that
     # dropped/renamed a declared column is BLOCKED (the write itself still commits; audited FAIL run).
     quality_required_columns: str = Field(default="", alias="MEDALLION_REQUIRED_COLUMNS")
+    # Ingest ceilings (audit 2026-07-12): the media ingest refuses (400) rather than OOM when a
+    # source prefix exceeds these. Defaults generous for the demo; tune per deployment.
+    ingest_max_objects: int = Field(default=10_000, alias="MEDALLION_INGEST_MAX_OBJECTS")
+    ingest_max_total_bytes: int = Field(default=1 << 30, alias="MEDALLION_INGEST_MAX_TOTAL_BYTES")
 
     # --- Optional FGA gate (ReBAC enforcement) — the mover checks it is AUTHORIZED to produce the target
     # stage before emitting. The silver→gold mover checks `can_promote` (validator-only); the others check

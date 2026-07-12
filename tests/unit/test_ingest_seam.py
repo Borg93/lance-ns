@@ -71,6 +71,29 @@ def test_ingest_to_bronze_rejects_empty_source(tmp_path: Path) -> None:
         ingest_to_bronze(LocalDirSource(empty, "*.png"), str(tmp_path / "bronze"), {})
 
 
+def test_ingest_ceilings_refuse_before_writing(tmp_path: Path) -> None:
+    """Audit 2026-07-12 (the whole-batch-in-memory finding): a source exceeding either ceiling is
+    REFUSED with the actionable env-var name — bounded accumulation, no bronze written — while a
+    source under both ceilings ingests unchanged."""
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    _write_png(source_dir / "a.png", (10, 0, 0))
+    _write_png(source_dir / "b.png", (0, 10, 0))
+    _write_png(source_dir / "c.png", (0, 0, 10))
+    bronze = str(tmp_path / "bronze")
+
+    with pytest.raises(ValueError, match="MEDALLION_INGEST_MAX_OBJECTS"):
+        ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, max_objects=2)
+    with pytest.raises(ValueError, match="MEDALLION_INGEST_MAX_TOTAL_BYTES"):
+        ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, max_total_bytes=100)
+    assert not (tmp_path / "bronze").exists()  # refused BEFORE writing — no partial bronze
+
+    result = ingest_to_bronze(
+        LocalDirSource(source_dir, "*.png"), bronze, {}, max_objects=3, max_total_bytes=1 << 20
+    )
+    assert result.row_count == 3  # under both ceilings → byte-identical behavior
+
+
 class _ReadStream:
     """pyarrow ``open_input_stream`` stand-in: a ``with``-usable reader exposing ``readall()``."""
 

@@ -32,7 +32,21 @@ async def ingest_media(
     the ingest is an idempotent overwrite). Token-guarded like ``/produce``: without it any in-cluster
     pod could drive the media pipeline / fabricate provenance.
     """
-    result = await run_ingest_media(dapr, settings)
+    try:
+        result = await run_ingest_media(dapr, settings)
+    except ValueError as exc:
+        # Client-addressable ingest refusals (empty source prefix, ingest ceilings exceeded) — a clear
+        # 400 with the actionable message, never an opaque 500.
+        return JSONResponse(
+            status_code=400,
+            media_type=_PROBLEM_JSON,
+            content={
+                "type": "https://lance.org/problems/invalidinput",
+                "title": "InvalidInput",
+                "status": 400,
+                "detail": str(exc),
+            },
+        )
     if result.get("status") == "media_disabled":
         return JSONResponse(
             status_code=409,

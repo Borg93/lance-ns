@@ -50,6 +50,27 @@ curl -sS -D- -o /tmp/win.bin -H "Range: bytes=0-3" \
 exactly the 4-byte PNG magic prefix (`\x89PNG`). With FGA on, a principal WITHOUT `can_read_data` on
 the table gets `403` on the same URL (reader tier, same rung as `/query`).
 
+## 3c · Data-contract clauses (Batch 21 — declared columns + freshness)
+
+The demo movers now DECLARE consumer dependencies (`requiredColumns` in values: `id` on the tabular
+stages; `id,thumbnail,embedding` on media-to-silver). After one cascade run:
+```bash
+curl -s http://localhost:8001/runs | python3 -m json.tool | grep -A3 column_declared | head
+```
+**ASSERT:** the silver/gold runs' `quality_assertions` contain `column_declared` entries with
+`success: true` per declared column. NEGATIVE (the breaking-change detector): `--set` a bogus
+declaration on one mover (e.g. `requiredColumns: "ghost"`), re-fire the cascade — that stage's run
+shows `column_declared success:false column:ghost`, `quality_passed:false`, and the NEXT stage never
+runs (promotion blocked, cascade halted at the violation). Revert after.
+
+Freshness: `helm upgrade --reuse-values --set services.lineage.freshnessBudgetHours=0.01` (36s),
+wait ≥1 min without producing, then:
+```bash
+curl -s "http://localhost:8001/datasets/gold\$catalog/reconcile" | python3 -m json.tool
+```
+**ASSERT:** `"stale": true` while `"in_sync": true` (its own axis), and the next cron tick WARNs
+`lineage_reconcile_stale` with the dataset list. Revert the budget to 0 (axis off).
+
 ## 4 · The train drive (#115, end to end)
 
 ```bash

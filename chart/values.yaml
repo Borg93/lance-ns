@@ -531,15 +531,15 @@ medallion:
     # (data-contract gap #1): the quality gate adds a `column_declared` assertion per name, so a
     # promotion that dropped/renamed a declared column is BLOCKED (the breaking-change detector).
     - { name: raw-to-bronze, daprAppId: raw-to-bronze, fromNamespace: raw, fromDataset: raw_events, toNamespace: bronze, toDataset: bronze$events, operation: ingest_events, author: alice, subTopic: medallion.raw, pubTopic: medallion.bronze, requiredAction: can_create_table, serviceIdentity: "service-raw-to-bronze" }
-    - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver, requiredAction: can_create_table, serviceIdentity: "service-bronze-to-silver" }
-    - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "", requiredAction: can_promote, serviceIdentity: "service-silver-to-gold" }
+    - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver, requiredAction: can_create_table, serviceIdentity: "service-bronze-to-silver", requiredColumns: "id" }
+    - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "", requiredAction: can_promote, serviceIdentity: "service-silver-to-gold", requiredColumns: "id" }
     # The MEDIA lane (multimodal §9): POST /ingest-media on lance-ray lands bronze-media blobs and
     # publishes medallion.media; this mover's generic compute then derives what the blob CONTENT
     # supports (image → inline thumbnail + embedding; unrecognised media carries through untouched —
     # no media config anywhere, the same binary as every mover). Terminal (pubTopic ""). Own
     # namespaces: mover URIs derive from the namespace, so reusing bronze/silver would collide with
     # the events chain's datasets on the same paths.
-    - { name: media-to-silver, daprAppId: media-to-silver, fromNamespace: bronze-media, fromDataset: bronze-media$objects, toNamespace: silver-media, toDataset: silver-media$features, operation: derive_media, author: data_eng, subTopic: medallion.media, pubTopic: "", requiredAction: can_create_table, serviceIdentity: "service-media-to-silver" }
+    - { name: media-to-silver, daprAppId: media-to-silver, fromNamespace: bronze-media, fromDataset: bronze-media$objects, toNamespace: silver-media, toDataset: silver-media$features, operation: derive_media, author: data_eng, subTopic: medallion.media, pubTopic: "", requiredAction: can_create_table, serviceIdentity: "service-media-to-silver", requiredColumns: "id,thumbnail,embedding" }
 
 # --- Compaction/GC microservice (Dapr cron binding) -----------------------------------------------
 # A bindings.cron component POSTs /<bindingName> on `schedule`; the service compacts small Lance

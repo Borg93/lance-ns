@@ -2011,6 +2011,14 @@
             "type": "boolean",
             "title": "Stale",
             "default": false
+          },
+          "missing_declared_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Missing Declared Columns",
+            "default": []
           }
         },
         "type": "object",

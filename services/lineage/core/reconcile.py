@@ -152,6 +152,7 @@ async def reconcile_all(
     read_dangling: Callable[[str], Awaitable[list[str]]] | None = None,
     read_age: Callable[[str], Awaitable[float | None]] | None = None,
     freshness_budget_hours: float = 0,
+    declared: dict[str, list[str]] | None = None,
 ) -> list[ReconcileStatus]:
     """Reconcile every dataset the graph knows against storage; optionally back-fill dropped writes (B4).
 
@@ -187,6 +188,16 @@ async def reconcile_all(
         if freshness_budget_hours > 0 and storage_version is not None and read_age is not None:
             age = await read_age(uri)
             status.stale = age is not None and age > freshness_budget_hours
+        # Declared-columns patrol (Batch 23): re-check the gate's column_declared assertion against
+        # the CURRENT storage schema — a write that bypassed the mover skipped the gate; this doesn't.
+        # Only declared datasets pay the schema read; a failed read reports nothing (the version
+        # check already classifies unreadable storage; a phantom violation would cry wolf).
+        wanted = (declared or {}).get(summary.name)
+        if wanted and storage_version is not None and read_schema is not None:
+            fields = await read_schema(uri, storage_version)
+            if fields is not None:
+                present = {f.get("name") for f in fields}
+                status.missing_declared_columns = [c for c in wanted if c not in present]
         if backfill and storage_version is not None and status.status in BACKFILLABLE_STATES:
             # Fix the drift as a side effect but keep the found status in the report — a subsequent sweep
             # will show it in_sync, proving the back-fill took. The schema read is pinned to the version

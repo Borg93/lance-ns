@@ -150,6 +150,52 @@ def test_reconcile_all_flags_stale_only_with_a_budget_and_readable_storage() -> 
     assert all(s.stale is False for s in off)
 
 
+def test_reconcile_all_flags_missing_declared_columns_estate_wide() -> None:
+    """Batch 23 — the estate-patrol half of column_declared: a declared dataset whose CURRENT
+    storage schema lost a declared column is flagged WITH column blame (catches writes that
+    bypassed the mover's gate); undeclared datasets pay NO schema read; a failed schema read
+    reports nothing (never a phantom violation)."""
+    repo = _FakeRepo(
+        datasets=["broken", "healthy", "undeclared"],
+        graph_versions={"broken": 1, "healthy": 1, "undeclared": 1},
+        uris={"broken": "s3://b/broken", "healthy": "s3://b/healthy", "undeclared": "s3://b/undeclared"},
+    )
+    read = _reader({"broken": 1, "healthy": 1, "undeclared": 1})
+    schema_reads: list[str] = []
+
+    async def read_schema(uri: str, _version: int) -> list[dict[str, str]] | None:
+        schema_reads.append(uri)
+        if uri.endswith("broken"):
+            return [{"name": "id", "type": "int64"}]  # 'embedding' was dropped by a bypassing write
+        return [{"name": "id", "type": "int64"}, {"name": "embedding", "type": "array<float>"}]
+
+    statuses = asyncio.run(
+        reconcile_all(
+            cast(Any, repo),
+            read,
+            backfill=False,
+            read_schema=read_schema,
+            declared={"broken": ["id", "embedding"], "healthy": ["id", "embedding"]},
+        )
+    )
+    by_name = {s.dataset: s for s in statuses}
+    assert by_name["broken"].missing_declared_columns == ["embedding"]  # precise blame
+    assert by_name["healthy"].missing_declared_columns == []
+    assert by_name["undeclared"].missing_declared_columns == []
+    assert sorted(schema_reads) == ["s3://b/broken", "s3://b/healthy"]  # undeclared never read
+
+
+def test_declared_columns_map_parses_and_fails_safe() -> None:
+    """The chart-derived JSON map parses; malformed values-typo JSON yields {} (contract check off)
+    instead of a lineage service that won't boot."""
+    from lineage.core.config import declared_columns_map
+
+    ok = _settings(declared_columns='{"silver$features": ["id", "embedding"]}')
+    assert declared_columns_map(ok) == {"silver$features": ["id", "embedding"]}
+    assert declared_columns_map(_settings()) == {}  # default: off
+    assert declared_columns_map(_settings(declared_columns="{not json")) == {}  # fail-safe
+
+
 # --- B4: reconcile_all + the outbox back-fill ------------------------------------------------ #
 
 
@@ -412,6 +458,7 @@ def test_cron_route_post_with_token_returns_sweep_report(monkeypatch: pytest.Mon
         "storage_loss": [],
         "dangling_blobs": {},
         "stale": [],
+        "contract_violations": {},
         "pruned_runs": 0,
     }
 

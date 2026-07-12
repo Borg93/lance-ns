@@ -68,6 +68,12 @@ class LineageSettings(BaseSettings):
     # >0 = the reconcile sweep + per-dataset GET flag `stale: true` for any dataset whose newest
     # version commit is older — arrival cadence becomes an ASSERTED contract clause, not a dashboard.
     freshness_budget_hours: float = Field(default=0, alias="LINEAGE_FRESHNESS_BUDGET_HOURS")
+    # Declared consumer dependencies per dataset (data-contract, Batch 23): a JSON map
+    # {"dataset": ["col", ...]} the chart derives from the movers' requiredColumns. The reconcile
+    # sweep compares each declared dataset's STORAGE schema against it and reports
+    # missing_declared_columns — the estate-patrol half of the gate's column_declared assertion
+    # (same two-enforcement-point pattern as the blob probe). "" (default) = no checks, no reads.
+    declared_columns: str = Field(default="", alias="LINEAGE_DECLARED_COLUMNS")
     # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<name> on a schedule to
     # back-fill Lance writes whose lineage event was lost (the outbox gap). Empty = the cron route isn't
     # mounted (the /datasets/{name}/reconcile read endpoint is always available regardless).
@@ -165,6 +171,26 @@ def apply_dapr_secrets(settings: LineageSettings) -> None:
     db_password = bundle.get(settings.dapr_secret_db_field)
     if db_password:
         settings.database_url = _with_db_password(settings.database_url, db_password)
+
+
+def declared_columns_map(settings: LineageSettings) -> dict[str, list[str]]:
+    """The parsed dataset→declared-columns map — fail-safe: malformed JSON logs and yields {} (the
+    contract check silently OFF beats a lineage service that won't boot over a values typo)."""
+    import json as _json
+    import logging as _logging
+
+    if not settings.declared_columns:
+        return {}
+    try:
+        raw = _json.loads(settings.declared_columns)
+        return {
+            str(dataset): [str(c) for c in columns]
+            for dataset, columns in raw.items()
+            if isinstance(columns, list)
+        }
+    except Exception as exc:  # noqa: BLE001 — a values typo must not take the service down
+        _logging.getLogger(__name__).warning("declared_columns_unparseable", extra={"error": str(exc)})
+        return {}
 
 
 def storage_options(settings: LineageSettings) -> dict[str, str]:

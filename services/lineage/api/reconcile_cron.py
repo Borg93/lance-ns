@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
-from lineage.core.config import storage_options
+from lineage.core.config import declared_columns_map, storage_options
 from lineage.core.reconcile import (
     BACKFILLABLE_STATES,
     STORAGE_LOSS_STATES,
@@ -68,6 +68,9 @@ async def _on_cron(
             # the version manifests (storage truth), budget 0 (default) = axis off, zero extra reads.
             read_age=lambda uri: run_in_threadpool(read_latest_write_age_hours, uri, opts),
             freshness_budget_hours=settings.freshness_budget_hours,
+            # Declared-columns patrol (Batch 23): re-check the gate's column_declared assertion
+            # estate-wide — only declared datasets pay the schema read.
+            declared=declared_columns_map(settings),
         )
         # Opt-in Run retention (§4) — prune old graph runs while we still hold the single-flight lock,
         # so two replicas never race the same delete. 0 days (the default) = keep full provenance.
@@ -102,6 +105,13 @@ async def _on_cron(
     stale = [s.dataset for s in statuses if s.stale]
     if stale:
         log.warning("lineage_reconcile_stale", extra={"datasets": stale, "count": len(stale)})
+    # Declared-columns violations — a dataset's CURRENT schema lost a column a consumer declared
+    # (a write that bypassed the mover skipped the gate). Not auto-fixable; WARN with column blame.
+    violations = {s.dataset: s.missing_declared_columns for s in statuses if s.missing_declared_columns}
+    if violations:
+        log.warning(
+            "lineage_reconcile_contract_violation", extra={"datasets": violations, "count": len(violations)}
+        )
     log.info(
         "lineage_reconcile_sweep",
         extra={
@@ -110,6 +120,7 @@ async def _on_cron(
             "storage_loss": len(lost),
             "dangling_blobs": len(dangling),
             "stale": len(stale),
+            "contract_violations": len(violations),
             "pruned_runs": pruned_runs,
         },
     )
@@ -119,6 +130,7 @@ async def _on_cron(
         "storage_loss": lost,
         "dangling_blobs": dangling,
         "stale": stale,
+        "contract_violations": violations,
         "pruned_runs": pruned_runs,
     }
 

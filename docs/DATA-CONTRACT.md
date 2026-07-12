@@ -58,6 +58,11 @@ features, path-unsafe names, oversized/non-dict config — `services/medallion/s
   GET flag `stale: true` for any dataset whose newest version commit (storage truth — the version
   manifests, so a write that bypassed lineage still counts as fresh) is older than the budget,
   WARN-logged `lineage_reconcile_stale` per tick. 0 (default) = the axis is off, zero extra reads.
+- **Breaking changes — gate AND patrol CLOSED 2026-07-12.** The reconcile sweep now re-checks the
+  same declarations estate-wide (`missing_declared_columns` on the status, WARN
+  `lineage_reconcile_contract_violation`): a write that BYPASSED the mover skipped the gate — the
+  patrol doesn't. One declaration source (the movers' `requiredColumns` in values, chart-derived
+  into `LINEAGE_DECLARED_COLUMNS`), two enforcement points, so they can never disagree.
 - **Breaking changes — the GATE half CLOSED 2026-07-12.** Declare consumer dependencies per mover
   (`requiredColumns: "id,embedding"` in the chart → `MEDALLION_REQUIRED_COLUMNS`) and the quality
   gate adds a `column_declared` assertion per name: a promotion whose written schema dropped or

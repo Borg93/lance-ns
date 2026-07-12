@@ -673,6 +673,15 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 23 (added + ✅ DONE 2026-07-12, user: "do it") — the declared-columns PATROL (the
+>   reconcile half of the breaking-change detector).** The sweep re-checks the movers' declarations
+>   against each declared dataset's CURRENT storage schema — catching writes that BYPASSED the
+>   mover (the gate can't see those). `missing_declared_columns` + WARN with column blame;
+>   `LINEAGE_DECLARED_COLUMNS` chart-derived from requiredColumns (one declaration source, two
+>   enforcement points — same pattern as the blob probe); undeclared datasets pay zero reads;
+>   values-typo JSON fails safe. FGA column masking stays parked WITH the reason recorded
+>   (speculative authz model change, no consumer). Suite 586→588; openapi+types regenerated.
+>
 >   **BATCH 22 (added + ✅ DONE 2026-07-12) — ingest ceilings (Batch 20's last open finding) +
 >   contract-clause dogfooding.** `ingest_to_bronze` now consumes its source INCREMENTALLY and
 >   refuses (clear ValueError naming the env knob → 400 problem+json at /ingest-media, which also
@@ -1297,9 +1306,16 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     additive evolution never blocked; default (no declaration) byte-identical. TEST:
     `test_assert_quality_declared_columns_block_breaking_changes` (present → success per column +
     passed; missing 'embedding' → success=False WITH precise column blame + gate fails; no
-    declaration → no assertion). REMAINING (this item stays 🟡 for): FGA pre-registered column
-    masking + reconcile flagging UNDECLARED writes — governance extensions on the same declaration,
-    build when a real masking/governance need appears. Original scope for the record:
+    declaration → no assertion). **Reconcile half SHIPPED 2026-07-12 (Batch 23):** the sweep
+    re-checks declarations estate-wide — `missing_declared_columns` with column blame, WARN
+    `lineage_reconcile_contract_violation`, chart DERIVES `LINEAGE_DECLARED_COLUMNS` from the
+    movers' requiredColumns (one source, two enforcement points); undeclared datasets pay zero
+    schema reads (test-asserted); malformed values JSON fails SAFE to {} (test-asserted). TESTS:
+    `test_reconcile_all_flags_missing_declared_columns_estate_wide`,
+    `test_declared_columns_map_parses_and_fails_safe`. REMAINING (this item stays 🟡 ONLY for):
+    FGA pre-registered column MASKING — deliberately parked: it needs a column type in the authz
+    model (a real model change) and no consumer needs masking yet; building speculative authz is
+    the anti-pattern the skills warn about. Build when a masking requirement lands. Original scope for the record:
     register expected columns so the quality gate asserts they landed, FGA pre-registers column masking, and
     reconcile flags undeclared writes — a governance contract, not a Dapr one. Lance itself needs no up-front
     schema (add_columns evolves it; per-version schemas already ride the WROTE edge). This is also the

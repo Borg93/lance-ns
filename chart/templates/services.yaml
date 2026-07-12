@@ -227,6 +227,20 @@ spec:
             # version commit is older than this many hours. Unset/0 = the axis is off.
             - { name: LINEAGE_FRESHNESS_BUDGET_HOURS, value: {{ .Values.services.lineage.freshnessBudgetHours | quote }} }
             {{- end }}
+            {{- if .Values.medallion.enabled }}
+            {{- $declared := dict }}
+            {{- range .Values.medallion.movers }}
+            {{- if .requiredColumns }}
+            {{- $_ := set $declared .toDataset (splitList "," .requiredColumns) }}
+            {{- end }}
+            {{- end }}
+            {{- if $declared }}
+            # Declared-columns patrol (Batch 23): DERIVED from the movers' requiredColumns — one
+            # declaration source (values), two enforcement points (the gate at promotion, this sweep
+            # after) — so the gate and the patrol can never disagree on what consumers declared.
+            - { name: LINEAGE_DECLARED_COLUMNS, value: {{ $declared | toJson | quote }} }
+            {{- end }}
+            {{- end }}
             # Bound the DaprClient gRPC deadline (the SDK env) — covers the boot-time secret-store fetch.
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }
             # Demo peek router — values-gated (unauthenticated metadata disclosure; prod ships it off).

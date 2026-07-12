@@ -965,6 +965,11 @@ export interface components {
              * @default false
              */
             stale: boolean;
+            /**
+             * Missing Declared Columns
+             * @default []
+             */
+            missing_declared_columns: string[];
         };
         /**
          * Run

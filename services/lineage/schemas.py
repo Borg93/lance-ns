@@ -37,6 +37,10 @@ class ReconcileStatus(BaseModel):
     # Freshness (data-contract gap #2, 2026-07-12): True when a freshness budget is configured and
     # the newest on-disk version commit is older than it. False when in budget OR the axis is off.
     stale: bool = False
+    # Declared-columns patrol (Batch 23): columns a consumer DECLARED (chart requiredColumns) that
+    # the dataset's CURRENT storage schema no longer carries — the estate-wide re-check of the
+    # gate's column_declared assertion (a write that bypassed the mover skips the gate; this doesn't).
+    missing_declared_columns: list[str] = []
 
 
 class DatasetRef(BaseModel):

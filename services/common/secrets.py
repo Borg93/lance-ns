@@ -13,11 +13,26 @@ source of truth and the plaintext secret no longer lives in the environment.
 from __future__ import annotations
 
 import logging
-import time
 
 import httpx
+from tenacity import (
+    Retrying,
+    before_sleep_log,
+    retry_if_exception,
+    stop_after_attempt,
+    wait_exponential_jitter,
+)
 
 log = logging.getLogger(__name__)
+
+
+def _is_transient(exc: BaseException) -> bool:
+    """Whether a fetch failure can heal by waiting: connect/timeout (sidecar still coming up) and 5xx
+    (store still seeding) retry; a 4xx is MISCONFIGURATION (bad store name, denied scope) that more
+    waiting cannot fix — fail immediately instead of burning the whole boot-retry budget on it."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, httpx.TransportError)
 
 
 def fetch_dapr_secret(
@@ -33,24 +48,32 @@ def fetch_dapr_secret(
     that boots before the sidecar/store/seed are ready still gets it. Returns ``{}`` (and logs) only after
     exhausting retries — the caller decides whether that is fatal (fail-closed) or a fallback.
 
-    Deliberately SYNC (blocking httpx + sleep between retries — ~80s worst case): async lifespans must
-    call it via ``run_in_threadpool`` so a slow-seeding store never blocks the event loop."""
+    Retries via tenacity with exponential backoff + jitter (initial=``backoff``, capped at 15s — the
+    project resilience default), and ONLY for transient failures: a 4xx from the sidecar is
+    misconfiguration and fails immediately rather than looping the boot budget away. Deliberately SYNC
+    (blocking httpx — worst case ≈2 min at the defaults): async lifespans must call it via
+    ``run_in_threadpool`` so a slow-seeding store never blocks the event loop."""
     url = f"http://localhost:{dapr_http_port}/v1.0/secrets/{store}/{key}"
-    for attempt in range(1, retries + 1):
-        try:
-            resp = httpx.get(url, timeout=timeout)
-            resp.raise_for_status()
-            data = resp.json()
-            if isinstance(data, dict):
-                return {k: str(v) for k, v in data.items()}
-            log.warning("dapr_secret_unexpected_shape", extra={"store": store, "key": key})
-            return {}
-        except Exception as exc:  # noqa: BLE001 — store may not be ready yet; retry
-            if attempt == retries:
-                log.warning("dapr_secret_fetch_failed", extra={"store": store, "key": key, "error": str(exc)})
+    try:
+        for attempt in Retrying(
+            retry=retry_if_exception(_is_transient),
+            stop=stop_after_attempt(retries),
+            wait=wait_exponential_jitter(initial=backoff, max=15),
+            before_sleep=before_sleep_log(log, logging.WARNING),
+            reraise=True,
+        ):
+            with attempt:
+                resp = httpx.get(url, timeout=timeout)
+                resp.raise_for_status()
+                data = resp.json()
+                if isinstance(data, dict):
+                    return {k: str(v) for k, v in data.items()}
+                log.warning("dapr_secret_unexpected_shape", extra={"store": store, "key": key})
                 return {}
-            time.sleep(backoff)
-    return {}
+    except Exception as exc:  # noqa: BLE001 — exhausted or non-transient; the caller decides fatality
+        log.warning("dapr_secret_fetch_failed", extra={"store": store, "key": key, "error": str(exc)})
+        return {}
+    return {}  # unreachable; keeps the type-checker's every-path-returns view honest
 
 
 def fetch_required_secrets(store: str, key: str, *, require: str) -> dict[str, str]:

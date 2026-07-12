@@ -4,7 +4,9 @@ behaviour, and that the AGE DB password is spliced into the connection string fr
 
 from __future__ import annotations
 
+import httpx
 import pytest
+from common.secrets import fetch_dapr_secret
 from lineage.core.config import LineageSettings, _with_db_password, apply_dapr_secrets
 
 
@@ -17,6 +19,36 @@ def test_with_db_password_url_encodes_special_chars() -> None:
     url = "postgresql://lance@age:5432/lineage"
     # A password with URL-significant chars must be percent-encoded so the DSN stays parseable.
     assert _with_db_password(url, "p@ss/w:rd") == "postgresql://lance:p%40ss%2Fw%3Ard@age:5432/lineage"
+
+
+def test_fetch_dapr_secret_fails_fast_on_4xx_but_retries_transient(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Resilience-skill rule pinned: a 4xx is MISCONFIGURATION (bad store name, denied scope) that
+    waiting can't heal — exactly ONE attempt, not a burned boot-retry budget; a transient connect
+    failure retries and succeeds. Backoff is jittered-exponential via tenacity (initial=backoff)."""
+    calls = {"n": 0}
+
+    def _forbidden(url: str, timeout: float) -> httpx.Response:
+        calls["n"] += 1
+        request = httpx.Request("GET", url)
+        return httpx.Response(403, request=request)
+
+    monkeypatch.setattr(httpx, "get", _forbidden)
+    assert fetch_dapr_secret("store", "key", retries=5, backoff=0.001) == {}
+    assert calls["n"] == 1  # non-transient → no retries
+
+    flaky = {"n": 0}
+
+    def _flaky(url: str, timeout: float) -> httpx.Response:
+        flaky["n"] += 1
+        if flaky["n"] < 3:
+            raise httpx.ConnectError("sidecar not up yet", request=httpx.Request("GET", url))
+        return httpx.Response(200, json={"k": "v"}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", _flaky)
+    assert fetch_dapr_secret("store", "key", retries=5, backoff=0.001) == {"k": "v"}
+    assert flaky["n"] == 3  # two transient failures retried, then the success returned
 
 
 def test_apply_dapr_secrets_noop_when_disabled(monkeypatch: pytest.MonkeyPatch) -> None:

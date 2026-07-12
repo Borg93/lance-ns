@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from common.dapr_auth import require_dapr_token
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
@@ -19,6 +19,9 @@ async def produce(
     dapr: DaprClientDep,
     settings: SettingsDep,
     _: Annotated[None, Depends(require_dapr_token)],
+    idempotency_key: Annotated[
+        str | None, Header(alias="Idempotency-Key", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    ] = None,
 ) -> dict[str, str] | JSONResponse:
     """Ingest (dummy) the raw dataset and emit its write event — the event-driven cascade head.
 
@@ -32,8 +35,12 @@ async def produce(
     cascade head: /produce is a direct operator trigger (not sidecar-delivered), and without this any pod that
     could reach ``lance-ray:8000`` could drive the pipeline / fabricate medallion provenance. No-op in dev
     (unset token); enforced once APP_API_TOKEN is set. A NetworkPolicy (chart) is the network-isolation layer.
+
+    ``Idempotency-Key`` (optional) is the retry pairing this route's own 503+Retry-After contract demands:
+    a retry that REUSES the key converges onto the same cascade token (deterministic run_ids → the graph
+    MERGEs the duplicate head) instead of double-firing two unrelated raw→gold runs.
     """
-    result = await run_produce(dapr, settings)
+    result = await run_produce(dapr, settings, token=idempotency_key)
     if result.get("status") == "publish_failed":
         # RFC 9457 problem+json + Retry-After (parity with catalog/lineage errors), not a bare FastAPI 503.
         return JSONResponse(

@@ -660,6 +660,29 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 17 (added + ✅ DONE 2026-07-12) — skills/currency verification sweep (user ask) + the
+>   two worthwhile fixes it produced.** (1) LANCE-RAY DIFF: our pin (0.4.2) predates all new main
+>   commits, so deployed behavior is UNCHANGED; upstream main STILL exposes blob-v2 as plain
+>   LargeBinary on read (verified in their datasource source — our in-process blob fallback stays
+>   correct and necessary), while their write side gained external-blob-mode fragment writes +
+>   stable-row-id forwarding (Jul 8) — trending toward lifting our fallback; 📌 WATCH: re-evaluate
+>   at their next RELEASE (>0.4.2). (2) DAPR/SKILLS AUDIT (subagent, against the actual skill
+>   files): verdict COMPLIANT — ack semantics (SUCCESS/RETRY/DROP), idempotent MERGE-on-run_id
+>   under at-least-once, single-flight locks, threadpooled blocking IO, fail-closed secrets all
+>   adhere; retry is DELEGATED to Dapr/JetStream redelivery (component backOff 30-300s), which the
+>   skill's own broker pattern endorses. FIXED same-batch: `fetch_dapr_secret` hand-rolled fixed-3s
+>   retry → tenacity exponential+jitter that FAILS FAST on 4xx (misconfig never heals — pinned by
+>   `test_fetch_dapr_secret_fails_fast_on_4xx_but_retries_transient`, exactly-one-attempt asserted);
+>   `POST /produce` now accepts an `Idempotency-Key` header so its own 503+Retry-After contract
+>   can't double-fire the cascade head (pinned by `test_produce_idempotency_token_converges_retries`
+>   — same key ⇒ same head runId; no key ⇒ fresh token). ACCEPTED DEVIATIONS (documented, not
+>   fixed): `dapr_auth` per-request os.environ read (shared across 4 services with distinct
+>   Settings; Dapr-injected var; deliberate); `BlobStream` @dataclass (a live-handle resource
+>   carrier with a generator — Pydantic validation adds nothing; the skill's rule targets value
+>   objects). REMAINING (next batch candidate): the audit's one medium = the KNOWN DLQ gap
+>   (docs/RESILIENCE.md #2) — maxDeliver:5 exhaustion drops a stage trigger with no parking lot;
+>   fix = deadLetterTopic on the subscriptions + an operator-visible consumer. Suite 573→575.
+>
 >   **BATCH 16 (added + ✅ DONE 2026-07-12) — reconcile flags dangling blob pointers (the
 >   post-promotion half of §9 P1 lifecycle; with this, the tractable blob estate is CLOSED —
 >   remaining blob items are the user's live pass + the external-GC watch item + P2 schema

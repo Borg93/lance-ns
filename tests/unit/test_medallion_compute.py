@@ -185,6 +185,28 @@ def test_produce_seeds_real_raw_and_emits_its_version(tmp_path: Any) -> None:
     )
 
 
+def test_produce_idempotency_token_converges_retries(tmp_path: Any) -> None:
+    """Skill rule pinned (retry needs an idempotency key): two produces REUSING the caller's token
+    emit head events with the SAME runId — the graph MERGEs the duplicate instead of forking two
+    unrelated cascades; without a token each call mints a fresh one (distinct runIds)."""
+    raw = str(tmp_path / "raw")
+    settings = MedallionSettings.model_validate(
+        {"compute_enabled": True, "raw_uri": raw, "raw_namespace": "raw", "raw_dataset": "raw_events"}
+    )
+    dapr = _FakeDapr()
+
+    first = asyncio.run(produce(cast(DaprClient, dapr), settings, token="retry-key-1"))
+    second = asyncio.run(produce(cast(DaprClient, dapr), settings, token="retry-key-1"))
+    assert first["token"] == second["token"] == "retry-key-1"  # the response echoes the caller's key
+    events = [p for p in dapr.published if p["topic"] == settings.lineage_topic]
+    assert events[0]["data"]["run"]["runId"] == events[1]["data"]["run"]["runId"]
+
+    fresh = asyncio.run(produce(cast(DaprClient, dapr), settings))
+    assert fresh["token"] not in ("retry-key-1", "")  # no key → fresh random token, distinct run
+    third = [p for p in dapr.published if p["topic"] == settings.lineage_topic][2]
+    assert third["data"]["run"]["runId"] != events[0]["data"]["run"]["runId"]
+
+
 # --------------------------------------------------------------------------- #
 # the quality gate — assertions on the produced data, and blocked promotion
 # --------------------------------------------------------------------------- #

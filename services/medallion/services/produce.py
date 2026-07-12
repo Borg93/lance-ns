@@ -30,15 +30,24 @@ log = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 
-async def produce(dapr: DaprClient, settings: MedallionSettings) -> dict[str, str]:
+async def produce(
+    dapr: DaprClient, settings: MedallionSettings, *, token: str | None = None
+) -> dict[str, str]:
     """Ingest the raw dataset and emit its write event (the event-driven cascade head).
 
     With ``compute_enabled`` it FIRST seeds a real ``raw_events`` Lance dataset (the fake lance-ray ingest)
     so the emitted lineage carries the real version; off → a dummy emit (version 1). It then emits ONE
     OpenLineage event for ``raw_events``. It does NOT publish ``medallion.raw`` — lance-ray's ``/raw-arrival``
     subscription reacts to this raw-write event and fires the trigger, so the cascade is event-driven.
-    Best-effort: a sidecar/broker outage logs + still returns (the catalog-style contract)."""
-    token = uuid.uuid4().hex[:12]
+    Best-effort: a sidecar/broker outage logs + still returns (the catalog-style contract).
+
+    ``token`` is the caller's idempotency key (skill rule: an operation whose route invites retry must
+    pair it with one): the route's 503 tells the caller to retry, but the publish timeout is ambiguous —
+    the sidecar may have accepted the event before the timeout fired — so a retry that minted a FRESH
+    token would double-fire the cascade head as two unrelated runs. A reused token converges instead:
+    every downstream run_id derives from it, so the graph MERGEs the duplicate and the overwrite-writes
+    land the same data. Absent (the common fire-and-forget case) → a fresh random token."""
+    token = token or uuid.uuid4().hex[:12]
     result = None
     if settings.compute_enabled and settings.raw_uri:
         # Fake-Ray ingest: a REAL Lance write of raw_events (blocking IO → threadpool) → the real version

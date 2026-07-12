@@ -53,16 +53,24 @@ def ingest_to_bronze(
     max_objects: int = 10_000,
     max_total_bytes: int = 1 << 30,
     chunk_objects: int = 64,
+    chunk_bytes: int = 64 << 20,
 ) -> IngestResult:
     """STREAM every object from ``source`` into a bronze blob-v2 table at 2.2 (``id, payload, source_uri``).
 
     Raises ``ValueError`` on an empty source: an empty bronze is almost always a mis-set prefix, and silently
     "succeeding" with zero rows would report a false success (and an input-less lineage edge) up the cascade.
 
-    STREAMING (2026-07-12, retires the whole-batch-in-memory posture): objects are written in chunks of
-    ``chunk_objects`` — the first chunk ``mode="overwrite"`` (which also sets the create-time-only
+    STREAMING (2026-07-12, retires the whole-batch-in-memory posture): objects are written in chunks —
+    the first chunk ``mode="overwrite"`` (which also sets the create-time-only
     ``enable_stable_row_ids``), the rest ``mode="append"`` — so memory high-water is ONE chunk plus the
-    accumulated URI strings, regardless of source size. The CEILINGS remain the refusal guard (clear
+    accumulated URI strings, regardless of source size. A chunk flushes on ``chunk_objects`` OR
+    ``chunk_bytes``, WHICHEVER TRIPS FIRST: the object count alone would let 64 large images balloon a
+    "chunk" toward the whole total ceiling (the flaw a review question exposed), so the byte bound is
+    the real memory guarantee and the count bound is the fragment-hygiene knob (many tiny objects
+    still batch into sensibly-sized Lance fragments instead of per-object commits). Neither number is
+    a Dapr/NATS constraint — the bus never carries payload bytes (claim-check: events are pointers);
+    these tune ONLY resident memory vs Lance commit/fragment churn. The CEILINGS remain the refusal
+    guard (clear
     ``ValueError`` naming the env knob, mapped to 400 at the route) against a mis-pointed prefix: bounded
     memory does not make a million-object ingest a good idea. Two consequences, both deliberate:
     a multi-chunk ingest commits multiple Lance versions and the lineage WROTE edge records the FINAL one
@@ -73,6 +81,7 @@ def ingest_to_bronze(
     """
     dataset: lance.LanceDataset | None = None
     chunk: list[SourceObject] = []
+    chunk_size = 0
     source_uris: list[str] = []
     total_bytes = 0
     next_id = 0
@@ -110,9 +119,11 @@ def ingest_to_bronze(
                 f"source exceeds the ingest ceiling of {max_total_bytes} total bytes "
                 f"(MEDALLION_INGEST_MAX_TOTAL_BYTES); narrow the source prefix or raise the ceiling"
             )
-        if len(chunk) >= chunk_objects:
+        chunk_size += len(obj.data)
+        if len(chunk) >= chunk_objects or chunk_size >= chunk_bytes:
             dataset = flush(chunk)
             chunk = []
+            chunk_size = 0
     if chunk:
         dataset = flush(chunk)
     if dataset is None:

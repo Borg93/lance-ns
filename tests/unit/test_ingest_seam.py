@@ -119,6 +119,24 @@ def test_ingest_streams_in_chunks_with_global_ids(tmp_path: Path) -> None:
     assert lance.dataset(bronze).count_rows() == 5 and again.row_count == 5
 
 
+def test_ingest_chunk_flushes_on_bytes_before_count(tmp_path: Path) -> None:
+    """The BYTE bound is the real memory guarantee (review question 2026-07-12): with a byte cap
+    smaller than one object, every object flushes its own chunk even though the COUNT bound (huge
+    here) never trips — so large objects can't balloon a 'chunk' toward the total ceiling."""
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    for i in range(3):
+        _write_png(source_dir / f"img{i}.png", (5 * i, 0, 0))
+    bronze = str(tmp_path / "bronze")
+
+    result = ingest_to_bronze(
+        LocalDirSource(source_dir, "*.png"), bronze, {}, chunk_objects=1000, chunk_bytes=1
+    )
+    assert result.row_count == 3
+    assert result.version == 3  # one commit PER OBJECT: the byte bound tripped, the count never did
+    assert lance.dataset(bronze).to_table(columns=["id"]).column("id").to_pylist() == [0, 1, 2]
+
+
 class _ReadStream:
     """pyarrow ``open_input_stream`` stand-in: a ``with``-usable reader exposing ``readall()``."""
 

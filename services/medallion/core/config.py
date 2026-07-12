@@ -60,6 +60,10 @@ class MedallionSettings(BaseSettings):
     ingest_max_total_bytes: int = Field(default=1 << 30, alias="MEDALLION_INGEST_MAX_TOTAL_BYTES")
     # Streaming chunk size (objects per Lance commit): memory high-water ≈ one chunk + URI strings.
     ingest_chunk_objects: int = Field(default=64, alias="MEDALLION_INGEST_CHUNK_OBJECTS")
+    # The BYTE bound is the real memory guarantee (a chunk flushes on count OR bytes, whichever
+    # first); the count bound is fragment hygiene for many tiny objects. Not a Dapr/NATS number —
+    # the bus never carries payload bytes.
+    ingest_chunk_bytes: int = Field(default=64 << 20, alias="MEDALLION_INGEST_CHUNK_BYTES")
 
     # --- Optional FGA gate (ReBAC enforcement) — the mover checks it is AUTHORIZED to produce the target
     # stage before emitting. The silver→gold mover checks `can_promote` (validator-only); the others check

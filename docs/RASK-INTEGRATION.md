@@ -63,6 +63,10 @@ secret).
 ### 5. Drop the demo scaffolding (rask supersedes it)
 - `chart/templates/{age-postgres,rustfs,backup-pg,backup-snapshot}.yaml` → CNPG / rustfs-operator.
 - `frontend/` + the `web` Deployment + `gateway.yaml` → rask's SvelteKit frontends + Traefik Ingress.
+  **Pre-shaped for the graft (2026-07-11):** `frontend/` is now a Turborepo 2.10 + bun workspace in
+  rask's own shape — `apps/web` (the lineage explorer) + `packages/ui` (shared Svelte 5 components,
+  transport-agnostic by tested rule) — so folding in means moving `apps/web` + merging `packages/ui`
+  into rask's component library, not untangling a monolith.
 - `openbao` dev-mode + the dev `infra-credentials` static Secret → external-secrets from rask's Vault.
 - The `dex` demo IdP → rask's real IdP (or keep for local-only).
 

@@ -4,10 +4,14 @@
 # ── build: install deps + compile the SvelteKit node build ─────────────────────
 FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS build
 WORKDIR /app
-COPY frontend/package.json frontend/bun.lock ./
+# Turborepo workspace (Batch 12, rask microfrontend shape): manifests first for the install cache…
+COPY frontend/package.json frontend/bun.lock frontend/turbo.json ./
+COPY frontend/apps/web/package.json ./apps/web/package.json
+COPY frontend/packages/ui/package.json ./packages/ui/package.json
 RUN --mount=type=cache,target=/root/.bun/install/cache bun install --frozen-lockfile
+# …then the sources; turbo builds the app (and its workspace deps) with its task graph.
 COPY frontend/ ./
-RUN bun run build
+RUN bunx turbo run build --filter=lance-lineage-web
 
 # ── runtime: the node-adapter server only ──────────────────────────────────────
 FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS runtime
@@ -31,9 +35,9 @@ ENV NODE_ENV=production \
 # a production-only install drops a module the SSR server needs at runtime ("Cannot find module
 # @sveltejs/kit"). A precise prod tree means hoisting the adapter's true runtime deps into dependencies
 # (fragile, needs a SvelteKit build to verify) — deferred; the dev-dep leak is an accepted-low hygiene cost.
-COPY --from=build --link /app/build ./build
+COPY --from=build --link /app/apps/web/build ./build
 COPY --from=build --link /app/node_modules ./node_modules
-COPY --from=build --link /app/package.json ./package.json
+COPY --from=build --link /app/apps/web/package.json ./package.json
 EXPOSE 3000
 # Bun is the init/PID1 here; the slim image has no curl, so health-check via bun's fetch.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \

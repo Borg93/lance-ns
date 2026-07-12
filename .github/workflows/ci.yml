@@ -116,24 +116,24 @@ jobs:
       - name: Install (frozen lockfile)
         run: bun install --frozen-lockfile
 
-      - name: svelte-check (0 errors gate)
-        run: bun run check
-
-      - name: Unit tests (bun)
-        run: bun test src/lib
+      # Turborepo workspace (Batch 12): check + unit tests fan out over apps/* AND packages/*
+      # (the @lance/ui exports/transport-agnosticism tests run here too).
+      - name: svelte-check + unit tests (turbo)
+        run: bunx turbo run check test
 
       - name: Install Playwright chromium
+        working-directory: frontend/apps/web
         run: bunx playwright install --with-deps chromium
 
       - name: Playwright e2e (hermetic — /api mocked in-page)
-        run: bun run test:e2e
+        run: bunx turbo run test:e2e --filter=lance-lineage-web
 
       - name: Upload Playwright traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/test-results/
+          path: frontend/apps/web/test-results/
           retention-days: 7
 
   # AGE-backed lineage e2e (§7): the graph repository's REAL Cypher runs against a real Apache AGE

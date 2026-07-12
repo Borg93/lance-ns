@@ -549,6 +549,9 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   `--set security.infraContexts.enabled=true` → infra pods Ready, PVC data intact after a
 >   rollout restart (fsGroup proof); (4) ONLY THEN label the namespace
 >   `pod-security.kubernetes.io/enforce=baseline` (→ `restricted` after soak).
+>   **Added 2026-07-11 (Batch 12):** rebuild the web image once (`docker build -f
+>   .docker/web.dockerfile .`) — the dockerfile now builds the Turborepo workspace; ASSERT the
+>   image boots (`bun ./build/index.js`, port 3000) and /lineage renders with the search box.
 >   **Added 2026-07-11 (Batch 5):** `make e2e-lineage` now also runs
 >   `test_terminal_lifecycle_and_column_gc_against_age` — the three new Cypher shapes (read-time
 >   dropped derivation with the COMPLETE filter; NOT..IN list-param HAS_COLUMN DELETE; the
@@ -650,6 +653,22 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   other three services) + chart else-branches; skipVerify sub-item verified already-shipped.
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
+>
+>   **BATCH 12 (added + ✅ DONE 2026-07-11) — Turborepo workspace (rask microfrontend shape) + the
+>   missing UI features.** `frontend/` → bun workspace with turbo 2.10.4 (user-pinned version,
+>   verified on npm): `apps/web` (history-preserving git mv) + `packages/ui` (@lance/ui — Chip +
+>   SearchBar, TRANSPORT-AGNOSTIC BY TESTED RULE: `exports.test.ts` fails if a component ever
+>   calls fetch or reaches into an app). Browse gains governed /search with WHY-chips + namespace
+>   scope; new Jobs tab. web.dockerfile builds via the turbo graph (runtime contract byte-
+>   compatible: same entrypoint/port/uid); CI frontend job fans check+test over apps AND packages.
+>   AUDIT NOTES (honest): no svelte/turborepo/microfrontend skills or Svelte MCP exist in this
+>   session (checked — only an unrelated PixiJS skill), so this used the repo's own Svelte 5
+>   conventions; a REAL Svelte 5 gotcha was found and pinned in-code — a DOM event handler on a
+>   workspace-lib component never fired under the app's event delegation, so SearchBar's debounce
+>   is $effect-driven with the reason documented in the component. Gates: turbo check+test 3/3
+>   tasks green (svelte-check 0/0, bun 15+2), Playwright 4/4, production build via turbo emits
+>   apps/web/build/index.js. LIVE residual (§7a): rebuild the web image once to prove the
+>   dockerfile's workspace build on a real docker daemon (this sandbox has none).
 >
 >   **BATCH 8 (added + ✅ DONE 2026-07-11) — externalization leftovers closed by VERIFICATION,
 >   not code.** Fact-check-first (the Batch 1 lesson, again vindicated): observability-s3-behind-
@@ -1072,8 +1091,14 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   `test_search_is_governed_before_the_limit` (a matching-but-ungranted dataset never appears AND
   is not counted), `test_search_orders_by_name_and_caps`. REMAINING (pinned, unchanged): tier 2 =
   Lance FTS + FLAT vector CONTENT search (rask `index_catalog.py`/`search_api` pattern) behind the
-  measured recall gate below; wiring /jobs + /namespaces + /search into the Browse UI (frontend
-  scope, parked per the 2026-07-06 goal).
+  measured recall gate below. **UI wiring SHIPPED 2026-07-11 (Batch 12):** the Browse tab gains
+  the @lance/ui SearchBar driving governed /search (hits render their WHY-chips; selecting focuses
+  the dataset) + a /namespaces scope filter; a new Jobs tab lists the governed compute identities
+  with clickable outputs. PLAYWRIGHT (hermetic, in CI):
+  `governed search finds by column and focuses the hit; jobs tab lists compute identities` —
+  asserts the column-tier hit renders `column:embedding` as its reason chip, selecting it focuses
+  the dataset in Details, and the Jobs tab lists the mocked identity. Existing 3 specs unchanged
+  and green (4/4).
   📌 Decision pin (2026-07-05, firnflow/lance_docs audit): default = FTS + FLAT exact vector scan (the rask
   pattern builds NO ANN index — correct at our scale); no IVF_PQ/ANN index on an embedding column without a
   measured gate — external BEIR data shows IVF_PQ recall loss GROWS with corpus size (~0 at ≤25k rows, ~22%

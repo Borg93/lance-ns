@@ -1,13 +1,6 @@
 node_modules
-/build
-/.svelte-kit
-/.vite
-.env
-.env.*
-!.env.example
-.DS_Store
-
-# Playwright
-/test-results
-/playwright-report
-/playwright/.cache
+.turbo
+apps/*/build
+apps/*/.svelte-kit
+apps/*/test-results
+frontend/.svelte-kit

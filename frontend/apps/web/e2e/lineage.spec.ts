@@ -41,6 +41,20 @@ test.beforeEach(async ({ page }) => {
 			});
 		if (path === '/events') return json(route, { events: [] });
 		if (path === '/runs') return json(route, { runs: [] });
+		if (path === '/jobs')
+			return json(route, {
+				jobs: [{ namespace: 'lance-medallion', name: 'embed_features', outputs: ['silver$features'] }],
+				total: 1
+			});
+		if (path === '/namespaces') return json(route, { namespaces: ['bronze', 'gold', 'raw', 'silver'] });
+		if (path.startsWith('/search'))
+			return json(route, {
+				query: 'embed',
+				results: [
+					{ name: 'silver$features', namespace: 'silver', tags: [], matches: ['column:embedding'] }
+				],
+				total: 1
+			});
 		if (path === '/demo/datasets') return json(route, { datasets: [] });
 		return json(route, {});
 	});
@@ -94,4 +108,24 @@ test('browse landing lists datasets from /datasets, filters, and focuses on clic
 	await expect(page.locator('.browse-row.on')).toHaveCount(1);
 	await page.getByRole('tab', { name: 'Details' }).click();
 	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+});
+
+
+test('governed search finds by column and focuses the hit; jobs tab lists compute identities', async ({
+	page
+}) => {
+	// ASSERTS (Batch 12): the SearchBar (packages/ui) drives the governed /search endpoint — a
+	// column-tier hit renders its WHY-chip (column:embedding) and selecting it focuses the dataset;
+	// the new Jobs tab lists the governed compute identities with clickable outputs.
+	await page.goto('/lineage');
+	await page.getByLabel('search').fill('embed');
+	const hit = page.getByRole('listbox').getByRole('button');
+	await expect(hit).toContainText('silver$features');
+	await expect(hit).toContainText('column:embedding'); // the match-reason chip
+	await hit.click();
+	await page.getByRole('tab', { name: 'Details' }).click();
+	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+
+	await page.getByRole('tab', { name: 'Jobs (1)' }).click();
+	await expect(page.getByText('embed_features')).toBeVisible();
 });

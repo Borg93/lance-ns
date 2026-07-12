@@ -19,6 +19,8 @@
 	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
 	import { enter, stagger, countUp } from '$lib/attachments';
 	import { LineageState } from '$lib/store.svelte';
+	import { SearchBar } from '@lance/ui';
+	import { fetchSearch } from '$lib/api';
 	import { LAYER, type DemoDataset } from '$lib/types';
 
 	const store = new LineageState();
@@ -28,14 +30,16 @@
 	// Browse (GOAL 4 A3): filter the governed /datasets catalog by name / namespace / tag, then click a
 	// row to focus that dataset — the browsable entry point that replaces the hardcoded name list.
 	let browseQuery = $state('');
+	let nsFilter = $state(''); // '' = all namespaces (fed by the governed /namespaces list)
 
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
 	const eventCount = $derived(store.events.length);
 	const browseResults = $derived.by(() => {
+		const scoped = nsFilter ? store.catalog.filter((d) => d.namespace === nsFilter) : store.catalog;
 		const q = browseQuery.trim().toLowerCase();
-		if (!q) return store.catalog;
-		return store.catalog.filter(
+		if (!q) return scoped;
+		return scoped.filter(
 			(d) =>
 				d.name.toLowerCase().includes(q) ||
 				(d.namespace ?? '').toLowerCase().includes(q) ||
@@ -308,6 +312,7 @@
 				<Tabs.List class="tablist">
 					<Tabs.Trigger value="browse" class="tab">Browse ({store.catalog.length})</Tabs.Trigger>
 					<Tabs.Trigger value="status" class="tab">Status ({store.runs.length})</Tabs.Trigger>
+					<Tabs.Trigger value="jobs" class="tab">Jobs ({store.jobs.length})</Tabs.Trigger>
 					<Tabs.Trigger value="events" class="tab">Events ({store.events.length})</Tabs.Trigger>
 					<Tabs.Trigger value="details" class="tab">Details</Tabs.Trigger>
 				</Tabs.List>
@@ -317,6 +322,20 @@
 						Every dataset the lineage graph knows — search by <b>name</b>, <b>namespace</b>, or
 						<b>tag</b>, then click one to focus it. No need to know a name in advance.
 					</p>
+					<!-- Server-side GOVERNED search (P1 Search tier 1): reaches tags + the column
+					     inventory the client-side list below can't see; hits show WHY they matched. -->
+					<SearchBar
+						search={async (q) => (await fetchSearch(q))?.results ?? []}
+						onselect={(name) => (store.selected = name)}
+					/>
+					{#if store.namespaceList.length}
+						<select class="browse-ns-filter mono" bind:value={nsFilter} aria-label="Namespace">
+							<option value="">all namespaces</option>
+							{#each store.namespaceList as ns (ns)}
+								<option value={ns}>{ns}</option>
+							{/each}
+						</select>
+					{/if}
 					<input
 						class="browse-input mono"
 						type="search"
@@ -366,6 +385,28 @@
 							<pre class="mono json">{JSON.stringify(ev.event, null, 2)}</pre>
 						</details>
 					{/each}
+				</Tabs.Content>
+
+				<Tabs.Content value="jobs" class="tabbody">
+					<p class="hint board-intro">
+						Every compute identity that has run — governed like the rest: a job is listed only
+						if you may see every dataset it wrote.
+					</p>
+					<ul class="browse-list job-list">
+						{#each store.jobs as j (j.namespace + '/' + j.name)}
+							<li>
+								<div class="job-row">
+									<span class="job-name mono">{j.name}</span>
+									<span class="browse-ns">{j.namespace}</span>
+									{#each j.outputs ?? [] as out (out)}
+										<button class="browse-tag mono" onclick={() => (store.selected = out)}>{out}</button>
+									{/each}
+								</div>
+							</li>
+						{:else}
+							<p class="hint">No jobs recorded yet.</p>
+						{/each}
+					</ul>
 				</Tabs.Content>
 
 				<Tabs.Content value="details" class="tabbody">
@@ -897,6 +938,26 @@
 		margin: 0 0 2px;
 	}
 	/* Browse panel (GOAL 4 A3) — the governed /datasets list + filter */
+	.job-name {
+		font-size: 0.85rem;
+	}
+	.job-row {
+		display: flex;
+		align-items: center;
+		gap: 0.45rem;
+		flex-wrap: wrap;
+		padding: 0.4rem 0.55rem;
+	}
+	.browse-ns-filter {
+		width: 100%;
+		margin: 0.35rem 0;
+		padding: 0.35rem 0.55rem;
+		border-radius: 0.5rem;
+		border: 1px solid color-mix(in oklab, currentColor 25%, transparent);
+		background: transparent;
+		color: inherit;
+		font-size: 0.8rem;
+	}
 	.browse-input {
 		width: 100%;
 		box-sizing: border-box;

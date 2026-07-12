@@ -1,4 +1,4 @@
-import type { ColumnGraph, Datasets, DemoDatasets, Events, LineageGraph, Producers, Runs } from './types';
+import type { ColumnGraph, Datasets, DemoDatasets, Events, Jobs, LineageGraph, Namespaces, Producers, Runs, SearchResults } from './types';
 
 /** Per-request timeout — a hung backend must not stack poll ticks (§2 perf, 2026-07-11). */
 const FETCH_TIMEOUT_MS = 8000;
@@ -47,5 +47,9 @@ export const fetchDatasets = (opts: { namespace?: string; tag?: string; limit?: 
 	const qs = p.toString();
 	return getJSON<Datasets>(`datasets${qs ? `?${qs}` : ''}`);
 };
+export const fetchSearch = (q: string, limit = 10) =>
+	getJSON<SearchResults>(`search?q=${enc(q)}&limit=${limit}`);
+export const fetchJobs = () => getJSON<Jobs>('jobs');
+export const fetchNamespaces = () => getJSON<Namespaces>('namespaces');
 export const fetchColumnGraph = (name: string) =>
 	getJSON<ColumnGraph>(`datasets/${enc(name)}/columns`);

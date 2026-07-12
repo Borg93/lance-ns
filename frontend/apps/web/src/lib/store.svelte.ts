@@ -4,6 +4,8 @@ import {
 	fetchDemo,
 	fetchEvents,
 	fetchGraph,
+	fetchJobs,
+	fetchNamespaces,
 	fetchProducers,
 	fetchRuns
 } from './api';
@@ -13,6 +15,7 @@ import {
 	type DatasetSummary,
 	type DemoDataset,
 	type EventRecord,
+	type JobSummary,
 	type GraphEdge,
 	type GraphNode,
 	type ProducerInfo,
@@ -42,6 +45,8 @@ export class LineageState {
 	datasets = $state<DemoDataset[]>([]);
 	catalog = $state<DatasetSummary[]>([]);
 	runs = $state<RunStatus[]>([]);
+	jobs = $state<JobSummary[]>([]);
+	namespaceList = $state<string[]>([]);
 	lastUpdated = $state('');
 	online = $state(false);
 	selected = $state<string | null>(null);
@@ -80,11 +85,13 @@ export class LineageState {
 
 			const nodeMap = new Map<string, GraphNode>();
 			const edgeSet = new Set<string>();
-			const [graphs, events, demo, runs] = await Promise.all([
+			const [graphs, events, demo, runs, jobs, namespaces] = await Promise.all([
 				inPools(present, (id) => fetchGraph(id)),
 				fetchEvents(),
 				fetchDemo(),
-				fetchRuns()
+				fetchRuns(),
+				fetchJobs(),
+				fetchNamespaces()
 			]);
 			for (const g of graphs) {
 				if (!g) continue;
@@ -93,6 +100,8 @@ export class LineageState {
 			}
 
 			this.runs = runs?.runs ?? [];
+			this.jobs = jobs?.jobs ?? [];
+			this.namespaceList = namespaces?.namespaces ?? [];
 			this.producers = producers;
 			this.nodes = [...nodeMap.values()];
 			this.edges = [...edgeSet].map((key) => {

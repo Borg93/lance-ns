@@ -1,6 +1,6 @@
 """Guard against frontend↔backend schema drift (#24).
 
-The web app's TypeScript types are generated from ``frontend/openapi.json`` (which is dumped from this
+The web app's TypeScript types are generated from ``frontend/apps/web/openapi.json`` (dumped from this
 FastAPI app). If a route or response model is added/changed but the contract snapshot isn't
 regenerated, the frontend types silently lie. This test fails when that happens.
 
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-_OPENAPI = Path(__file__).resolve().parents[2] / "frontend" / "openapi.json"
+_OPENAPI = Path(__file__).resolve().parents[2] / "frontend" / "apps" / "web" / "openapi.json"
 
 
 def test_committed_openapi_contract_covers_the_live_app() -> None:
@@ -24,7 +24,9 @@ def test_committed_openapi_contract_covers_the_live_app() -> None:
     # The committed snapshot is generated with the demo router enabled (a superset of routes/schemas),
     # so the live app — demo on or off — must be a SUBSET. A new path/schema absent here means stale.
     missing_paths = set(live["paths"]) - set(committed["paths"])
-    assert not missing_paths, f"frontend/openapi.json stale — missing {sorted(missing_paths)}; regenerate"
+    assert not missing_paths, (
+        f"frontend/apps/web/openapi.json stale — missing {sorted(missing_paths)}; regenerate"
+    )
 
     live_schemas = set(live.get("components", {}).get("schemas", {}))
     missing_schemas = live_schemas - set(committed.get("components", {}).get("schemas", {}))

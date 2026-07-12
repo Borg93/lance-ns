@@ -27,6 +27,9 @@ class DatasetResult(BaseModel):
     old_versions_removed: int = 0
     bytes_removed: int = 0
     error: str | None = None
+    # Stable identifier for span aggregation (otel attributes.md: set `error.type` whenever the span
+    # status is ERROR) — the exception CLASS name, never the message.
+    error_type: str | None = None
 
 
 def discover_dataset_uris(fs: pafs.FileSystem, bucket: str, *, max_depth: int = 3) -> list[str]:
@@ -63,7 +66,7 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
     try:
         ds = lance.dataset(uri, storage_options=storage_options)
     except Exception as exc:  # noqa: BLE001 — not a Lance dataset / unreadable → skip, don't abort
-        return DatasetResult(uri=uri, error=f"open: {exc}")
+        return DatasetResult(uri=uri, error=f"open: {exc}", error_type=type(exc).__name__)
     result = DatasetResult(uri=uri)
     try:
         # defer_index_remap: with the Fragment Reuse Index the row-id remap is deferred, so compaction and
@@ -97,4 +100,5 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
         result.bytes_removed = int(getattr(stats, "bytes_removed", 0))
     except Exception as exc:  # noqa: BLE001 — maintenance is best-effort per dataset
         result.error = f"maintain: {exc}"
+        result.error_type = type(exc).__name__
     return result

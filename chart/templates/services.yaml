@@ -89,7 +89,9 @@ spec:
             - { name: LANCE_OIDC_ENABLED, value: "true" }
             - { name: LANCE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
             - { name: LANCE_OIDC_AUDIENCE, value: {{ .Values.dex.clientId | quote }} }
-            - { name: LANCE_OIDC_ALLOW_INSECURE, value: "true" }
+            # Scheme-derived like the vault skipVerify: the http escape hatch opens ONLY for a plain-http
+            # issuer (the in-cluster dev Dex); an https issuer (real IdP) keeps the HTTPS guard enforced.
+            - { name: LANCE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }
             - { name: LANCE_FGA_ENABLED, value: "true" }
             - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
             # Lock top-level (root) namespace/table creation to holders of a warehouse-level create grant.
@@ -238,7 +240,8 @@ spec:
             - { name: LINEAGE_OIDC_ENABLED, value: "true" }
             - { name: LINEAGE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
             - { name: LINEAGE_OIDC_AUDIENCE, value: {{ .Values.dex.clientId | quote }} }
-            - { name: LINEAGE_OIDC_ALLOW_INSECURE, value: "true" }
+            # Scheme-derived (see the catalog twin above): https issuer => HTTPS guard stays enforced.
+            - { name: LINEAGE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }
             - { name: LINEAGE_FGA_ENABLED, value: "true" }
             - { name: LINEAGE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
             {{- end }}

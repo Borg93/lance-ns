@@ -70,6 +70,8 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
             # span explicitly — else a failed dataset looks identical to a clean one in the trace.
             if result.error is not None:
                 span.set_status(StatusCode.ERROR, result.error)
+                if result.error_type:  # error.type: stable class name so error spans aggregate
+                    span.set_attribute("error.type", result.error_type)
     record_run()
     record_reclaimed(
         fragments_removed=sum(r.fragments_removed for r in results),

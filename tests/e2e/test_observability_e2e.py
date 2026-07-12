@@ -175,3 +175,14 @@ def test_logs_populated() -> None:
         return otlp > 0 and pods > 0 or None
 
     assert _eventually(both_log_tables_nonempty)
+
+    # Log↔trace CORRELATION, not just presence (otel signals.md: "Every log emitted inside an
+    # active span carries trace_id"): if the logging auto-instrumentation env flag were dropped,
+    # both tables would still fill and the suite would pass while correlation silently died.
+    def correlated_log_exists() -> bool | None:
+        rows = _gt_sql(
+            "SELECT count(*) FROM opentelemetry_logs WHERE trace_id IS NOT NULL AND trace_id != ''"
+        )
+        return int(rows[0][0]) > 0 or None
+
+    assert _eventually(correlated_log_exists)

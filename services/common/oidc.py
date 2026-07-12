@@ -34,7 +34,7 @@ from urllib.parse import urlsplit
 import httpx
 import jwt
 from lance_namespace import UnauthenticatedError
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 _DISCOVERY_SUFFIX = "/.well-known/openid-configuration"
 
@@ -221,14 +221,19 @@ class OIDCVerifier:
                 # token to bind against), so there is nothing to disable — unlike
                 # python-jose, no ``verify_at_hash`` option exists or is needed here.
                 options={
-                    "require": ["exp", "iat", "aud"],
+                    # ``sub`` is required here (not just in the model): the whole authz layer keys
+                    # grants and checks on it, and some IdP-issued tokens legitimately omit it —
+                    # without the require, such a token failed pydantic OUTSIDE the 401 mapping (500).
+                    "require": ["exp", "iat", "aud", "sub"],
                     "verify_exp": True,
                     "verify_iat": True,
                     "verify_aud": True,
                     "verify_iss": True,
                 },
             )
-        except (jwt.PyJWTError, jwt.PyJWKClientError) as exc:
-            # Never leak the underlying JWT/crypto error to the client.
+            # Inside the 401 mapping on purpose: a signed token whose claim SHAPES pydantic rejects
+            # (e.g. a non-numeric exp) is a bad token — a 401, never an unhandled 500.
+            return IDToken.model_validate(payload)
+        except (jwt.PyJWTError, jwt.PyJWKClientError, ValidationError) as exc:
+            # Never leak the underlying JWT/crypto/validation error to the client.
             raise UnauthenticatedError("Invalid or expired token") from exc
-        return IDToken.model_validate(payload)

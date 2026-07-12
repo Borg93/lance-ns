@@ -3,7 +3,9 @@
 The golden signal for the cascade: how many stage transitions each mover completed. Exported via the
 OTel SDK (``opentelemetry-instrument``) over OTLP to GreptimeDB, queryable in PromQL / Perses. Bounded
 cardinality — only the namespaced ``lance.medallion.transition`` label (e.g. ``raw->bronze``); per-run ids
-stay on spans/logs. (Namespaced per the otel skill; in PromQL the dots become underscores →
+stay on spans/logs. (Dot-namespaced under the project's `lance.*` convention —
+deliberately NOT the otel skill's reverse-DNS letter, pinned in todo_fable; in PromQL the dots
+become underscores →
 ``lance_medallion_transition``.)
 """
 

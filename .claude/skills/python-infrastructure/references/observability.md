@@ -33,19 +33,22 @@ Every service sets these on `Resource.create({...})` at startup:
 | ------------------------ | ------------------------------------------------ | ------------------------ |
 | `service.name`           | The service name, e.g. `rask-api`, `rask-worker` | env: `OTEL_SERVICE_NAME` |
 | `service.version`        | App version                                      | env: `SERVICE_VERSION`   |
-| `deployment.environment` | `local` / `staging` / `production`               | env: `ENVIRONMENT`       |
+| `deployment.environment.name` | `local` / `staging` / `production`          | env: `ENVIRONMENT`       |
 
 Set via env or in code:
 
 ```bash
 export OTEL_SERVICE_NAME="rask-api"
-export OTEL_RESOURCE_ATTRIBUTES="service.version=1.2.3,deployment.environment=production"
+export OTEL_RESOURCE_ATTRIBUTES="service.version=1.2.3,deployment.environment.name=production"
 export OTEL_EXPORTER_OTLP_ENDPOINT="http://otel-collector:4317"
 export OTEL_TRACES_EXPORTER="otlp"
 export OTEL_METRICS_EXPORTER="otlp"
 export OTEL_LOGS_EXPORTER="otlp"
-export OTEL_TRACES_SAMPLER="parentbased_traceidratio"
-export OTEL_TRACES_SAMPLER_ARG="0.1"
+# Keep the SDK's default AlwaysOn sampler (see otel skill signals.md: "Do not change it") —
+# sampling belongs in a Collector tier. This project ships OTLP-direct to GreptimeDB with NO
+# Collector (chart lance.otlpEndpoint), so no sampling stage exists by design; the
+# observability.externalOtlpEndpoint value is the path to a Collector + tail sampling when
+# trace volume demands it. Do NOT set OTEL_TRACES_SAMPLER in the SDK.
 export OTEL_PYTHON_LOGGING_AUTO_INSTRUMENTATION_ENABLED="true"
 ```
 
@@ -185,7 +188,8 @@ def timed_operation(name: str, **attrs):
         try:
             yield span
         except Exception as e:
-            span.record_exception(e)
+            # NOTE: span.record_exception is DEPRECATED (otel skill gotcha) — set the status
+            # and let the exception propagate to a log record carrying exception.* attributes.
             span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
             elapsed_ms = (time.perf_counter() - start) * 1000
             log.error(
@@ -208,13 +212,13 @@ with timed_operation("fetch_user_orders", user_id=user.id):
 ## Summary
 
 1. **OTel for all three signals** — traces, metrics, logs over OTLP.
-2. **Set `service.name`, `service.version`, `deployment.environment`** on the Resource.
+2. **Set `service.name`, `service.version`, `deployment.environment.name`** on the Resource.
 3. **stdlib `logging` + auto-instrumented LoggingInstrumentor** — don't add `structlog`.
 4. **Auto-instrument by default**; add manual spans only for business operations.
 5. **Four golden signals** at every external boundary.
 6. **Bounded cardinality** on metric attributes; per-request detail goes on spans/logs.
 7. **Propagate trace context across queue boundaries** explicitly.
 8. **Use semantic-convention attribute names** — see `otel` → `references/attributes.md`.
-9. **Sampling configured via env vars** (`OTEL_TRACES_SAMPLER`).
+9. **Sampling stays OUT of the SDK** (AlwaysOn default; a Collector tier owns sampling when one exists).
 
 For everything else OTel-related, defer to the `otel` skill.

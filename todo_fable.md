@@ -673,6 +673,33 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 19 (added + ✅ DONE 2026-07-12) — OTel + auth/authz/secret-store skill-adherence sweep
+>   (user ask: "otel, secret store, nats, event, auth and authz — still intact with my skills?").**
+>   Two parallel audits against the ACTUAL skill files; BOTH verdicts COMPLIANT. OTel: all five
+>   workloads under opentelemetry-instrument with the full lance.otelEnv set; manual INTERNAL spans
+>   exactly where auto-instrumentation can't see; metrics bounded-cardinality UCUM-united; logging
+>   stdlib→OTel with trace correlation enabled; and the cross-NATS trace propagation is VERIFIED
+>   MECHANISM (grpc instrumentation → Dapr CloudEvent traceparent → FastAPI extract; e2e-obs
+>   asserts one trace_id spans catalog+lineage incl. the PublishEvent + subscriber spans) — not a
+>   comment claim. FGA/OIDC/secrets: model follows the skill's concentric/can_*/parent-cascade
+>   patterns with documented deviations; fail-closed EVERYWHERE (enabled-but-unwired ⇒ 503, never
+>   allow); zero plaintext app secrets when the store is on; model tests + auth-e2e in CI. FIXED
+>   same-batch: (1) MEDIUM — the chart hardcoded OIDC_ALLOW_INSECURE=true unconditionally,
+>   permanently opening the dev-only http escape hatch → now scheme-derived from the issuer
+>   (mirrors the vault skipVerify ternary; https IdP ⇒ HTTPS guard enforced); (2) oidc.py requires
+>   `sub` and maps claim-shape ValidationError → 401 (was an unhandled 500 for signed-but-subless
+>   tokens); (3) CI now transforms model.fga and DIFFS it against the model.json the app actually
+>   loads (the triple-copy drift was tested-copy-only); (4) model.fga header no longer claims
+>   direct team#member grants the type restrictions reject (teams flow via roles/project — the
+>   auditable design); (5) compaction error spans carry `error.type` (stable class name);
+>   (6) observability.md reference reconciled with the otel skill (record_exception deprecated,
+>   deployment.environment.name, sampling stays OUT of the SDK — no Collector by design);
+>   (7) e2e-obs now asserts a trace_id-CORRELATED log row, not just non-empty tables. 📌 PINNED
+>   naming decision: custom attributes stay on the project's dot-namespaced `lance.*` (NOT the
+>   skill's reverse-DNS letter) — renaming would break the live Greptime/Perses queries; the code
+>   comments now say so honestly. NATS/eventing adherence: already verdict-compliant in Batch 17,
+>   re-proven by Batch 18's gates.
+>
 >   **BATCH 18 (added + ✅ DONE 2026-07-12, DEFAULT ON same day — "fix dapr first") — the
 >   Dapr-native resiliency + dead-letter layer (the audit's medium; RESILIENCE gap #2),
 >   `dapr.resiliency.enabled` DEFAULT TRUE (`false` = the exact chaos-verified broker-only

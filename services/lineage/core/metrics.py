@@ -7,7 +7,8 @@ GreptimeDB** (no Collector — mirrors rask), queryable in PromQL / Perses.
 
 Cardinality is bounded on purpose (the otel skill's #1 cost driver): the only attribute is the bounded,
 namespaced ``lance.lineage.outcome`` — per-run / per-table identifiers belong on spans and logs, never on
-metric attributes. (Custom attributes are namespaced per the otel skill; in PromQL the dots become
+metric attributes. (Custom attributes use the project's dot-namespaced `lance.*` convention —
+deliberately NOT the otel skill's reverse-DNS letter, pinned in todo_fable; in PromQL the dots become
 underscores → ``lance_lineage_outcome``.)
 ``metrics.get_meter`` returns a proxy that binds lazily, so creating the instruments at import time
 (before ``opentelemetry-instrument`` installs the real MeterProvider) is safe.

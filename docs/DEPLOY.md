@@ -97,15 +97,22 @@ no further code. OTel has no async histogram instrument, so Lance histograms arr
 ## Governance (Dex + OpenFGA)
 
 Deployed; `auth.enabled=false` by default. Set `auth.enabled=true` to wire OIDC (Dex) verification +
-OpenFGA `can_get_metadata` checks into the catalog + lineage. OpenFGA's schema migrates against the AGE
+OpenFGA `can_get_metadata` checks into the catalog + lineage. The OIDC `ALLOW_INSECURE` escape hatch is
+SCHEME-DERIVED from the issuer (2026-07-12): a plain-http issuer (the in-cluster dev Dex) opens it, an
+https issuer (any real IdP) keeps the verifier's HTTPS guard enforced — never hardcoded open. OpenFGA's schema migrates against the AGE
 Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `ag_catalog`).
 
 ## Notable engineering notes
 
-- **Dapr JetStream consumer** uses an **ephemeral** consumer (no `durableName`): a durable PUSH
-  consumer orphans on every pod redeploy ("consumer name already in use") and silently halts ingestion.
-  Ephemeral is auto-cleaned + recreated cleanly; idempotent ingest makes any replay a no-op. Durable
-  redelivery across a redeploy gap (a durable PULL consumer) is the production-hardening follow-up.
+- **Dapr JetStream consumers** are split BY RECOVERY STORY (2026-07-06/12): the LINEAGE ingest stays
+  **ephemeral** (deliverPolicy=all — a restart replays the retained stream into the idempotent MERGE;
+  a durable cursor would defeat that recovery), while the cascade head + movers pair
+  `deliverPolicy=new` with a **durable + queue-group** consumer (cursor survives pod death/redeploys —
+  chaos-verified; the durable-orphan failure applies only to durables WITHOUT a queue group). Since
+  2026-07-12 the **Dapr Resiliency + DLQ layer is DEFAULT ON** (`dapr.resiliency.enabled`): the sidecar
+  owns delivery retries (30s→300s ×5) and exhaustion PARKS the message on the per-app `dlq.*` topic
+  (own DLQ stream) — see docs/RESILIENCE.md gap #2. The durable PULL consumer move remains the last
+  hardening follow-up.
 - **AGE + OpenFGA share one Postgres**: AGE's `ag_catalog` search-path would break OpenFGA migrations,
   so the openfga db is pinned to `search_path = public` in the AGE initdb.
 - **kind has no host ports** — reach services via `make dashboards` (port-forwards).

@@ -91,6 +91,7 @@ def _seed_and_ingest(settings: MedallionSettings) -> IngestResult:
         settings.storage_options(),
         max_objects=settings.ingest_max_objects,
         max_total_bytes=settings.ingest_max_total_bytes,
+        chunk_objects=settings.ingest_chunk_objects,
     )
 
 

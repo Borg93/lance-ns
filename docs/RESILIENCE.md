@@ -90,7 +90,7 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
    scopes consumer names PER STREAM; the dlq topics live on their own stream — and the producer
    already runs two same-durable subscriptions across two streams live). CI render-asserts the set
    ships together and the escape hatch restores the chaos-verified schedule. Live check remaining:
-   the runbook 6.5 poison-inject. Still open beyond it: the **durable PULL consumer** move.
+   the runbook 6.5 poison-inject. The once-planned **durable PULL consumer** is RETIRED (2026-07-12): PULL means consuming NATS directly (nats-py), i.e. leaving Dapr pub/sub — which contradicts the pinned Dapr-first rule — and its target gaps (cursor loss, silent exhaustion) are since covered by durable push cursors + sidecar Resiliency retries + this DLQ. Revisit only if a live delivery-semantics gap appears that Dapr's model cannot express.
 
 3. **Trigger loss on mover death: FIXED (durable cursors, 2026-07-06); lineage full-stream-replay
    remains by design.** The cascade head + movers now pair `deliverPolicy: new` with a `durableName`
@@ -173,5 +173,7 @@ PSA would reject `lineage`/`openfga-migrate` until their root init containers ar
 - **Loss:** only at the catalog outbox gap (crash between S3 write + publish). Everything downstream of a
   successful publish is durable + replayed.
 - **Recovery:** automatic — `RETRY` for transient faults, JetStream buffer + replay for downed services.
-- **Hardening roadmap (for prod):** durable PULL consumer (resume-from-ack) · Dapr `deadLetterTopic` ·
-  transactional outbox / Ray durable producer. None are needed for the demo; all are needed at scale.
+- **Hardening roadmap (for prod):** ~~durable PULL consumer~~ (RETIRED — contradicts the Dapr-first
+  rule; superseded by durable push cursors + Resiliency retries) · ~~Dapr `deadLetterTopic`~~
+  (SHIPPED, default on) · transactional outbox / Ray durable producer (the remaining item —
+  belongs to the rask merge, where the Ray job becomes the durable producer).

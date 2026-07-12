@@ -94,6 +94,31 @@ def test_ingest_ceilings_refuse_before_writing(tmp_path: Path) -> None:
     assert result.row_count == 3  # under both ceilings → byte-identical behavior
 
 
+def test_ingest_streams_in_chunks_with_global_ids(tmp_path: Path) -> None:
+    """Streaming ingest (2026-07-12): chunked overwrite-then-append keeps memory at one chunk while
+    the RESULT is indistinguishable from the single-write path — global positional ids in insertion
+    order (compute._carry_forward's range(rows) contract), all blobs readable, stable row ids set by
+    the FIRST chunk, and the reported version is the FINAL commit (1 overwrite + 2 appends = 3)."""
+    source_dir = tmp_path / "src"
+    source_dir.mkdir()
+    for i in range(5):
+        _write_png(source_dir / f"img{i}.png", (10 * i, 0, 0))
+    bronze = str(tmp_path / "bronze")
+
+    result = ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, chunk_objects=2)
+
+    ds = lance.dataset(bronze)
+    assert result.row_count == 5 and len(result.source_uris) == 5
+    assert result.version == 3 == ds.version  # ceil(5/2) chunks → 3 commits; edge gets the final
+    assert ds.has_stable_row_ids  # create-time-only flag set by the first chunk, inherited after
+    assert ds.to_table(columns=["id"]).column("id").to_pylist() == [0, 1, 2, 3, 4]  # global order
+    # every blob readable across the chunk boundary (row 4 lives in the last append)
+    assert ds.read_blobs("payload", indices=[4])[0][1][:4] == b"\x89PNG"
+    # a RE-INGEST's first chunk overwrites from scratch — the idempotent-overwrite contract holds
+    again = ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, chunk_objects=2)
+    assert lance.dataset(bronze).count_rows() == 5 and again.row_count == 5
+
+
 class _ReadStream:
     """pyarrow ``open_input_stream`` stand-in: a ``with``-usable reader exposing ``readall()``."""
 

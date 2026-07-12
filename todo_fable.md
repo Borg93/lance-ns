@@ -673,6 +673,23 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 24 (added + ✅ DONE 2026-07-12, user challenged the parked list) — streaming ingest +
+>   parked-list truth-up.** (1) `ingest_to_bronze` now STREAMS: chunks of
+>   `MEDALLION_INGEST_CHUNK_OBJECTS` (64) written overwrite-then-append — memory high-water is ONE
+>   chunk + URI strings regardless of source size; result indistinguishable from the single write
+>   (global positional ids across chunks, stable-row-ids from the first chunk, final version on the
+>   lineage edge; mid-ingest crash = partial bronze with NO trigger, overwritten by the next ingest
+>   — the cascade's own idempotent-overwrite contract). TEST:
+>   `test_ingest_streams_in_chunks_with_global_ids` (5 objects, chunk 2 → version 3, ids [0..4] in
+>   order, blob readable across the chunk boundary, re-ingest overwrites clean). Ceilings stay as
+>   the refusal guard. (2) The **durable PULL consumer is RETIRED** from the roadmap: PULL = direct
+>   nats-py = leaving Dapr pub/sub = contradicts the pinned Dapr-first rule; its target gaps are
+>   covered by durable push cursors + Resiliency retries + the DLQ (RESILIENCE.md updated both
+>   places). (3) Remaining parked items re-justified with sharper reasons: FGA masking chains to
+>   the DEFERRED query engine (masking needs a read-side enforcement point; tuples without one are
+>   decorative security); presigned URLs are parked on SECURITY grounds (ReBAC bypass for the TTL),
+>   not effort. Suite 588→590.
+>
 >   **BATCH 23 (added + ✅ DONE 2026-07-12, user: "do it") — the declared-columns PATROL (the
 >   reconcile half of the breaking-change detector).** The sweep re-checks the movers' declarations
 >   against each declared dataset's CURRENT storage schema — catching writes that BYPASSED the
@@ -692,8 +709,7 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   bronze written, under-ceiling byte-identical). DOGFOOD: the demo movers now DECLARE
 >   requiredColumns in values (`id` on tabular stages; `id,thumbnail,embedding` on media-to-silver
 >   — if the deriver breaks, promotion blocks) + runbook 3c gives the live positive/negative
->   asserts for both new contract clauses. True RecordBatch streaming stays the large-media
->   follow-up (pinned in ingest.py's docstring).
+>   asserts for both new contract clauses. (The streaming follow-up shipped hours later — Batch 24.)
 >
 >   **BATCH 21 (added + ✅ DONE 2026-07-12) — the data contract's last two clauses (user: "why not
 >   just do them now": gap #1 breaking-change detector + gap #2 freshness).** (1) Declared consumer

@@ -2,7 +2,7 @@
 # Lance Lineage web UI — SvelteKit (Svelte Flow + bits-ui) on Bun. Build context = repo root.
 
 # ── build: install deps + compile the SvelteKit node build ─────────────────────
-FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS build
+FROM oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS build
 WORKDIR /app
 # Turborepo workspace (Batch 12, rask microfrontend shape): manifests first for the install cache…
 COPY frontend/package.json frontend/bun.lock frontend/turbo.json ./
@@ -15,7 +15,7 @@ COPY frontend/ ./
 RUN bunx turbo run build --filter=lance-lineage-web
 
 # ── runtime: the node-adapter server only ──────────────────────────────────────
-FROM oven/bun:1.3-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS runtime
+FROM oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS runtime
 
 ARG BUILD_DATE
 ARG VCS_REF

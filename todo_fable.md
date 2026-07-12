@@ -660,6 +660,18 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 15 (added + ✅ DONE 2026-07-12) — §9 P2 `blob_resolves` quality-gate assertion +
+>   verifications the user asked for.** (1) The gate now proves blob POINTERS dereference at
+>   promotion time (1 real byte, first+last rows; `size()` alone is a trap — it succeeds against a
+>   deleted object). (2) Our whole blob stack was verified against the OFFICIAL lance blob guide
+>   (github lance-format/lance docs/src/guide/blob.md) — every API/format claim matches. (3) bun
+>   bumped 1.3.11→1.3.14 after verifying 1.3.14 IS npm dist-tag latest AND that the web image's
+>   pinned digest already IS 1.3.14-slim (docker hub tag check — tag label made explicit).
+>   (4) rask access re-attempted on the user's pointer (AI-Riksarkivet/rask): repo EXISTS but is
+>   private — unauthenticated fetch 404s, and add_repo refuses cross-owner adds in a Borg93-scoped
+>   session. To do the (a) look-only convention pass, start a session with rask as a source (or
+>   paste its root package.json + turbo.json + one app/package manifest into chat).
+>
 >   **BATCH 14 (added + ✅ DONE 2026-07-12) — MFE follow-ups (b)+(c): StatusBoard + the GSAP
 >   animation layer extracted into @lance/ui (structural `RunStatusLike` prop type; the one
 >   SvelteKit tie cut with the same SSR semantics; agnosticism test now recursive + bans `$app`),
@@ -1091,7 +1103,24 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     against a real crashed-run orphan (§7a); the BROADER posture — compaction/GC understanding
     pointer columns generally + reconcile flagging dangling pointers after a bucket wipe — is
     untouched by this tool.
-  - ⛔ P2 quality gate blob assertion: "the blob pointer resolves" check alongside row_count/not_null.
+  - ✅ P2 quality gate blob assertion — **DONE 2026-07-12 (Batch 15):** `blob_resolves` per blob-v2
+    column in `medallion/services/quality.py`, alongside row_count/not_null and riding the SAME
+    `dataQualityAssertions` facet + gate (fail ⇒ promotion BLOCKED, run still audited). Probe design
+    from live pylance evidence: `size()` reads only the descriptor (succeeds against a DELETED
+    object!), so the check reads ONE REAL BYTE from the first+last rows' payloads per column —
+    catches the wholesale cases (bucket wipe, wrong/unregistered external base) for two 1-byte
+    reads; per-row bitrot is a scrubber's job. Zero-length/null payloads resolve trivially; tabular
+    datasets grow no assertion (skip, not fail — same direction as not_null). Verified against the
+    OFFICIAL lance blob guide same day (lance-format/lance docs/src/guide/blob.md): declaration
+    (blob_field/blob_array/Blob.from_uri), the 2.2 format requirement, take_blobs→BlobFile vs
+    read_blobs split, external-base registration + `allow_external_blob_outside_bases`, indices=
+    positional — ALL match our implementation; noted future option: `ids=` selector for stable
+    addressing (cascade tables already set enable_stable_row_ids). TESTS
+    (test_medallion_compute.py): `test_assert_quality_blob_resolves_on_healthy_payloads` (managed
+    payloads incl. null + b"" → success, column named; tabular datasets never grow the assertion)
+    + `test_assert_quality_blob_fails_on_dangling_external_pointer` (external Blob.from_uri
+    written against a registered base, healthy passes, object DELETED → success=False AND
+    `passed()` False ⇒ gate blocks). Suite 568→570.
   - ⛔ P2 per-project schema declaration (embeddings/classification/summarization columns are KNOWN per project):
     register expected columns so the quality gate asserts they landed, FGA pre-registers column masking, and
     reconcile flags undeclared writes — a governance contract, not a Dapr one. Lance itself needs no up-front

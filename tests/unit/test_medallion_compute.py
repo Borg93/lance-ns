@@ -225,6 +225,54 @@ def test_assert_quality_skips_null_check_when_key_absent(tmp_path: Any) -> None:
     assert [c.assertion for c in checks] == ["row_count_positive"]
 
 
+def _write_blob_dataset(uri: str, payloads: list, *, base: str | None = None) -> None:
+    from lance import blob_field
+
+    schema = pa.schema([pa.field("id", pa.int64()), blob_field("media")])
+    table = pa.table({"id": list(range(len(payloads))), "media": lance.blob_array(payloads)}, schema=schema)
+    lance.write_dataset(
+        table,
+        uri,
+        data_storage_version="2.2",
+        initial_bases=[lance.DatasetBasePath(base, is_dataset_root=False)] if base else None,
+    )
+
+
+def test_assert_quality_blob_resolves_on_healthy_payloads(tmp_path: Any) -> None:
+    # §9 P2: a blob column adds a blob_resolves assertion (column named); managed payloads —
+    # including a zero-length/null row, which resolves trivially — pass. A tabular dataset
+    # (the tests above) never grows the assertion, so this pins the skip direction too.
+    uri = str(tmp_path / "gold")
+    _write_blob_dataset(uri, [b"img-bytes" * 10, None, b""])
+    checks = assert_quality(uri, {}, key_column="id")
+    blob = next(c for c in checks if c.assertion == "blob_resolves")
+    assert blob.success is True and blob.column == "media"
+    assert passed(checks)
+
+
+def test_assert_quality_blob_fails_on_dangling_external_pointer(tmp_path: Any) -> None:
+    # THE case the assertion exists for (bucket wipe / wrong base): an external Blob.from_uri
+    # object deleted from under the table passes every tabular check — count_rows and the null
+    # filter never touch payload bytes — and would fail only at first read, far downstream of the
+    # promotion. The gate must catch it AT promotion: probed 2026-07-12, a dangling pointer raises
+    # from take_blobs itself (and size() alone would NOT catch it — it reads only the descriptor).
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    obj = ext / "obj.bin"
+    obj.write_bytes(b"external-payload")
+    uri = str(tmp_path / "gold")
+    _write_blob_dataset(uri, [lance.Blob.from_uri(str(obj))], base=str(ext))
+
+    healthy = assert_quality(uri, {}, key_column="id")
+    assert next(c for c in healthy if c.assertion == "blob_resolves").success is True
+
+    obj.unlink()
+    checks = assert_quality(uri, {}, key_column="id")
+    blob = next(c for c in checks if c.assertion == "blob_resolves")
+    assert blob.success is False and blob.column == "media"
+    assert not passed(checks)  # the gate blocks the promotion
+
+
 def _quality_mover_settings(from_uri: str, to_uri: str) -> MedallionSettings:
     return MedallionSettings.model_validate(
         {

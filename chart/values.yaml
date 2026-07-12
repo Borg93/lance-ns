@@ -121,6 +121,22 @@ dapr:
   # /medallion-event, the cron route) reject any forged request that didn't come through the sidecar.
   # OVERRIDE in prod (it's the auth secret for those routes). Closes the provenance-forgery prod-blocker.
   appToken: "lance-dev-dapr-app-token-override-me"
+  # OPT-IN Dapr-native retry + dead-letter layer (docs/RESILIENCE.md gap #2). Default OFF = the exact
+  # chaos-verified pre-existing behavior (broker-side backOff 30-300s, maxDeliver 5, exhaustion = silent).
+  # ON wires THREE things TOGETHER (they are only correct as a set — a deadLetterTopic without a retry
+  # policy dead-letters on the FIRST failure per Dapr's documented default):
+  #   1. a Resiliency CRD: the SIDECAR owns delivery retries (exponential 30s→300s, 5 attempts ≈ the
+  #      previous broker schedule), scoped to the subscriber apps;
+  #   2. deadLetterTopic on every subscription (via the *_DLQ_TOPIC envs): retry exhaustion PARKS the
+  #      message on a per-app dlq.* topic — ERROR-logged by the app's /dlq-event route — instead of
+  #      silently ceasing to redeliver;
+  #   3. the broker backOff moves to a long crash-recovery window (first step > the sidecar's total
+  #      retry span) so broker redelivery no longer races the sidecar's in-flight retries — it now
+  #      covers ONLY sidecar/pod death mid-delivery.
+  # ⚠️ Flip AFTER a live kind pass (runbook): the durable-consumer interplay of a second (dlq) topic
+  # subscription on the same per-app component must be proven against real NATS before prod.
+  resiliency:
+    enabled: false
   # The Dapr dashboard — a web UI for the Dapr stuff (components, subscriptions, configurations,
   # control plane). These are first-party keys (the dapr subchart ignores them).
   dashboard:

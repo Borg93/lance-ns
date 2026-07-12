@@ -72,12 +72,22 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
    + `services.lineage.reconcile`). *Full fix:* a transactional outbox, or make the **Ray job the durable
    producer** (it owns the write + the emit) — the documented direction ([`FLOW.md`](FLOW.md) §7, [`RASK-INTEGRATION.md`](RASK-INTEGRATION.md)).
 
-2. **No dead-letter queue; `maxDeliver=5`.** A genuinely poison message (always `RETRY`, not malformed)
-   is dropped from the *consumer* after 5 deliveries (~8.5 min of backOff) with **no DLQ**. Limits
-   retention keeps it in the *stream*, so the lineage consumer (`deliverPolicy: all`) re-sees it on
-   restart — but an outage longer than the retry window means the event isn't ingested **until a
-   restart**. *Fix:* set a Dapr `deadLetterTopic` + an operator drain, and move to a **durable PULL
-   consumer**.
+2. **No dead-letter queue; `maxDeliver=5` — CODE-COMPLETE FIX SHIPPED 2026-07-12 (opt-in
+   `dapr.resiliency.enabled`, default OFF pending the live kind pass).** The gap as it stood: a
+   genuinely poison message (always `RETRY`, not malformed) was dropped from the *consumer* after 5
+   deliveries (~8.5 min of backOff) with **no DLQ**; limits retention kept it in the *stream*, so the
+   lineage consumer (`deliverPolicy: all`) re-saw it on restart — but an outage longer than the retry
+   window meant the event wasn't ingested **until a restart**. The shipped fix is the Dapr-native SET
+   (they are only correct together — a `deadLetterTopic` without a retry policy dead-letters on the
+   FIRST failure, Dapr's documented default): a **Resiliency CRD** makes the sidecar own delivery
+   retries (exponential 30s→300s, 5 attempts ≈ the old broker schedule), every subscription declares
+   a per-app **`deadLetterTopic`** (`dlq.*`), exhausted deliveries PARK there — ERROR-logged
+   (`dapr_dead_letter_parked`) by each app's `/dlq-event` route, acked, never blind-requeued — and
+   the broker `backOff` moves to a 720s crash-recovery window so it can't race the sidecar's
+   retries. CI render-asserts the set ships together and that flag-OFF stays byte-identical to the
+   chaos-verified behavior. ⚠️ LIVE PASS REQUIRED before flipping on: the durable-consumer interplay
+   of the second (dlq) topic subscription on the same per-app component vs real NATS (runbook 6.5).
+   Still open beyond it: the **durable PULL consumer** move.
 
 3. **Trigger loss on mover death: FIXED (durable cursors, 2026-07-06); lineage full-stream-replay
    remains by design.** The cascade head + movers now pair `deliverPolicy: new` with a `durableName`

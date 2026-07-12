@@ -43,6 +43,12 @@ class MedallionSettings(BaseSettings):
     author: str = Field(default="alice", alias="MEDALLION_AUTHOR")
     sub_topic: str = Field(default="medallion.raw", alias="MEDALLION_SUB_TOPIC")
     pub_topic: str = Field(default="", alias="MEDALLION_PUB_TOPIC")  # "" = terminal stage (gold)
+    # Dead-letter topic for this app's subscriptions (Dapr-native DLQ - docs/RESILIENCE.md gap #2).
+    # "" (default) = no DLQ declared, exactly the pre-existing behavior. MUST ship together with the
+    # chart's Dapr Resiliency retry policy (dapr.resiliency.enabled wires both): a deadLetterTopic
+    # WITHOUT a retry policy dead-letters on the FIRST failure (Dapr documented default), which would
+    # replace the chaos-verified redelivery-with-backoff behavior with instant parking.
+    dlq_topic: str = Field(default="", alias="MEDALLION_DLQ_TOPIC")
 
     # --- Optional FGA gate (ReBAC enforcement) — the mover checks it is AUTHORIZED to produce the target
     # stage before emitting. The silver→gold mover checks `can_promote` (validator-only); the others check

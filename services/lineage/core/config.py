@@ -58,6 +58,12 @@ class LineageSettings(BaseSettings):
     dapr_enabled: bool = Field(default=False, alias="LINEAGE_DAPR_ENABLED")
     dapr_pubsub: str = Field(default="lineage-pubsub", alias="LINEAGE_DAPR_PUBSUB")
     dapr_topic: str = Field(default="lineage.events.v1", alias="LINEAGE_DAPR_TOPIC")
+    # Dead-letter topic for the ingest subscription (Dapr-native DLQ). "" (default) = none — the
+    # pre-existing behavior. Ships together with the chart's Resiliency retry policy (a DLQ without
+    # one dead-letters on the FIRST failure per Dapr's documented default). Lineage's recovery story
+    # stays replay-from-stream (ephemeral deliverPolicy=all consumer); the DLQ adds operator
+    # VISIBILITY for deliveries that exhausted retries, it does not replace the replay.
+    dapr_dlq_topic: str = Field(default="", alias="LINEAGE_DLQ_TOPIC")
     # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<name> on a schedule to
     # back-fill Lance writes whose lineage event was lost (the outbox gap). Empty = the cron route isn't
     # mounted (the /datasets/{name}/reconcile read endpoint is always available regardless).

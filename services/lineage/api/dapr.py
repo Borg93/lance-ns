@@ -12,6 +12,7 @@ after ``app`` exists (the import-order constraint the split must preserve).
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated, Any
 
 from common.dapr_auth import require_dapr_token
@@ -20,6 +21,8 @@ from fastapi import Depends, FastAPI, Request
 
 from lineage.core.config import get_settings
 from lineage.services.consumer import handle_cloud_event
+
+log = logging.getLogger(__name__)
 
 
 async def on_lineage_event(
@@ -35,16 +38,40 @@ async def on_lineage_event(
     return await handle_cloud_event(request.app.state.repository, event)
 
 
+async def on_dead_letter(
+    event: dict[str, Any], _: Annotated[None, Depends(require_dapr_token)]
+) -> dict[str, str]:
+    """Park one dead-lettered ingest delivery: ERROR-log + ack (Dapr-native DLQ, RESILIENCE gap #2).
+
+    No auto-requeue — the delivery already exhausted the sidecar's Resiliency retry schedule, and
+    lineage's real recovery story stays replay-from-stream (the ephemeral deliverPolicy=all consumer
+    re-reads the retained stream on restart); the DLQ adds operator VISIBILITY, not a second path."""
+    log.error(
+        "dapr_dead_letter_parked",
+        extra={"app": "lineage", "event_id": event.get("id") if isinstance(event, dict) else None},
+    )
+    return {"status": "SUCCESS"}
+
+
 def register_dapr(app: FastAPI) -> None:
     """Wire the Dapr subscription onto ``app``.
 
     ``DaprApp(app)`` is always constructed (it adds GET ``/dapr/subscribe``). The subscription itself is
     registered ONLY when Dapr ingest is enabled, so an HTTP-only deployment carries no always-live ingest
     route. Combined with the token guard above, the pubsub component's publisher scopes, and the gateway
-    blocking this route, a forged external event cannot reach the graph."""
+    blocking this route, a forged external event cannot reach the graph. When ``dapr_dlq_topic`` is set
+    (chart: ``dapr.resiliency.enabled``), the subscription declares a Dapr ``deadLetterTopic`` and the
+    parking route is registered — exhausted deliveries become visible instead of vanishing."""
     settings = get_settings()
     dapr_app = DaprApp(app)
     if settings.dapr_enabled:
-        dapr_app.subscribe(pubsub=settings.dapr_pubsub, topic=settings.dapr_topic, route="/lineage-events")(
-            on_lineage_event
-        )
+        dapr_app.subscribe(
+            pubsub=settings.dapr_pubsub,
+            topic=settings.dapr_topic,
+            route="/lineage-events",
+            dead_letter_topic=settings.dapr_dlq_topic or None,
+        )(on_lineage_event)
+        if settings.dapr_dlq_topic:
+            dapr_app.subscribe(
+                pubsub=settings.dapr_pubsub, topic=settings.dapr_dlq_topic, route="/lineage-dlq"
+            )(on_dead_letter)

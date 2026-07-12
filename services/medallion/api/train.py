@@ -93,7 +93,12 @@ def register_train_trigger_route(app: FastAPI, dapr_app: DaprApp | None = None) 
     settings = get_settings()
     dapr_app = dapr_app or DaprApp(app)
 
-    @dapr_app.subscribe(pubsub=settings.pubsub, topic=settings.train_topic, route="/train-trigger")
+    @dapr_app.subscribe(
+        pubsub=settings.pubsub,
+        topic=settings.train_topic,
+        route="/train-trigger",
+        dead_letter_topic=settings.dlq_topic or None,
+    )
     async def on_train_trigger(
         event: dict[str, Any],
         request: Request,

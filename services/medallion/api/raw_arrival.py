@@ -15,16 +15,31 @@ from dapr.ext.fastapi import DaprApp
 from fastapi import Depends, FastAPI
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
+from medallion.api.dlq import register_dlq_route
 from medallion.core.config import get_settings
 from medallion.services.ingest_trigger import handle_raw_arrival
 
 
 def register_raw_arrival_route(app: FastAPI) -> DaprApp:
-    """Wrap ``app`` in a :class:`DaprApp` and register the raw-arrival subscription (the cascade head)."""
+    """Wrap ``app`` in a :class:`DaprApp` and register the raw-arrival subscription (the cascade head).
+
+    Registers the producer's ONE DLQ parking route here (train reuses this ``DaprApp`` — a second
+    registration would duplicate ``/dlq-event``); both producer subscriptions declare the same
+    ``deadLetterTopic`` when configured, so an exhausted head/train trigger parks visibly.
+    """
     settings = get_settings()
     dapr_app = DaprApp(app)
+    if settings.dlq_topic:
+        register_dlq_route(
+            dapr_app, pubsub=settings.pubsub, dlq_topic=settings.dlq_topic, app_label="producer"
+        )
 
-    @dapr_app.subscribe(pubsub=settings.pubsub, topic=settings.lineage_topic, route="/raw-arrival")
+    @dapr_app.subscribe(
+        pubsub=settings.pubsub,
+        topic=settings.lineage_topic,
+        route="/raw-arrival",
+        dead_letter_topic=settings.dlq_topic or None,
+    )
     async def on_raw_arrival(
         event: dict[str, Any],
         dapr: DaprClientDep,

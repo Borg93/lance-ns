@@ -215,6 +215,11 @@ spec:
             # must match the Component name in dapr-component.yaml (both render lance.subPubsub).
             - { name: LINEAGE_DAPR_PUBSUB, value: {{ include "lance.subPubsub" (list $root .Values.services.lineage.daprAppId) | quote }} }
             - { name: LINEAGE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            {{- if .Values.dapr.resiliency.enabled }}
+            # Dapr-native DLQ (ships with the Resiliency CRD): ingest deliveries that exhaust the
+            # sidecar retry schedule park here (visibility only — replay-from-stream stays the recovery).
+            - { name: LINEAGE_DLQ_TOPIC, value: "dlq.lineage.events" }
+            {{- end }}
             # Bound the DaprClient gRPC deadline (the SDK env) — covers the boot-time secret-store fetch.
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }
             # Demo peek router — values-gated (unauthenticated metadata disclosure; prod ships it off).

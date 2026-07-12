@@ -566,6 +566,19 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   above waits on the user's kind session; these four need NO cluster. Ordered by risk: docs first,
 >   deletion-adjacent last. Each batch = its own commit + the full §0 gate + adversarial review.)
 >
+>   📌 **PINNED RULE (user, 2026-07-12): DAPR-FIRST — always fully utilize Dapr features.** Where
+>   Dapr provides a capability, the app must consume it rather than hand-roll: retry/backoff on
+>   delivery = the Resiliency CRD + component backOff (config, never in-handler loops); parking =
+>   deadLetterTopic subscriptions; secrets = the Dapr secret store (sole source); cron = the
+>   binding; ack semantics = SUCCESS/RETRY/DROP. THE ONE sanctioned exception (understood + agreed
+>   2026-07-12): app-side retry (tenacity) is allowed ONLY where the Dapr sidecar/store ITSELF is
+>   the unavailable dependency — the boot-time secret fetch races the sidecar+seed coming up, and
+>   no Dapr feature can retry a call to a Dapr that isn't there yet. Dapr WORKFLOWS remain the
+>   tool for multi-step non-idempotent orchestration (per the python-infrastructure skill's
+>   decision tree); the medallion cascade is deliberately CHOREOGRAPHY (idempotent stages, tokens,
+>   pub/sub) — converting it to workflow orchestration is NOT wanted; revisit only if a genuinely
+>   non-idempotent multi-step flow appears (none exists today).
+>
 >   📌 **PINNED RULE (user, 2026-07-12): only VALUABLE tests.** Every test added must pin a distinct
 >   contract or a probed failure mode — no restating another test at the same layer, no testing
 >   framework defaults. Unit re-asserting integration (or vice versa) is allowed ONLY when the layers
@@ -659,6 +672,26 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   other three services) + chart else-branches; skipVerify sub-item verified already-shipped.
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
+>
+>   **BATCH 18 (added + 🟡 CODE-COMPLETE 2026-07-12) — the Dapr-native resiliency + dead-letter
+>   layer (the audit's medium; RESILIENCE gap #2), flag-gated `dapr.resiliency.enabled` default
+>   OFF.** The SET ships together because it is only correct together (Dapr's documented default:
+>   deadLetterTopic WITHOUT a retry policy dead-letters on the FIRST failure — which would replace
+>   the chaos-verified redelivery behavior with instant parking): (1) Resiliency CRD — the SIDECAR
+>   owns delivery retries, exponential 30s→300s ×5 ≈ the old broker schedule, scoped per subscriber
+>   component; (2) deadLetterTopic on ALL FIVE subscriptions (movers /medallion-event, producer
+>   /raw-arrival + /train-trigger, lineage /lineage-events) via *_DLQ_TOPIC envs the chart sets
+>   only with the flag; per-app dlq.* topics; parking routes /dlq-event + /lineage-dlq ERROR-log
+>   `dapr_dead_letter_parked` + ACK (never blind-requeue), token-guarded like every sidecar route;
+>   (3) broker backOff demoted to a 720s crash-recovery window (> the sidecar's total retry span —
+>   no concurrent duplicate deliveries mid-retry). CI render-gates the set: flag OFF byte-identical
+>   (zero Resiliency/DLQ, 30-300s intact), flag ON all three present AND the old schedule absent.
+>   TESTS (test_dapr_dlq.py, 5): default /dapr/subscribe shape unchanged; deadLetterTopic declared
+>   + parking subscription present when configured (mover AND lineage); parking route ERROR-logs +
+>   returns SUCCESS; forged /dlq-event → 403. Suite 575→580. ✅ DONE WHEN (live, runbook 6.5): the
+>   durable-consumer question answered against real NATS (second dlq-topic subscription on the same
+>   per-app component must not clash with `<appId>-durable`), poison-inject parks visibly, e2e
+>   green with the flag on — THEN consider defaulting it on.
 >
 >   **BATCH 17 (added + ✅ DONE 2026-07-12) — skills/currency verification sweep (user ask) + the
 >   two worthwhile fixes it produced.** (1) LANCE-RAY DIFF: our pin (0.4.2) predates all new main

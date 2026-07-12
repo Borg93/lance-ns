@@ -71,6 +71,11 @@ spec:
             - { name: MEDALLION_PRODUCER_OPERATION, value: {{ .Values.medallion.producer.operation | quote }} }
             - { name: MEDALLION_PRODUCER_AUTHOR, value: {{ .Values.medallion.producer.author | quote }} }
             - { name: MEDALLION_RAW_TOPIC, value: {{ .Values.medallion.producer.rawTopic | quote }} }
+            {{- if .Values.dapr.resiliency.enabled }}
+            # Dapr-native DLQ (ships with the Resiliency CRD): the producer's raw-arrival + train
+            # subscriptions park exhausted deliveries here, ERROR-logged by /dlq-event.
+            - { name: MEDALLION_DLQ_TOPIC, value: "dlq.lance-ray" }
+            {{- end }}
             {{- if .Values.medallion.compute }}
             # Real fake-Ray compute: the producer seeds the raw Lance dataset (so the cascade writes actual
             # versioned data on RustFS). S3 secret follows the catalog's two-tier rule (plaintext only when
@@ -182,6 +187,11 @@ spec:
             - { name: MEDALLION_AUTHOR, value: {{ .author | quote }} }
             - { name: MEDALLION_SUB_TOPIC, value: {{ .subTopic | quote }} }
             - { name: MEDALLION_PUB_TOPIC, value: {{ .pubTopic | quote }} }
+            {{- if $root.Values.dapr.resiliency.enabled }}
+            # Dapr-native DLQ (ships with the Resiliency CRD — see values.yaml dapr.resiliency): retry
+            # exhaustion parks the trigger on this per-app topic, ERROR-logged by /dlq-event.
+            - { name: MEDALLION_DLQ_TOPIC, value: "dlq.{{ .subTopic }}" }
+            {{- end }}
             {{- if $root.Values.medallion.compute }}
             # Real fake-Ray compute: read the upstream stage's Lance dataset, transform, write the downstream
             # one — so the emitted lineage carries the REAL version + rows/bytes and the cascade produces

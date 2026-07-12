@@ -68,9 +68,19 @@ spec:
     # backOff supersedes ackWait for redelivery timing (NATS consumer semantics): its FIRST value is the
     # effective ack window, so it must not undercut the slowest handler (a compute-on mover does real
     # S3 reads+writes) — a 1s first step would concurrently redeliver mid-handling even at 1 replica.
+    {{- if $.Values.dapr.resiliency.enabled }}
+    # Resiliency ON: the SIDECAR owns delivery retries (Resiliency CRD, ~10.5 min total) and parks
+    # exhausted messages on the DLQ — so broker redelivery becomes the CRASH-RECOVERY layer only. Its
+    # first step must exceed the sidecar's total retry span, else the broker would redeliver while the
+    # sidecar still holds the message mid-retry (concurrent duplicate handling).
+    - { name: ackWait, value: "720s" }
+    - { name: maxDeliver, value: "3" }
+    - { name: backOff, value: "720s,720s" }
+    {{- else }}
     - { name: ackWait, value: "30s" }
     - { name: maxDeliver, value: "5" }
     - { name: backOff, value: "30s,60s,120s,300s" }
+    {{- end }}
 scopes:
   - {{ .appId }}
 {{- end }}

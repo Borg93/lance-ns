@@ -15,16 +15,30 @@ from dapr.ext.fastapi import DaprApp
 from fastapi import Depends, FastAPI
 
 from medallion.api.dependencies import DaprClientDep, FgaClientDep, SettingsDep
+from medallion.api.dlq import register_dlq_route
 from medallion.core.config import get_settings
 from medallion.services.transform import handle_stage
 
 
 def register_stage_route(app: FastAPI) -> DaprApp:
-    """Wrap ``app`` in a :class:`DaprApp` and register the mover's stage subscription handler."""
+    """Wrap ``app`` in a :class:`DaprApp` and register the mover's stage subscription handler.
+
+    When ``dlq_topic`` is configured (chart: ``dapr.resiliency.enabled``), the subscription declares
+    a Dapr ``deadLetterTopic`` and the DLQ parking route is registered — a stage trigger that
+    exhausts the sidecar's Resiliency retry schedule is PARKED visibly instead of silently dropped
+    after ``maxDeliver`` (docs/RESILIENCE.md gap #2). Default "" keeps today's exact behavior.
+    """
     settings = get_settings()
     dapr_app = DaprApp(app)
+    if settings.dlq_topic:
+        register_dlq_route(dapr_app, pubsub=settings.pubsub, dlq_topic=settings.dlq_topic, app_label="mover")
 
-    @dapr_app.subscribe(pubsub=settings.pubsub, topic=settings.sub_topic, route="/medallion-event")
+    @dapr_app.subscribe(
+        pubsub=settings.pubsub,
+        topic=settings.sub_topic,
+        route="/medallion-event",
+        dead_letter_topic=settings.dlq_topic or None,
+    )
     async def on_stage(
         event: dict[str, Any],
         dapr: DaprClientDep,

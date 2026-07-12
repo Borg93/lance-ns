@@ -110,6 +110,23 @@ def test_read_op_checks_reader_and_allows(client: TestClient, fake_ns: MagicMock
     assert captured == [{"user": "alice", "relation": "can_get_metadata", "obj": "table:db1$users"}]
 
 
+def test_blob_read_checks_data_reader_and_denies(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: ``GET /v1/table/{id}/blobs`` (the credential-less blob serving path) is a DATA read —
+    the router guard checks ``can_read_data`` (same rung as ``/query``, NOT the writer fallthrough)
+    and a caller without it is 403'd BEFORE the endpoint touches any dataset."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.get(
+        "/v1/table/db1$users/blobs",
+        params={"column": "payload", "row": 0},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 403
+    assert captured == [{"user": "alice", "relation": "can_read_data", "obj": "table:db1$users"}]
+
+
 def test_generic_mutation_checks_writer(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
     """CONTRACT: a non-lifecycle mutation (update) checks ``can_write_data`` (writer rung)."""
     _wire(client)

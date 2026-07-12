@@ -1,16 +1,17 @@
-"""Table data endpoints: Arrow-IPC writes, query, count, update/delete, plans."""
+"""Table data endpoints: Arrow-IPC writes, query, count, update/delete, plans, blob serving."""
 
 from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from typing import Annotated
 
 from common import fga
-from fastapi import APIRouter, Body, Header
+from fastapi import APIRouter, Body, Header, Query
 from fastapi.concurrency import run_in_threadpool
-from fastapi.responses import PlainTextResponse, Response
+from fastapi.responses import PlainTextResponse, Response, StreamingResponse
 from lance_namespace import (
     AnalyzeTableQueryPlanRequest,
     CountTableRowsRequest,
@@ -384,6 +385,95 @@ async def delete_from_table(
         pin_version=response.version,
     )
     return response
+
+
+# A single-range ``bytes=`` header: ``bytes=0-3`` / ``bytes=100-`` / ``bytes=-500``. Multi-range and
+# other units deliberately don't match — RFC 9110 §14.1.1 lets a server ignore a Range it doesn't
+# support, so those fall through to the full 200 rather than a guessy 416.
+_RANGE_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+_OCTET_STREAM = "application/octet-stream"
+
+
+def _parse_range(header: str | None) -> tuple[int | None, int | None] | None:
+    """Parse a single-range ``Range`` header into ``(first, last)`` (both inclusive; ``None`` = open).
+
+    ``bytes=-n`` (suffix) → ``(None, n)``; ``bytes=a-`` → ``(a, None)``; ``bytes=a-b`` → ``(a, b)``.
+    Anything else — malformed, multi-range, non-bytes unit, ``last < first``, the empty ``bytes=-`` —
+    returns ``None``, which the endpoint treats as "no range" (full 200), per RFC 9110's permission
+    to ignore unsupported Range headers. Pure, so it is unit-testable without a dataset.
+    """
+    if not header:
+        return None
+    match = _RANGE_RE.match(header.strip())
+    if not match:
+        return None
+    first, last = match.group(1), match.group(2)
+    if not first and not last:
+        return None
+    if not first:
+        return None, int(last)
+    if not last:
+        return int(first), None
+    lo, hi = int(first), int(last)
+    return None if hi < lo else (lo, hi)
+
+
+@router.get("/{id}/blobs")
+async def read_table_blob(
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    column: Annotated[str, Query(min_length=1)],
+    row: Annotated[int, Query(ge=0)],
+    version: Annotated[int | None, Query(ge=1)] = None,
+    range_header: Annotated[str | None, Header(alias="Range")] = None,
+    if_range: Annotated[str | None, Header(alias="If-Range")] = None,
+) -> Response:
+    """Serve one blob payload over plain HTTP — the credential-less consumer path (§9 P1).
+
+    A browser/notebook/service with NO storage credentials fetches blob bytes straight from the
+    catalog: ``GET /v1/table/{id}/blobs?column=payload&row=3[&version=N]``. ``Range: bytes=…`` is
+    honoured (206 + ``Content-Range``), an unsatisfiable range gets the RFC 416 + ``bytes */size``,
+    and every response carries ``Accept-Ranges: bytes`` plus a strong ``ETag``
+    (``"<version>-<column>-<row>"``) so clients can resume safely: an ``If-Range`` that no longer
+    matches (the table was overwritten mid-download) downgrades the range to a full 200 instead of
+    silently splicing bytes from two incarnations. The body is STREAMED in bounded windows (each a
+    lazy ``BlobFile.read_range``), so a multi-GB payload never buffers in the catalog — the
+    read-side mirror of the write-side body-limit OOM guard. ``row`` is the POSITIONAL index at the
+    served version (pin ``version`` for a stable address across overwrites).
+
+    Authz: the router-level ``authorize`` maps the ``blobs`` suffix to reader-tier ``can_read_data``
+    (same rung as ``/query``) — this endpoint serves DATA, so credential-vending tiers apply
+    unchanged; it just removes the need for the credentials themselves.
+    """
+    segments = parse_identifier(id, settings.delimiter)
+    blob = await run_in_threadpool(
+        dataplane.read_blob,
+        ns,
+        so,
+        segments,
+        column=column,
+        row=row,
+        version=version,
+        range_spec=_parse_range(range_header),
+        if_range=if_range,
+    )
+    headers = {"Accept-Ranges": "bytes", "ETag": blob.etag}
+    if not blob.satisfiable:
+        headers["Content-Range"] = f"bytes */{blob.size}"
+        return Response(status_code=416, headers=headers)
+    headers["Content-Length"] = str(blob.length)
+    if blob.ranged:
+        headers["Content-Range"] = f"bytes {blob.start}-{blob.end}/{blob.size}"
+    # StreamingResponse iterates the sync generator in a threadpool (starlette iterate_in_threadpool),
+    # so each bounded read_range window runs off the event loop and only one window is ever in memory.
+    return StreamingResponse(
+        blob.chunks(),
+        status_code=206 if blob.ranged else 200,
+        media_type=_OCTET_STREAM,
+        headers=headers,
+    )
 
 
 @router.post("/{id}/query")

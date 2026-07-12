@@ -654,6 +654,19 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 13 (added + ✅ DONE 2026-07-12) — the P1 credential-less blob serving path.**
+>   `GET /v1/table/{id}/blobs?column=&row=[&version=]` + `dataplane.read_blob`: STREAMED in bounded
+>   8 MiB `read_range` windows (never buffers a payload), full RFC 9110 Range semantics (200/206/
+>   416, `Content-Range`, `Accept-Ranges`, strong `ETag` + `If-Range` so a resume across an
+>   overwrite can't splice two incarnations), every probed pylance failure shape mapped to a
+>   precise 4xx, and zero-length/null payloads served as empty 200s (probed: pylance 8.0.0 stores
+>   null as size-0 — same row state). Reader-tier authz via the router's suffix map (`blobs` ∈
+>   `_DATA_READ_ACTIONS`), pinned at unit AND integration (end-to-end 403). Adversarial review
+>   (fix-first verdict) drove the streaming upgrade, the empty-payload fix, the tightened
+>   version-error match, and If-Range — all five findings fixed same-batch. Presigned URLs
+>   deliberately NOT offered (a signed URL bypasses FGA for its TTL; the governed proxy doesn't).
+>   42 new tests, suite 526→568, CI-exact gate green. Details on the flipped §9 P1 line.
+>
 >   **BATCH 12 (added + ✅ DONE 2026-07-11) — Turborepo workspace (rask microfrontend shape) + the
 >   missing UI features.** `frontend/` → bun workspace with turbo 2.10.4 (user-pinned version,
 >   verified on npm): `apps/web` (history-preserving git mv) + `packages/ui` (@lance/ui — Chip +
@@ -989,8 +1002,8 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   CNI) restricts ingress to `lance-ray` to in-release pods. `services/medallion/api/produce.py`
 - 🟡 **P0 Multimodal (blob_v2) — BACKEND ROUND-TRIP COMPLETE (P0→P4, live-verified); glyph
   truth'd up 2026-07-12 (the header said ⛔ while the body said complete — the todo was the stale
-  artifact again). OPEN sub-items only: the P1 credential-less serving path (ranged blob read /
-  presigned URL endpoint) + the P2s below.** Original context: the format + our pinned pylance>=7.0.0 fully support it
+  artifact again). P1 credential-less serving path SHIPPED 2026-07-12 (Batch 13). OPEN sub-items
+  only: the P2s below + the lifecycle remainder.** Original context: the format + our pinned pylance>=7.0.0 fully support it
   (`lance/blob.py` BlobColumn, inline-when-small / pointer-when-large, ranged reads; verified in the installed
   package + lance_docs/{guide,file_format,ray}.md) and the direct write path (vended creds → RustFS) is open —
   but lance-ns has NEVER exercised a blob column. Dapr is uninvolved by design (events carry pointers, never
@@ -1011,7 +1024,7 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
       `lance.blob.v2`→`blob`, FixedSizeList→`array<elem>`, binary→`binary` (shared `common.schema`).
       Live-verified in AGE: a media WROTE edge shows `payload:blob, thumbnail:binary, embedding:array<float>`
       (and the real cascade's `silver$features` now carries its derived schema too).
-    §9 backend round-trip (P0→P4) COMPLETE. Remaining: optional ranged blob-read serving endpoint (P2).
+    §9 backend round-trip (P0→P4) COMPLETE; the ranged blob-read serving endpoint shipped in Batch 13 (below).
   - ✅ P0 guard the tabular path — DONE (2026-07-04): a pure-ASGI `BodySizeLimitMiddleware`
     (`services/catalog/api/body_limit.py`, cap `LANCE_MAX_BODY_BYTES` default 256 MiB) rejects an oversized
     Arrow-IPC body with a problem+json **413** BEFORE it is buffered — both the fast Content-Length reject
@@ -1019,8 +1032,36 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     path (claim-check). Live-verified (2000 B over a 1000 cap → 413) + `tests/unit/test_body_limit.py`.
     Complement (2026 layered best-practice): also cap at the ingress/Gateway-API/mesh when one fronts the
     catalog — the app guard covers in-cluster ClusterIP callers that bypass the edge.
-  - ⛔ P1 serving path for credential-less consumers (frontend/browser): catalog endpoint doing a ranged blob
-    read or presigned URL from a blob column — does not exist.
+  - ✅ P1 serving path for credential-less consumers — **DONE 2026-07-12 (Batch 13):**
+    `GET /v1/table/{id}/blobs?column=&row=[&version=]` (`services/catalog/api/v1/endpoints/data.py`)
+    serves blob bytes over plain HTTP, **STREAMED in bounded 8 MiB `BlobFile.read_range` windows via
+    `StreamingResponse`** (adversarial review upgraded the first buffered cut — the catalog never
+    holds a multi-GB payload; the read-side mirror of the body-limit OOM guard), with full RFC 9110
+    Range support: `bytes=a-b|a-|-n` → 206 + `Content-Range`; no Range → 200 + `Content-Length`;
+    start ≥ size → 416 `bytes */size`; malformed/multi-range ignored → 200 (RFC-permitted). Every
+    response carries a strong `ETag` (`"<version>-<column>-<row>"`) and **`If-Range` is honored** —
+    a stale validator downgrades a resume to a full 200 instead of splicing bytes from two
+    incarnations (review finding). `dataplane.read_blob` maps every probed pylance failure shape to
+    a precise 4xx: unknown column → 404 `TableColumnNotFoundError`, non-blob column → 400, row OOB →
+    400 (the raw panic was a row-address dump), missing version manifest → 404
+    `TableVersionNotFoundError` and a declared-only/dataset-less location → 404 `TableNotFoundError`
+    (both bare ValueErrors, told apart by the manifest-path shape — review tightened the first
+    substring match). **Zero-length payloads serve as an empty 200** (review caught the first cut
+    400-ing them as "null"; the fix probe showed pylance 8.0.0 stores a NULL blob as a size-0
+    descriptor — null and `b""` are the SAME row state, `take_blobs` returns `[]` for both); any
+    Range against one is 416. `?version=` pins the read across overwrites; `row` is positional at
+    the served version (delete-shift semantics test-pinned). Authz: router-level `authorize` maps
+    the `blobs` suffix to reader-tier `can_read_data` (added to `_DATA_READ_ACTIONS`) — pinned by
+    `test_blobs_suffix_is_reader_tier` (unit) AND `test_blob_read_checks_data_reader_and_denies`
+    (integration: 403 end-to-end through the router guard, relation captured). Tests (42 new, suite
+    526→568): `tests/unit/test_blob_serve.py` (real dir ns + real pylance — full/ranged/suffix/
+    clamped/unsatisfiable byte-compared, chunk-loop math pinned at window 4 → `4+4+3`, empty/null
+    200s, all 4xx guards incl. declared-only, version+etag pinning, If-Range both ways, positional-
+    after-delete, `_parse_range` table) + `tests/integration/test_blob_serve_api.py` (HTTP contract:
+    200/206/416/400/404/422, `Content-Range`/`Accept-Ranges`/`ETag` headers, empty payload
+    `Content-Length: 0`, version param over HTTP incl. 404 problem+json + `version=0` → 422,
+    If-Range stale→200/fresh→206). Presigned-URL variant NOT built — the governed ranged proxy is
+    strictly safer (no URL that bypasses FGA for its TTL); revisit only if a CDN/offload need appears.
   - 🟡 P1 blob-pointer lifecycle — **the models-lane HALF SHIPPED 2026-07-11 (Batch 4):**
     `scripts/model_artifact_janitor.py` + 7 unit tests. Per-model sweep: registry read at ONE
     pinned version → referenced-token set from `meta`; tokens = first-level prefixes under the

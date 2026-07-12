@@ -101,6 +101,9 @@ stacks). Governed mode needs the media grants — `scripts/seed_medallion_fga.sh
 lance-ray 0.4.2 reads blob BYTES correctly (its datasource reconstructs them via `take_blobs`), but
 exposes blob-v2 columns as plain LargeBinary — so until the stage job re-attaches `blob_field` on
 write and ships the deriver (+Pillow) in the ray image, blob upstreams take the in-process path.
+Consumers with NO storage credentials (browser, notebook) fetch the blob bytes back through the
+catalog: `GET /v1/table/{id}/blobs?column=payload&row=N[&version=]`, Range-capable (206/416) and
+governed at reader-tier `can_read_data` — see `docs/FEATURE-GAP.md` §1 (serving) for details.
 
 **`/produce` auth (the cascade head).** `/produce` is a direct operator trigger (not sidecar-delivered), so
 it is guarded by `require_dapr_token` (the shared `APP_API_TOKEN`): **no-op in dev** (unset token — `make

@@ -36,6 +36,20 @@ One real `POST /v1/table/<id>/merge_insert` (catalog image must be rolled).
 **ASSERT:** a BTREE index on the merge key appears (`/indices` or `describe_indices`), the
 documented extra version bump occurs, and a second merge_insert does NOT re-create the index.
 
+## 3b · Blob serving path (Batch 13 — catalog image must be rolled)
+
+Against the media table the cascade already wrote (`bronze-media$objects`, blob column `payload`):
+
+```bash
+curl -sS -D- -o /tmp/full.bin "http://localhost:8000/v1/table/bronze-media\$objects/blobs?column=payload&row=0"
+curl -sS -D- -o /tmp/win.bin -H "Range: bytes=0-3" \
+  "http://localhost:8000/v1/table/bronze-media\$objects/blobs?column=payload&row=0"
+```
+**ASSERT:** first response is `200` with `Accept-Ranges: bytes` and `/tmp/full.bin` is a valid PNG
+(`file /tmp/full.bin`); second is `206` with `Content-Range: bytes 0-3/<size>` and `/tmp/win.bin` is
+exactly the 4-byte PNG magic prefix (`\x89PNG`). With FGA on, a principal WITHOUT `can_read_data` on
+the table gets `403` on the same URL (reader tier, same rung as `/query`).
+
 ## 4 · The train drive (#115, end to end)
 
 ```bash

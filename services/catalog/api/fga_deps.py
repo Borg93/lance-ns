@@ -56,7 +56,9 @@ _FGA_TYPE: dict[str, str] = {
 # read metadata — split so list_objects(can_read_data) is meaningful (both are reader).
 # ``credentials`` (vending) is a DATA read at minimum — the router guard requires can_read_data; the
 # endpoint additionally requires can_write_data for a write-tier vend.
-_DATA_READ_ACTIONS = frozenset({"query", "count_rows", "credentials"})
+# ``blobs`` (GET /v1/table/{id}/blobs — the credential-less blob serving path) returns raw payload
+# bytes, so it is a DATA read exactly like ``query``.
+_DATA_READ_ACTIONS = frozenset({"query", "count_rows", "credentials", "blobs"})
 _META_READ_ACTIONS = frozenset(
     {"describe", "exists", "list", "stats", "explain_plan", "analyze_plan", "version"}
 )

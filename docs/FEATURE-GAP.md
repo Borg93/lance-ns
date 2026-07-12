@@ -17,6 +17,11 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
   column needs file format 2.2, which the native create pins at 2.1 and rejects, so it routes to a direct
   `write_dataset(data_storage_version="2.2")` (declare → write, with rollback-on-failure); every other schema
   delegates to native. Client `storage_options` are still not accepted (the catalog vends storage access).
+  **Serving (2026-07-12, Batch 13)**: `GET /v1/table/{id}/blobs?column=&row=[&version=]` streams blob bytes
+  to credential-less consumers (browser/notebook) with RFC 9110 Range support — a `Range: bytes=…` request
+  reads ONLY the window from storage via the lazy `BlobFile` (206 + `Content-Range`; 416 when unsatisfiable)
+  — governed at reader-tier `can_read_data` like `/query`. Deliberately a governed proxy, not presigned URLs
+  (a signed URL bypasses ReBAC for its TTL).
   **Blob modes**: managed/inline/packed/dedicated (bytes copied in) always work; **external-pointer**
   (`Blob.from_uri` outside the dataset root) is gated behind `vending.allowExternalBlobs` (default off — an
   external object's lifecycle is outside Lance's version-aware GC), and rejected with a clean 400 when off.

@@ -90,28 +90,31 @@ jobs:
           grep -q "runAsUser: 999" /tmp/sec.yaml   # age-postgres context rendered
           grep -q "runAsUser: 65532" /tmp/sec.yaml # wait-age init hardening rendered (PSA prereq)
 
-      # Render-and-grep the OPT-IN Dapr resiliency + dead-letter layer (Batch 18, same discipline):
-      # flag OFF must render byte-identical pre-existing pubsub semantics (no Resiliency CRD, no DLQ
-      # envs, the chaos-verified 30-300s broker backOff); flag ON must ship the SET together — the
-      # Resiliency CRD (sidecar-owned retries), the *_DLQ_TOPIC envs (deadLetterTopic subscriptions),
-      # and the crash-recovery broker backOff (720s first step > the sidecar's total retry span).
-      # A deadLetterTopic WITHOUT the retry policy dead-letters on the FIRST failure (Dapr default) —
-      # this gate makes shipping one without the others impossible.
-      - name: Helm render dapr resiliency + DLQ layer (flag on) + invariants
+      # Render-and-grep the Dapr resiliency + dead-letter layer (Batch 18; DEFAULT ON per the
+      # Dapr-first rule): the default render must ship the SET together — the Resiliency CRD
+      # (sidecar-owned retries), the *_DLQ_TOPIC envs (deadLetterTopic subscriptions), the DLQ
+      # stream (a parking publish with no stream FAILS — Dapr does not auto-create streams), and
+      # the crash-recovery broker backOff (720s first step > the sidecar's total retry span).
+      # A deadLetterTopic WITHOUT the retry policy dead-letters on the FIRST failure (Dapr default)
+      # — this gate makes shipping one without the others impossible. The escape hatch
+      # (enabled=false) must restore the exact chaos-verified broker-only behavior.
+      - name: Helm render dapr resiliency + DLQ layer (default on) + invariants
         run: |
           set -euo pipefail
-          off=$(helm template chart | grep -c "kind: Resiliency" || true)
-          [ "$off" = "0" ] || { echo "flag OFF must render zero Resiliency CRDs, got $off"; exit 1; }
-          offdlq=$(helm template chart | grep -c "DLQ_TOPIC" || true)
-          [ "$offdlq" = "0" ] || { echo "flag OFF must render zero DLQ envs, got $offdlq"; exit 1; }
-          helm template chart | grep -q '30s,60s,120s,300s'   # chaos-verified schedule intact
-          helm template chart --set dapr.resiliency.enabled=true > /tmp/resil.yaml
+          helm template chart > /tmp/resil.yaml
           grep -q "kind: Resiliency" /tmp/resil.yaml
           grep -q "pubsubDeliveryRetry" /tmp/resil.yaml
           dlq=$(grep -c "DLQ_TOPIC" /tmp/resil.yaml || true)
           [ "$dlq" -ge 3 ] || { echo "expected >=3 DLQ envs (lineage+producer+movers), got $dlq"; exit 1; }
+          grep -q '"dlq.>"' /tmp/resil.yaml                 # the DLQ stream is provisioned
           grep -q "720s,720s" /tmp/resil.yaml               # broker demoted to crash recovery
           ! grep -q "30s,60s,120s,300s" /tmp/resil.yaml     # never BOTH retry owners at once
+          helm template chart --set dapr.resiliency.enabled=false > /tmp/legacy.yaml
+          off=$(grep -c "kind: Resiliency" /tmp/legacy.yaml || true)
+          [ "$off" = "0" ] || { echo "escape hatch must render zero Resiliency CRDs, got $off"; exit 1; }
+          offdlq=$(grep -c "DLQ_TOPIC" /tmp/legacy.yaml || true)
+          [ "$offdlq" = "0" ] || { echo "escape hatch must render zero DLQ envs, got $offdlq"; exit 1; }
+          grep -q '30s,60s,120s,300s' /tmp/legacy.yaml      # chaos-verified schedule restored
 
       # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
       # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.

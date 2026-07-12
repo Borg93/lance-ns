@@ -97,24 +97,25 @@ In the audit's order, one flag at a time, re-asserting pods Ready after each:
 4. ONLY then: `kubectl label ns <ns> pod-security.kubernetes.io/enforce=baseline` (soak) →
    `=restricted` — the wait-age init containers are now compliant, so nothing should be rejected.
 
-## 6.5 · Dapr resiliency + DLQ flip (Batch 18 — the ONE live question the code can't answer)
+## 6.5 · Dapr resiliency + DLQ (Batch 18 — DEFAULT ON; verify the deployed default)
 
-```bash
-helm upgrade <release> chart --reuse-values --set dapr.resiliency.enabled=true
-# rollout-restart the subscriber pods so sidecars re-read /dapr/subscribe
-kubectl rollout restart deploy -l app.kubernetes.io/instance=<release>
-```
+Nothing to flip — the layer ships enabled (the durable-consumer question was answered from the
+component source: consumer names scope per stream, the dlq.* topics live on their own DLQ stream).
+After `helm upgrade` + a rollout restart of the subscriber pods:
+
 **ASSERT (in order):**
-1. `kubectl get resiliency` shows `<release>-pubsub-resiliency`; subscriber pods carry `*_DLQ_TOPIC` envs.
-2. **The durable-consumer question:** after restart, `nats consumer ls` (or mover logs) shows the
-   main durable consumers re-attached with NO "consumer name already in use" errors — the second
-   (dlq) topic subscription on the same per-app component must not clash with `<appId>-durable`.
-   If it clashes, STOP: file it — the fix is a second per-app component for the DLQ topic.
+1. `kubectl get resiliency` shows `<release>-pubsub-resiliency`; subscriber pods carry `*_DLQ_TOPIC`
+   envs; `nats stream ls` shows the `DLQ` stream (subjects `dlq.>`) alongside
+   LINEAGE/MEDALLION/TRAINING.
+2. Sanity (expected-pass): main durable consumers re-attach after restart with no
+   "consumer name already in use" errors — per-stream consumer scoping proven live.
 3. Poison-inject: publish a stage trigger with a bogus payload the mover always RETRYs (or scale AGE
    to 0 and fire one event). Watch the sidecar retry ~5 times over ~7.5 min, then the app's
    `/dlq-event` log shows `dapr_dead_letter_parked` (ERROR) with the token — the message is PARKED,
    not silently gone, and the cascade continues for other messages.
-4. Normal traffic still flows: `make e2e-medallion` green with the flag on.
+4. Normal traffic still flows: `make e2e-medallion` green on the default values.
+5. Escape hatch (optional): `--set dapr.resiliency.enabled=false` restores the exact pre-existing
+   broker-only redelivery (30-300s backOff, no DLQ) — the chaos-verified baseline.
 
 ## 7 · Chart values passthrough for train (optional tidy)
 

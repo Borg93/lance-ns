@@ -673,9 +673,19 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
->   **BATCH 18 (added + 🟡 CODE-COMPLETE 2026-07-12) — the Dapr-native resiliency + dead-letter
->   layer (the audit's medium; RESILIENCE gap #2), flag-gated `dapr.resiliency.enabled` default
->   OFF.** The SET ships together because it is only correct together (Dapr's documented default:
+>   **BATCH 18 (added + ✅ DONE 2026-07-12, DEFAULT ON same day — "fix dapr first") — the
+>   Dapr-native resiliency + dead-letter layer (the audit's medium; RESILIENCE gap #2),
+>   `dapr.resiliency.enabled` DEFAULT TRUE (`false` = the exact chaos-verified broker-only
+>   baseline).** The follow-up hardening that flipped the default: (a) the once-"live-only"
+>   durable-consumer question was ANSWERED FROM SOURCE — components-contrib jetstream.go applies
+>   `durableName` AS-IS per subscription, and NATS scopes consumer names PER STREAM, so the dlq.*
+>   subscriptions can't clash with `<appId>-durable` because (b) a dedicated **DLQ stream**
+>   (`dlq.>`) was added to nats-stream-job — which also fixed a REAL Batch-18 bug the source read
+>   exposed: Dapr does NOT auto-create streams, so the parking publish itself would have FAILED
+>   against the unprovisioned dlq.* subjects (silently un-parking the message). Precedent already
+>   live: the producer runs two same-durable subscriptions across two streams (LINEAGE+TRAINING).
+>   CI gate rewritten for default-on (+ DLQ-stream grep + escape-hatch restores 30-300s). Live
+>   remainder (runbook 6.5): the poison-inject behavioral assert only. The SET ships together because it is only correct together (Dapr's documented default:
 >   deadLetterTopic WITHOUT a retry policy dead-letters on the FIRST failure — which would replace
 >   the chaos-verified redelivery behavior with instant parking): (1) Resiliency CRD — the SIDECAR
 >   owns delivery retries, exponential 30s→300s ×5 ≈ the old broker schedule, scoped per subscriber

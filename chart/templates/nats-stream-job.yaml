@@ -50,4 +50,11 @@ spec:
               add_if_missing LINEAGE "lineage.events.>"
               add_if_missing MEDALLION "medallion.>"
               add_if_missing TRAINING "training.>"
+              # DLQ parks dead-lettered deliveries (dapr.resiliency — the sidecar publishes to dlq.*
+              # after retry exhaustion). Its OWN stream for two load-bearing reasons: Dapr does NOT
+              # auto-create streams (a parking publish with no stream FAILS, silently un-parking the
+              # message), and NATS scopes consumer names PER STREAM — the dlq.* subscriptions reuse
+              # each app's durableName, which only avoids clashing with the app's main consumer
+              # because the two live on different streams.
+              add_if_missing DLQ "dlq.>"
 {{- end }}

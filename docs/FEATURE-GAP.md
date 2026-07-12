@@ -44,21 +44,40 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 
 ## 2. vs Lakekeeper (Iceberg REST catalog)
 
-We govern a **Lance** lakehouse (single-writer directory namespace, immutable versions + native time-travel),
-not Iceberg — so many Lakekeeper features are structurally N/A.
+> 🔄 **Currency check 2026-07-12** (cloned v0.13.1 + main@2026-07-11, CHANGELOG v0.12.0→HEAD read):
+> the two genuinely-missing verdicts below (multi-warehouse, views/MVs) and "no lineage at all"
+> REMAIN accurate — but the framing changed materially: **Lakekeeper 0.13.0 (2026-06-30) now
+> catalogs LANCE tables directly** via its Generic Table API (#1673): per-table credential vending,
+> soft-delete/undrop, a dedicated OpenFGA object type with 16 per-action permissions, Console UI,
+> and a pylakekeeper client. It is however **metadata-pointer-only by its own docs**
+> (generic-tables.md): *no commit coordination, no schema enforcement*, no data plane (no
+> insert/query/merge, no version/tag/branch ops, no schema evolution), statistics free-form
+> informational — and still zero lineage. So "they do Iceberg, we do Lance → structurally N/A" is
+> DEAD as a frame; the real position is: **Lakekeeper can now GOVERN Lance pointers; lance-ns
+> OPERATES a Lance lakehouse** (full data plane §1 + versioned lineage + reconcile). Two phrasing
+> softenings applied below per the same check: their OSS authz gained nested roles (+ Cedar in the
+> paid tier), and their vending gained SSE-KMS + remote signing + Lance-table vending — so
+> "vending ahead" is now "on par", and "ReBAC exceeds their roles" is toned to "finer-grained in
+> the data path".
+
+We govern a **Lance** lakehouse (single-writer directory namespace, immutable versions + native time-travel).
+Many Iceberg-specific Lakekeeper features remain N/A — but see the currency note: Lance-pointer
+governance itself no longer is.
 
 | Capability | Us | Verdict |
 |-----------|-----|---------|
 | Multi-warehouse data plane | FGA **models** team→project→warehouse→namespace→table, but the runtime binds ONE `LANCE_REST_ROOT` bucket | **Genuinely missing** — valuable only for multi-tenant SaaS (needs a per-warehouse namespace-backend router). N/A for single-org. |
 | Control-plane management API | Declarative config (env + Helm + FGA at boot); Lakekeeper-style **read-only maintenance mode** built | Missing but low-value given GitOps |
 | Soft-delete / undrop | `DeregisterTable` (`.lance-deregistered` marker) + `RestoreTable` + version time-travel | **Have — arguably stronger**; only a timed-expiration queue is N/A-by-design |
-| User/role admin API | External OIDC (Dex) + OpenFGA tuples seeded on create + `.localbin/fga` | Missing *API*, not *capability* (ReBAC exceeds Lakekeeper's roles) |
+| User/role admin API | External OIDC (Dex) + OpenFGA tuples seeded on create + `.localbin/fga` | Missing *API*, not *capability* (our ReBAC is finer-grained IN THE DATA PATH; their OSS now has nested roles + admission gates, Cedar in the paid tier — 2026-07-12) |
 | Task/job queue | Separate `compaction` service + Dapr/NATS JetStream | Reasonable split; a unified maintenance scheduler is missing |
-| Storage-profile + credential vending | ModeB / Static / STS / **WebIdentity** with per-table session policies (`core/vending.py`) | **Have — on par or ahead**; multiple storage profiles missing (only matters with multi-warehouse) |
+| Storage-profile + credential vending | ModeB / Static / STS / **WebIdentity** with per-table session policies (`core/vending.py`) | **Have — on par** (2026-07-12: they added SSE-KMS vending + Iceberg remote signing + vending for Lance generic tables; we have no KMS/signing equivalent); multiple storage profiles missing (only matters with multi-warehouse) |
 | Table / partition statistics | `GetTableStats` (Lance `total_bytes`/`num_rows`/fragment stats) + lineage `outputStatistics` | **Have (table)**; partition stats **N/A** — Lance clusters, doesn't partition |
 | Views / materialized views | Endpoints exist → native 501 | **Genuinely missing + valuable**, but a **native-Lance gap** (`base_objects` is "reserved for future view deps"), not ours to fill yet. The medallion gold layer is our MV equivalent today. |
 
-**Net:** genuinely-missing-and-valuable = multi-warehouse/multi-storage-profile (multi-tenant only) + working views/MVs (blocked on native Lance). Everything else is present-or-better or N/A-by-design. And Lakekeeper has **no lineage at all**.
+| **Lance table support** (NEW row, 2026-07-12) | full data plane (§1): Arrow-IPC write/query, versions/tags/branches, schema evolution, blob-v2, commit-level lineage + storage reconcile | **Lakekeeper 0.13 governs Lance as METADATA POINTERS only** (vending + soft-delete + FGA + UI; explicitly no commit coordination / schema enforcement / data plane). Complementary more than competitive today — and a possible future interop: registering our tables as their generic pointers would give a shared org catalog without ceding the data plane. |
+
+**Net (re-affirmed 2026-07-12 against v0.13.1):** genuinely-missing-and-valuable = multi-warehouse/multi-storage-profile (multi-tenant only) + working views/MVs (blocked on native Lance). Everything else is present-or-better or N/A-by-design. Lakekeeper still has **no lineage at all** — and its new Lance support is governance-of-pointers, not operation-of-a-lakehouse.
 
 ## 3. vs Marquez (OpenLineage reference server)
 

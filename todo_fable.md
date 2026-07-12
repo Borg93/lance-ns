@@ -667,8 +667,10 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   workspace-lib component never fired under the app's event delegation, so SearchBar's debounce
 >   is $effect-driven with the reason documented in the component. Gates: turbo check+test 3/3
 >   tasks green (svelte-check 0/0, bun 15+2), Playwright 4/4, production build via turbo emits
->   apps/web/build/index.js. LIVE residual (§7a): rebuild the web image once to prove the
->   dockerfile's workspace build on a real docker daemon (this sandbox has none).
+>   apps/web/build/index.js. PROVEN IN CI (run 29181903865 fully green — the reshaped frontend
+>   job's first run: workspace install, turbo check+test over apps AND packages, Playwright 4/4).
+>   LIVE residual (§7a): rebuild the web image once to prove the dockerfile's workspace build on
+>   a real docker daemon (this sandbox has none).
 >
 >   **BATCH 8 (added + ✅ DONE 2026-07-11) — externalization leftovers closed by VERIFICATION,
 >   not code.** Fact-check-first (the Batch 1 lesson, again vindicated): observability-s3-behind-
@@ -985,7 +987,10 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   `tests/unit/test_produce_auth.py` (403 on missing/wrong token). (2) a gated `NetworkPolicy`
   (`chart/templates/network-policy.yaml`, `networkPolicy.enabled`, default off — needs a policy-enforcing
   CNI) restricts ingress to `lance-ray` to in-release pods. `services/medallion/api/produce.py`
-- ⛔ **P0 Multimodal (blob_v2) — MULTIMODAL FIRST.** The format + our pinned pylance>=7.0.0 fully support it
+- 🟡 **P0 Multimodal (blob_v2) — BACKEND ROUND-TRIP COMPLETE (P0→P4, live-verified); glyph
+  truth'd up 2026-07-12 (the header said ⛔ while the body said complete — the todo was the stale
+  artifact again). OPEN sub-items only: the P1 credential-less serving path (ranged blob read /
+  presigned URL endpoint) + the P2s below.** Original context: the format + our pinned pylance>=7.0.0 fully support it
   (`lance/blob.py` BlobColumn, inline-when-small / pointer-when-large, ranged reads; verified in the installed
   package + lance_docs/{guide,file_format,ray}.md) and the direct write path (vended creds → RustFS) is open —
   but lance-ns has NEVER exercised a blob column. Dapr is uninvolved by design (events carry pointers, never
@@ -1081,6 +1086,26 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   `chart/values.yaml:~180` still claims otherwise, fix it. Still open: at merge switch to rask’s
   RustFS-operator Tenant + CNPG-backed AGE. Prove “helm install from zero” fully reproducible
   (FGA seeds, OpenBao seeding, dex clients are still script-manual); backups exist but gated off.
+- 🟡 **MFE follow-ups (Batch 12 leftovers — user: "remember to fix the mfe stuff", 2026-07-12).**
+  The workspace shape is landed + CI-proven; what remains to be FULLY rask-similar:
+  (a) ⛔ **exact-convention alignment needs the rask repo visible** — package naming (@lance/ui vs
+  their scheme), their turbo.json task names/caching, shared config packages (tsconfig/eslint
+  presets as workspace packages), runtime composition (separate deploys behind Traefik vs a shell
+  app). BLOCKED on: add the rask repo to a session (it is not in list_repos under any obvious
+  name) or paste its root package.json + turbo.json + one app/package manifest.
+  (b) ⛔ extract `StatusBoard` (and the attachment helpers it needs) into @lance/ui — deferred in
+  Batch 12 because it imports app-local `attachments.ts`/`types.ts`; the lib needs either its own
+  copy of the tiny attachment helpers or structural prop types (keep the transport-agnostic test
+  green either way).
+  (c) ⛔ shared `packages/config` (tsconfig base + prettier/eslint) so a second app (`apps/*`)
+  starts from presets instead of copying apps/web's configs.
+  (d) 📌 pinned gotcha for all future lib components: DOM event handlers on workspace-lib
+  components did NOT fire under the host app's Svelte 5 event delegation (Batch 12, proven with a
+  console-capture spec) — lib components react to bound state via $effect, never rely on
+  delegated DOM handlers; documented in SearchBar.svelte.
+  ✅ DONE WHEN: (b)+(c) land with the existing gates (turbo check/test, transport-agnosticism test
+  extended to the new components, Playwright still 4/4); (a) lands as a diff-and-adjust batch once
+  rask is visible.
 - 🟡 **P1 Search — TIER 1 SHIPPED 2026-07-11 (Batch 11): governed `/search?q=` over the discovery
   estate.** Case-insensitive substring across dataset NAMES, NAMESPACES, TAGS, and the CURRENT
   column inventory (HAS_COLUMN-scoped, so GC'd columns don't resurrect via search); each hit
@@ -1128,6 +1153,12 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   `lance_docs/namespace.md:3080`; check maturity in our 0.9 pin) as the native alternative FIRST. Firnflow's
   semantic (cosine-threshold approximate-reuse) cache = rejected — approximate answers cut against the
   strict-fidelity posture, and no consumer exists.
+- 📌 **Competitive watch (2026-07-12, Lakekeeper currency check v0.13.1):** Lakekeeper now
+  catalogs LANCE tables (Generic Table API, 0.13.0) — metadata-pointer-only (their docs: no commit
+  coordination, no schema enforcement, no data plane, no lineage). Verdicts in FEATURE-GAP.md §2
+  re-affirmed + re-framed (currency banner added; vending softened to on-par). Possible future
+  interop, NOT current work: register our tables as their generic pointers for a shared org
+  catalog while we keep the data plane. Re-check at their 0.14/0.15.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);
   rask has no tenancy/operator of its own — this stays ours. FGA-as-registry + declarative seeding is the
   interim.

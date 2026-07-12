@@ -16,7 +16,7 @@ from fastapi import APIRouter, Query
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.api.fga_deps import FilterDep, governed
-from lineage.schemas import DatasetSummary, Datasets, Jobs, Namespaces, SearchHit, SearchResults
+from lineage.schemas import Datasets, DatasetSummary, Jobs, Namespaces, SearchHit, SearchResults
 
 router = APIRouter(tags=["discovery"])
 

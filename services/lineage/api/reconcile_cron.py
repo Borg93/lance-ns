@@ -23,6 +23,7 @@ from lineage.core.config import storage_options
 from lineage.core.reconcile import (
     BACKFILLABLE_STATES,
     STORAGE_LOSS_STATES,
+    read_dangling_blob_columns,
     read_storage_schema,
     read_storage_version,
     reconcile_all,
@@ -58,6 +59,10 @@ async def _on_cron(
             # Recover the per-version schema for a back-filled write too (#24) — pinned to the version
             # being back-filled so a mid-sweep write can't attach a later schema to the recovered edge.
             read_schema=lambda uri, ver: run_in_threadpool(read_storage_schema, uri, opts, ver),
+            # Blob-pointer health (§9 P1 lifecycle) — the axis version comparison can't see: an
+            # external payload deleted AFTER promotion changes no Lance version. Same shared probe
+            # the quality gate runs; two 1-byte reads per blob column.
+            read_dangling=lambda uri: run_in_threadpool(read_dangling_blob_columns, uri, opts),
         )
         # Opt-in Run retention (§4) — prune old graph runs while we still hold the single-flight lock,
         # so two replicas never race the same delete. 0 days (the default) = keep full provenance.
@@ -81,12 +86,19 @@ async def _on_cron(
     lost = [s.dataset for s in statuses if s.status in STORAGE_LOSS_STATES]
     if lost:
         log.warning("lineage_reconcile_storage_loss", extra={"datasets": lost, "count": len(lost)})
+    # Dangling blob pointers — payloads gone from under a version-wise-healthy table. NOT auto-fixable
+    # (the bytes are lost); WARN so a bucket wipe / deleted external base surfaces on the next tick
+    # instead of at some consumer's first read.
+    dangling = {s.dataset: s.dangling_blob_columns for s in statuses if s.dangling_blob_columns}
+    if dangling:
+        log.warning("lineage_reconcile_dangling_blobs", extra={"datasets": dangling, "count": len(dangling)})
     log.info(
         "lineage_reconcile_sweep",
         extra={
             "checked": len(statuses),
             "backfilled": len(backfilled),
             "storage_loss": len(lost),
+            "dangling_blobs": len(dangling),
             "pruned_runs": pruned_runs,
         },
     )
@@ -94,6 +106,7 @@ async def _on_cron(
         "checked": len(statuses),
         "backfilled": backfilled,
         "storage_loss": lost,
+        "dangling_blobs": dangling,
         "pruned_runs": pruned_runs,
     }
 

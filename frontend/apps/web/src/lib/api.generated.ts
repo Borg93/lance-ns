@@ -939,6 +939,11 @@ export interface components {
         /**
          * ReconcileStatus
          * @description Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23).
+         *
+         *     ``dangling_blob_columns`` (§9 P1 lifecycle, 2026-07-12) is the POINTER-health axis the version
+         *     comparison can't see: a blob-v2 column whose payloads no longer dereference (external object
+         *     deleted, bucket wiped) leaves the version untouched — a dataset can be ``in_sync`` and still
+         *     unreadable. Non-empty = those columns failed a real 1-byte probe read.
          */
         ReconcileStatus: {
             /** Dataset */
@@ -950,6 +955,11 @@ export interface components {
             /** In Sync */
             in_sync: boolean;
             status: components["schemas"]["ReconcileState"];
+            /**
+             * Dangling Blob Columns
+             * @default []
+             */
+            dangling_blob_columns: string[];
         };
         /**
          * Run

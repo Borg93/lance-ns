@@ -13,9 +13,23 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 
 import lance
+from common import blobs
 from common.schema import SchemaFields, facet_fields
 
 from lineage.schemas import DatasetSummary, ReconcileState, ReconcileStatus
+
+
+def _swallow_dataset_error(exc: BaseException) -> None:
+    """Treat any dataset-open/read failure as "unreadable" — EXCEPT real interpreter shutdown signals.
+
+    ``except Exception`` alone is NOT enough here: lance's Rust boundary raises pyo3's
+    ``PanicException`` for some malformed URIs / storage configs, and that derives from
+    ``BaseException`` — so one bad dataSource URI would crash the WHOLE reconcile sweep (found by a
+    real panic: ``RelativeUrlWithoutBase`` from the object-store crate, 2026-07-12). Re-raise only
+    the signals that must never be swallowed.
+    """
+    if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+        raise exc
 
 
 def read_storage_version(uri: str, storage_options: dict[str, str]) -> int | None:
@@ -25,7 +39,8 @@ def read_storage_version(uri: str, storage_options: dict[str, str]) -> int | Non
     """
     try:
         return int(lance.dataset(uri, storage_options=storage_options).version)
-    except Exception:  # noqa: BLE001 - absent/unreadable dataset → no storage version, not a failure
+    except BaseException as exc:  # noqa: BLE001 - unreadable → no storage version (incl. pyo3 panics)
+        _swallow_dataset_error(exc)
         return None
 
 
@@ -39,8 +54,26 @@ def read_storage_schema(uri: str, storage_options: dict[str, str], version: int)
     """
     try:
         return facet_fields(lance.dataset(uri, storage_options=storage_options, version=version).schema)
-    except Exception:  # noqa: BLE001 - absent/unreadable dataset → no schema to recover, not a failure
+    except BaseException as exc:  # noqa: BLE001 - unreadable → no schema to recover (incl. pyo3 panics)
+        _swallow_dataset_error(exc)
         return None
+
+
+def read_dangling_blob_columns(uri: str, storage_options: dict[str, str]) -> list[str]:
+    """Blob-v2 columns at ``uri`` whose payloads no longer dereference — ``[]`` when healthy/no blobs.
+
+    The reconcile half of the shared pointer-health probe (``common.blobs`` — same probe the quality
+    gate runs at promotion): the sweep re-checks the ALREADY-promoted estate, because an external
+    object deleted after promotion (bucket wipe) changes no Lance version and so is invisible to the
+    version comparison. Cheap by construction — a metadata open plus two 1-byte reads per blob
+    column; a tabular dataset costs only the open. An unreadable dataset yields ``[]`` (not a
+    finding): the version comparison already classifies missing/unreadable storage.
+    """
+    try:
+        return blobs.dangling_blob_columns(lance.dataset(uri, storage_options=storage_options))
+    except BaseException as exc:  # noqa: BLE001 - the version check's finding, not ours (incl. pyo3 panics)
+        _swallow_dataset_error(exc)
+        return []
 
 
 def reconcile(*, dataset: str, graph_version: int | None, storage_version: int | None) -> ReconcileStatus:
@@ -96,6 +129,7 @@ async def reconcile_all(
     *,
     backfill: bool,
     read_schema: Callable[[str, int], Awaitable[SchemaFields | None]] | None = None,
+    read_dangling: Callable[[str], Awaitable[list[str]]] | None = None,
 ) -> list[ReconcileStatus]:
     """Reconcile every dataset the graph knows against storage; optionally back-fill dropped writes (B4).
 
@@ -105,6 +139,10 @@ async def reconcile_all(
     signature), stamp the real version onto the graph and re-classify to in-sync. Read-only otherwise.
     ``read_schema`` (optional, same threadpool wrapping) recovers the on-disk column schema — called with
     the version being back-filled so the recovered schema is pinned to it — and rides the WROTE edge (#24).
+    ``read_dangling`` (optional, same threadpool wrapping) probes blob-pointer health on datasets storage
+    can actually read — the axis version comparison can't see (§9 P1 lifecycle) — and its findings ride
+    ``dangling_blob_columns`` on the status; only run when a storage version exists (an unreadable dataset
+    is already the version check's finding).
     """
     results: list[ReconcileStatus] = []
     for summary in await repository.list_datasets():
@@ -119,6 +157,8 @@ async def reconcile_all(
         graph_version = await repository.latest_write_version(summary.name)
         storage_version = await read_version(uri)
         status = reconcile(dataset=summary.name, graph_version=graph_version, storage_version=storage_version)
+        if storage_version is not None and read_dangling is not None:
+            status.dangling_blob_columns = await read_dangling(uri)
         if backfill and storage_version is not None and status.status in BACKFILLABLE_STATES:
             # Fix the drift as a side effect but keep the found status in the report — a subsequent sweep
             # will show it in_sync, proving the back-fill took. The schema read is pinned to the version

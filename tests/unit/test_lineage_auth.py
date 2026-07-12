@@ -569,10 +569,16 @@ def test_get_reconcile_flags_storage_drift(monkeypatch: pytest.MonkeyPatch) -> N
     repo.write_version = 1
     repo.uri = "s3://lakehouse/silver/features"
     monkeypatch.setattr("lineage.api.v1.endpoints.reconcile.read_storage_version", lambda _uri, _opts: 2)
+    # §9 P1 lifecycle: when storage IS readable, the endpoint also runs the blob-pointer probe and
+    # its findings ride the response — the axis the version comparison can't see.
+    monkeypatch.setattr(
+        "lineage.api.v1.endpoints.reconcile.read_dangling_blob_columns", lambda _uri, _opts: ["thumb"]
+    )
     result = asyncio.run(get_reconcile("silver$features", cast(LineageRepository, repo), settings))
     assert result.status is ReconcileState.STORAGE_AHEAD
     assert result.in_sync is False
     assert (result.graph_version, result.storage_version) == (1, 2)
+    assert result.dangling_blob_columns == ["thumb"]
 
 
 def test_get_reconcile_skips_storage_read_without_uri(monkeypatch: pytest.MonkeyPatch) -> None:

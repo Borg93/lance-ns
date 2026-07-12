@@ -1998,6 +1998,14 @@
           },
           "status": {
             "$ref": "#/components/schemas/ReconcileState"
+          },
+          "dangling_blob_columns": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Dangling Blob Columns",
+            "default": []
           }
         },
         "type": "object",
@@ -2007,7 +2015,7 @@
           "status"
         ],
         "title": "ReconcileStatus",
-        "description": "Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23)."
+        "description": "Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23).\n\n``dangling_blob_columns`` (\u00a79 P1 lifecycle, 2026-07-12) is the POINTER-health axis the version\ncomparison can't see: a blob-v2 column whose payloads no longer dereference (external object\ndeleted, bucket wiped) leaves the version untouched \u2014 a dataset can be ``in_sync`` and still\nunreadable. Non-empty = those columns failed a real 1-byte probe read."
       },
       "Run": {
         "properties": {

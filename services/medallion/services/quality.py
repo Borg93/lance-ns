@@ -13,13 +13,9 @@ Both gate movement. The checks use ``count_rows`` (with a filter) so they never 
 
 from __future__ import annotations
 
-import logging
-
 import lance
 from common import blobs
 from pydantic import BaseModel
-
-log = logging.getLogger(__name__)
 
 #: Assertion names — stable identifiers the ``dataQualityAssertions`` facet carries (and the gate keys on).
 ROW_COUNT_POSITIVE = "row_count_positive"
@@ -55,37 +51,14 @@ def assert_quality(uri: str, storage_options: dict[str, str], *, key_column: str
     if key_column and key_column in ds.schema.names:
         nulls = ds.count_rows(f"{key_column} IS NULL")
         assertions.append(Assertion(assertion=NOT_NULL, success=nulls == 0, column=key_column))
+    # The probe itself is SHARED with reconcile (common.blobs.blob_column_resolves): the gate checks
+    # pointers AT promotion; the reconcile sweep re-checks the already-promoted estate — one probe,
+    # two enforcement points, so the two can never drift on what "resolves" means.
     for column in blobs.blob_field_names(ds.schema):
         assertions.append(
-            Assertion(assertion=BLOB_RESOLVES, success=_blob_resolves(ds, column), column=column)
+            Assertion(assertion=BLOB_RESOLVES, success=blobs.blob_column_resolves(ds, column), column=column)
         )
     return assertions
-
-
-def _blob_resolves(ds: lance.LanceDataset, column: str) -> bool:
-    """Whether ``column``'s blob payloads dereference — probed on the FIRST and LAST rows only.
-
-    One real byte is read per probed payload: ``BlobFile.size()`` reads only the stored descriptor
-    (probed at pylance 8.0.0 — it succeeds against a deleted object), so only an actual
-    ``read_range`` proves the bytes are reachable; and for a dangling EXTERNAL pointer even
-    ``take_blobs`` itself raises (it opens the object), which is why the whole probe sits in the
-    try. First+last catches the wholesale failures the gate exists for (wiped bucket, wrong or
-    unregistered external base) at the cost of two 1-byte reads; per-row bitrot auditing is a
-    scrubber's job, not a promotion gate's. Zero-length/null payloads resolve trivially
-    (``take_blobs`` returns no handle for them — same probed behavior the serving path guards).
-    """
-    rows = ds.count_rows()
-    if rows == 0:
-        return True  # nothing to resolve; row_count_positive already fails the gate
-    try:
-        for row in sorted({0, rows - 1}):
-            for handle in ds.take_blobs(column, indices=[row]):
-                if handle.size() > 0:
-                    handle.read_range(0, 1)
-    except Exception as exc:  # noqa: BLE001 — ANY resolve failure is exactly what this assertion reports
-        log.warning("blob_resolve_failed", extra={"column": column, "error": str(exc)})
-        return False
-    return True
 
 
 def passed(assertions: list[Assertion]) -> bool:

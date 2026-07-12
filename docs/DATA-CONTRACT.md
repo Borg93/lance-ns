@@ -35,7 +35,7 @@ D1; unit-proven: pinned-v1 means ≠ LATEST means in `tests/unit/test_train_job.
 |---|---|---|---|
 | **Promotion-time** | Quality gate (`MEDALLION_QUALITY_ENABLED`) | the DATA is good enough to promote: `row_count_positive` + `not_null(key_column)` + `blob_resolves` per blob column (2026-07-12: one real byte read from the first+last rows' payloads — catches a dangling external pointer/bucket wipe AT promotion instead of at first downstream read); a failure still emits the run + its `dataQualityAssertions` facet (auditable) but BLOCKS the next stage trigger — a bad batch cannot cascade | `services/medallion/services/quality.py` |
 | **Access-time** | OpenFGA (fail-closed) | WHO may read/write/promote: concentric owner⊇writer⊇reader rungs + the separate `validator` rung for promotion; movers/trainer check as their OWN service identities before spending compute (deny → DROP) | `services/common/fga.py`, `handle_train_trigger`, mover gates |
-| **Drift-time** | B4 reconcile (cron) | the GRAPH matches STORAGE: back-fills Lance writes whose lineage event was lost; flags `missing_on_storage` | `services/lineage/api/v1/endpoints/reconcile.py` |
+| **Drift-time** | B4 reconcile (cron) | the GRAPH matches STORAGE: back-fills Lance writes whose lineage event was lost; flags `missing_on_storage`; and probes blob-POINTER health (2026-07-12: `dangling_blob_columns` — an external payload deleted after promotion changes no Lance version, so only the 1-byte probe sees it; same shared probe as the quality gate) | `services/lineage/api/v1/endpoints/reconcile.py` |
 
 Plus edge validation where the bus meets code: consumers treat the bus as a wider trust surface
 than token-guarded heads and DROP malformed triggers rather than repair them (version-less

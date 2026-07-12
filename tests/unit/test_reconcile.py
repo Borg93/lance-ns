@@ -14,7 +14,12 @@ import pytest
 from common.schema import SchemaFields
 from lineage.api.reconcile_cron import _on_cron
 from lineage.core.config import LineageSettings
-from lineage.core.reconcile import read_storage_version, reconcile, reconcile_all
+from lineage.core.reconcile import (
+    read_dangling_blob_columns,
+    read_storage_version,
+    reconcile,
+    reconcile_all,
+)
 from lineage.schemas import DatasetSummary, ReconcileState
 
 
@@ -55,6 +60,43 @@ def test_read_storage_version_returns_on_disk_version(tmp_path: Path) -> None:
 
 def test_read_storage_version_none_when_absent(tmp_path: Path) -> None:
     assert read_storage_version(str(tmp_path / "missing.lance"), {}) is None
+
+
+# --- §9 P1 lifecycle: blob-pointer health (the axis version comparison can't see) ------------- #
+
+
+def test_read_dangling_blob_columns_flags_wiped_external_payload(tmp_path: Path) -> None:
+    """THE post-promotion case: deleting an external blob object changes NO Lance version, so the
+    dataset stays version-in-sync while its payloads are gone — only the pointer probe sees it.
+    Healthy → [] (and a tabular dataset → [] for just a metadata open); wiped → the column named."""
+    tabular = str(tmp_path / "tab.lance")
+    lance.write_dataset(pa.table({"id": [1]}), tabular)
+    assert read_dangling_blob_columns(tabular, {}) == []
+
+    ext = tmp_path / "ext"
+    ext.mkdir()
+    obj = ext / "obj.bin"
+    obj.write_bytes(b"payload-bytes")
+    uri = str(tmp_path / "media.lance")
+    schema = pa.schema([pa.field("id", pa.int64()), lance.blob_field("media")])
+    lance.write_dataset(
+        pa.table({"id": [0], "media": lance.blob_array([lance.Blob.from_uri(str(obj))])}, schema=schema),
+        uri,
+        data_storage_version="2.2",
+        initial_bases=[lance.DatasetBasePath(str(ext), is_dataset_root=False)],
+    )
+    version_before = read_storage_version(uri, {})
+    assert read_dangling_blob_columns(uri, {}) == []  # healthy pointers resolve
+
+    obj.unlink()
+    assert read_storage_version(uri, {}) == version_before  # the wipe is INVISIBLE to the version axis
+    assert read_dangling_blob_columns(uri, {}) == ["media"]  # …but not to the probe
+
+
+def test_read_dangling_blob_columns_empty_when_dataset_unreadable(tmp_path: Path) -> None:
+    # A missing dataset is the VERSION check's finding (missing_on_storage) — the probe must not
+    # double-report it as a blob problem.
+    assert read_dangling_blob_columns(str(tmp_path / "missing.lance"), {}) == []
 
 
 # --- B4: reconcile_all + the outbox back-fill ------------------------------------------------ #
@@ -128,6 +170,30 @@ def test_reconcile_all_backfills_only_lost_write_states() -> None:
     assert by_status["insync"] == ReconcileState.IN_SYNC
     assert by_status["graph_ahead"] == ReconcileState.GRAPH_AHEAD  # graph newer than disk — not a lost write
     assert "no_uri" not in by_status  # skipped: no dataSource URI to read
+
+
+def test_reconcile_all_carries_dangling_blobs_only_where_storage_is_readable() -> None:
+    """The sweep attaches the probe's findings to each status — and never probes a dataset whose
+    storage version is absent (that's the version check's finding, not a blob one)."""
+    repo = _FakeRepo(
+        datasets=["media", "clean", "gone"],
+        graph_versions={"media": 1, "clean": 1, "gone": 1},
+        uris={"media": "s3://b/media", "clean": "s3://b/clean", "gone": "s3://b/gone"},
+    )
+    read = _reader({"media": 1, "clean": 1})  # "gone" has no storage version
+    probed: list[str] = []
+
+    async def read_dangling(uri: str) -> list[str]:
+        probed.append(uri)
+        return ["payload"] if uri.endswith("media") else []
+
+    statuses = asyncio.run(reconcile_all(cast(Any, repo), read, backfill=False, read_dangling=read_dangling))
+    by_name = {s.dataset: s for s in statuses}
+    assert by_name["media"].dangling_blob_columns == ["payload"]
+    assert by_name["media"].in_sync is True  # version axis untouched — that's the point
+    assert by_name["clean"].dangling_blob_columns == []
+    assert by_name["gone"].dangling_blob_columns == []  # never probed…
+    assert sorted(probed) == ["s3://b/clean", "s3://b/media"]  # …proven, not assumed
 
 
 def test_reconcile_all_skips_dropped_datasets() -> None:
@@ -289,7 +355,13 @@ def test_cron_route_post_with_token_returns_sweep_report(monkeypatch: pytest.Mon
     # the fixture's dataset has no dataSource URI, so the sweep checks 0 datasets (swept above proves the
     # body ran); retention off (the default) → the report still carries pruned_runs, so dashboards can
     # rely on every key being present on every tick.
-    assert body == {"checked": 0, "backfilled": [], "storage_loss": [], "pruned_runs": 0}
+    assert body == {
+        "checked": 0,
+        "backfilled": [],
+        "storage_loss": [],
+        "dangling_blobs": {},
+        "pruned_runs": 0,
+    }
 
 
 def test_mount_reconcile_cron_production_gate() -> None:

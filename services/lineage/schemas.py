@@ -20,13 +20,20 @@ class ReconcileState(StrEnum):
 
 
 class ReconcileStatus(BaseModel):
-    """Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23)."""
+    """Whether a dataset's lineage-graph version matches its actual on-disk Lance version (#23).
+
+    ``dangling_blob_columns`` (§9 P1 lifecycle, 2026-07-12) is the POINTER-health axis the version
+    comparison can't see: a blob-v2 column whose payloads no longer dereference (external object
+    deleted, bucket wiped) leaves the version untouched — a dataset can be ``in_sync`` and still
+    unreadable. Non-empty = those columns failed a real 1-byte probe read.
+    """
 
     dataset: str
     graph_version: int | None = None
     storage_version: int | None = None
     in_sync: bool
     status: ReconcileState
+    dangling_blob_columns: list[str] = []
 
 
 class DatasetRef(BaseModel):

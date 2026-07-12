@@ -660,6 +660,15 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 16 (added + ✅ DONE 2026-07-12) — reconcile flags dangling blob pointers (the
+>   post-promotion half of §9 P1 lifecycle; with this, the tractable blob estate is CLOSED —
+>   remaining blob items are the user's live pass + the external-GC watch item + P2 schema
+>   declaration).** Probe SHARED with the quality gate via common.blobs (one definition of
+>   "resolves", two enforcement points); statuses/cron/endpoint carry `dangling_blob_columns`;
+>   WARN on the tick. Found+fixed a latent sweep-crasher: pyo3 PanicException (BaseException!)
+>   from one malformed dataSource URI slipped every `except Exception` guard. Suite 570→573,
+>   openapi+types regenerated. Details on the P1 lifecycle item.
+>
 >   **BATCH 15 (added + ✅ DONE 2026-07-12) — §9 P2 `blob_resolves` quality-gate assertion +
 >   verifications the user asked for.** (1) The gate now proves blob POINTERS dereference at
 >   promotion time (1 real byte, first+last rows; `size()` alone is a trap — it succeeds against a
@@ -1098,11 +1107,30 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     unparseable meta row ⇒ the whole pass degrades to report-only even with the flag; unstattable
     token kept; overlapping registry/artifact trees refuse to run (never enumerates a Lance
     dataset dir). THE invariant (referenced ⇒ never deleted, even past TTL, even with --delete)
-    was test-pinned BEFORE the delete code existed, per the batch guardrail. REMAINING (this item
-    stays open for): the deployed default stays dry-run until a live kind pass proves the report
-    against a real crashed-run orphan (§7a); the BROADER posture — compaction/GC understanding
-    pointer columns generally + reconcile flagging dangling pointers after a bucket wipe — is
-    untouched by this tool.
+    was test-pinned BEFORE the delete code existed, per the batch guardrail.
+    **Reconcile half SHIPPED 2026-07-12 (Batch 16):** the sweep + `GET /datasets/{name}/reconcile`
+    now report `dangling_blob_columns` — blob-v2 columns whose payloads no longer dereference —
+    via the SHARED 1-byte probe (`common.blobs.blob_column_resolves`, the same one the quality
+    gate runs at promotion; one probe, two enforcement points). Key insight test-pinned: deleting
+    an external payload changes NO Lance version, so the dataset stays version-`in_sync` while
+    unreadable — only the pointer probe sees it. Cron WARNs `lineage_reconcile_dangling_blobs` +
+    reports `dangling_blobs` per tick (NOT auto-fixable — the bytes are lost). BONUS robustness
+    fix found by the tests: lance's pyo3 `PanicException` derives from `BaseException`, so the
+    sweep's `except Exception` guards would CRASH on one malformed dataSource URI (real panic:
+    `RelativeUrlWithoutBase`) — all three storage readers now swallow panics but re-raise
+    KeyboardInterrupt/SystemExit (`_swallow_dataset_error`). TESTS:
+    `test_read_dangling_blob_columns_flags_wiped_external_payload` (version UNCHANGED after the
+    wipe, probe flags ['media']; healthy + tabular → []),
+    `test_read_dangling_blob_columns_empty_when_dataset_unreadable` (missing dataset is the
+    version check's finding, not double-reported),
+    `test_reconcile_all_carries_dangling_blobs_only_where_storage_is_readable` (findings ride the
+    status; datasets with NO storage version are never probed — probe-call list asserted),
+    reconcile endpoint test extended (`dangling_blob_columns` rides the response). Suite 570→573;
+    lineage openapi + frontend types regenerated (ReconcileStatus grew the field).
+    REMAINING (this item stays open for): the deployed default stays dry-run until a live kind
+    pass proves the janitor report against a real crashed-run orphan (§7a); compaction/GC
+    pointer-awareness for EXTERNAL bases (Lance's own GC manages managed blobs; external objects
+    are deliberately outside it) stays a watch item.
   - ✅ P2 quality gate blob assertion — **DONE 2026-07-12 (Batch 15):** `blob_resolves` per blob-v2
     column in `medallion/services/quality.py`, alongside row_count/not_null and riding the SAME
     `dataQualityAssertions` facet + gate (fail ⇒ promotion BLOCKED, run still audited). Probe design

@@ -688,7 +688,7 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   places). (3) Remaining parked items re-justified with sharper reasons: FGA masking chains to
 >   the DEFERRED query engine (masking needs a read-side enforcement point; tuples without one are
 >   decorative security); presigned URLs are parked on SECURITY grounds (ReBAC bypass for the TTL),
->   not effort. Suite 588→590.
+>   not effort. Suite 588→589.
 >
 >   **BATCH 23 (added + ✅ DONE 2026-07-12, user: "do it") — the declared-columns PATROL (the
 >   reconcile half of the breaking-change detector).** The sweep re-checks the movers' declarations

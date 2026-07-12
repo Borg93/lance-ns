@@ -192,6 +192,11 @@ spec:
             # exhaustion parks the trigger on this per-app topic, ERROR-logged by /dlq-event.
             - { name: MEDALLION_DLQ_TOPIC, value: "dlq.{{ .subTopic }}" }
             {{- end }}
+            {{- if .requiredColumns }}
+            # Declared consumer dependencies (data-contract gap #1): the quality gate blocks a
+            # promotion whose written schema dropped/renamed any of these (the breaking-change detector).
+            - { name: MEDALLION_REQUIRED_COLUMNS, value: {{ .requiredColumns | quote }} }
+            {{- end }}
             {{- if $root.Values.medallion.compute }}
             # Real fake-Ray compute: read the upstream stage's Lance dataset, transform, write the downstream
             # one — so the emitted lineage carries the REAL version + rows/bytes and the cascade produces

@@ -53,12 +53,18 @@ features, path-unsafe names, oversized/non-dict config — `services/medallion/s
   old versions stay readable; per-version schemas ride the lineage `WROTE` edge.
 
 **NOT yet prod-grade (tracked, deliberate):**
-- **Freshness is the second known gap (2026-07-12).** A complete contract also promises arrival
-  cadence — a 3-day-stale silver is as broken for a consumer as a missing column. Today the run
-  board and the transitions metric make staleness *visible* but nothing *asserts* it; the planned
-  fix rides the reconcile sweep (compare latest-write age against a per-stage freshness budget,
-  WARN like dangling blobs). Tracked in todo_fable §9.
-- **Breaking changes are the known gap.** A producer renaming/dropping a column a downstream
+- **Freshness — CLOSED 2026-07-12 (same day it was named).** Arrival cadence is now an ASSERTED
+  clause: set `services.lineage.freshnessBudgetHours` (>0) and the reconcile sweep + per-dataset
+  GET flag `stale: true` for any dataset whose newest version commit (storage truth — the version
+  manifests, so a write that bypassed lineage still counts as fresh) is older than the budget,
+  WARN-logged `lineage_reconcile_stale` per tick. 0 (default) = the axis is off, zero extra reads.
+- **Breaking changes — the GATE half CLOSED 2026-07-12.** Declare consumer dependencies per mover
+  (`requiredColumns: "id,embedding"` in the chart → `MEDALLION_REQUIRED_COLUMNS`) and the quality
+  gate adds a `column_declared` assertion per name: a promotion whose written schema dropped or
+  renamed a declared column is BLOCKED (write still commits; audited FAIL run) — the runtime
+  breakage becomes a pre-promotion contract violation. Additive evolution is never blocked; no
+  declaration (default) = byte-identical gate. Original framing kept below for the record:
+- **Breaking changes were the known gap.** A producer renaming/dropping a column a downstream
   reads is caught only at RUNTIME (the mover's transform fails → RETRY → stall) — not at
   promotion time. The fix is the §9 per-project **schema declaration** item (declare expected
   columns; the quality gate asserts they landed; reconcile flags undeclared writes) — that turns

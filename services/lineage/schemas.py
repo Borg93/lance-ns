@@ -34,6 +34,9 @@ class ReconcileStatus(BaseModel):
     in_sync: bool
     status: ReconcileState
     dangling_blob_columns: list[str] = []
+    # Freshness (data-contract gap #2, 2026-07-12): True when a freshness budget is configured and
+    # the newest on-disk version commit is older than it. False when in budget OR the axis is off.
+    stale: bool = False
 
 
 class DatasetRef(BaseModel):

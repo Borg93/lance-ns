@@ -247,6 +247,30 @@ def test_assert_quality_skips_null_check_when_key_absent(tmp_path: Any) -> None:
     assert [c.assertion for c in checks] == ["row_count_positive"]
 
 
+def test_assert_quality_declared_columns_block_breaking_changes(tmp_path: Any) -> None:
+    """THE breaking-change detector (data-contract gap #1): a version whose schema no longer carries
+    a DECLARED consumer dependency fails the gate (promotion blocked), while additive evolution and
+    undeclared datasets stay untouched. seed_raw writes columns [id, payload]."""
+    uri = str(tmp_path / "gold")
+    seed_raw(uri, {}, rows=2)
+
+    healthy = assert_quality(uri, {}, key_column="id", required_columns=["id", "payload"])
+    declared = [c for c in healthy if c.assertion == "column_declared"]
+    assert [(c.column, c.success) for c in declared] == [("id", True), ("payload", True)]
+    assert passed(healthy)
+
+    # The producer "renamed" payload → a declared dependency is gone: the SPECIFIC column is named,
+    # the gate fails, and the untouched declaration still reports success (precise blame).
+    breaking = assert_quality(uri, {}, key_column="id", required_columns=["id", "embedding"])
+    by_column = {c.column: c.success for c in breaking if c.assertion == "column_declared"}
+    assert by_column == {"id": True, "embedding": False}
+    assert not passed(breaking)  # promotion blocked
+
+    # No declaration (the default) → no new assertion, byte-identical to the pre-existing gate.
+    undeclared = assert_quality(uri, {}, key_column="id")
+    assert all(c.assertion != "column_declared" for c in undeclared)
+
+
 def _write_blob_dataset(uri: str, payloads: list, *, base: str | None = None) -> None:
     from lance import blob_field
 

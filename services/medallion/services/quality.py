@@ -21,6 +21,7 @@ from pydantic import BaseModel
 ROW_COUNT_POSITIVE = "row_count_positive"
 NOT_NULL = "not_null"
 BLOB_RESOLVES = "blob_resolves"
+COLUMN_DECLARED = "column_declared"
 
 
 class Assertion(BaseModel):
@@ -31,7 +32,13 @@ class Assertion(BaseModel):
     column: str | None = None
 
 
-def assert_quality(uri: str, storage_options: dict[str, str], *, key_column: str) -> list[Assertion]:
+def assert_quality(
+    uri: str,
+    storage_options: dict[str, str],
+    *,
+    key_column: str,
+    required_columns: tuple[str, ...] | list[str] = (),
+) -> list[Assertion]:
     """Run cheap, exact quality assertions on the just-written Lance dataset at ``uri``.
 
     - ``row_count_positive``: the dataset has at least one row (an empty promotion is a silent failure).
@@ -51,6 +58,15 @@ def assert_quality(uri: str, storage_options: dict[str, str], *, key_column: str
     if key_column and key_column in ds.schema.names:
         nulls = ds.count_rows(f"{key_column} IS NULL")
         assertions.append(Assertion(assertion=NOT_NULL, success=nulls == 0, column=key_column))
+    # THE BREAKING-CHANGE DETECTOR (data-contract gap #1, 2026-07-12): each column a downstream
+    # consumer DECLARED it reads must still exist in the just-written schema. Schema-on-write stays
+    # completely free (additive evolution never blocked; the write itself always commits) — only the
+    # PROMOTION of a version that dropped/renamed a declared column is stopped, turning what was a
+    # runtime failure in the consumer's job into a pre-promotion contract violation here.
+    for column in required_columns:
+        assertions.append(
+            Assertion(assertion=COLUMN_DECLARED, success=column in ds.schema.names, column=column)
+        )
     # The probe itself is SHARED with reconcile (common.blobs.blob_column_resolves): the gate checks
     # pointers AT promotion; the reconcile sweep re-checks the already-promoted estate — one probe,
     # two enforcement points, so the two can never drift on what "resolves" means.

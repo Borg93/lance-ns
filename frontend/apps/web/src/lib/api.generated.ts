@@ -960,6 +960,11 @@ export interface components {
              * @default []
              */
             dangling_blob_columns: string[];
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
         };
         /**
          * Run

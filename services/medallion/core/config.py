@@ -49,6 +49,11 @@ class MedallionSettings(BaseSettings):
     # WITHOUT a retry policy dead-letters on the FIRST failure (Dapr documented default), which would
     # replace the chaos-verified redelivery-with-backoff behavior with instant parking.
     dlq_topic: str = Field(default="", alias="MEDALLION_DLQ_TOPIC")
+    # Declared consumer dependencies for THIS stage's output (data-contract gap #1): comma-separated
+    # column names downstream consumers read. Empty (default) = no declaration, no new assertion.
+    # When set, the quality gate adds a `column_declared` assertion per name — a promotion that
+    # dropped/renamed a declared column is BLOCKED (the write itself still commits; audited FAIL run).
+    quality_required_columns: str = Field(default="", alias="MEDALLION_REQUIRED_COLUMNS")
 
     # --- Optional FGA gate (ReBAC enforcement) — the mover checks it is AUTHORIZED to produce the target
     # stage before emitting. The silver→gold mover checks `can_promote` (validator-only); the others check
@@ -124,6 +129,11 @@ class MedallionSettings(BaseSettings):
     dapr_secret_key: str = Field(default="lance", alias="MEDALLION_DAPR_SECRET_KEY")
     dapr_secret_s3_field: str = Field(default="rustfs-secret-key", alias="MEDALLION_DAPR_SECRET_S3_FIELD")
     s3_region: str = Field(default="us-east-1", alias="MEDALLION_S3_REGION")
+
+    @property
+    def required_column_list(self) -> list[str]:
+        """The declared consumer-dependency columns (parsed from the comma-separated env)."""
+        return [c.strip() for c in self.quality_required_columns.split(",") if c.strip()]
 
     def storage_options(self) -> dict[str, str]:
         """Lance ``storage_options`` for the compute write — empty for a local path; S3 config otherwise."""

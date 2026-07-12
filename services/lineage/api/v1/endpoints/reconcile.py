@@ -14,7 +14,12 @@ from fastapi.concurrency import run_in_threadpool
 from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.api.fga_deps import audit_read, require_metadata_access
 from lineage.core.config import storage_options
-from lineage.core.reconcile import read_dangling_blob_columns, read_storage_version, reconcile
+from lineage.core.reconcile import (
+    read_dangling_blob_columns,
+    read_latest_write_age_hours,
+    read_storage_version,
+    reconcile,
+)
 from lineage.schemas import ReconcileStatus
 
 # Gate first (require_metadata_access), then log the authorized reconcile read (#6); deps run in order.
@@ -44,4 +49,8 @@ async def get_reconcile(name: str, repository: RepositoryDep, settings: Settings
     # deleted after promotion changes no Lance version. Only probed when storage is readable at all.
     if uri is not None and storage_version is not None:
         status.dangling_blob_columns = await run_in_threadpool(read_dangling_blob_columns, uri, opts)
+        # Freshness (gap #2): asserted only when a budget is configured — 0 keeps the axis off.
+        if settings.freshness_budget_hours > 0:
+            age = await run_in_threadpool(read_latest_write_age_hours, uri, opts)
+            status.stale = age is not None and age > settings.freshness_budget_hours
     return status

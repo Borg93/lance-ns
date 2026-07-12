@@ -24,6 +24,7 @@ from lineage.core.reconcile import (
     BACKFILLABLE_STATES,
     STORAGE_LOSS_STATES,
     read_dangling_blob_columns,
+    read_latest_write_age_hours,
     read_storage_schema,
     read_storage_version,
     reconcile_all,
@@ -63,6 +64,10 @@ async def _on_cron(
             # external payload deleted AFTER promotion changes no Lance version. Same shared probe
             # the quality gate runs; two 1-byte reads per blob column.
             read_dangling=lambda uri: run_in_threadpool(read_dangling_blob_columns, uri, opts),
+            # Freshness (data-contract gap #2) — arrival cadence as an ASSERTED clause: age read from
+            # the version manifests (storage truth), budget 0 (default) = axis off, zero extra reads.
+            read_age=lambda uri: run_in_threadpool(read_latest_write_age_hours, uri, opts),
+            freshness_budget_hours=settings.freshness_budget_hours,
         )
         # Opt-in Run retention (§4) — prune old graph runs while we still hold the single-flight lock,
         # so two replicas never race the same delete. 0 days (the default) = keep full provenance.
@@ -92,6 +97,11 @@ async def _on_cron(
     dangling = {s.dataset: s.dangling_blob_columns for s in statuses if s.dangling_blob_columns}
     if dangling:
         log.warning("lineage_reconcile_dangling_blobs", extra={"datasets": dangling, "count": len(dangling)})
+    # Stale datasets — data stopped arriving inside the configured freshness budget. Not auto-fixable
+    # (the fix is upstream: re-fire the producer); WARN so cadence breaches surface on the tick.
+    stale = [s.dataset for s in statuses if s.stale]
+    if stale:
+        log.warning("lineage_reconcile_stale", extra={"datasets": stale, "count": len(stale)})
     log.info(
         "lineage_reconcile_sweep",
         extra={
@@ -99,6 +109,7 @@ async def _on_cron(
             "backfilled": len(backfilled),
             "storage_loss": len(lost),
             "dangling_blobs": len(dangling),
+            "stale": len(stale),
             "pruned_runs": pruned_runs,
         },
     )
@@ -107,6 +118,7 @@ async def _on_cron(
         "backfilled": backfilled,
         "storage_loss": lost,
         "dangling_blobs": dangling,
+        "stale": stale,
         "pruned_runs": pruned_runs,
     }
 

@@ -16,6 +16,7 @@ from lineage.api.reconcile_cron import _on_cron
 from lineage.core.config import LineageSettings
 from lineage.core.reconcile import (
     read_dangling_blob_columns,
+    read_latest_write_age_hours,
     read_storage_version,
     reconcile,
     reconcile_all,
@@ -97,6 +98,56 @@ def test_read_dangling_blob_columns_empty_when_dataset_unreadable(tmp_path: Path
     # A missing dataset is the VERSION check's finding (missing_on_storage) — the probe must not
     # double-report it as a blob problem.
     assert read_dangling_blob_columns(str(tmp_path / "missing.lance"), {}) == []
+
+
+# --- data-contract gap #2: freshness (arrival cadence as an asserted clause) ------------------ #
+
+
+def test_read_latest_write_age_uses_the_newest_version_commit(tmp_path: Path) -> None:
+    """Age comes from STORAGE TRUTH (the version manifests), so a write that bypassed lineage still
+    counts as fresh. A just-written dataset ages ≈0; missing dataset → None (the version check's
+    finding, never a phantom staleness)."""
+    uri = str(tmp_path / "t.lance")
+    lance.write_dataset(pa.table({"id": [1]}), uri)
+    lance.write_dataset(pa.table({"id": [2]}), uri, mode="append")
+    age = read_latest_write_age_hours(uri, {})
+    assert age is not None
+    assert 0 <= age < 1  # written seconds ago; clamped at 0 against clock skew
+    assert read_latest_write_age_hours(str(tmp_path / "missing.lance"), {}) is None
+
+
+def test_reconcile_all_flags_stale_only_with_a_budget_and_readable_storage() -> None:
+    """The freshness axis: budget>0 + storage readable → age compared against the budget; budget 0
+    (the default) probes NOTHING (default deployments pay zero reads); no storage version → never
+    probed (that's already missing_on_storage). in_sync stays version-based — stale is its own axis."""
+    repo = _FakeRepo(
+        datasets=["fresh", "old", "gone"],
+        graph_versions={"fresh": 1, "old": 1, "gone": 1},
+        uris={"fresh": "s3://b/fresh", "old": "s3://b/old", "gone": "s3://b/gone"},
+    )
+    read = _reader({"fresh": 1, "old": 1})  # "gone" unreadable
+    probed: list[str] = []
+
+    async def read_age(uri: str) -> float | None:
+        probed.append(uri)
+        return 99.0 if uri.endswith("old") else 0.1
+
+    statuses = asyncio.run(
+        reconcile_all(cast(Any, repo), read, backfill=False, read_age=read_age, freshness_budget_hours=24)
+    )
+    by_name = {s.dataset: s for s in statuses}
+    assert by_name["old"].stale is True
+    assert by_name["old"].in_sync is True  # stale is its OWN axis — the version still matches
+    assert by_name["fresh"].stale is False
+    assert by_name["gone"].stale is False
+    assert sorted(probed) == ["s3://b/fresh", "s3://b/old"]  # "gone" never probed
+
+    probed.clear()
+    off = asyncio.run(
+        reconcile_all(cast(Any, repo), read, backfill=False, read_age=read_age, freshness_budget_hours=0)
+    )
+    assert probed == []  # budget 0 = the axis is OFF: zero probe calls
+    assert all(s.stale is False for s in off)
 
 
 # --- B4: reconcile_all + the outbox back-fill ------------------------------------------------ #
@@ -360,6 +411,7 @@ def test_cron_route_post_with_token_returns_sweep_report(monkeypatch: pytest.Mon
         "backfilled": [],
         "storage_loss": [],
         "dangling_blobs": {},
+        "stale": [],
         "pruned_runs": 0,
     }
 

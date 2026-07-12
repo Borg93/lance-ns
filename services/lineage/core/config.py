@@ -64,6 +64,10 @@ class LineageSettings(BaseSettings):
     # stays replay-from-stream (ephemeral deliverPolicy=all consumer); the DLQ adds operator
     # VISIBILITY for deliveries that exhausted retries, it does not replace the replay.
     dapr_dlq_topic: str = Field(default="", alias="LINEAGE_DLQ_TOPIC")
+    # Freshness budget in hours (data-contract gap #2): 0 (default) = the axis is OFF (no probe).
+    # >0 = the reconcile sweep + per-dataset GET flag `stale: true` for any dataset whose newest
+    # version commit is older — arrival cadence becomes an ASSERTED contract clause, not a dashboard.
+    freshness_budget_hours: float = Field(default=0, alias="LINEAGE_FRESHNESS_BUDGET_HOURS")
     # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<name> on a schedule to
     # back-fill Lance writes whose lineage event was lost (the outbox gap). Empty = the cron route isn't
     # mounted (the /datasets/{name}/reconcile read endpoint is always available regardless).

@@ -673,6 +673,19 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 21 (added + ✅ DONE 2026-07-12) — the data contract's last two clauses (user: "why not
+>   just do them now": gap #1 breaking-change detector + gap #2 freshness).** (1) Declared consumer
+>   dependencies: per-mover `requiredColumns` → the quality gate's `column_declared` assertions —
+>   schema-on-write stays free, additive evolution never blocked, but a promotion that dropped a
+>   declared column is BLOCKED with precise column blame. (2) Freshness: `freshnessBudgetHours` →
+>   reconcile asserts arrival cadence from STORAGE truth (version-manifest timestamps), stale
+>   datasets WARN per tick; budget 0 = zero extra reads (asserted). Both default-off = behavior
+>   identical; both ride EXISTING enforcement points (the gate + the sweep) — no new services.
+>   ReconcileStatus grew `stale` (openapi + frontend types regenerated). Suite 582→585. With this
+>   the data-contract enforcement matrix is COMPLETE: shape (manifest) / quality+declared-schema
+>   (gate) / access (FGA) / drift+pointers+freshness (reconcile) / cadence-of-change (immutable
+>   versions + tags). DATA-CONTRACT.md gaps section flipped.
+>
 >   **BATCH 20 (added + ✅ DONE 2026-07-12) — deep adversarial audit of the LEAST-audited code +
 >   Lakekeeper re-check (user ask).** Audit targets: the AGE Cypher layer, seven less-audited
 >   catalog endpoint modules, identifiers/vending/serialization, the media lane, the janitor +
@@ -1264,14 +1277,31 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
     + `test_assert_quality_blob_fails_on_dangling_external_pointer` (external Blob.from_uri
     written against a registered base, healthy passes, object DELETED → success=False AND
     `passed()` False ⇒ gate blocks). Suite 568→570.
-  - ⛔ P2 per-project schema declaration (embeddings/classification/summarization columns are KNOWN per project):
+  - 🟡 P2 per-project schema declaration — **the GATE half (the breaking-change detector) SHIPPED
+    2026-07-12 (Batch 21):** per-mover `requiredColumns` (chart) → `MEDALLION_REQUIRED_COLUMNS` →
+    `column_declared` assertion per declared name in `assert_quality`; a promotion whose written
+    schema dropped/renamed a declared column is BLOCKED (write still commits, audited FAIL run);
+    additive evolution never blocked; default (no declaration) byte-identical. TEST:
+    `test_assert_quality_declared_columns_block_breaking_changes` (present → success per column +
+    passed; missing 'embedding' → success=False WITH precise column blame + gate fails; no
+    declaration → no assertion). REMAINING (this item stays 🟡 for): FGA pre-registered column
+    masking + reconcile flagging UNDECLARED writes — governance extensions on the same declaration,
+    build when a real masking/governance need appears. Original scope for the record:
     register expected columns so the quality gate asserts they landed, FGA pre-registers column masking, and
     reconcile flags undeclared writes — a governance contract, not a Dapr one. Lance itself needs no up-front
     schema (add_columns evolves it; per-version schemas already ride the WROTE edge). This is also the
     **breaking-change detector**: today a producer renaming/dropping a column a downstream reads is caught only
     at runtime (mover fails → RETRY → stall); declared columns turn that into a pre-promotion contract
     violation. Additive evolution is already safe by construction (immutable versions pin readers).
-  - ⛔ P2 FRESHNESS check (found 2026-07-12 answering the user's "are we missing something?"): a
+  - ✅ P2 FRESHNESS check — **DONE 2026-07-12 (Batch 21, same day it was found):**
+    `read_latest_write_age_hours` (storage truth: max version-manifest timestamp, clamped ≥0) +
+    `stale: bool` on ReconcileStatus; sweep + per-dataset GET assert it when
+    `services.lineage.freshnessBudgetHours` > 0 (default 0 = axis OFF, zero extra reads — probe-call
+    list test-asserted); WARN `lineage_reconcile_stale` + `stale: [...]` in the tick report. TESTS:
+    `test_read_latest_write_age_uses_the_newest_version_commit` (fresh ds age ≈0; missing → None),
+    `test_reconcile_all_flags_stale_only_with_a_budget_and_readable_storage` (old>budget stale=True
+    while in_sync stays True — its OWN axis; budget 0 probes NOTHING; unreadable never probed).
+    Original finding kept for the record: a
     complete data contract also promises ARRIVAL CADENCE — a 3-day-stale silver is as broken for a
     consumer as a missing column, and today nothing ASSERTS it (the run board shows staleness only
     if you look; the transitions metric could drive a Perses alert nobody has built). Cheap fit:

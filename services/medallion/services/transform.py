@@ -166,6 +166,7 @@ async def handle_stage(
                         settings.to_uri,
                         settings.storage_options(),
                         key_column=settings.quality_key_column,
+                        required_columns=settings.required_column_list,
                     )
         run_event = build_run_event(
             operation=settings.operation,

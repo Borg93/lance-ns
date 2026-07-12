@@ -10,6 +10,7 @@ The endpoint that exposes it (gated on ``can_get_metadata``) wires these to the 
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from typing import Protocol
 
 import lance
@@ -76,6 +77,25 @@ def read_dangling_blob_columns(uri: str, storage_options: dict[str, str]) -> lis
         return []
 
 
+def read_latest_write_age_hours(uri: str, storage_options: dict[str, str]) -> float | None:
+    """Hours since the NEWEST version commit at ``uri`` — the freshness axis (data-contract gap #2).
+
+    Read from STORAGE TRUTH (the version manifests' timestamps), not from the graph's event times —
+    a write that bypassed lineage still counts as fresh data. Manifest timestamps are naive UTC
+    (lance stamps commit time without a zone); clamped at 0 so clock skew can't yield negative age.
+    ``None`` when unreadable/empty — the version comparison already classifies those.
+    """
+    try:
+        versions = lance.dataset(uri, storage_options=storage_options).versions()
+        if not versions:
+            return None
+        latest = max(v["timestamp"] for v in versions)
+        return max((datetime.now(UTC) - latest.replace(tzinfo=UTC)).total_seconds() / 3600.0, 0.0)
+    except BaseException as exc:  # noqa: BLE001 - unreadable → no age, not a failure (incl. pyo3 panics)
+        _swallow_dataset_error(exc)
+        return None
+
+
 def reconcile(*, dataset: str, graph_version: int | None, storage_version: int | None) -> ReconcileStatus:
     """Compare the graph's recorded version against the on-disk version and classify any drift."""
     if graph_version is None and storage_version is None:
@@ -130,6 +150,8 @@ async def reconcile_all(
     backfill: bool,
     read_schema: Callable[[str, int], Awaitable[SchemaFields | None]] | None = None,
     read_dangling: Callable[[str], Awaitable[list[str]]] | None = None,
+    read_age: Callable[[str], Awaitable[float | None]] | None = None,
+    freshness_budget_hours: float = 0,
 ) -> list[ReconcileStatus]:
     """Reconcile every dataset the graph knows against storage; optionally back-fill dropped writes (B4).
 
@@ -159,6 +181,12 @@ async def reconcile_all(
         status = reconcile(dataset=summary.name, graph_version=graph_version, storage_version=storage_version)
         if storage_version is not None and read_dangling is not None:
             status.dangling_blob_columns = await read_dangling(uri)
+        # Freshness (data-contract gap #2): only when a budget is configured AND storage is readable —
+        # an unreadable dataset is already the version check's finding, and budget 0 means the axis is
+        # off (no probe at all, so default deployments pay nothing).
+        if freshness_budget_hours > 0 and storage_version is not None and read_age is not None:
+            age = await read_age(uri)
+            status.stale = age is not None and age > freshness_budget_hours
         if backfill and storage_version is not None and status.status in BACKFILLABLE_STATES:
             # Fix the drift as a side effect but keep the found status in the report — a subsequent sweep
             # will show it in_sync, proving the back-fill took. The schema read is pinned to the version

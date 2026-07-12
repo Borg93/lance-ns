@@ -412,6 +412,10 @@ services:
     module: lineage.main:app
     port: 8000
     daprAppId: lineage
+    # Freshness budget in HOURS (data-contract gap #2): >0 makes the reconcile sweep + per-dataset
+    # GET flag `stale: true` for any dataset whose newest version commit is older — arrival cadence
+    # becomes an ASSERTED contract clause (WARN `lineage_reconcile_stale` on the tick). 0 = off.
+    freshnessBudgetHours: 0
     # Safe to scale: the app's own pubsub component carries queueGroupName=lineage, so replicas form a
     # competing-consumer group (single delivery per event); ingest is idempotent anyway (MERGE on run_id).
     replicas: 1
@@ -523,6 +527,9 @@ medallion:
   movers:
     # serviceIdentity is a BARE subject — common.fga.check prefixes `user:` itself (a `user:` here would
     # double-prefix and always deny). The seeded FGA tuples grant these `user:service-*` identities.
+    # Optional per-mover `requiredColumns: "id,embedding"` — declared consumer dependencies
+    # (data-contract gap #1): the quality gate adds a `column_declared` assertion per name, so a
+    # promotion that dropped/renamed a declared column is BLOCKED (the breaking-change detector).
     - { name: raw-to-bronze, daprAppId: raw-to-bronze, fromNamespace: raw, fromDataset: raw_events, toNamespace: bronze, toDataset: bronze$events, operation: ingest_events, author: alice, subTopic: medallion.raw, pubTopic: medallion.bronze, requiredAction: can_create_table, serviceIdentity: "service-raw-to-bronze" }
     - { name: bronze-to-silver, daprAppId: bronze-to-silver, fromNamespace: bronze, fromDataset: bronze$events, toNamespace: silver, toDataset: silver$features, operation: embed_features, author: data_eng, subTopic: medallion.bronze, pubTopic: medallion.silver, requiredAction: can_create_table, serviceIdentity: "service-bronze-to-silver" }
     - { name: silver-to-gold, daprAppId: silver-to-gold, fromNamespace: silver, fromDataset: silver$features, toNamespace: gold, toDataset: gold$catalog, operation: aggregate_gold, author: analyst, subTopic: medallion.silver, pubTopic: "", requiredAction: can_promote, serviceIdentity: "service-silver-to-gold" }

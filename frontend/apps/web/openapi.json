@@ -2006,6 +2006,11 @@
             "type": "array",
             "title": "Dangling Blob Columns",
             "default": []
+          },
+          "stale": {
+            "type": "boolean",
+            "title": "Stale",
+            "default": false
           }
         },
         "type": "object",

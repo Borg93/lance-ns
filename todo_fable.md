@@ -673,6 +673,28 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 20 (added + ✅ DONE 2026-07-12) — deep adversarial audit of the LEAST-audited code +
+>   Lakekeeper re-check (user ask).** Audit targets: the AGE Cypher layer, seven less-audited
+>   catalog endpoint modules, identifiers/vending/serialization, the media lane, the janitor +
+>   train script. VERDICT: CLEAN — the auditor tried and FAILED to break the load-bearing
+>   surfaces, with the refutations on record: no Cypher injection (LiteralString + agtype binds +
+>   psycopg.sql composition), vending session policies correctly prefix-scoped (`{prefix}/*` +
+>   s3:prefix condition — no sibling-prefix leak), no authz-suffix escalation via percent-encoded
+>   ids (ASGI-decoded path + path_params agree), the janitor PROVABLY cannot delete a referenced
+>   artifact. Three low findings; two FIXED same-batch: (1) Pillow decompression-bomb WARNING band
+>   — the default only raises above 2× MAX_IMAGE_PIXELS, so a ~150M-px crafted PNG passed
+>   is_image() and would decode ~0.5 GB in the deriver → media.py caps MAX_IMAGE_PIXELS=64M and
+>   `_open_guarded` promotes the warning to an error PER OPEN (scoped filter — pytest itself proved
+>   global filters get reset; pinned by `test_decompression_bomb_warning_band_is_rejected`, tiny-cap
+>   trick so no giant allocation); (2) `/v1/table/batch-commit` with a `declare_table` sub-op
+>   created a table with NO owner tuple (fail-closed asymmetry vs /declare) → now seeds
+>   owner+parent per declared table (pinned by
+>   `test_batch_commit_declare_seeds_ownership_like_the_declare_route`, canonical id asserted).
+>   (3) OPEN (pinned): `ingest_to_bronze` materializes the whole source batch in memory (documented
+>   demo posture) — add a max-bytes/object-count ceiling when the media lane leaves demo scale.
+>   Suite 580→582. LAKEKEEPER RE-CHECK: still v0.13.1 (no release since the currency banner) —
+>   verdicts unchanged, watch stands at 0.14.
+>
 >   **BATCH 19 (added + ✅ DONE 2026-07-12) — OTel + auth/authz/secret-store skill-adherence sweep
 >   (user ask: "otel, secret store, nats, event, auth and authz — still intact with my skills?").**
 >   Two parallel audits against the ACTUAL skill files; BOTH verdicts COMPLIANT. OTel: all five
@@ -1378,6 +1400,8 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   re-affirmed + re-framed (currency banner added; vending softened to on-par). Possible future
   interop, NOT current work: register our tables as their generic pointers for a shared org
   catalog while we keep the data plane. Re-check at their 0.14/0.15.
+  RE-CHECKED 2026-07-12 (user ask, later same day): releases page still shows v0.13.1 (Jun 30) as
+  latest — no new release since the currency banner; verdicts unchanged. Watch stands at 0.14.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);
   rask has no tenancy/operator of its own — this stays ours. FGA-as-registry + declarative seeding is the
   interim.

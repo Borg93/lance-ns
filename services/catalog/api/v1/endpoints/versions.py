@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter
+from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     BatchCommitTablesRequest,
     BatchCommitTablesResponse,
@@ -18,7 +19,9 @@ from lance_namespace import (
     ListTableVersionsResponse,
 )
 
-from catalog.api.dependencies import NamespaceDep, SettingsDep
+from catalog.api import fga_deps
+from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
+from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
 from catalog.services import native
 
@@ -38,8 +41,30 @@ def batch_create_table_versions(
 
 
 @router.post("/batch-commit", response_model_exclude_none=True)
-def batch_commit_tables(body: BatchCommitTablesRequest, ns: NamespaceDep) -> BatchCommitTablesResponse:
-    return native.call(ns, "batch_commit_tables", body)
+async def batch_commit_tables(
+    body: BatchCommitTablesRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
+) -> BatchCommitTablesResponse:
+    """Atomic multi-table commit — delegates to the native ``batch_commit_tables``.
+
+    OWNERSHIP PARITY with ``/declare`` (audit 2026-07-12): a ``declare_table`` sub-op CREATES a table
+    (``_authorize_batch`` gated it as create-on-parent), so the creator must be seeded owner + parent
+    edge exactly like the dedicated route — without this, a batch-declared table had NO owner tuple
+    (fail-closed asymmetry: the creator couldn't manage their own table at owner tier, and the
+    reused-id revoke assumptions didn't hold). ``seed_ownership`` is a no-op with FGA off.
+    """
+    response: BatchCommitTablesResponse = await run_in_threadpool(
+        native.call, ns, "batch_commit_tables", body
+    )
+    for operation in body.operations or []:
+        declare = getattr(operation, "declare_table", None)
+        segments = getattr(declare, "id", None) if declare is not None else None
+        if segments:
+            await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    return response
 
 
 @router.post("/{id}/version/list", response_model_exclude_none=True)

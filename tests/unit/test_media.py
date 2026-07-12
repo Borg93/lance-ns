@@ -20,6 +20,17 @@ def _png(color: tuple[int, int, int] = (10, 20, 30), size: tuple[int, int] = (64
     return buffer.getvalue()
 
 
+def test_decompression_bomb_warning_band_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Audit 2026-07-12: Pillow's default only RAISES above 2x MAX_IMAGE_PIXELS — the (MAX, 2*MAX)
+    band merely warns and then fully decodes (~0.5 GB for a crafted ~150M-pixel PNG). media.py caps
+    MAX_IMAGE_PIXELS and promotes the warning to an error, so the band is REJECTED. Pinned with a
+    tiny cap so the test needs no giant allocation: 40x40 (1600 px) sits in (1000, 2000) -> bomb."""
+    assert Image.MAX_IMAGE_PIXELS == 64_000_000  # the module cap is set on import
+    monkeypatch.setattr(Image, "MAX_IMAGE_PIXELS", 1000)
+    assert media.is_image(_png(size=(20, 20))) is True  # under the cap: normal image
+    assert media.is_image(_png(size=(40, 40))) is False  # warning band: rejected, not decoded
+
+
 def test_derive_thumbnail_is_a_smaller_png() -> None:
     source = _png(size=(512, 512))
     thumb = media.derive_thumbnail(source, size=(32, 32))

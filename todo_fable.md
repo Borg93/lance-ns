@@ -1483,6 +1483,17 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
   re-affirmed + re-framed (currency banner added; vending softened to on-par). Possible future
   interop, NOT current work: register our tables as their generic pointers for a shared org
   catalog while we keep the data plane. Re-check at their 0.14/0.15.
+- 📌 **DECISION RECORD (2026-07-12): Apache Fluss considered and REJECTED for ingest.** Fluss is a
+  real-time streaming-table layer (sub-second changelog reads, its own tablet-server cluster, the
+  Flink ecosystem, tiering into Paimon/Iceberg) — a different problem class from our event-driven
+  BATCH platform (trigger → bounded batch → Lance version → provenance). Adopting it would add a
+  stateful operand + a second table format + an ecosystem neither this repo nor rask runs, to serve
+  an ingest whose job is "copy N objects into a Lance table when triggered". The ingest's chunked
+  writes are a memory bound on the in-process path, NOT a streaming paradigm — and the production
+  seam already gets true pipelined execution from Ray Data (blocks ≈ chunks, framework-managed)
+  once lance-ray ships blob-typed write-back (watch item above). RE-OPEN this decision only if a
+  genuine continuous-feed requirement arrives (unbounded source, sub-second consumers, changelog
+  semantics) — the comparison then is Fluss vs NATS-JetStream micro-batching, decided on operands.
   RE-CHECKED 2026-07-12 (user ask, later same day): releases page still shows v0.13.1 (Jun 30) as
   latest — no new release since the currency banner; verdicts unchanged. Watch stands at 0.14.
 - ⛔ **P2 Control plane** — warehouse/project/role/user admin API (or CRDs following rask’s operator pattern);

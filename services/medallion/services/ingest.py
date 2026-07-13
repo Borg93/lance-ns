@@ -55,12 +55,15 @@ def ingest_to_bronze(
     chunk_objects: int = 64,
     chunk_bytes: int = 64 << 20,
 ) -> IngestResult:
-    """STREAM every object from ``source`` into a bronze blob-v2 table at 2.2 (``id, payload, source_uri``).
+    """Write every object from ``source`` into a bronze blob-v2 table at 2.2 — BOUNDED-MEMORY, CHUNKED.
 
     Raises ``ValueError`` on an empty source: an empty bronze is almost always a mis-set prefix, and silently
     "succeeding" with zero rows would report a false success (and an input-less lineage edge) up the cascade.
 
-    STREAMING (2026-07-12, retires the whole-batch-in-memory posture): objects are written in chunks —
+    CHUNKED WRITES (2026-07-12 — deliberately NOT 'streaming' in either platform sense: this is a
+    BATCH ingest with bounded memory, not a Fluss/Kafka-style unbounded stream, and not Ray Data's
+    pipelined execution — which is what the PRODUCTION seam gets for free once lance-ray can write
+    blob columns back; this in-process path exists exactly because it can't yet). Objects land in chunks —
     the first chunk ``mode="overwrite"`` (which also sets the create-time-only
     ``enable_stable_row_ids``), the rest ``mode="append"`` — so memory high-water is ONE chunk plus the
     accumulated URI strings, regardless of source size. A chunk flushes on ``chunk_objects`` OR

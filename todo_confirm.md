@@ -15,10 +15,14 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
 > lance's AWS-session-token fallback made training 100% broken; `MEDALLION_RAY_ENABLED` never reached
 > the producer so `/train` was unreachable; and **the ServiceAccount security layer CrashLooped every
 > Dapr pod**. Plus: input version pins were emitted then dropped on ingest (280 READ edges, 0 versions
-> — now persisted). Two gaps opened: no trainer service credential under auth (all training lineage
-> lost), and PSA `restricted` is blocked by the Dapr sidecar. **The recurring shape: five of the six
-> were "wired only in the movers loop" / "the flag was never actually deployed" — config-surface bugs
-> that unit tests and chart-render CI structurally cannot see.**
+> — now persisted). **FOLLOW-UP SESSION (same day): the trainer-lineage-credential gap is now CLOSED
+> (a `ServicePrincipal` service door — governed /train lineage lands as `service-trainer`, e2e-guarded),
+> and closing it exposed a 7TH live-only bug — the RustFS securityContext uid was wrong (1000 vs the
+> image/data's 10001), so the §6.3 flip left the data plane WRITE-DEAD while reads passed (my proof was
+> read-only). Remaining open: PSA `restricted` (blocked by the Dapr sidecar), and the run-inputs API.**
+> **The recurring shape across all seven: "wired only in the movers loop" / "the flag was never actually
+> deployed" / "the proof only tested the easy direction" — config-surface + verification-gap bugs that
+> unit tests and chart-render CI structurally cannot see.**
 
 ## 1 · Dapr usage (per the dapr skill)
 
@@ -79,9 +83,14 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   feature versions → Ray job SUCCEEDED → `weights.json` loads from the PLAIN S3 path → registry commits
   as a Lance dataset; redelivery re-attaches with NO duplicate job; FGA deny → no job; FAIL path → a
   FAILed job. Chart values passthrough landed. Three bugs fixed to get there (TRAIN_TOKEN collision,
-  producer ray env, the dead FGA gate — §7a). ⛔ **OPEN: no trainer service credential** — the job's
-  self-emitted lineage 401s against the governed ingest, so ALL training provenance is lost in the
-  shipped auth-on stack (plumbing proven sound by injecting a human token).
+  producer ray env, the dead FGA gate — §7a). ✅ **TRAINER LINEAGE CREDENTIAL CLOSED 2026-07-13**: the
+  job now authenticates to the HTTP ingest as the SERVICE it is (app token + bare FGA subject
+  `service-trainer`, a `ServicePrincipal` — NOT a Dex user, per D3), is stamped as author, and is still
+  FGA-checked on the outputs. Live-proven: governed /train → COMPLETE attributed to `service-trainer`,
+  zero 401s (was: graph empty). Guarded by a new governed-union e2e sub-phase (5 passed / 191s). The
+  fix uncovered + fixed a 7TH live-only bug: RustFS `infraContexts.runAsUser` was 1000 but the image +
+  on-disk data are uid 10001, so under the §6.3 flip RustFS READ fine but every WRITE 500'd — the whole
+  data plane was write-dead (my §6.3 proof was read-only). Corrected to 10001.
 
 ## 5 · Auth / authz (can and can't)
 
@@ -180,8 +189,13 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   (kindnet) silently IGNORES NetworkPolicy, so it is unprovable here (needs Calico/Cilium).
 - ✅ **Per-workload ServiceAccounts + infra securityContexts — FLIPPED AND PROVEN LIVE 2026-07-13**
   (both were 🟡 chart-only): SAs bound, k8s token NOT mounted, daprd clean, cascade flows; infra runs
-  non-root (age 999 / rustfs 1000) and a restart kept 441 AGE Run nodes + 392 RustFS objects (fsGroup
-  proof). The SA flip was UNSHIPPABLE before the pass — it CrashLooped every Dapr pod (§7a bug 6).
+  non-root (age 999, openbao 100, rustfs **10001**) and a restart kept 441 AGE Run nodes + 392 RustFS
+  objects. The SA flip was UNSHIPPABLE before the pass — it CrashLooped every Dapr pod (§7a bug 6).
+  🔴 **CORRECTION (bug 7): the rustfs securityContext was WRONG (uid 1000) and my first fsGroup "proof"
+  was READ-ONLY, so it false-passed.** The rustfs image + its on-disk data are uid **10001**; under a
+  1000 context RustFS reads fine but every WRITE 500s (`Io error: Permission denied`) — the whole data
+  plane was write-dead, caught only when a governed train job failed to write weights.json. Fixed to
+  10001/10001. Lesson pinned: an fsGroup/securityContext proof MUST include a write, not just a list.
 - ⛔ **PSA `restricted` is UNREACHABLE** (disproven live 2026-07-13; the runbook's old "nothing should
   be rejected" was wrong): it BLOCKS pod creation on the Dapr-injected `daprd` sidecar (needs
   `capabilities.drop=[ALL]` + `seccompProfile`), and `baseline` would make Vector un-reschedulable

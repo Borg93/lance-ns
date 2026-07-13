@@ -90,11 +90,27 @@ run is terminal until a human (or future automation) POSTs `/train` again with a
   sweep can never repair it).
 - **Emission transport**: Ray pods carry no Dapr sidecar, so the job POSTs to the lineage HTTP
   ingest (`LINEAGE_URL`, default the in-cluster service) — best-effort, two attempts, never crashes
-  training. **Governed-deployment caveat**: with the chart's `auth.enabled` the ingest 401s
-  unauthenticated POSTs; the job supports an optional `LINEAGE_TOKEN` bearer env for that mode, but
-  nothing provisions such a credential yet — auth-on deployments lose training lifecycle events
-  until a service credential path is wired (the failure is visible: the job logs `HTTP 401` per
-  attempt, distinguishable from an outage). The demo tier runs auth-off.
+  training. **Governed deployments — the SERVICE-DOOR credential (closed 2026-07-13).** With
+  `auth.enabled` the ingest requires a verified caller, and until this fix every training RunEvent
+  401'd → **all training provenance was silently lost** (the job logs `HTTP 401` per attempt,
+  distinguishable from an outage). The fix follows the trust model already in the code: the Dapr
+  subscription route (`lineage/api/dapr.py`) does **not** use OIDC/FGA — it is guarded by the shared
+  app token and trusts the producer-stamped author; OIDC is the *external/human* door. The Ray job is
+  an internal producer that merely lacks a sidecar, so it authenticates as the **service it already
+  is**: `LINEAGE_SERVICE_TOKEN` (the app token the submitter injects into the Ray `runtime_env`) +
+  `LINEAGE_SERVICE_ID` = its bare FGA subject `service-trainer`. Lineage
+  (`ServicePrincipal`, `lineage/api/security.py`) verifies the token, checks the subject against the
+  `LINEAGE_SERVICE_SUBJECTS` allowlist (chart: only `service-trainer`), stamps it as author, and
+  **still FGA-checks `can_write_data` on every output** — so the trainer records provenance only for
+  what D5's `writer`-on-`namespace:models` rung permits. This does NOT mint a Dex user (which would be
+  the "second identity axis" D3 argues against), and it is *stricter* than the mover path it mirrors
+  (movers self-assert an unverified `MEDALLION_AUTHOR` config string; the trainer's outputs are
+  authorized). The allowlist is what stops an app-token holder speaking as a human. `LINEAGE_TOKEN`
+  (an OIDC bearer) is still honoured for external producers/tests; the demo tier runs auth-off (no
+  app token → the service door stays shut → the ingest is open).
+  > **Residual exposure (tracked):** the app token rides in the Ray `runtime_env`, which the Ray Jobs
+  > API echoes back — the SAME exposure the S3 credentials already have. Tighten both together with a
+  > secret mounted on the Ray pods at the KubeRay `RayJob` merge (D6).
 
 ## D4 — The model REGISTRY is a Lance dataset; the artifact BYTES are plain S3 objects (DECIDED,
 ## sharpened 2026-07-10 after design review)

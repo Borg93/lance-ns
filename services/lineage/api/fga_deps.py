@@ -31,7 +31,6 @@ from collections.abc import Callable
 from typing import Annotated, Any
 
 from common import fga
-from common.oidc import IDToken
 from fastapi import Depends, Request
 from lance_namespace import (
     PermissionDeniedError,
@@ -40,7 +39,7 @@ from lance_namespace import (
 )
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
-from lineage.api.security import CurrentToken
+from lineage.api.security import CurrentToken, Principal
 from lineage.core.config import LineageSettings
 from lineage.models import RunEvent
 
@@ -88,7 +87,7 @@ async def audit_read(
         log.warning("read_audit_failed", extra={"reader": token.sub, "dataset": name, "error": str(exc)})
 
 
-def enforce_author(event: RunEvent, token: IDToken | None) -> None:
+def enforce_author(event: RunEvent, token: Principal | None) -> None:
     """Bind the run author to the *verified* principal — never trust the request body.
 
     When the request is authenticated, overwrite the ``author`` run facet with the token
@@ -100,7 +99,7 @@ def enforce_author(event: RunEvent, token: IDToken | None) -> None:
 
 
 async def enforce_output_authz(
-    event: RunEvent, request: Request, settings: LineageSettings, token: IDToken | None
+    event: RunEvent, request: Request, settings: LineageSettings, token: Principal | None
 ) -> None:
     """Output-scoped ingest authz: require the producer may WRITE every output dataset it claims.
 
@@ -141,7 +140,7 @@ class DatasetFilter:
     when FGA is off (dev/tests).
     """
 
-    def __init__(self, request: Request, settings: LineageSettings, token: IDToken | None) -> None:
+    def __init__(self, request: Request, settings: LineageSettings, token: Principal | None) -> None:
         self._request = request
         self._settings = settings
         self._token = token

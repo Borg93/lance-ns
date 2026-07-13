@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 from collections.abc import Mapping
 
@@ -183,6 +184,15 @@ async def submit_train_job(
                 "REGISTRY_URI": registry_uri,
                 "ARTIFACT_BASE": artifact_base,
                 "LINEAGE_URL": settings.train_lineage_url,
+                # The job authenticates to the lineage ingest as the SERVICE it already is: the shared app
+                # token + its bare FGA subject (D5's `service-trainer`). Without this every training
+                # RunEvent 401'd under auth.enabled and ALL training provenance was silently lost (live
+                # 2026-07-13). Empty app token (dev/auth-off) → header omitted → the ingest stays open.
+                # NOTE the token rides in the Ray runtime_env, which the Ray Jobs API echoes back — the
+                # SAME exposure the S3 credentials below already have. Tighten both together (a secret
+                # mounted on the Ray pods) at the KubeRay merge; see docs/RAY-TRAIN.md D2.
+                "LINEAGE_SERVICE_TOKEN": os.environ.get("APP_API_TOKEN", ""),
+                "LINEAGE_SERVICE_ID": settings.trainer_identity,
                 "S3_ENDPOINT": settings.s3_endpoint,
                 "S3_KEY": settings.s3_access_key_id,
                 "S3_SECRET": settings.s3_secret_access_key.get_secret_value(),

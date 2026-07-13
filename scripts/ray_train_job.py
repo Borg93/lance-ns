@@ -170,15 +170,21 @@ def emit(event: dict[str, Any]) -> None:
     """Best-effort POST to the lineage HTTP ingest (Ray pods carry no Dapr sidecar). Two attempts,
     then give up loudly on stderr — provenance must never crash the training itself.
 
-    LINEAGE_TOKEN (optional) rides as a bearer: with the chart's ``auth.enabled`` the ingest route
-    401s unauthenticated POSTs, so a governed deployment must inject a credential here (documented in
-    docs/RAY-TRAIN.md — the demo tier runs auth-off). An HTTP status in the failure line keeps a 401
-    (credential problem) distinguishable from an outage."""
+    Under the chart's ``auth.enabled`` the ingest 401s an unauthenticated POST — which silently cost a
+    governed deployment ALL of its training provenance until 2026-07-13. We authenticate as the SERVICE
+    we already are: ``LINEAGE_SERVICE_TOKEN`` (the app token the estate shares) + ``LINEAGE_SERVICE_ID``
+    (the bare FGA subject, ``service-trainer``), which lineage verifies against its allowlist and then
+    FGA-checks on the outputs — so the trainer can only record provenance for what D5's rung permits.
+    A human/OIDC ``LINEAGE_TOKEN`` bearer is still honoured (external producers, tests).
+    An HTTP status in the failure line keeps a 401/403 (credential problem) distinguishable from an outage."""
     url = os.environ.get("LINEAGE_URL", "").rstrip("/")
     if not url:
         return
     headers = {"content-type": "application/json"}
-    if token := os.environ.get("LINEAGE_TOKEN", ""):
+    if service_token := os.environ.get("LINEAGE_SERVICE_TOKEN", ""):
+        headers["dapr-api-token"] = service_token
+        headers["x-lance-service-identity"] = os.environ.get("LINEAGE_SERVICE_ID", "")
+    elif token := os.environ.get("LINEAGE_TOKEN", ""):
         headers["authorization"] = f"Bearer {token}"
     body = json.dumps(event).encode()
     for attempt in (1, 2):

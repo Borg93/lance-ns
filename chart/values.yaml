@@ -81,7 +81,12 @@ security:
   # Per-image uid/fsGroup (data/secret holders need the RIGHT ids for their PVCs, not helper reuse):
   infraContexts:
     enabled: false
-    rustfs: { runAsUser: 1000, fsGroup: 1000 }
+    rustfs: { runAsUser: 10001, fsGroup: 10001 } # MUST match the rustfs image's built-in `rustfs` user
+    # (uid 10001) — it is what owns the on-disk data. A mismatched uid (this was 1000) does NOT CrashLoop:
+    # RustFS starts and READS fine (world-readable dirs), but EVERY WRITE fails `Io error: Permission
+    # denied (os error 13)` → S3 500/AccessDenied to every client. Live 2026-07-13: the whole data plane
+    # was write-dead under infraContexts until this was corrected. fsGroup alone can't rescue it (the
+    # dirs are mode 755 owned by group 10001, so a different group has no write bit).
     age: { runAsUser: 999, fsGroup: 999 } # postgres official image uid/gid
     openbao: { runAsUser: 100, fsGroup: 1000 } # hashicorp vault-family image uid
     dex: { runAsUser: 1001, fsGroup: 1001 }

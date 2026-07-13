@@ -263,6 +263,13 @@ spec:
             - { name: LINEAGE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }
             - { name: LINEAGE_FGA_ENABLED, value: "true" }
             - { name: LINEAGE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            # The SERVICE door on the HTTP ingest (lineage/api/security.py ServicePrincipal): bare FGA
+            # subjects that may ingest with the shared app token instead of an OIDC bearer. The Ray TRAIN
+            # job is a sidecar-less in-cluster producer (RAY-TRAIN.md D2) — before this, every training
+            # RunEvent 401'd under auth and ALL training provenance was lost (live 2026-07-13). Only the
+            # trainer is listed: the allowlist is what stops an app-token holder speaking as a human, and
+            # its outputs are still FGA-checked as `service-trainer`, so D5's rung still bounds it.
+            - { name: LINEAGE_SERVICE_SUBJECTS, value: {{ .Values.medallion.train.trainerIdentity | quote }} }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}

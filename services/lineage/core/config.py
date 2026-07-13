@@ -50,6 +50,12 @@ class LineageSettings(BaseSettings):
     # The FGA object type a Lance dataset maps to. A lineage Dataset node's ``name`` is the
     # catalog ``table:<id>``, so a read is gated on ``can_get_metadata`` of ``table:<name>``.
     fga_object_type: str = Field(default="table", alias="LINEAGE_FGA_OBJECT_TYPE")
+    # Bare FGA subjects (comma-separated, e.g. "service-trainer") that may ingest over the HTTP route as
+    # an in-cluster SERVICE — authenticated by the app token, not OIDC (lineage/api/security.py
+    # ServicePrincipal). Empty (the default) = the service door is shut and the HTTP ingest is OIDC-only.
+    # The allowlist is what stops an app-token holder from speaking as a human; outputs are still
+    # FGA-checked as the named subject, so each service is bounded by its own rung (D5).
+    service_subjects: str = Field(default="", alias="LINEAGE_SERVICE_SUBJECTS")
 
     # --- Dapr pub/sub durable ingest (opt-in) — the catalog publishes to the Dapr pubsub.jetstream
     # component and the sidecar delivers each event to this service's subscription handler over HTTP, so

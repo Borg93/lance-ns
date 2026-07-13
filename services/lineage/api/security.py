@@ -13,12 +13,14 @@ rather than silently letting requests through.
 
 from __future__ import annotations
 
-from typing import Annotated
+import os
+import secrets as _secrets
+from typing import Annotated, Protocol
 
 from common.oidc import IDToken, OIDCVerifier
-from fastapi import Depends, Request
+from fastapi import Depends, Header, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from lance_namespace import ServiceUnavailableError, UnauthenticatedError
+from lance_namespace import PermissionDeniedError, ServiceUnavailableError, UnauthenticatedError
 
 from lineage.api.dependencies import SettingsDep
 
@@ -27,10 +29,80 @@ _bearer = HTTPBearer(auto_error=False, description="OIDC bearer token")
 _CredentialsDep = Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)]
 
 
-def authenticate(request: Request, settings: SettingsDep, credentials: _CredentialsDep) -> IDToken | None:
-    """Authenticate the request, returning the parsed token (or ``None`` when OIDC is off)."""
+class Principal(Protocol):
+    """What the ingest authz layer actually needs of a caller: a subject to attribute + authorize.
+
+    Both :func:`~lineage.api.fga_deps.enforce_author` and
+    :func:`~lineage.api.fga_deps.enforce_output_authz` read only ``.sub``, so an OIDC ``IDToken``
+    and a :class:`ServicePrincipal` are interchangeable there.
+    """
+
+    @property
+    def sub(self) -> str: ...
+
+
+class ServicePrincipal:
+    """A non-human, in-cluster producer authenticated by the shared app token (NOT OIDC).
+
+    **Why this exists.** Services in this system are not OIDC identities: the movers/catalog/compaction
+    reach lineage over the Dapr subscription route, which is guarded by the app-api-token and attributes
+    the run to the producer-stamped author (``lineage/api/dapr.py``). OIDC is the *human/external* door.
+    The Ray TRAIN job is an internal producer that simply has no sidecar (docs/RAY-TRAIN.md D2), so it
+    POSTs the HTTP ingest — where, before this, it hit the OIDC wall and **every training RunEvent 401'd,
+    silently losing all training provenance in a governed deployment** (live 2026-07-13).
+
+    Minting a Dex user for it would introduce exactly the "second identity axis the lineage graph must
+    bridge" that D3 argues against. So a service authenticates with the app token it already shares, and
+    NAMES itself with the same bare FGA subject the rest of the estate uses (``service-trainer``) — the
+    identity D5 already grants (``writer`` on ``namespace:models`` only).
+
+    The claimed subject is **allowlisted** (``LINEAGE_SERVICE_SUBJECTS``): a token holder can only speak
+    as a configured service, never as a human — so this cannot become an impersonation primitive. And it
+    is *stricter* than the Dapr route it mirrors: the outputs are still FGA-checked as that subject, so a
+    trainer can only record provenance for what its rung lets it write.
+    """
+
+    def __init__(self, subject: str) -> None:
+        self._sub = subject
+
+    @property
+    def sub(self) -> str:
+        return self._sub
+
+
+def _service_principal(settings: SettingsDep, token: str | None, identity: str | None) -> ServicePrincipal:
+    """Authenticate an in-cluster service producer: valid app token + an ALLOWLISTED subject."""
+    expected = os.environ.get("APP_API_TOKEN")
+    if not expected:
+        # The service door only exists when the app token does. Without it there is nothing to verify,
+        # so an unauthenticated caller must not be able to open it by merely naming a subject.
+        raise UnauthenticatedError("service ingest is not configured")
+    if not _secrets.compare_digest((token or "").encode(), expected.encode()):
+        raise UnauthenticatedError("invalid service token")
+    allowed = {s.strip() for s in settings.service_subjects.split(",") if s.strip()}
+    if not identity or identity not in allowed:
+        # Fail closed on an unlisted subject — this is what stops a token holder impersonating a human.
+        raise PermissionDeniedError(f"service identity not allowed: {identity or '<missing>'}")
+    return ServicePrincipal(identity)
+
+
+def authenticate(
+    request: Request,
+    settings: SettingsDep,
+    credentials: _CredentialsDep,
+    dapr_api_token: Annotated[str | None, Header()] = None,
+    x_lance_service_identity: Annotated[str | None, Header()] = None,
+) -> Principal | None:
+    """Authenticate the caller: an OIDC bearer (human/external) OR the service door (in-cluster producer).
+
+    Returns ``None`` when OIDC is off — the open dev default, unchanged.
+    """
     if not settings.oidc_enabled:
         return None
+    # The service door is only consulted when a service token is actually presented, so a human request
+    # with a bad/absent bearer keeps its existing 401 — no behaviour change for any existing caller.
+    if dapr_api_token is not None:
+        return _service_principal(settings, dapr_api_token, x_lance_service_identity)
     verifier: OIDCVerifier | None = getattr(request.app.state, "oidc", None)
     if verifier is None:
         # Enabled but no verifier wired (startup/discovery skew): fail closed, never open.
@@ -40,5 +112,7 @@ def authenticate(request: Request, settings: SettingsDep, credentials: _Credenti
     return verifier.verify(credentials.credentials)
 
 
-#: Token of the authenticated caller (``None`` when OIDC is disabled).
-CurrentToken = Annotated[IDToken | None, Depends(authenticate)]
+#: The authenticated caller — an OIDC ``IDToken``, a ``ServicePrincipal``, or ``None`` when OIDC is off.
+CurrentToken = Annotated[Principal | None, Depends(authenticate)]
+
+__all__ = ["CurrentToken", "IDToken", "Principal", "ServicePrincipal", "authenticate"]

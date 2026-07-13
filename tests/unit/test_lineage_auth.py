@@ -837,3 +837,128 @@ def test_audit_read_best_effort_swallows_store_failure() -> None:
             "a$b", _settings(read_audit_enabled=True), _token(), cast(LineageRepository, repo)
         )
     )
+
+
+# --- The SERVICE door on the HTTP ingest (lineage/api/security.py ServicePrincipal) ------------------
+# The Ray TRAIN job is a sidecar-less IN-CLUSTER producer (RAY-TRAIN.md D2): it POSTs the HTTP ingest,
+# which under auth.enabled 401'd every RunEvent, silently losing ALL training provenance (live
+# 2026-07-13). It now authenticates with the shared app token + its bare FGA subject. These tests pin the
+# security properties that make that safe — above all: it must NOT become an impersonation primitive.
+
+
+def _svc_settings(subjects: str = "service-trainer") -> LineageSettings:
+    return _settings(**_FULL_AUTH, service_subjects=subjects)
+
+
+def test_service_principal_authenticates_an_allowlisted_subject(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A valid app token + an ALLOWLISTED subject → a ServicePrincipal carrying that bare FGA name."""
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    principal = security.authenticate(
+        _request(),
+        _svc_settings(),
+        None,
+        dapr_api_token="s3cret",
+        x_lance_service_identity="service-trainer",
+    )
+    assert isinstance(principal, security.ServicePrincipal)
+    # The subject is the SAME bare name the rest of the estate uses (D5) — not a second identity axis.
+    assert principal.sub == "service-trainer"
+
+
+def test_service_token_cannot_impersonate_a_human(monkeypatch: pytest.MonkeyPatch) -> None:
+    """THE load-bearing guard: a token holder may only speak as an ALLOWLISTED SERVICE, never as a user.
+
+    Without the allowlist this door would let anything holding the app token record provenance as alice
+    (and then write whatever alice may write) — a provenance-forgery + privilege-escalation primitive.
+    """
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    with pytest.raises(PermissionDeniedError):
+        security.authenticate(
+            _request(),
+            _svc_settings(),
+            None,
+            dapr_api_token="s3cret",
+            x_lance_service_identity="alice",  # a human — not on the allowlist
+        )
+
+
+def test_service_door_rejects_a_bad_or_missing_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A wrong token (or a named subject with no token configured) is 401 — never a silent pass."""
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    with pytest.raises(UnauthenticatedError):
+        security.authenticate(
+            _request(),
+            _svc_settings(),
+            None,
+            dapr_api_token="wrong",
+            x_lance_service_identity="service-trainer",
+        )
+    # No app token configured → the door does not exist; naming a subject must not open it.
+    monkeypatch.delenv("APP_API_TOKEN", raising=False)
+    with pytest.raises(UnauthenticatedError):
+        security.authenticate(
+            _request(),
+            _svc_settings(),
+            None,
+            dapr_api_token="s3cret",
+            x_lance_service_identity="service-trainer",
+        )
+
+
+def test_service_door_is_shut_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty LINEAGE_SERVICE_SUBJECTS (the default) = OIDC-only ingest: no subject is allowlisted."""
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    with pytest.raises(PermissionDeniedError):
+        security.authenticate(
+            _request(),
+            _settings(**_FULL_AUTH),  # service_subjects defaults to ""
+            None,
+            dapr_api_token="s3cret",
+            x_lance_service_identity="service-trainer",
+        )
+
+
+def test_service_principal_is_attributed_and_fga_bounded() -> None:
+    """The ServicePrincipal flows through BOTH ingest gates: it is stamped as author AND FGA-checked.
+
+    This is what keeps D5 intact end-to-end — the trainer records provenance only for what its rung
+    (`writer` on `namespace:models`) actually permits, and is *stricter* than the Dapr subscription route
+    it mirrors (which trusts the producer-stamped author outright).
+    """
+    principal = security.ServicePrincipal("service-trainer")
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-07-13T09:00:00+00:00",
+            "producer": "https://github.com/Borg93/lance-ns",
+            "run": {"runId": "11111111-1111-5111-8111-111111111111", "facets": {}},
+            "job": {"namespace": "ray-jobs", "name": "train.churn"},
+            "inputs": [],
+            "outputs": [{"namespace": "models", "name": "models$churn", "facets": {}}],
+        }
+    )
+    # (1) attributed — the run is no longer authored by "" (which is what the graph held before)
+    fga_deps.enforce_author(event, principal)
+    assert event.run.facets["author"] == {"name": "service-trainer", "sub": "service-trainer"}
+
+    # (2) authorized — the FGA check runs as the SERVICE subject, and a denial is a 403
+    checked: dict[str, Any] = {}
+
+    async def _batch_check(_client: Any, *, user: str, relation: str, objects: list[str]) -> dict[str, bool]:
+        checked.update(user=user, relation=relation, objects=objects)
+        return dict.fromkeys(objects, False)  # the trainer may NOT write this output
+
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(fga, "batch_check", _batch_check)
+        with pytest.raises(PermissionDeniedError):
+            asyncio.run(
+                fga_deps.enforce_output_authz(
+                    event,
+                    _request(fga=cast(OpenFgaClient, object())),
+                    _svc_settings(),
+                    principal,
+                )
+            )
+    assert checked["user"] == "service-trainer"  # NOT an opaque Dex sub
+    assert checked["relation"] == "can_write_data"
+    assert checked["objects"] == ["table:models$churn"]

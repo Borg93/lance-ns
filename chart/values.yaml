@@ -121,6 +121,16 @@ dapr:
   enabled: true
   sidecars: true # add dapr.io/* annotations to catalog + lineage
   logLevel: info
+  # PodSecurity `restricted` compliance for the injected daprd sidecar. OFF by default (prod posture, like
+  # networkPolicy.enabled). Our app containers are already `restricted`-clean (lance.securityContext:
+  # runAsNonRoot + drop:[ALL] + RuntimeDefault); the sidecar is the remaining gap. Turning this on adds the
+  # RuntimeDefault seccomp annotation; you MUST ALSO set the injector-wide drop-caps value it can't reach:
+  #   --set dapr.sidecarRestricted=true --set dapr.dapr_sidecar_injector.sidecarDropALLCapabilities=true
+  # NOTE full-namespace `restricted` ENFORCE is still blocked on THIS stack by Vector (a log-collector
+  # DaemonSet needs hostPath /var/log/pods — `restricted` forbids it, no value fixes it): give Vector its
+  # own namespace at `baseline`, or a ServiceAccount PSA exemption in the API-server admission config. See
+  # docs/KIND-RUNBOOK §6.4 — full enforce is parked-by-design (never applied on kind), same as L3.
+  sidecarRestricted: false
   # Bound every DaprClient gRPC call (publish_event has no per-call timeout arg, and the SDK's default
   # deadline is unset) so a wedged sidecar can't hang a publisher indefinitely — a timeout surfaces as a
   # publish failure the caller handles (the producer → 503, the movers → RETRY) instead of a stuck request.

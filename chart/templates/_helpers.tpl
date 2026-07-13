@@ -77,6 +77,19 @@ unshippable). Disabling the unused store is the fix that KEEPS the audit's inten
 API grants) instead of walking it back by re-mounting the token. Always on: the store is unused with the
 flag off too, so this also drops an unnecessary k8s-API surface from the default deployment. */}}
 dapr.io/disable-builtin-k8s-secret-store: "true"
+{{- if .Values.dapr.sidecarRestricted }}
+{{/* PodSecurity `restricted` compliance for the INJECTED daprd sidecar (our app containers are already
+compliant via lance.securityContext; the sidecar is not by default). RuntimeDefault seccomp is the per-pod
+annotation; drop-ALL-caps is the injector-wide `dapr.dapr_sidecar_injector.sidecarDropALLCapabilities` value
+(set it true TOGETHER with this flag — a subchart value can't read this one). OFF by default like
+networkPolicy.enabled: full `restricted` ENFORCE is a prod posture, and on this stack it is additionally
+BLOCKED by Vector — a log-collector DaemonSet that inherently needs hostPath (/var/log/pods), which
+`restricted` forbids and no value fixes. Vector needs its own namespace at `baseline`, or a ServiceAccount
+PSA exemption in the API-server admission config. So: this hardens what the chart owns; full-namespace
+enforce stays parked-by-design (docs/KIND-RUNBOOK §6.4). Live-provable in isolation: flip this + the
+injector value, re-roll, and the daprd container carries drop:[ALL] + RuntimeDefault. */}}
+dapr.io/sidecar-seccomp-profile-type: RuntimeDefault
+{{- end }}
 {{- end -}}
 {{/* Do the app services consume secrets via Dapr (the secret store), vs plaintext env? True when there is
 ANY Vault to read from — the in-cluster OpenBao OR an external Vault address. This decouples "use the secret

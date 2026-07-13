@@ -130,18 +130,27 @@ In the audit's order, one flag at a time, re-asserting pods Ready after each:
      unrestricted capabilities (container "daprd" must set securityContext.capabilities.drop=["ALL"]),
      seccompProfile (pod or container "daprd" must set securityContext.seccompProfile.type to "RuntimeDefault")
    ```
-   The blocker is the **Dapr-injected `daprd` sidecar**, which our chart does not author. Two levels:
-   - **`baseline`** — everything passes EXCEPT `vector` (hostPath volumes, inherent to a log collector).
-     Enforcing it would make Vector un-reschedulable, so do NOT set `enforce=baseline` until Vector is
-     exempted (own namespace, or an API-server PSA exemption).
-   - **`restricted`** — additionally needs: the Dapr control plane installed with
-     `sidecarDropALLCapabilities=true` + the `dapr.io/sidecar-seccomp-profile-type: RuntimeDefault`
-     annotation, AND a container-level `securityContext` on our own app containers
-     (`allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault`)
-     — none of which the chart sets today.
+   Two independent blockers; the chart now owns the fixable one:
+   - **App containers — already `restricted`-clean** (correction to the old text): `lance.securityContext`
+     sets `runAsNonRoot` + `allowPrivilegeEscalation:false` + `capabilities.drop:[ALL]` +
+     `seccompProfile:RuntimeDefault` on every app container. They were never the blocker.
+   - **The Dapr-injected `daprd` sidecar — NOW FIXABLE via the chart** (added 2026-07-13, gated + OFF by
+     default like `networkPolicy.enabled`). Set both together:
+     `--set dapr.sidecarRestricted=true --set dapr.dapr_sidecar_injector.sidecarDropALLCapabilities=true`
+     → the first adds the `dapr.io/sidecar-seccomp-profile-type: RuntimeDefault` annotation on all 9 Dapr
+     workloads (render-asserted), the second flips the injector env `SIDECAR_DROP_ALL_CAPABILITIES=true`
+     so injected sidecars carry `drop:[ALL]`. NOTE this re-rolls the Dapr control plane + every injected
+     pod — a prod-values change, not driven on kind (same treatment as L3 NetworkPolicy).
+   - **Vector — a STRUCTURAL blocker no value fixes.** It's a log-collector DaemonSet that inherently
+     mounts hostPath `/var/log/pods`, which `restricted` (and even `baseline`) forbids. Full-namespace
+     enforce is therefore impossible while Vector shares the namespace: give Vector its OWN namespace at
+     `baseline`, or add a `ServiceAccount` PSA exemption in the API-server admission config. This is why
+     full enforce stays **parked-by-design**, like L3 — the chart hardens what it owns; the cluster-policy
+     exemption for Vector is a deploy decision outside the app chart.
 
    **Current end state (safe):** the namespace carries `warn=baseline` + `audit=baseline` — full
-   visibility, no admission blocking. Promote to `enforce` only after the two bullets above land.
+   visibility, no admission blocking. Promote to `enforce` only after the Dapr flags are set AND Vector is
+   exempted per the bullet above.
 
 ## 6.5 · Dapr resiliency + DLQ (Batch 18 — DEFAULT ON; verify the deployed default)
 

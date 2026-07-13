@@ -145,7 +145,11 @@ implement the `SourceAdapter`/`SinkAdapter` Protocol — the `S3Source`/`S3Sink`
 
 `services/medallion/services/ingest.py::ingest_to_bronze(source, bronze_uri, so)` is the ingest head: it
 writes every object's bytes into a **bronze blob-v2 table at file format 2.2** (`id, payload` (blob),
-`source_uri`) with **`enable_stable_row_ids=True`** and returns the source URIs for the lineage edge. Every
+`source_uri`) with **`enable_stable_row_ids=True`** and returns the source URIs for the lineage edge. The
+write is **Lance's native streaming write** — a bounded-memory `Iterator[RecordBatch]` (batched by
+`MEDALLION_INGEST_CHUNK_OBJECTS`/`_CHUNK_BYTES`, byte bound first) into **one atomic commit**: a mid-ingest
+failure commits nothing and a failed re-ingest leaves the previous bronze fully readable; the refusal
+ceilings (`MEDALLION_INGEST_MAX_OBJECTS`/`_MAX_TOTAL_BYTES` → 400) still guard against a mis-pointed prefix. Every
 cascade write (bronze/silver/gold) sets that flag — it is *create-time-only* (cannot be turned on later), so
 we set it up front to keep a durable `_rowid` across compaction, which rewrites fragments and invalidates row
 *addresses*. Today `id` is still positional (the cascade is overwrite-only); the stable `_rowid` is the seam a

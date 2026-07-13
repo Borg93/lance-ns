@@ -7,10 +7,12 @@ from pathlib import Path
 from typing import cast
 
 import lance
+import pyarrow as pa
 import pyarrow.fs as pafs
 import pytest
 from common.sinks import LocalDirSink, S3Sink
-from common.sources import LocalDirSource, S3Source
+from common.sources import LocalDirSource, S3Source, SourceObject
+from medallion.services import ingest as ingest_module
 from medallion.services.ingest import ingest_to_bronze
 from PIL import Image
 
@@ -71,10 +73,13 @@ def test_ingest_to_bronze_rejects_empty_source(tmp_path: Path) -> None:
         ingest_to_bronze(LocalDirSource(empty, "*.png"), str(tmp_path / "bronze"), {})
 
 
-def test_ingest_ceilings_refuse_before_writing(tmp_path: Path) -> None:
-    """Audit 2026-07-12 (the whole-batch-in-memory finding): a source exceeding either ceiling is
-    REFUSED with the actionable env-var name — bounded accumulation, no bronze written — while a
-    source under both ceilings ingests unchanged."""
+def test_ingest_ceilings_refuse_without_committing(tmp_path: Path) -> None:
+    """Audit 2026-07-12 (the whole-batch-in-memory finding), tightened 2026-07-13 for the atomic
+    single-commit write: a source exceeding either ceiling is REFUSED with the actionable env-var
+    name — the generator's raise crosses Lance's FFI as OSError, so this pins the boundary
+    re-raising the clean ValueError — and NOTHING commits: no loadable dataset appears, and a
+    PRE-EXISTING bronze survives an aborted re-ingest untouched (the old multi-commit path had
+    already overwritten it by then)."""
     source_dir = tmp_path / "src"
     source_dir.mkdir()
     _write_png(source_dir / "a.png", (10, 0, 0))
@@ -86,19 +91,26 @@ def test_ingest_ceilings_refuse_before_writing(tmp_path: Path) -> None:
         ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, max_objects=2)
     with pytest.raises(ValueError, match="MEDALLION_INGEST_MAX_TOTAL_BYTES"):
         ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, max_total_bytes=100)
-    assert not (tmp_path / "bronze").exists()  # refused BEFORE writing — no partial bronze
+    with pytest.raises(ValueError):  # aborted writes leave orphan files at most — never a manifest
+        lance.dataset(bronze)
 
     result = ingest_to_bronze(
         LocalDirSource(source_dir, "*.png"), bronze, {}, max_objects=3, max_total_bytes=1 << 20
     )
     assert result.row_count == 3  # under both ceilings → byte-identical behavior
 
+    # the ATOMICITY upgrade: a ceiling-tripped RE-ingest leaves the previous bronze fully readable
+    with pytest.raises(ValueError, match="MEDALLION_INGEST_MAX_OBJECTS"):
+        ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, max_objects=2)
+    survivor = lance.dataset(bronze)
+    assert survivor.version == result.version and survivor.count_rows() == 3
 
-def test_ingest_streams_in_chunks_with_global_ids(tmp_path: Path) -> None:
-    """Streaming ingest (2026-07-12): chunked overwrite-then-append keeps memory at one chunk while
-    the RESULT is indistinguishable from the single-write path — global positional ids in insertion
-    order (compute._carry_forward's range(rows) contract), all blobs readable, stable row ids set by
-    the FIRST chunk, and the reported version is the FINAL commit (1 overwrite + 2 appends = 3)."""
+
+def test_ingest_streams_batches_into_one_atomic_commit(tmp_path: Path) -> None:
+    """Lance-native streaming write (2026-07-13): the batch iterator keeps memory at one chunk while
+    the RESULT is a SINGLE commit — global positional ids in insertion order (compute._carry_forward's
+    range(rows) contract), all blobs readable across batch boundaries, stable row ids, and the version
+    bumps exactly ONCE per ingest (fresh → 1, idempotent re-ingest overwrite → 2)."""
     source_dir = tmp_path / "src"
     source_dir.mkdir()
     for i in range(5):
@@ -109,31 +121,42 @@ def test_ingest_streams_in_chunks_with_global_ids(tmp_path: Path) -> None:
 
     ds = lance.dataset(bronze)
     assert result.row_count == 5 and len(result.source_uris) == 5
-    assert result.version == 3 == ds.version  # ceil(5/2) chunks → 3 commits; edge gets the final
-    assert ds.has_stable_row_ids  # create-time-only flag set by the first chunk, inherited after
+    assert result.version == 1 == ds.version  # 3 batches, ONE commit — the WROTE edge = the result
+    assert ds.has_stable_row_ids
     assert ds.to_table(columns=["id"]).column("id").to_pylist() == [0, 1, 2, 3, 4]  # global order
-    # every blob readable across the chunk boundary (row 4 lives in the last append)
+    # every blob readable across the batch boundary (row 4 lives in the last yielded batch)
     assert ds.read_blobs("payload", indices=[4])[0][1][:4] == b"\x89PNG"
-    # a RE-INGEST's first chunk overwrites from scratch — the idempotent-overwrite contract holds
+    # a RE-INGEST overwrites from scratch in one commit — the idempotent-overwrite contract holds
     again = ingest_to_bronze(LocalDirSource(source_dir, "*.png"), bronze, {}, chunk_objects=2)
-    assert lance.dataset(bronze).count_rows() == 5 and again.row_count == 5
+    assert again.version == 2 and again.row_count == 5
+    assert lance.dataset(bronze).count_rows() == 5
 
 
-def test_ingest_chunk_flushes_on_bytes_before_count(tmp_path: Path) -> None:
+def test_ingest_batch_flushes_on_bytes_before_count(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The BYTE bound is the real memory guarantee (review question 2026-07-12): with a byte cap
-    smaller than one object, every object flushes its own chunk even though the COUNT bound (huge
-    here) never trips — so large objects can't balloon a 'chunk' toward the total ceiling."""
+    smaller than one object, every object becomes its own RecordBatch even though the COUNT bound
+    (huge here) never trips — so large objects can't balloon a batch toward the total ceiling.
+    Observed by counting ``_chunk_batch`` calls now that all batches land in one commit."""
     source_dir = tmp_path / "src"
     source_dir.mkdir()
     for i in range(3):
         _write_png(source_dir / f"img{i}.png", (5 * i, 0, 0))
     bronze = str(tmp_path / "bronze")
 
+    batch_sizes: list[int] = []
+    real_chunk_batch = ingest_module._chunk_batch
+
+    def counting_chunk_batch(chunk: list[SourceObject], first_id: int) -> pa.RecordBatch:
+        batch_sizes.append(len(chunk))
+        return real_chunk_batch(chunk, first_id)
+
+    monkeypatch.setattr(ingest_module, "_chunk_batch", counting_chunk_batch)
     result = ingest_to_bronze(
         LocalDirSource(source_dir, "*.png"), bronze, {}, chunk_objects=1000, chunk_bytes=1
     )
     assert result.row_count == 3
-    assert result.version == 3  # one commit PER OBJECT: the byte bound tripped, the count never did
+    assert batch_sizes == [1, 1, 1]  # one batch PER OBJECT: the byte bound tripped, the count never did
+    assert result.version == 1  # ...and still exactly one commit
     assert lance.dataset(bronze).to_table(columns=["id"]).column("id").to_pylist() == [0, 1, 2]
 
 

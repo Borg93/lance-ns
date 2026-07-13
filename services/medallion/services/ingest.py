@@ -8,6 +8,9 @@ The per-stage ML then flows the blob forward (``compute._carry_forward``) and de
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from itertools import chain
+
 import lance
 import pyarrow as pa
 from common import schema
@@ -30,13 +33,14 @@ class IngestResult(BaseModel):
     fields: list[dict[str, str]]
 
 
-def _chunk_table(chunk: list[SourceObject], first_id: int) -> pa.Table:
-    """One chunk's rows as an Arrow table; ``first_id`` keeps the positional id GLOBAL across chunks."""
-    return pa.table(
+def _chunk_batch(chunk: list[SourceObject], first_id: int) -> pa.RecordBatch:
+    """One chunk's rows as a RecordBatch; ``first_id`` keeps the positional id GLOBAL across chunks."""
+    return pa.record_batch(
         {
             # Positional id — the cascade is OVERWRITE-ONLY and compute._carry_forward re-reads blobs by
-            # the same range(rows); appended chunks preserve insertion order, so the global offset keeps
-            # id == position. If ingest ever gains true append mode, derive a stable id from source_uri.
+            # the same range(rows); batches land in yield order within the single write, so the global
+            # offset keeps id == position. If ingest ever gains true append mode, derive a stable id
+            # from source_uri.
             "id": pa.array(range(first_id, first_id + len(chunk)), pa.int64()),
             "payload": blob_array([obj.data for obj in chunk]),
             "source_uri": pa.array([obj.uri for obj in chunk], pa.string()),
@@ -55,82 +59,95 @@ def ingest_to_bronze(
     chunk_objects: int = 64,
     chunk_bytes: int = 64 << 20,
 ) -> IngestResult:
-    """Write every object from ``source`` into a bronze blob-v2 table at 2.2 — BOUNDED-MEMORY, CHUNKED.
+    """Write every object from ``source`` into a bronze blob-v2 table at 2.2 — ONE ATOMIC, BOUNDED-MEMORY
+    commit via Lance's NATIVE streaming write.
 
-    Raises ``ValueError`` on an empty source: an empty bronze is almost always a mis-set prefix, and silently
-    "succeeding" with zero rows would report a false success (and an input-less lineage edge) up the cascade.
+    Raises ``ValueError`` on an empty source (checked by a peek BEFORE any write touches storage): an empty
+    bronze is almost always a mis-set prefix, and silently "succeeding" with zero rows would report a false
+    success (and an input-less lineage edge) up the cascade.
 
-    CHUNKED WRITES (2026-07-12 — deliberately NOT 'streaming' in either platform sense: this is a
-    BATCH ingest with bounded memory, not a Fluss/Kafka-style unbounded stream, and not Ray Data's
-    pipelined execution — which is what the PRODUCTION seam gets for free once lance-ray can write
-    blob columns back; this in-process path exists exactly because it can't yet). Objects land in chunks —
-    the first chunk ``mode="overwrite"`` (which also sets the create-time-only
-    ``enable_stable_row_ids``), the rest ``mode="append"`` — so memory high-water is ONE chunk plus the
-    accumulated URI strings, regardless of source size. A chunk flushes on ``chunk_objects`` OR
-    ``chunk_bytes``, WHICHEVER TRIPS FIRST: the object count alone would let 64 large images balloon a
-    "chunk" toward the whole total ceiling (the flaw a review question exposed), so the byte bound is
-    the real memory guarantee and the count bound is the fragment-hygiene knob (many tiny objects
-    still batch into sensibly-sized Lance fragments instead of per-object commits). Neither number is
-    a Dapr/NATS constraint — the bus never carries payload bytes (claim-check: events are pointers);
-    these tune ONLY resident memory vs Lance commit/fragment churn. The CEILINGS remain the refusal
-    guard (clear
-    ``ValueError`` naming the env knob, mapped to 400 at the route) against a mis-pointed prefix: bounded
-    memory does not make a million-object ingest a good idea. Two consequences, both deliberate:
-    a multi-chunk ingest commits multiple Lance versions and the lineage WROTE edge records the FINAL one
-    (versions are cheap; the edge's version is the readable-result handle); and a mid-ingest crash leaves a
-    partial bronze with NO trigger published — harmless, because the cascade head only fires after success
-    and the next ingest's first chunk overwrites from scratch (the same idempotent-overwrite contract the
-    whole cascade rests on).
+    LANCE-NATIVE STREAMING WRITE (2026-07-13 — replaced the hand-rolled overwrite-then-append multi-commit
+    chunking after checking the Lance guide: ``write_dataset`` accepts ``Iterator[RecordBatch]`` + ``schema``
+    and streams it with bounded memory, so the multi-commit loop was a DIY copy of a shipped feature).
+    Objects are batched into RecordBatches — ``chunk_objects`` OR ``chunk_bytes``, WHICHEVER TRIPS FIRST:
+    the object count alone would let 64 large images balloon one batch toward the whole total ceiling,
+    so the byte bound is the real memory guarantee and the count bound is batching hygiene (many tiny
+    objects still amortize into sensibly-sized batches). Memory high-water is ONE batch plus the
+    accumulated URI strings, regardless of source size; fragment/file layout inside the commit is Lance's
+    own job (``max_rows_per_file``/``max_bytes_per_file`` defaults). Neither knob is a Dapr/NATS
+    constraint — the bus never carries payload bytes (claim-check: events are pointers).
+
+    ONE COMMIT, ATOMIC (probed): the version bumps exactly once per ingest — the lineage WROTE edge and the
+    readable result are the same handle — and a mid-ingest failure commits NOTHING: an aborted re-ingest
+    leaves the PREVIOUS bronze fully readable (the old multi-commit path could not promise this — its first
+    chunk had already overwritten). Orphaned data files from an abort carry no manifest and the next
+    successful overwrite supersedes them.
+
+    The CEILINGS remain the refusal guard (clear ``ValueError`` naming the env knob, mapped to 400 at the
+    route) against a mis-pointed prefix: bounded memory does not make a million-object ingest a good idea.
+    They are enforced INSIDE the batch generator, and Lance's FFI wraps a generator's exception in
+    ``OSError`` — so the recorded ValueError is re-raised at the boundary to keep the contract.
+
+    EXTERNAL-URI BLOBS deliberately NOT used here: blob v2 can point at external objects
+    (``Blob.from_uri``) which would make ingest a zero-copy metadata write, but bronze must OWN its bytes —
+    a pointer-only bronze dangles the moment the source bucket's lifecycle deletes or migrates an object
+    (exactly the failure mode the reconcile dangling-pointer patrol exists for). Copying once at the ingest
+    boundary is the cheap insurance that the lakehouse's ground truth is self-contained.
     """
-    dataset: lance.LanceDataset | None = None
-    chunk: list[SourceObject] = []
-    chunk_size = 0
-    source_uris: list[str] = []
-    total_bytes = 0
-    next_id = 0
-
-    def flush(pending: list[SourceObject]) -> lance.LanceDataset:
-        nonlocal next_id
-        table = _chunk_table(pending, next_id)
-        next_id += len(pending)
-        if dataset is None:
-            # enable_stable_row_ids (create-time-only) — durable _rowid across compaction; appends
-            # inherit it. First chunk overwrites so a re-ingest always starts from scratch.
-            return lance.write_dataset(
-                table,
-                bronze_uri,
-                mode="overwrite",
-                storage_options=storage_options,
-                data_storage_version="2.2",
-                enable_stable_row_ids=True,
-            )
-        return lance.write_dataset(
-            table, bronze_uri, mode="append", storage_options=storage_options, data_storage_version="2.2"
-        )
-
-    for obj in source.iter_objects():
-        chunk.append(obj)
-        source_uris.append(obj.uri)
-        total_bytes += len(obj.data)
-        if len(source_uris) > max_objects:
-            raise ValueError(
-                f"source exceeds the ingest ceiling of {max_objects} objects "
-                f"(MEDALLION_INGEST_MAX_OBJECTS); narrow the source prefix or raise the ceiling"
-            )
-        if total_bytes > max_total_bytes:
-            raise ValueError(
-                f"source exceeds the ingest ceiling of {max_total_bytes} total bytes "
-                f"(MEDALLION_INGEST_MAX_TOTAL_BYTES); narrow the source prefix or raise the ceiling"
-            )
-        chunk_size += len(obj.data)
-        if len(chunk) >= chunk_objects or chunk_size >= chunk_bytes:
-            dataset = flush(chunk)
-            chunk = []
-            chunk_size = 0
-    if chunk:
-        dataset = flush(chunk)
-    if dataset is None:
+    objects = iter(source.iter_objects())
+    first = next(objects, None)
+    if first is None:
         raise ValueError(f"source yielded no objects; refusing to write an empty bronze at {bronze_uri!r}")
+
+    source_uris: list[str] = []
+    ceiling_error: ValueError | None = None
+
+    def batches() -> Iterator[pa.RecordBatch]:
+        nonlocal ceiling_error
+        chunk: list[SourceObject] = []
+        chunk_size = 0
+        total_bytes = 0
+        next_id = 0
+        for obj in chain([first], objects):
+            chunk.append(obj)
+            source_uris.append(obj.uri)
+            total_bytes += len(obj.data)
+            if len(source_uris) > max_objects:
+                ceiling_error = ValueError(
+                    f"source exceeds the ingest ceiling of {max_objects} objects "
+                    f"(MEDALLION_INGEST_MAX_OBJECTS); narrow the source prefix or raise the ceiling"
+                )
+                raise ceiling_error
+            if total_bytes > max_total_bytes:
+                ceiling_error = ValueError(
+                    f"source exceeds the ingest ceiling of {max_total_bytes} total bytes "
+                    f"(MEDALLION_INGEST_MAX_TOTAL_BYTES); narrow the source prefix or raise the ceiling"
+                )
+                raise ceiling_error
+            chunk_size += len(obj.data)
+            if len(chunk) >= chunk_objects or chunk_size >= chunk_bytes:
+                yield _chunk_batch(chunk, next_id)
+                next_id += len(chunk)
+                chunk = []
+                chunk_size = 0
+        if chunk:
+            yield _chunk_batch(chunk, next_id)
+
+    try:
+        dataset = lance.write_dataset(
+            batches(),
+            bronze_uri,
+            schema=_INGEST_SCHEMA,
+            mode="overwrite",
+            storage_options=storage_options,
+            data_storage_version="2.2",
+            # enable_stable_row_ids (create-time-only) — durable _rowid across compaction.
+            enable_stable_row_ids=True,
+        )
+    except Exception:
+        if ceiling_error is not None:
+            raise ceiling_error from None
+        raise
     return IngestResult(
         version=int(dataset.version),
         row_count=dataset.count_rows(),

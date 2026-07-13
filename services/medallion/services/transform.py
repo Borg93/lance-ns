@@ -30,7 +30,7 @@ from opentelemetry import trace
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_denied, record_quality_blocked, record_transition
 from medallion.schemas.events import build_run_event
-from medallion.services.compute import has_blob_columns, measure, transform_stage
+from medallion.services.compute import measure, transform_stage
 from medallion.services.derivers import UnderivableMediaError
 from medallion.services.quality import Assertion, assert_quality, passed
 from medallion.services.ray_submit import submit_stage_job
@@ -118,21 +118,6 @@ async def handle_stage(
                 with tracer.start_as_current_span("medallion.transform") as span:
                     span.set_attribute("lance.medallion.transition", transition)
                     use_ray = settings.ray_enabled
-                    if use_ray and await run_in_threadpool(
-                        has_blob_columns, settings.from_uri, settings.storage_options()
-                    ):
-                        # The Ray stage job cannot yet round-trip a blob column (lance-ray reads
-                        # blob BYTES fine via take_blobs, but strips the blob typing on read, so the
-                        # job's write-back would demote/mismatch it) and derives no artifacts — so a
-                        # blob upstream takes the in-process path even with Ray on, the same
-                        # native-fallback convention as the Ray index path (docs/RAY.md). Observable
-                        # (warned + span-attributed), never silent.
-                        log.warning(
-                            "medallion_ray_blob_fallback",
-                            extra={"transition": transition, "from_uri": settings.from_uri},
-                        )
-                        span.set_attribute("lance.medallion.compute", "in_process_blob_fallback")
-                        use_ray = False
                     if use_ray:
                         # EVENT-DRIVEN real-Ray: submit the stage transform to the Ray cluster IN RESPONSE
                         # TO this trigger (`ray job submit` via the Ray Jobs REST API), then measure the

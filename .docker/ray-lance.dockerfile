@@ -9,7 +9,13 @@ FROM rayproject/ray:2.56.0-py312-cpu@sha256:2951c07de396a8b746f9c678b52c6e2282e6
 # Fully pinned for reproducibility — this trio is version-sensitive (lance_ray's write_lance / index paths
 # target specific pylance signatures; see docs/RAY.md). --no-cache-dir keeps the layer lean; the base
 # already runs as the non-root `ray` user (UID 1000).
-RUN pip install --no-cache-dir "lance-ray==0.4.2" "pylance==8.0.0" "pyarrow==19.0.1"
+# pillow: the media stage job derives an inline thumbnail + embedding from image blobs (the SAME Pillow
+# primitives as services/medallion/services/media.py, drift-pinned by tests/unit/test_ray_stage_job.py).
+# Needed since 2026-07-13, when the Ray stage job gained the blob path (Phase-3 media-on-Ray parity):
+# lance-ray 0.4.2 strips blob-v2 typing on read (verified live — read_lance turns a blob column into plain
+# large_binary), so the job round-trips blobs via pylance and derives here rather than falling back
+# in-process. Drop this + the round-trip when lance-ray gains inline-blob-preserving read/write.
+RUN pip install --no-cache-dir "lance-ray==0.4.2" "pylance==8.0.0" "pyarrow==19.0.1" "pillow==11.3.0"
 
 # Bake the jobs so `ray job submit -- python /home/ray/jobs/<job>.py` needs no working-dir upload:
 #   ray_lance_job.py  — the standalone write/index/evolve/compact demo (make ray-demo)

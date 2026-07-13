@@ -15,7 +15,7 @@ import lance
 import pyarrow as pa
 from lance import blob_array, blob_field
 from medallion.services import media
-from medallion.services.compute import has_blob_columns, transform_stage
+from medallion.services.compute import transform_stage
 from medallion.services.derivers import derive_artifacts
 from PIL import Image
 
@@ -102,10 +102,14 @@ def test_derive_noop_on_empty_payloads() -> None:
     assert derive_artifacts(table, {"payload": []}) is table
 
 
-def test_has_blob_columns_is_the_ray_gate(tmp_path: Path) -> None:
-    """The mover's Ray-path gate keys on the LANCE TYPE (blob column present), nothing else."""
+def test_blob_field_detection_keys_on_lance_type(tmp_path: Path) -> None:
+    """Blob detection keys on the LANCE TYPE (blob column present), nothing else. (Was the Ray-path GATE
+    until 2026-07-13 — the gate is gone now that the Ray stage job round-trips blobs; the detection still
+    routes a media stage to the pylance blob path, in the job itself.)"""
+    from common import blobs
+
     blobby = _bronze_media(tmp_path, [_png((1, 2, 3))])
     tabular = str(tmp_path / "plain")
     lance.write_dataset(pa.table({"id": pa.array([1], pa.int64())}), tabular, data_storage_version="2.2")
-    assert has_blob_columns(blobby, {}) is True
-    assert has_blob_columns(tabular, {}) is False
+    assert blobs.blob_field_names(lance.dataset(blobby).schema) == ["payload"]
+    assert blobs.blob_field_names(lance.dataset(tabular).schema) == []

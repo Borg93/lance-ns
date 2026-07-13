@@ -94,18 +94,6 @@ def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> Wri
     return measure(uri, storage_options)
 
 
-def has_blob_columns(uri: str, storage_options: dict[str, str]) -> bool:
-    """Whether the dataset carries any blob-v2 column — the mover's Ray-path gate (blocking IO).
-
-    lance-ray 0.4.2 READS blobs correctly (its datasource reconstructs real bytes via ``take_blobs``),
-    but it exposes blob-v2 columns as PLAIN LargeBinary — the blob typing is stripped — so the stage
-    job's write-back would lose (or mismatch) the blob column, and the job has no deriver/Pillow yet.
-    Until that port lands (re-attach ``blob_field`` on write + ship the deriver in the ray image), a
-    blob-carrying upstream takes the in-process path even when Ray is enabled.
-    """
-    return bool(blobs.blob_field_names(lance.dataset(uri, storage_options=storage_options).schema))
-
-
 def transform_stage(
     from_uri: str, to_uri: str, storage_options: dict[str, str], *, stage: str
 ) -> WriteResult:

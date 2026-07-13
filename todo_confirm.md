@@ -57,11 +57,14 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
 - ✅ **Media lane in the deployed cascade**: `/ingest-media` → blob bronze → content-dispatched
   derivation (thumbnail + embedding) → silver, with source-URI provenance. `make e2e-media`, and as
   of 2026-07-06 **under full governance** (`make e2e-governed-union` test 4).
-- ⛔ **Blobs through the RAY stage job** — lance-ray reads blob bytes fine (take_blobs) but strips
-  the blob typing on read, so the job's write-back would demote the column; the ray image lacks the
-  deriver. Movers currently take an OBSERVABLE in-process fallback (`medallion_ray_blob_fallback`).
-  = Phase 3 of the active goal: blob_field re-attach on write-back + deriver in the ray image, drop
-  the gate, prove media-on-Ray live.
+- ✅ **Blobs through the RAY stage job — CLOSED 2026-07-13 (Phase 3).** The premise was VERIFIED live
+  (not assumed): `lance_ray.read_lance` strips blob-v2 typing → plain `large_binary` (schema before/after
+  proven), so the Ray job re-wraps via pylance instead. `ray_stage_job.py` now has a media path
+  (read_blobs → blob_array → derive thumbnail+embedding → write 2.2), the ray image ships Pillow, the
+  deriver is drift-pinned to services/medallion/services/media.py, and the `has_blob_columns` fallback
+  gate is GONE. Live: `/ingest-media` (ray on) → media stage ran AS A RAY JOB (no `medallion_ray_blob_fallback`),
+  `silver-media` has `payload` still blob-v2 + derived thumbnail+embedding. lance-ray bump = drop the
+  round-trip (docs/RAY.md exit note); the deriver is our logic, stays.
 
 ## 4 · Ray compute (tabular)
 

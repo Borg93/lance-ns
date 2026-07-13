@@ -76,13 +76,36 @@ cluster). Fake-Ray in-process stays the default.
   mover `measure()`s the written dataset so the OpenLineage WROTE edge is **identical** to the in-process
   path; on failure/timeout it raises → the mover returns RETRY and Dapr redelivers (the job is
   overwrite-idempotent).
-- **The job:** `scripts/ray_stage_job.py` (baked in the image) reads upstream, stamps the `stage` column
-  across Ray workers, and writes downstream at 2.2 + stable row ids (clears the dir first, since
-  `enable_stable_row_ids` is create-time-only and the cascade reuses the stage URI under overwrite semantics).
+- **The job:** `scripts/ray_stage_job.py` (baked in the image) has **two paths**, chosen by whether the
+  upstream carries a blob-v2 column:
+  - **Tabular** → the distributed `lance_ray.read_lance → map_batches(stamp) → write_lance` path (Ray
+    workers, one commit) at 2.2 + stable row ids.
+  - **Media (blob-v2 present)** → a **pylance-native round-trip** on the driver: read the blob column via
+    `read_blobs`, re-wrap with `blob_array`, derive an inline `thumbnail` + `embedding` from image
+    payloads, and `write_dataset(2.2, enable_stable_row_ids=True)`. This is the SAME contract as the
+    in-process `compute.transform_stage`; the deriver is inlined and **drift-pinned** to
+    `services/medallion/services/media.py` by `tests/unit/test_ray_stage_job.py`.
 
-**Live-proven on kind:** `/produce` → the `raw-to-bronze` mover (ray on) submitted a Ray job that produced
-`bronze` (`stage=bronze`, 2.2, `stable_row_ids=True`), and AGE shows `bronze$events` DERIVED_FROM `raw_events`
-with the real measured stats. With the flag off, `make e2e-medallion` (fake-Ray path) still passes.
+### Why the media path is a pylance round-trip and not `lance_ray` end-to-end (Phase-3 parity, 2026-07-13)
+
+`lance_ray` **is not the redundant layer here — it genuinely can't round-trip an inline blob column** on
+0.4.2. Verified live, not assumed: `lance_ray.read_lance` materialises a `lance.blob.v2` column as plain
+`large_binary` (the schema before/after: `extension<lance.blob.v2<BlobType>>` → `large_binary`), so a
+`lance_ray.write_lance` of that Ray dataset writes plain binary and the column loses its blob typing. The
+0.4.2 blob params (`base_store_params`, `initial_bases`) are for **external** `Blob.from_uri` references,
+not inline round-trip typing; the `external_blob_mode`/`target_bases` params in `lance_docs/ray.md` are a
+**newer lance_ray than 0.4.2** (confirmed absent from the installed signature). So the media path re-wraps
+via pylance — a justified bridge, not DIY duplication. **Exit:** when the ray image bumps to a lance_ray
+that preserves inline blob typing on read/write, drop the round-trip (and the inlined deriver) and route
+media through the distributed path too. The `thumbnail`/`embedding` derivation is our business logic and
+is never something `lance_ray` provides — that stays regardless.
+
+**Live-proven on kind:** (tabular) `/produce` → the `raw-to-bronze` mover (ray on) submitted a Ray job that
+produced `bronze` (`stage=bronze`, 2.2, `stable_row_ids=True`), AGE shows `bronze$events` DERIVED_FROM
+`raw_events` with real measured stats. (media, 2026-07-13) `/ingest-media` (ray on) → the media stage ran
+**as a Ray job** (no more `medallion_ray_blob_fallback`) and `silver-media` came back with `payload` still a
+blob-v2 column **plus** derived `thumbnail` + `embedding`. With the flag off, `make e2e-medallion`
+(fake-Ray path) still passes.
 
 ## Relationship to the cascade
 

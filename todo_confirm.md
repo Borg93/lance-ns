@@ -7,6 +7,19 @@ driven in the shipped combination, not unit-passed.* Update a row only with tran
 
 Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (not yet true / not yet proven)
 
+> **2026-07-13 — FULL KIND-RUNBOOK PASS RUN. Read `todo_fable.md` §7a for the complete verdict.**
+> Both e2e suites green on the union stack; every 🟡 "code-complete, live pending" row below is now
+> driven. The pass found **six live-only bugs** (all fixed + re-proven): the web image never booted;
+> durable-consumer config drift silently kills all delivery for ~25 min on a config-changing upgrade;
+> **the trainer's FGA gate was dead (a revoked trainer still trained)**; a `TOKEN` env collision with
+> lance's AWS-session-token fallback made training 100% broken; `MEDALLION_RAY_ENABLED` never reached
+> the producer so `/train` was unreachable; and **the ServiceAccount security layer CrashLooped every
+> Dapr pod**. Plus: input version pins were emitted then dropped on ingest (280 READ edges, 0 versions
+> — now persisted). Two gaps opened: no trainer service credential under auth (all training lineage
+> lost), and PSA `restricted` is blocked by the Dapr sidecar. **The recurring shape: five of the six
+> were "wired only in the movers loop" / "the flag was never actually deployed" — config-surface bugs
+> that unit tests and chart-render CI structurally cannot see.**
+
 ## 1 · Dapr usage (per the dapr skill)
 
 - ✅ **Pub/sub, subscriptions, ack semantics, token guards** — two audits (GOAL-3 Dapr audit + the §2
@@ -62,7 +75,13 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   (2026-07-10/11, unit tier + adversarial reviews): head + consumer + `scripts/ray_train_job.py`
   (pinned-version reads, bytes-then-commit registry publish, self-emitted TRAINING lifecycle
   lineage with a reconcile-recoverable dataSource facet) + trainer grants + the `TRAINING`
-  JetStream stream. Live kind drive + chart values passthrough remain (todo_fable §7a RESIDUAL).
+  JetStream stream. **✅ LIVE-DRIVEN 2026-07-13** (todo_fable §7a): POST /train → 202 with pinned
+  feature versions → Ray job SUCCEEDED → `weights.json` loads from the PLAIN S3 path → registry commits
+  as a Lance dataset; redelivery re-attaches with NO duplicate job; FGA deny → no job; FAIL path → a
+  FAILed job. Chart values passthrough landed. Three bugs fixed to get there (TRAIN_TOKEN collision,
+  producer ray env, the dead FGA gate — §7a). ⛔ **OPEN: no trainer service credential** — the job's
+  self-emitted lineage 401s against the governed ingest, so ALL training provenance is lost in the
+  shipped auth-on stack (plumbing proven sound by injecting a human token).
 
 ## 5 · Auth / authz (can and can't)
 
@@ -78,6 +97,10 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   control was RESOLVED AS IMPOSSIBLE — OpenFGA object ids can't hold an s3 URI, see todo_fable §7a) —
   code-complete + gate-green, but the 4/4 live evidence above predates them: re-run
   `make e2e-governed-union` on the union stack to re-confirm.
+- ✅ **Trainer rung (#115 D5) — DEAD UNTIL 2026-07-13, NOW ENFORCED LIVE**: the FGA envs rendered only
+  inside the movers `range`, so the TRAINING consumer (hosted by the producer app) ran with
+  `fga_client=None` and its gate silently no-op'd — a REVOKED trainer still trained. Fixed + live
+  deny-test: revoked grant → 202 token but ZERO Ray jobs; re-grant → job runs to SUCCEEDED.
 - ✅ **Governed lineage visibility for humans** — the seed script now writes table→namespace parent
   tuples for mover datasets (before 2026-07-06 the medallion estate was invisible to ALL humans under
   LINEAGE_FGA_ENABLED — found + fixed while building the union e2e).
@@ -113,14 +136,21 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   Lance=data, by design).
 - ✅ **Governed reads** (metadata gate + transitive-disclosure filter + /graph + /columns + /events +
   /runs folds) — unit + governed-union live.
+- ✅ **Input version pins persisted (fixed 2026-07-13)** — the graph held **280 READ edges and ZERO
+  versions**: the Ray TRAIN job emits spec-true `datasetVersion` facets on its inputs (#115 D1's
+  reproducibility claim) and the ingest dropped every one, so the graph could not answer *which feature
+  versions produced this model*. `RunEvent.input_version()` + a READ-edge SET now record it (live:
+  version 28 on the edge; the pre-fix run's edge is still blank). ⛔ Follow-up: no API surfaces a run's
+  INPUTS at all — the pin is reachable only by Cypher (/runs returns outputs; /graph is dataset→dataset).
 - 🟡 **`/insert` version attribution** — read-after-write (upstream response carries only a
   transaction_id); reconcile heals drift. Blocked upstream; documented.
 - 🟡 **Compaction FAILURES invisible to lineage/APIs — CODE-COMPLETE (2026-07-10)**: FAIL RunEvent per
   maintain:-errored dataset (deterministic run_id flood guard, errorMessage facet, capped concurrent
   fan-out, `defer_index_remap=True` + real-Lance interplay regression) — 10 unit tests green. Pending:
-  the live fault-injection proof on kind (ONE FAIL node across ≥2 cron ticks, lineageEmit=true) +
-  compaction image roll. Re-verify: `uv run pytest tests/unit/test_compaction_lineage.py
-  tests/unit/test_compaction_optimize.py` + the §7a RESIDUAL live check.
+  ✅ **LIVE-PROVEN 2026-07-13**: fault-injected a dataset (deleted one data file under its manifest) →
+  exactly ONE FAIL Run node with the deterministic id `2e0e2470-…` (= uuid5 of
+  `compaction-fail-faultns$sacrifice`), errorMessage facet carrying the Lance IO error, no flood across
+  ticks, and the sweep kept processing every other dataset.
 
 ## 10 · Compaction / GC
 
@@ -137,12 +167,25 @@ Legend: ✅ confirmed live · 🟡 confirmed with a named caveat · ⛔ open (no
   release — verified; `lance.otel` is a 9.0 feature). Activation = switch the pin to `pylance[otel]`
   at the 9.0 bump (pyproject marks the spot), then re-run `make e2e-cas` (data-plane major bump
   re-opens the commit-safety verdict) + the real-Lance tripwire tests. 3 unit tests pin the guard.
+- ✅ **App logs ship to GreptimeDB via OTLP, NOT stdout** (confirmed 2026-07-13): auto-instrumentation
+  (`OTEL_LOGS_EXPORTER=otlp`) attaches a root handler, so `kubectl logs` carries only uvicorn access
+  lines. Query `opentelemetry_logs` instead — `dapr_dead_letter_parked`, `train_denied`,
+  `train_trigger_malformed` all present there. Every "the app logs X" assert is a Greptime query.
 - 🟡 **Greptime/Perses are unauthenticated in-cluster** — acceptable on kind; prod hardening parked
   with §12.
 
 ## 12 · Production-only residuals (PARKED — one-line notes, per the active goal)
 
-- ⛔ L3 default-deny NetworkPolicies + OpenBao isolation: prod-values only, never applied on kind.
+- ⛔ L3 default-deny NetworkPolicies + OpenBao isolation: never applied on kind — kind's default CNI
+  (kindnet) silently IGNORES NetworkPolicy, so it is unprovable here (needs Calico/Cilium).
+- ✅ **Per-workload ServiceAccounts + infra securityContexts — FLIPPED AND PROVEN LIVE 2026-07-13**
+  (both were 🟡 chart-only): SAs bound, k8s token NOT mounted, daprd clean, cascade flows; infra runs
+  non-root (age 999 / rustfs 1000) and a restart kept 441 AGE Run nodes + 392 RustFS objects (fsGroup
+  proof). The SA flip was UNSHIPPABLE before the pass — it CrashLooped every Dapr pod (§7a bug 6).
+- ⛔ **PSA `restricted` is UNREACHABLE** (disproven live 2026-07-13; the runbook's old "nothing should
+  be rejected" was wrong): it BLOCKS pod creation on the Dapr-injected `daprd` sidecar (needs
+  `capabilities.drop=[ALL]` + `seccompProfile`), and `baseline` would make Vector un-reschedulable
+  (hostPath). Namespace left at `warn`+`audit`=baseline. See KIND-RUNBOOK §6.4 for what it needs.
 - ⛔ NATS JetStream HA (3 replicas) — single-node on kind.
 - ⛔ Query/consumption engine — deliberately NOT built yet (user decision 2026-07-06: consumption is
   a future query engine; do not build /search now).

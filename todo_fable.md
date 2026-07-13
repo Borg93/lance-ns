@@ -518,16 +518,58 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 > stale `docs/COVERAGE.md` test tally (320 → 437 measured); seed-script `w()` now fails loudly on
 > non-duplicate write errors (the Makefile seed-abort was unreachable for grant failures otherwise).
 >
-> - ⛔ **RESIDUAL — the done-done pass:** on the kind union stack run `make e2e-governed-union` and
->   `make e2e-lineage` green with these changes, and rebuild+roll the shared catalog image so the
->   `RunEvent.progress` poison-guard actually ships. Until then nothing below counts as §0-done.
->   **Added 2026-07-10 (Phase 2):** with `compaction.lineageEmit=true` + a rolled compaction image,
->   fault-inject a dataset (delete one data file under its manifest) and assert exactly ONE FAIL Run
->   node across ≥2 cron ticks via /runs + /events — the §4 compaction-failure item's live DONE WHEN.
->   **Added 2026-07-10 (#115a/c):** with helm available: wire the train values passthrough
->   (topic/entrypoint/trainer identity/models namespace) into chart/templates/medallion.yaml +
->   values.yaml and render-and-grep it (§0); re-run the seed; then the #115a live DONE WHEN (one POST
->   /train drives the stub job end to end; ungranted trainer → DROP with no job submitted).
+> - ✅ **RESIDUAL — the done-done pass: RUN 2026-07-13, ALL GREEN.** Full `docs/KIND-RUNBOOK.md` pass
+>   on the kind union stack (auth+FGA+compute+quality ON, openbao OFF), images rebuilt + rolled.
+>   `make e2e-governed-union` 4/4 (87s) and `make e2e-lineage` 7/7 (Dagger) green. Every runbook
+>   section driven: §2 compaction FAIL-visibility (exactly ONE FAIL Run node, deterministic id
+>   `2e0e2470…` = uuid5("compaction-fail-faultns$sacrifice"), no flood across ticks); §3 merge_insert
+>   (BTREE `id_idx` created on the first merge, documented extra version bump v2→v3, second merge
+>   reuses the SAME index uuid — no re-create); §3b blob serving (200 + `Accept-Ranges: bytes` + valid
+>   PNG; 206 + `Content-Range: bytes 0-3/131` + exact `\x89PNG`; ungranted bob → 403); §3c declared
+>   columns (6 WROTE edges carry `column_declared`, incl. the media lane's id+thumbnail+embedding) AND
+>   freshness (`stale:true` while `in_sync:true` at a 36s budget — independent axes, as designed);
+>   §4 the train drive; §5 the janitor (real orphan collected, 5 published artifacts kept + still
+>   loadable); §6.2/§6.3 security flips; §6.5 resiliency+DLQ.
+>
+>   **THE PASS FOUND SIX LIVE-ONLY BUGS — none catchable by CI (all committed, all re-proven live):**
+>   1. **web image CrashLoopBackOff** — bun's isolated-linker workspace topology broke `@sveltejs/kit`
+>      resolution in the runtime stage. The Batch-12/26 Turborepo image had never actually booted.
+>   2. **durable-consumer config drift** (`RESILIENCE.md` gap #7) — a config-changing upgrade (the
+>      resiliency default-ON maxDeliver/backOff change) wedges EVERY durable subscription
+>      ("consumer name already in use"), pods Ready, ZERO delivery, self-healing only after JetStream
+>      reaps the old durables (~20-25 min). CI never sees it: fresh clusters create consumers right the
+>      first time. Fixed: the stream-provision Job now reconciles drifted durables at every upgrade.
+>   3. **🔒 the trainer's FGA gate was DEAD** — `MEDALLION_FGA_*` rendered only inside the movers
+>      `range`, but the TRAINING consumer is hosted by the PRODUCER app → `fga_client=None` → the
+>      `can_read_data`/`can_create_table` gate silently no-op'd. A REVOKED trainer still trained
+>      (live deny-test submitted a Ray job). #115 D5's whole rung was decorative in a governed deploy.
+>   4. **`TOKEN` env collision** — lance's rust object-store env fallback reads a bare `TOKEN` as the
+>      AWS session token → bogus `x-amz-security-token` on every S3 request → RustFS 500. Training was
+>      100% broken; every side-probe passed (boto3 ignores TOKEN). Pinned by a raw-wire request diff.
+>      Renamed → `TRAIN_TOKEN`.
+>   5. **`MEDALLION_RAY_ENABLED` never reached the producer** — same movers-only scoping bug, so
+>      `/train` 409'd "not configured" on every POST. The train head could never work via the chart.
+>   6. **🔒 the ServiceAccount layer was unshippable** — `automountServiceAccountToken: false` removes
+>      the token daprd's auto-registered built-in `kubernetes` secret store initialises from → fatal
+>      `[INIT_COMPONENT_FAILURE]` → EVERY Dapr pod CrashLooped. Fixed by disabling the unused store
+>      (`dapr.io/disable-builtin-k8s-secret-store`), which KEEPS the audit's no-mounted-JWT intent.
+>
+>   **Plus a data-fidelity fix:** the graph held **280 READ edges and ZERO versions** — the train job
+>   emits spec-true `datasetVersion` pins on its inputs (#115 D1's reproducibility claim) and the
+>   ingest dropped every one. `RunEvent.input_version()` + a READ-edge SET now persist them
+>   (live: version 28 recorded; the pre-fix run's edge is still blank).
+>
+>   **Two gaps OPENED (not fixable in-pass, tracked below):** (a) 🔒 **no trainer service credential** —
+>   the Ray job's self-emitted lineage 401s against the governed ingest, so ALL training provenance is
+>   lost in the shipped auth-on stack (proven the plumbing is sound by injecting a human token);
+>   (b) **PSA `restricted` is unreachable** — it BLOCKS pod creation on the Dapr-injected `daprd`
+>   sidecar (no `capabilities.drop=[ALL]`/`seccompProfile`), and `baseline` would block Vector
+>   (hostPath). Namespace left at `warn`+`audit`=baseline. See KIND-RUNBOOK §6.4.
+>
+>   **Also learned (runbook-affecting):** app structured logs ship to **GreptimeDB via OTLP**
+>   (`OTEL_LOGS_EXPORTER=otlp` attaches a root handler), NOT stdout — `kubectl logs` shows only uvicorn
+>   access lines. Every "the app logs X" assert is a Greptime query (`opentelemetry_logs`);
+>   `dapr_dead_letter_parked` / `train_denied` / `train_trigger_malformed` all confirmed there.
 >   **Added 2026-07-11 (#115b):** rebuild the ray-lance image (it now bakes `ray_train_job.py`) and
 >   re-`helm upgrade` (the nats-stream Job must create the new `TRAINING` stream — without it every
 >   /train publish 503s); then the #115b live DONE WHEN: POST /train → `upstream(models$<m>)` shows

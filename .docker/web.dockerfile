@@ -28,17 +28,22 @@ LABEL org.opencontainers.image.title="lance-lineage-web" \
       org.opencontainers.image.version="${VERSION}" \
       org.opencontainers.image.licenses="Apache-2.0"
 
-WORKDIR /app
 ENV NODE_ENV=production \
     PORT=3000
-# NOTE: we copy the build stage's full node_modules rather than a `--production` tree. svelte-adapter-bun
-# externalizes @sveltejs/kit (a devDependency) into build/server but omits it from build/package.json, so
-# a production-only install drops a module the SSR server needs at runtime ("Cannot find module
-# @sveltejs/kit"). A precise prod tree means hoisting the adapter's true runtime deps into dependencies
-# (fragile, needs a SvelteKit build to verify) — deferred; the dev-dep leak is an accepted-low hygiene cost.
-COPY --from=build --link /app/apps/web/build ./build
-COPY --from=build --link /app/node_modules ./node_modules
-COPY --from=build --link /app/apps/web/package.json ./package.json
+# NOTE: bun's isolated linker (the workspace default) puts the real packages in the root
+# node_modules/.bun store and gives each workspace its own node_modules of symlinks into it
+# (../../../../node_modules/.bun/<pkg>@<ver>/…). The SSR server resolves @sveltejs/kit — a devDependency
+# svelte-adapter-bun externalizes into build/server but omits from build/package.json — through
+# apps/web/node_modules, so the runtime must replicate the whole topology at the same depths: store,
+# app symlink farm, and packages/ (workspace symlink targets). Copying only the root node_modules
+# breaks resolution ("Cannot find module @sveltejs/kit" — hit live 2026-07-13); a `--production`
+# reinstall drops the dev-dep entirely. Full-tree copy is the accepted hygiene cost.
+COPY --from=build --link /app/node_modules /app/node_modules
+COPY --from=build --link /app/packages /app/packages
+COPY --from=build --link /app/apps/web/node_modules /app/apps/web/node_modules
+COPY --from=build --link /app/apps/web/build /app/apps/web/build
+COPY --from=build --link /app/apps/web/package.json /app/apps/web/package.json
+WORKDIR /app/apps/web
 EXPOSE 3000
 # Bun is the init/PID1 here; the slim image has no curl, so health-check via bun's fetch.
 HEALTHCHECK --interval=15s --timeout=3s --start-period=10s --retries=5 \

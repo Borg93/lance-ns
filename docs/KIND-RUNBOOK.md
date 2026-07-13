@@ -139,7 +139,22 @@ After `helm upgrade` + a rollout restart of the subscriber pods:
 3. Poison-inject: publish a stage trigger with a bogus payload the mover always RETRYs (or scale AGE
    to 0 and fire one event). Watch the sidecar retry ~5 times over ~7.5 min, then the app's
    `/dlq-event` log shows `dapr_dead_letter_parked` (ERROR) with the token — the message is PARKED,
-   not silently gone, and the cascade continues for other messages.
+   not silently gone, and the cascade continues for other messages. A malformed payload the handler
+   DROPs (rather than RETRYs) parks immediately — same destination, no retry wait.
+
+   > ⚠️ **`kubectl logs` will NOT show it — that is not a failure.** The services run under
+   > `opentelemetry-instrument` with `OTEL_LOGS_EXPORTER=otlp`, so the auto-instrumentation attaches
+   > an OTLP handler to the ROOT logger and every app log record ships to **GreptimeDB** instead of
+   > stdout; `kubectl logs` carries only uvicorn's access lines (plus the sidecar's own output). This
+   > is the OTLP-direct design working as intended, but it makes every "the app logs X" assert in this
+   > runbook a Greptime query. Verified 2026-07-13 (port-forward greptime 4000):
+   > ```bash
+   > curl -s "http://localhost:4000/v1/sql?db=public" --data-urlencode \
+   >   "sql=SELECT timestamp, severity_text, body FROM opentelemetry_logs \
+   >        WHERE body = 'dapr_dead_letter_parked' ORDER BY timestamp DESC LIMIT 5"
+   > ```
+   > (The same applies to `train_denied`, `train_trigger_malformed`, `ray_train_job_reattach`, the
+   > compaction emit warnings — all present in `opentelemetry_logs`, none in `kubectl logs`.)
 4. Normal traffic still flows: `make e2e-medallion` green on the default values.
 5. Escape hatch (optional): `--set dapr.resiliency.enabled=false` restores the exact pre-existing
    broker-only redelivery (30-300s backOff, no DLQ) — the chaos-verified baseline.

@@ -67,6 +67,16 @@ dapr.io/sidecar-cpu-request: {{ $r.cpuRequest | quote }}
 dapr.io/sidecar-cpu-limit: {{ $r.cpuLimit | quote }}
 dapr.io/sidecar-memory-request: {{ $r.memoryRequest | quote }}
 dapr.io/sidecar-memory-limit: {{ $r.memoryLimit | quote }}
+{{/* daprd AUTO-REGISTERS a built-in `kubernetes` secret store in k8s mode and initialises it at boot,
+which builds a client from the pod's k8s-API SA token. We never use that store (our only secret store is
+`lance-secrets` — secretstores.hashicorp.vault, scoped per app), but its init is FATAL on failure: with
+security.serviceAccounts.enabled the per-workload SAs set automountServiceAccountToken=false, the token
+file is gone, daprd falls back to `stat /home/nonroot/.kube/config`, and EVERY Dapr-injected pod
+CrashLoops ("[INIT_COMPONENT_FAILURE] ... secretstores.kubernetes/v1" — live 2026-07-13; the SA flip was
+unshippable). Disabling the unused store is the fix that KEEPS the audit's intent (no mounted JWT, zero
+API grants) instead of walking it back by re-mounting the token. Always on: the store is unused with the
+flag off too, so this also drops an unnecessary k8s-API surface from the default deployment. */}}
+dapr.io/disable-builtin-k8s-secret-store: "true"
 {{- end -}}
 {{/* Do the app services consume secrets via Dapr (the secret store), vs plaintext env? True when there is
 ANY Vault to read from — the in-cluster OpenBao OR an external Vault address. This decouples "use the secret

@@ -14,6 +14,12 @@ so this suite asserts, live:
      ``quality_passed=false`` + the failed ``not_null`` assertion in lineage, and gold is NOT triggered;
   4. the MEDIA lane under governance: ``/ingest-media`` lands blobs + derives thumbnail/embedding with
      the seeded ``service-media-to-silver`` grant, all read back through the GOVERNED lineage API.
+  5. the TRAIN lane under governance (#115): ``/train`` drives a Ray training job that self-emits its
+     OpenLineage lifecycle to the HTTP ingest — which under auth 401'd EVERY event (all training
+     provenance silently lost) until the service-door credential. The run must land COMPLETE
+     **attributed to ``service-trainer``** (a bare FGA subject, not a Dex sub), with the model node
+     governed like the rest of the estate — the exact combination that was broken. (The pinned feature
+     version rides the graph's READ edge but no API surfaces run inputs yet — todo_fable §7a follow-up.)
 
 Deploy the union + seed, then ``make e2e-governed-union`` (which port-forwards + seeds + fills env):
 
@@ -483,4 +489,67 @@ def test_media_lane_derives_under_governance(stack: tuple[str, str], alice: dict
     assert (
         requests.get(f"{lineage}/datasets/silver-media$features/schema", headers=bob, timeout=8).status_code
         == 403
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 5. the TRAIN lane under governance (#115) — the credential regression guard
+# --------------------------------------------------------------------------- #
+
+
+def test_train_lineage_lands_attributed_under_governance(
+    stack: tuple[str, str], alice: dict[str, str]
+) -> None:
+    """A governed training run's SELF-EMITTED lineage must land, attributed to ``service-trainer``.
+
+    This is the never-driven union bug this suite exists for: the Ray train job has no Dapr sidecar, so
+    it POSTs the lineage HTTP ingest — which under ``auth.enabled`` 401'd every RunEvent, silently
+    losing ALL training provenance in the shipped governed stack (live 2026-07-13). The service-door
+    credential closed it: the job authenticates as ``service-trainer`` (the app token + its bare FGA
+    subject), is stamped as author, and is FGA-checked on ``namespace:models``. Before that fix this
+    poll would ALWAYS time out (the run never lands), so the poll IS the regression guard.
+    """
+    lance_ray, lineage = stack
+    resp = requests.post(
+        f"{lance_ray}/train",
+        headers={"dapr-api-token": DAPR_TOKEN, "content-type": "application/json"},
+        json={"model": "churn", "features": [{"dataset": "silver$features"}]},
+        timeout=30,
+    )
+    if resp.status_code == 409:
+        pytest.skip("train head not configured (needs medallion.ray + a running Ray cluster)")
+    assert resp.status_code == 202, resp.text
+    token = resp.json()["token"]
+
+    # The job self-emits START → RUNNING → COMPLETE over the HTTP ingest; correlate by the SAME
+    # deterministic scheme the job uses (run_id_for("train-<token>")). Training is heavier than a stage
+    # transform (Ray job cold-start + submit-and-ack), so allow a longer budget than the cascade polls.
+    train_rid = _run_id_for("train", token)
+    _poll(
+        lambda: _run_states(lineage, alice).get(train_rid) == "COMPLETE",
+        timeout=180.0,
+        message=lambda: (
+            f"governed training lineage did not land for token {token} "
+            f"(state={_run_states(lineage, alice).get(train_rid)!r}) — the service-door credential "
+            f"is what makes this land; a 401 here means it regressed"
+        ),
+    )
+
+    # THE load-bearing assertion: the run is attributed to the bare FGA service subject, NOT a Dex sub
+    # and NOT an unauthenticated blank. This is what proves the credential authenticated as the service
+    # (and, by the ingest's output-authz, that service-trainer's rung permitted the models write).
+    runs = requests.get(f"{lineage}/runs?limit=1000", headers=alice, timeout=8)
+    runs.raise_for_status()
+    train_run = next((r for r in runs.json().get("runs", []) if r["run_id"] == train_rid), None)
+    assert train_run is not None, f"train run {train_rid} not visible to alice"
+    assert train_run.get("author") == "service-trainer", train_run
+
+    # The model node is governed like everything else: alice sees it (warehouse-reader cascades to
+    # namespace:models via the seeded parent), an ungranted user does not.
+    up = requests.get(f"{lineage}/datasets/models$churn/upstream", headers=alice, timeout=8)
+    up.raise_for_status()
+    assert "silver$features" in {d["name"] for d in up.json().get("related", [])}, up.json()
+    bob = {"Authorization": f"Bearer {_token('bob@example.com')}"}
+    assert (
+        requests.get(f"{lineage}/datasets/models$churn/upstream", headers=bob, timeout=8).status_code == 403
     )

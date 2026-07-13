@@ -41,6 +41,8 @@ from lineage.schemas import (
     GraphNode,
     LineageGraph,
     Neighbors,
+    RunInput,
+    RunInputs,
     Runs,
     RunStatus,
     SchemaField,
@@ -327,6 +329,7 @@ class _FakeRepo:
         self.events: list[EventRecord] = []
         self.list_events_calls: list[dict[str, object]] = []
         self.runs: list[RunStatus] = []
+        self.inputs: list[RunInput] = []
         self.write_version: int | None = None
         self.uri: str | None = None
         self.col_related: list[ColumnRef] = []
@@ -347,6 +350,9 @@ class _FakeRepo:
 
     async def list_runs(self) -> Runs:
         return Runs(runs=self.runs)
+
+    async def run_inputs(self, run_id: str) -> RunInputs:
+        return RunInputs(run_id=run_id, inputs=self.inputs)
 
     async def latest_write_version(self, name: str) -> int | None:  # noqa: ARG002
         return self.write_version
@@ -382,6 +388,40 @@ def test_get_upstream_drops_unauthorized_related(monkeypatch: pytest.MonkeyPatch
     )
     result = asyncio.run(get_upstream("root", cast(LineageRepository, _FakeRepo()), flt))
     assert [ref.name for ref in result.related] == ["a"]  # "b" is filtered out
+
+
+def test_run_inputs_surfaces_pinned_versions_and_is_governed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """GET /runs/{id}/inputs exposes each input's PINNED version (#115 D1) and drops what the caller
+    can't see — the API surface for what was Cypher-only, and the "which feature versions made this
+    model" answer."""
+    from lineage.api.v1.endpoints.runs import get_run_inputs
+
+    monkeypatch.setattr(fga, "batch_check", _batch_allow_a)  # only "a" visible
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.inputs = [
+        RunInput(name="a", version="28"),  # visible + pinned → surfaced with its version
+        RunInput(name="b", version="3"),  # not visible → dropped (no cross-grant disclosure)
+    ]
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(get_run_inputs("train-run", cast(LineageRepository, repo), flt, settings))
+    assert result.run_id == "train-run"
+    assert [(i.name, i.version) for i in result.inputs] == [("a", "28")]  # b filtered; a keeps its pin
+
+
+def test_run_inputs_pass_through_when_auth_off() -> None:
+    """Auth off (the dev default) → no filtering, versions intact, unpinned reads carry version None."""
+    from lineage.api.v1.endpoints.runs import get_run_inputs
+
+    settings = _settings()  # oidc/fga off
+    repo = _FakeRepo()
+    repo.inputs = [
+        RunInput(name="silver$features", version="28"),
+        RunInput(name="gold$catalog", version=None),
+    ]
+    flt = fga_deps.DatasetFilter(_request(), settings, None)
+    result = asyncio.run(get_run_inputs("r", cast(LineageRepository, repo), flt, settings))
+    assert [(i.name, i.version) for i in result.inputs] == [("silver$features", "28"), ("gold$catalog", None)]
 
 
 def test_get_events_filters_to_visible_datasets(monkeypatch: pytest.MonkeyPatch) -> None:

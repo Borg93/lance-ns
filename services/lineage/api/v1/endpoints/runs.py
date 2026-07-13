@@ -14,7 +14,7 @@ from fastapi import APIRouter, Query
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.api.fga_deps import FilterDep, governed
-from lineage.schemas import Events, Runs
+from lineage.schemas import Events, RunInputs, Runs
 
 router = APIRouter(tags=["query"])
 
@@ -37,6 +37,23 @@ async def get_runs(repository: RepositoryDep, datasets: FilterDep, settings: Set
     """
     result = await repository.list_runs()
     result.runs = await governed(datasets, settings.fga_enabled, result.runs, lambda r: set(r.outputs))
+    return result
+
+
+@router.get("/runs/{run_id}/inputs")
+async def get_run_inputs(
+    run_id: str, repository: RepositoryDep, datasets: FilterDep, settings: SettingsDep
+) -> RunInputs:
+    """The inputs a run consumed, each with the version it PINNED — the per-run reproducibility answer.
+
+    The pinned version rides the graph's ``READ`` edge (the Ray TRAIN job pins every feature — #115
+    D1); this endpoint is its API surface (before, Cypher-only). Kept OFF the 2s-polled ``/runs`` board
+    — it's a per-run drill-in, and adding a per-run READ-edge fetch to the board would be N+1 on the hot
+    path. Governed like every read: an input the caller can't ``can_get_metadata`` is dropped (an empty
+    list for a run the caller can't see into is itself non-disclosing). Auth off → pass-through.
+    """
+    result = await repository.run_inputs(run_id)
+    result.inputs = await governed(datasets, settings.fga_enabled, result.inputs, lambda i: {i.name})
     return result
 
 

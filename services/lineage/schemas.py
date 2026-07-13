@@ -298,6 +298,30 @@ class Runs(BaseModel):
     runs: list[RunStatus]
 
 
+class RunInput(BaseModel):
+    """One dataset a run consumed, with the PINNED version it read (``None`` = read floating LATEST).
+
+    The version is the OpenLineage ``version`` facet the producer stamped on the input — the Ray TRAIN
+    job pins every feature (#115 D1: training on floating LATEST is not reproducible). It rides the
+    graph's ``READ`` edge; this is the API surface for it (before, it was reachable only by Cypher).
+    """
+
+    name: str
+    version: str | None = None
+
+
+class RunInputs(BaseModel):
+    """The inputs a run consumed, with their pinned versions — the reproducibility answer for one run.
+
+    Governed like every other read: an input the caller can't ``can_get_metadata`` is dropped, so this
+    can't enumerate datasets outside the caller's reach. For a training run this answers exactly *which
+    feature versions produced this model*.
+    """
+
+    run_id: str
+    inputs: list[RunInput] = Field(default_factory=list)
+
+
 # --- Discovery / browse — the "what exists?" lists a caller reaches for with no dataset name in hand.
 # The per-``{name}`` graph reads answer "tell me about X"; these answer "what is there?" — the browsable
 # catalog a bare graph store lacks. Each is governed: rows referencing a non-visible dataset are dropped.

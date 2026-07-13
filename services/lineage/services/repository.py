@@ -65,6 +65,8 @@ from lineage.schemas import (
     Neighbors,
     ProducerInfo,
     Producers,
+    RunInput,
+    RunInputs,
     Runs,
     RunStatus,
     SchemaField,
@@ -317,6 +319,10 @@ _DERIVED_FROM: Final = (
 _UPSTREAM: Final = (
     "MATCH (d:Dataset {name:$name})-[:DERIVED_FROM*1..]->(u:Dataset) RETURN DISTINCT u.name, u.namespace"
 )
+# One run's direct inputs + the version it PINNED on each (the READ-edge version — #115's reproducibility
+# pin). Direct edges only (NOT the transitive DERIVED_FROM closure): "which versions did THIS run read"
+# is a property of the run's own reads, not of the dataset ancestry where a version has no meaning.
+_RUN_INPUTS: Final = "MATCH (r:Run {run_id:$rid})-[e:READ]->(d:Dataset) RETURN DISTINCT d.name, e.version"
 _DOWNSTREAM: Final = (
     "MATCH (d:Dataset {name:$name})<-[:DERIVED_FROM*1..]-(x:Dataset) RETURN DISTINCT x.name, x.namespace"
 )
@@ -748,6 +754,19 @@ class LineageRepository:
         """Datasets that are (transitively) derived from ``name`` — its impact."""
         rows = await fetch(self._pool, self._graph, _DOWNSTREAM, {"name": name}, columns=2)
         return Neighbors(dataset=name, related=[DatasetRef(name=r[0], namespace=r[1]) for r in rows])
+
+    async def run_inputs(self, run_id: str) -> RunInputs:
+        """One run's direct inputs with the pinned version it read on each (the READ-edge version).
+
+        For a training run this is *which feature versions produced this model* — #115 D1's
+        reproducibility claim, previously reachable only by Cypher. Ungoverned here (name+version only);
+        the endpoint drops inputs the caller can't see. ``e.version`` is ``""``/absent → ``None`` (an
+        unpinned floating read, e.g. a mover reading its upstream stage without a pin)."""
+        rows = await fetch(self._pool, self._graph, _RUN_INPUTS, {"rid": run_id}, columns=2)
+        return RunInputs(
+            run_id=run_id,
+            inputs=[RunInput(name=r[0], version=(r[1] or None)) for r in rows if r[0]],
+        )
 
     async def column_upstream(self, dataset: str, field: str) -> ColumnNeighbors:
         """The columns ``(dataset, field)`` was (transitively) derived from — field-level provenance. (#24)

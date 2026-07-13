@@ -14,11 +14,11 @@
  * exfiltrate it, but it is NOT encrypted/signed — a production BFF would seal it (e.g. AES-GCM with a
  * server key) and add refresh-token rotation. Documented, not hidden.
  */
-import { env } from '$env/dynamic/private';
+import { env } from "$env/dynamic/private";
 
-import type { OidcConfig } from './oidc-core';
+import type { OidcConfig } from "./oidc-core";
 
-export * from './oidc-core';
+export * from "./oidc-core";
 
 /** The OIDC config from env, or `null` when unconfigured (→ the demo runs auth-OFF). */
 export function oidcConfig(): OidcConfig | null {
@@ -27,10 +27,10 @@ export function oidcConfig(): OidcConfig | null {
 	const redirectUri = env.OIDC_REDIRECT_URI;
 	if (!issuer || !clientId || !redirectUri) return null;
 	return {
-		issuer: issuer.replace(/\/$/, ''),
+		issuer: issuer.replace(/\/$/, ""),
 		clientId,
 		clientSecret: env.OIDC_CLIENT_SECRET || null,
 		redirectUri,
-		scopes: env.OIDC_SCOPES || 'openid profile email'
+		scopes: env.OIDC_SCOPES || "openid profile email",
 	};
 }

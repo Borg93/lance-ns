@@ -7,9 +7,9 @@
  * exchange is testable against a fake token endpoint too.
  */
 
-export const SESSION_COOKIE = 'lance_session';
-export const VERIFIER_COOKIE = 'oidc_verifier';
-export const STATE_COOKIE = 'oidc_state';
+export const SESSION_COOKIE = "lance_session";
+export const VERIFIER_COOKIE = "oidc_verifier";
+export const STATE_COOKIE = "oidc_state";
 
 export type OidcConfig = {
 	issuer: string;
@@ -29,15 +29,15 @@ export type Session = {
 
 /** RFC 4648 §5 base64url (no padding) of raw bytes. */
 export function base64url(bytes: Uint8Array): string {
-	let bin = '';
+	let bin = "";
 	for (const b of bytes) bin += String.fromCharCode(b);
-	return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+	return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 }
 
 /** Decode a base64url string back to UTF-8 text (restores padding first). */
 export function base64urlDecode(s: string): string {
-	const b64 = s.replace(/-/g, '+').replace(/_/g, '/');
-	const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+	const b64 = s.replace(/-/g, "+").replace(/_/g, "/");
+	const padded = b64 + "=".repeat((4 - (b64.length % 4)) % 4);
 	const bin = atob(padded);
 	return new TextDecoder().decode(Uint8Array.from(bin, (c) => c.charCodeAt(0)));
 }
@@ -49,7 +49,7 @@ export function randomToken(bytes = 32): string {
 
 /** The PKCE S256 challenge for a verifier: base64url(SHA-256(verifier)). */
 export async function pkceChallenge(verifier: string): Promise<string> {
-	const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+	const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier));
 	return base64url(new Uint8Array(digest));
 }
 
@@ -58,49 +58,49 @@ export function buildAuthorizeUrl(
 	cfg: OidcConfig,
 	authorizationEndpoint: string,
 	state: string,
-	challenge: string
+	challenge: string,
 ): string {
 	const url = new URL(authorizationEndpoint);
-	url.searchParams.set('response_type', 'code');
-	url.searchParams.set('client_id', cfg.clientId);
-	url.searchParams.set('redirect_uri', cfg.redirectUri);
-	url.searchParams.set('scope', cfg.scopes);
-	url.searchParams.set('state', state);
-	url.searchParams.set('code_challenge', challenge);
-	url.searchParams.set('code_challenge_method', 'S256');
+	url.searchParams.set("response_type", "code");
+	url.searchParams.set("client_id", cfg.clientId);
+	url.searchParams.set("redirect_uri", cfg.redirectUri);
+	url.searchParams.set("scope", cfg.scopes);
+	url.searchParams.set("state", state);
+	url.searchParams.set("code_challenge", challenge);
+	url.searchParams.set("code_challenge_method", "S256");
 	return url.toString();
 }
 
 /** The url-encoded body for the authorization-code token exchange. */
 export function tokenRequestBody(cfg: OidcConfig, code: string, verifier: string): URLSearchParams {
 	const body = new URLSearchParams({
-		grant_type: 'authorization_code',
+		grant_type: "authorization_code",
 		code,
 		redirect_uri: cfg.redirectUri,
 		client_id: cfg.clientId,
-		code_verifier: verifier
+		code_verifier: verifier,
 	});
-	if (cfg.clientSecret) body.set('client_secret', cfg.clientSecret);
+	if (cfg.clientSecret) body.set("client_secret", cfg.clientSecret);
 	return body;
 }
 
 /** Decode (NOT verify) a JWT's claims — trusted because it came straight from the token endpoint over TLS. */
 export function decodeJwtClaims(jwt: string): Record<string, unknown> {
-	const payload = jwt.split('.')[1];
-	if (!payload) throw new Error('malformed JWT');
+	const payload = jwt.split(".")[1];
+	if (!payload) throw new Error("malformed JWT");
 	return JSON.parse(base64urlDecode(payload));
 }
 
 /** Build the session from a token response's id_token + access_token. */
 export function sessionFromTokens(idToken: string, accessToken: string): Session {
 	const claims = decodeJwtClaims(idToken);
-	const exp = typeof claims.exp === 'number' ? claims.exp : 0;
+	const exp = typeof claims.exp === "number" ? claims.exp : 0;
 	return {
-		sub: String(claims.sub ?? ''),
-		name: String(claims.name ?? claims.preferred_username ?? claims.email ?? claims.sub ?? 'user'),
-		email: typeof claims.email === 'string' ? claims.email : null,
+		sub: String(claims.sub ?? ""),
+		name: String(claims.name ?? claims.preferred_username ?? claims.email ?? claims.sub ?? "user"),
+		email: typeof claims.email === "string" ? claims.email : null,
 		accessToken,
-		expiresAt: exp
+		expiresAt: exp,
 	};
 }
 
@@ -143,12 +143,12 @@ export async function exchangeCode(
 	tokenEndpoint: string,
 	code: string,
 	verifier: string,
-	fetchFn: typeof fetch = fetch
+	fetchFn: typeof fetch = fetch,
 ): Promise<Session> {
 	const res = await fetchFn(tokenEndpoint, {
-		method: 'POST',
-		headers: { 'content-type': 'application/x-www-form-urlencoded' },
-		body: tokenRequestBody(cfg, code, verifier)
+		method: "POST",
+		headers: { "content-type": "application/x-www-form-urlencoded" },
+		body: tokenRequestBody(cfg, code, verifier),
 	});
 	if (!res.ok) throw new Error(`token exchange failed: ${res.status}`);
 	const tokens = (await res.json()) as { access_token: string; id_token: string };

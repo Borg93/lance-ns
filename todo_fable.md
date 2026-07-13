@@ -673,15 +673,52 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   Tests + assertions on the flipped §9 P1-externalization line. Gate: 523 green, CI-exact.
 >   PROVEN IN CI same day (run 29166555186 fully green incl. the helm render of the chart change).
 >
+>   **BATCH 26 (added + ✅ DONE 2026-07-13, user: "change to oxfmt and oxlint for our svelte 5 and
+>   typescript... turborepo and microfrontends stuff") — frontend lint+format standardized on the
+>   oxc toolchain.** Green-field add (the workspace had NO linter/formatter before — nothing to
+>   migrate off): oxlint 1.73.0 + oxfmt 0.58.0 pinned as root devDeps. PROBED before wiring:
+>   oxlint lints `.svelte` script blocks natively (planted `debugger` caught) but exits 0 on
+>   warnings → the gate script is `oxlint --deny-warnings .` (verified exit 1 on a planted
+>   violation, 0 clean); oxfmt formats `.svelte` too once `"svelte": true` is set
+>   (prettier-plugin-svelte semantics — needs the workspace's own `svelte` pkg, present).
+>   `.oxfmtrc.json`: `useTabs` (the tree was already uniformly tab-indented — minimal churn),
+>   ignorePatterns on GENERATED files (`api.generated.ts`, `openapi.json`, `bun.lock`) so
+>   `gen:types` never fights the formatter. One-time reformat: 38 files, mostly quote
+>   canonicalization; it exposed a brittle test — @lance/ui's export sweep grepped for
+>   single-quoted imports only, now quote-agnostic regexes (a formatter change can't blind the
+>   test again). Wired as turbo ROOT tasks (`//#lint`, `//#fmt:check` — one repo-wide process
+>   each, no per-package fanout) + CI frontend job now runs `check test lint fmt:check`.
+>   Full local gate green: build/check/test/lint/fmt:check + Playwright e2e 5/5.
+>
+>   **BATCH 25 (added + ✅ DONE 2026-07-13, user: "read the lance docs... make sure if this is
+>   already included in lance") — ingest onto Lance's NATIVE streaming write.** The docs check
+>   found Batch 24's overwrite-then-append multi-commit chunking was a DIY copy of a shipped
+>   feature: `lance.write_dataset` accepts `Iterator[RecordBatch]` + `schema` and streams it with
+>   bounded memory into ONE commit (guide "Writing Lance Dataset"; probed working with blob
+>   columns + `enable_stable_row_ids`). Rewritten: the batch generator (same chunk knobs, byte
+>   bound first) feeds a SINGLE `write_dataset` — version bumps once per ingest, and the commit is
+>   ATOMIC (probed): a mid-ingest failure commits NOTHING and a failed RE-ingest leaves the
+>   previous bronze fully readable (the multi-commit path had already overwritten it by its first
+>   chunk — a real recovery-semantics upgrade, not just less code). Lance's FFI wraps
+>   generator-raised exceptions in OSError, so the ceiling ValueErrors are recorded in a closure
+>   and re-raised clean at the boundary (the 400 mapping keeps working). Blob v2's EXTERNAL-URI
+>   option (`Blob.from_uri` — zero-copy ingest) was considered and REJECTED for bronze: bronze
+>   must OWN its bytes or the source bucket's lifecycle can dangle the lakehouse (the exact
+>   failure mode the reconcile pointer patrol exists for). TESTS (renamed to match the contract):
+>   `test_ingest_streams_batches_into_one_atomic_commit` (5 objects, chunk 2 → 3 batches, version
+>   1, ids [0..4], blob readable across batch boundary, re-ingest → version 2),
+>   `test_ingest_batch_flushes_on_bytes_before_count` (byte cap 1 → batch sizes [1,1,1] counted
+>   via monkeypatched `_chunk_batch`, still ONE commit),
+>   `test_ingest_ceilings_refuse_without_committing` (both ceilings named through the FFI
+>   boundary, NO loadable dataset after abort, pre-existing bronze survives a ceiling-tripped
+>   re-ingest at the same version). Suite steady at 590.
+>
 >   **BATCH 24 (added + ✅ DONE 2026-07-12, user challenged the parked list) — streaming ingest +
 >   parked-list truth-up.** (1) `ingest_to_bronze` now STREAMS: chunks of
 >   `MEDALLION_INGEST_CHUNK_OBJECTS` (64) written overwrite-then-append — memory high-water is ONE
->   chunk + URI strings regardless of source size; result indistinguishable from the single write
->   (global positional ids across chunks, stable-row-ids from the first chunk, final version on the
->   lineage edge; mid-ingest crash = partial bronze with NO trigger, overwritten by the next ingest
->   — the cascade's own idempotent-overwrite contract). TEST:
->   `test_ingest_streams_in_chunks_with_global_ids` (5 objects, chunk 2 → version 3, ids [0..4] in
->   order, blob readable across the chunk boundary, re-ingest overwrites clean). Ceilings stay as
+>   chunk + URI strings regardless of source size (SUPERSEDED by Batch 25: same knobs, now Lance's
+>   native iterator write, one atomic commit). TEST (renamed in Batch 25):
+>   `test_ingest_streams_in_chunks_with_global_ids`. Ceilings stay as
 >   the refusal guard. (2) The **durable PULL consumer is RETIRED** from the roadmap: PULL = direct
 >   nats-py = leaving Dapr pub/sub = contradicts the pinned Dapr-first rule; its target gaps are
 >   covered by durable push cursors + Resiliency retries + the DLQ (RESILIENCE.md updated both
@@ -704,9 +741,9 @@ what the audit proved the tests DON'T yet prove. Every item verified against cod
 >   refuses (clear ValueError naming the env knob → 400 problem+json at /ingest-media, which also
 >   fixed the pre-existing empty-source 500) the moment accumulation would exceed
 >   `MEDALLION_INGEST_MAX_OBJECTS` (10k) or `MEDALLION_INGEST_MAX_TOTAL_BYTES` (1 GiB) — memory
->   high-water ≈ ceiling + one object; a mis-pointed prefix can no longer OOM the producer. TEST:
->   `test_ingest_ceilings_refuse_before_writing` (both ceilings named in the error, NO partial
->   bronze written, under-ceiling byte-identical). DOGFOOD: the demo movers now DECLARE
+>   high-water ≈ ceiling + one object; a mis-pointed prefix can no longer OOM the producer. TEST
+>   (renamed in Batch 25): `test_ingest_ceilings_refuse_without_committing` (both ceilings named
+>   in the error, nothing committed, under-ceiling byte-identical). DOGFOOD: the demo movers now DECLARE
 >   requiredColumns in values (`id` on tabular stages; `id,thumbnail,embedding` on media-to-silver
 >   — if the deriver breaks, promotion blocks) + runbook 3c gives the live positive/negative
 >   asserts for both new contract clauses. (The streaming follow-up shipped hours later — Batch 24.)
@@ -1401,10 +1438,11 @@ flagged contradiction fixed (CredentialVendor wired). Detail below.
 - 🟡 **MFE follow-ups (Batch 12 leftovers — user: "remember to fix the mfe stuff", 2026-07-12).
   (b)+(c) SHIPPED 2026-07-12 (Batch 14); only (a) remains, blocked on rask visibility.**
   (a) ⛔ **exact-convention alignment needs the rask repo visible** — package naming (@lance/ui vs
-  their scheme), their turbo.json task names/caching, eslint/prettier presets, runtime composition
-  (separate deploys behind Traefik vs a shell app). BLOCKED on: add the rask repo to a session
-  (re-verified 2026-07-12: list_repos has NO repo named rask under any account) or paste its root
-  package.json + turbo.json + one app/package manifest.
+  their scheme), their turbo.json task names/caching, lint/format presets (we standardized on
+  oxlint+oxfmt 2026-07-13 — Batch 26; if rask pins something else, reconcile at merge), runtime
+  composition (separate deploys behind Traefik vs a shell app). BLOCKED on: add the rask repo to a
+  session (re-verified 2026-07-12: list_repos has NO repo named rask under any account) or paste
+  its root package.json + turbo.json + one app/package manifest.
   (b) ✅ **StatusBoard + the GSAP animation layer extracted into @lance/ui (Batch 14).**
   `StatusBoard.svelte`, `attachments.ts` (all 7 {@attach} factories) and `gsap.ts` git-mv'd into
   `packages/ui/src`; StatusBoard's prop type is now the lib-owned STRUCTURAL `RunStatusLike`

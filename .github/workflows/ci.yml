@@ -151,9 +151,12 @@ jobs:
         run: bun install --frozen-lockfile
 
       # Turborepo workspace (Batch 12): check + unit tests fan out over apps/* AND packages/*
-      # (the @lance/ui exports/transport-agnosticism tests run here too).
-      - name: svelte-check + unit tests (turbo)
-        run: bunx turbo run check test
+      # (the @lance/ui exports/transport-agnosticism tests run here too). lint/fmt:check are turbo
+      # ROOT tasks (//#) — oxlint gates warnings-as-errors (incl. .svelte script blocks); oxfmt
+      # gates formatting (ts/js/json AND .svelte via its prettier-plugin-svelte support; the
+      # generated api.generated.ts/openapi.json are ignorePatterns so gen:types never fights it).
+      - name: svelte-check + unit tests + oxlint + oxfmt (turbo)
+        run: bunx turbo run check test lint fmt:check
 
       - name: Install Playwright chromium
         working-directory: frontend/apps/web

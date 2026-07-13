@@ -16,6 +16,12 @@
 			"dependsOn": ["build"],
 			"cache": false,
 			"outputs": []
+		},
+		"//#lint": {
+			"cache": false
+		},
+		"//#fmt:check": {
+			"cache": false
 		}
 	}
 }

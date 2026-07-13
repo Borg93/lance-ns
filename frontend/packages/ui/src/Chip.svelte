@@ -1,9 +1,9 @@
 <script lang="ts">
 	/** A small labelled chip — match reasons, tags, statuses. Self-contained (no app imports). */
-	let { label, tone = 'neutral' }: { label: string; tone?: 'neutral' | 'accent' } = $props();
+	let { label, tone = "neutral" }: { label: string; tone?: "neutral" | "accent" } = $props();
 </script>
 
-<span class="chip" class:accent={tone === 'accent'}>{label}</span>
+<span class="chip" class:accent={tone === "accent"}>{label}</span>
 
 <style>
 	.chip {

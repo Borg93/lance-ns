@@ -1,8 +1,8 @@
 <script lang="ts" module>
-	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
-	import JobNode, { type JobNodeType } from '$lib/JobNode.svelte';
-	import ColumnNode, { type ColumnNodeType } from '$lib/ColumnNode.svelte';
-	import type { NodeTypes } from '@xyflow/svelte';
+	import MedallionNode, { type MedallionNodeType } from "$lib/MedallionNode.svelte";
+	import JobNode, { type JobNodeType } from "$lib/JobNode.svelte";
+	import ColumnNode, { type ColumnNodeType } from "$lib/ColumnNode.svelte";
+	import type { NodeTypes } from "@xyflow/svelte";
 
 	// svelte-flow rule 5: register node components ONCE at module scope, not inline.
 	const nodeTypes: NodeTypes = { medallion: MedallionNode, job: JobNode, column: ColumnNode };
@@ -10,25 +10,32 @@
 </script>
 
 <script lang="ts">
-	import { untrack } from 'svelte';
-	import { SvelteFlow, Background, BackgroundVariant, Controls, MiniMap, Panel } from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
-	import { Tabs } from 'bits-ui';
-	import { Radio, Boxes, Cpu, Columns3 } from '@lucide/svelte';
-	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
-	import { LineageState } from '$lib/store.svelte';
-	import { SearchBar, StatusBoard, enter, stagger, countUp } from '@lance/ui';
-	import { fetchSearch } from '$lib/api';
-	import { LAYER, type DemoDataset } from '$lib/types';
+	import { untrack } from "svelte";
+	import {
+		SvelteFlow,
+		Background,
+		BackgroundVariant,
+		Controls,
+		MiniMap,
+		Panel,
+	} from "@xyflow/svelte";
+	import "@xyflow/svelte/dist/style.css";
+	import { Tabs } from "bits-ui";
+	import { Radio, Boxes, Cpu, Columns3 } from "@lucide/svelte";
+	import FlowAutoFit from "$lib/FlowAutoFit.svelte";
+	import { LineageState } from "$lib/store.svelte";
+	import { SearchBar, StatusBoard, enter, stagger, countUp } from "@lance/ui";
+	import { fetchSearch } from "$lib/api";
+	import { LAYER, type DemoDataset } from "$lib/types";
 
 	const store = new LineageState();
 
 	// Which graph plane is shown — Datasets / Jobs (like Marquez) + Columns (field-to-field, #24).
-	let graphView = $state<'datasets' | 'jobs' | 'columns'>('datasets');
+	let graphView = $state<"datasets" | "jobs" | "columns">("datasets");
 	// Browse (GOAL 4 A3): filter the governed /datasets catalog by name / namespace / tag, then click a
 	// row to focus that dataset — the browsable entry point that replaces the hardcoded name list.
-	let browseQuery = $state('');
-	let nsFilter = $state(''); // '' = all namespaces (fed by the governed /namespaces list)
+	let browseQuery = $state("");
+	let nsFilter = $state(""); // '' = all namespaces (fed by the governed /namespaces list)
 
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
@@ -40,22 +47,32 @@
 		return scoped.filter(
 			(d) =>
 				d.name.toLowerCase().includes(q) ||
-				(d.namespace ?? '').toLowerCase().includes(q) ||
-				(d.tags ?? []).some((t) => t.toLowerCase().includes(q))
+				(d.namespace ?? "").toLowerCase().includes(q) ||
+				(d.tags ?? []).some((t) => t.toLowerCase().includes(q)),
 		);
 	});
 
 	let nodes = $state.raw<FlowNode[]>([]);
 	let edges = $state.raw<
-		{ id: string; source: string; target: string; animated: boolean; type: string; label?: string; class?: string }[]
+		{
+			id: string;
+			source: string;
+			target: string;
+			animated: boolean;
+			type: string;
+			label?: string;
+			class?: string;
+		}[]
 	>([]);
 	// Re-fit the viewport only when the node-set or the view changes (not on every data poll).
-	const fitKey = $derived(graphView + '|' + nodes.map((n) => n.id).join(','));
+	const fitKey = $derived(graphView + "|" + nodes.map((n) => n.id).join(","));
 
 	// Current run-state per dataset: the latest run (by updated_at) that lists it as an output.
 	const runStateByDataset = $derived.by(() => {
 		const m: Record<string, string> = {};
-		const ordered = [...store.runs].sort((a, b) => (a.updated_at ?? '').localeCompare(b.updated_at ?? ''));
+		const ordered = [...store.runs].sort((a, b) =>
+			(a.updated_at ?? "").localeCompare(b.updated_at ?? ""),
+		);
 		for (const r of ordered) {
 			if (!r.state) continue;
 			for (const out of r.outputs ?? []) m[out] = r.state;
@@ -71,7 +88,7 @@
 
 	// In Columns view, keep the selected dataset's field-to-field graph fresh on its own poll.
 	$effect(() => {
-		if (graphView !== 'columns' || !store.selected) return;
+		if (graphView !== "columns" || !store.selected) return;
 		const name = store.selected;
 		store.loadColumns(name);
 		const t = setInterval(() => store.loadColumns(name), 2000);
@@ -85,7 +102,7 @@
 		// `nodes` here (the var we reassign below) would make this effect retrigger itself → infinite loop.
 		const prev = new Map(untrack(() => nodes).map((node) => [node.id, node]));
 
-		if (graphView === 'columns') {
+		if (graphView === "columns") {
 			// Columns plane (#24): the selected dataset's field-to-field lineage. Columns are laid out by
 			// their owning dataset's medallion layer (x) and stacked (y); edges carry the transformation kind.
 			const cg = store.columnGraph;
@@ -96,7 +113,9 @@
 				return;
 			}
 			const masked = new Set(
-				(cg.edges ?? []).filter((e) => e.masking).map((e) => `${e.target_dataset}::${e.target_field}`)
+				(cg.edges ?? [])
+					.filter((e) => e.masking)
+					.map((e) => `${e.target_dataset}::${e.target_field}`),
 			);
 			const perLayer: Record<number, number> = {};
 			nodes = (cg.columns ?? []).map((c) => {
@@ -105,9 +124,16 @@
 				const id = `${c.dataset}::${c.field}`;
 				return {
 					id,
-					type: 'column' as const,
+					type: "column" as const,
 					position: prev.get(id)?.position ?? { x: 20 + layer * 230, y: 24 + row * 76 },
-					data: { dataset: c.dataset, field: c.field, type: c.type, layer, masked: masked.has(id), isRoot: c.dataset === root }
+					data: {
+						dataset: c.dataset,
+						field: c.field,
+						type: c.type,
+						layer,
+						masked: masked.has(id),
+						isRoot: c.dataset === root,
+					},
 				};
 			});
 			edges = (cg.edges ?? []).map((e) => {
@@ -118,28 +144,40 @@
 					source: s,
 					target: t,
 					animated: true,
-					type: 'smoothstep',
-					label: e.transformation_subtype || e.transformation_type || '',
-					class: e.masking ? 'masked-edge' : ''
+					type: "smoothstep",
+					label: e.transformation_subtype || e.transformation_type || "",
+					class: e.masking ? "masked-edge" : "",
 				};
 			});
 			return;
 		}
 
-		if (graphView === 'jobs') {
+		if (graphView === "jobs") {
 			// Jobs plane (like Marquez's job lineage): one node per job; an edge producing-job → consuming
 			// job whenever a job's input dataset was written by another job.
 			const jobs = new Map<
 				string,
-				{ author?: string | null; state?: string | null; inputs: Set<string>; outputs: Set<string>; failed: boolean }
+				{
+					author?: string | null;
+					state?: string | null;
+					inputs: Set<string>;
+					outputs: Set<string>;
+					failed: boolean;
+				}
 			>();
 			const producedBy = new Map<string, Set<string>>();
 			for (const ev of [...store.events].reverse()) {
 				if (!ev.job) continue;
-				const j = jobs.get(ev.job) ?? { author: ev.author, state: ev.event_type, inputs: new Set(), outputs: new Set(), failed: false };
+				const j = jobs.get(ev.job) ?? {
+					author: ev.author,
+					state: ev.event_type,
+					inputs: new Set(),
+					outputs: new Set(),
+					failed: false,
+				};
 				j.author = ev.author ?? j.author;
 				j.state = ev.event_type ?? j.state;
-				if (/FAIL|ABORT/i.test(ev.event_type ?? '')) j.failed = true;
+				if (/FAIL|ABORT/i.test(ev.event_type ?? "")) j.failed = true;
 				for (const o of ev.outputs ?? []) {
 					j.outputs.add(o);
 					if (!producedBy.has(o)) producedBy.set(o, new Set());
@@ -154,9 +192,16 @@
 				const row = (perCol[layer] = (perCol[layer] ?? 0) + 1) - 1;
 				return {
 					id: job,
-					type: 'job' as const,
+					type: "job" as const,
 					position: prev.get(job)?.position ?? { x: 30 + layer * 280, y: 40 + row * 130 },
-					data: { id: job.replace(/^ray-jobs\//, ''), author: j.author, state: j.state, outputs: [...j.outputs], failed: j.failed, selected: store.selected === job }
+					data: {
+						id: job.replace(/^ray-jobs\//, ""),
+						author: j.author,
+						state: j.state,
+						outputs: [...j.outputs],
+						failed: j.failed,
+						selected: store.selected === job,
+					},
 				};
 			});
 			const seen = new Set<string>();
@@ -166,7 +211,13 @@
 					for (const pj of producedBy.get(inp) ?? []) {
 						if (pj === job || seen.has(`${pj}|${job}`)) continue;
 						seen.add(`${pj}|${job}`);
-						je.push({ id: `${pj}->${job}`, source: pj, target: job, animated: true, type: 'smoothstep' });
+						je.push({
+							id: `${pj}->${job}`,
+							source: pj,
+							target: job,
+							animated: true,
+							type: "smoothstep",
+						});
 					}
 				}
 			}
@@ -177,12 +228,14 @@
 		// Datasets plane (default).
 		nodes = store.nodes.map((n) => {
 			const runs = store.producers[n.id] ?? [];
-			const versions = [...new Set(runs.map((r) => r.dataset_version).filter(Boolean) as string[])].sort();
-			const failed = runs.some((r) => /FAIL|ABORT/i.test(r.event_type ?? ''));
+			const versions = [
+				...new Set(runs.map((r) => r.dataset_version).filter(Boolean) as string[]),
+			].sort();
+			const failed = runs.some((r) => /FAIL|ABORT/i.test(r.event_type ?? ""));
 			const layer = LAYER[n.id] ?? 4;
 			return {
 				id: n.id,
-				type: 'medallion' as const,
+				type: "medallion" as const,
 				position: prev.get(n.id)?.position ?? { x: 30 + layer * 300, y: 150 },
 				data: {
 					id: n.id,
@@ -192,8 +245,8 @@
 					versions,
 					failed,
 					selected: store.selected === n.id,
-					runState: runStateByDataset[n.id] ?? null
-				}
+					runState: runStateByDataset[n.id] ?? null,
+				},
 			};
 		});
 		edges = store.edges.map((e) => ({
@@ -201,29 +254,33 @@
 			source: e.target,
 			target: e.source,
 			animated: true,
-			type: 'smoothstep'
+			type: "smoothstep",
 		}));
 	});
 
 	function selectNode(e: unknown) {
 		// Column nodes aren't datasets; in Columns view keep the dataset selection intact.
-		if (graphView === 'columns') return;
+		if (graphView === "columns") return;
 		const ev = e as { node?: { id: string }; targetNode?: { id: string } };
 		store.selected = ev.node?.id ?? ev.targetNode?.id ?? null;
 	}
 
 	const stateColor = (s?: string | null) =>
-		/FAIL|ABORT/i.test(s ?? '') ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : 'var(--mut)';
+		/FAIL|ABORT/i.test(s ?? "") ? "var(--fail)" : s === "COMPLETE" ? "var(--ok)" : "var(--mut)";
 
 	const selectedRuns = $derived(store.selected ? (store.producers[store.selected] ?? []) : []);
 
 	// Upstream / downstream for the selected dataset, from the DERIVED_FROM edges (source derived from
 	// target): upstream = what it was derived from; downstream = what derives from it.
 	const upstream = $derived(
-		store.selected ? store.edges.filter((e) => e.source === store.selected).map((e) => e.target) : []
+		store.selected
+			? store.edges.filter((e) => e.source === store.selected).map((e) => e.target)
+			: [],
 	);
 	const downstream = $derived(
-		store.selected ? store.edges.filter((e) => e.target === store.selected).map((e) => e.source) : []
+		store.selected
+			? store.edges.filter((e) => e.target === store.selected).map((e) => e.source)
+			: [],
 	);
 
 	// Per-version column evolution, marking columns added since the previous Lance version.
@@ -234,7 +291,7 @@
 			const fields = v.fields ?? [];
 			out.push({
 				version: v.version,
-				cols: fields.map((f) => ({ name: f.name, type: f.type, added: !prev.has(f.name) }))
+				cols: fields.map((f) => ({ name: f.name, type: f.type, added: !prev.has(f.name) })),
 			});
 			prev = new Set(fields.map((f) => f.name));
 		}
@@ -248,18 +305,20 @@
 		<h1>Lance Lineage <span class="sub">live medallion demo</span></h1>
 		<p class="explain">
 			You're the producer — trigger steps with
-			<code>medallion_demo.py --step 1</code> (then 2…5). Each step writes a real Lance table on RustFS
-			and emits one OpenLineage event. Watch the <b>graph</b> (who derived what), the <b>events</b>
+			<code>medallion_demo.py --step 1</code> (then 2…5). Each step writes a real Lance table on
+			RustFS and emits one OpenLineage event. Watch the <b>graph</b> (who derived what), the
+			<b>events</b>
 			(raw OpenLineage), and the <b>Lance tables</b> below evolve.
 		</p>
 		<div class="status">
-			<Radio size={13} class={store.online ? 'live-ic on' : 'live-ic'} />
-			<span class="state-word" class:live={store.online}>{store.online ? 'live' : 'waiting'}</span>
+			<Radio size={13} class={store.online ? "live-ic on" : "live-ic"} />
+			<span class="state-word" class:live={store.online}>{store.online ? "live" : "waiting"}</span>
 			<span class="sep">·</span>
 			<span class="num mono" {@attach countUp(datasetCount)}>0</span> datasets
 			<span class="sep">·</span>
 			<span class="num mono" {@attach countUp(eventCount)}>0</span> events
-			{#if store.lastUpdated}<span class="sep">·</span> <span class="ts">{store.lastUpdated}</span>{/if}
+			{#if store.lastUpdated}<span class="sep">·</span>
+				<span class="ts">{store.lastUpdated}</span>{/if}
 		</div>
 	</header>
 
@@ -272,30 +331,48 @@
 				<FlowAutoFit trigger={fitKey} />
 				<Panel position="top-left">
 					<div class="viewtoggle" role="tablist" aria-label="Graph view">
-						<button class="vt" class:on={graphView === 'datasets'} role="tab" aria-selected={graphView === 'datasets'} onclick={() => (graphView = 'datasets')}>
+						<button
+							class="vt"
+							class:on={graphView === "datasets"}
+							role="tab"
+							aria-selected={graphView === "datasets"}
+							onclick={() => (graphView = "datasets")}
+						>
 							<Boxes size={13} /> Datasets
 						</button>
-						<button class="vt" class:on={graphView === 'jobs'} role="tab" aria-selected={graphView === 'jobs'} onclick={() => (graphView = 'jobs')}>
+						<button
+							class="vt"
+							class:on={graphView === "jobs"}
+							role="tab"
+							aria-selected={graphView === "jobs"}
+							onclick={() => (graphView = "jobs")}
+						>
 							<Cpu size={13} /> Jobs
 						</button>
-						<button class="vt" class:on={graphView === 'columns'} role="tab" aria-selected={graphView === 'columns'} onclick={() => (graphView = 'columns')}>
+						<button
+							class="vt"
+							class:on={graphView === "columns"}
+							role="tab"
+							aria-selected={graphView === "columns"}
+							onclick={() => (graphView = "columns")}
+						>
 							<Columns3 size={13} /> Columns
 						</button>
 					</div>
 				</Panel>
 			</SvelteFlow>
-			{#if graphView === 'columns' && !store.selected}
+			{#if graphView === "columns" && !store.selected}
 				<div class="empty">
 					<b>Pick a dataset first.</b><br />
-					Select a node in <b>Datasets</b>, then switch back to <b>Columns</b> to see its
-					field-to-field lineage.
+					Select a node in <b>Datasets</b>, then switch back to <b>Columns</b> to see its field-to-field
+					lineage.
 				</div>
-			{:else if graphView === 'columns' && (store.columnGraph?.columns?.length ?? 0) === 0}
+			{:else if graphView === "columns" && (store.columnGraph?.columns?.length ?? 0) === 0}
 				<div class="empty">
 					<b>No column lineage for {store.selected} yet.</b><br />
 					Producers must emit the <code>columnLineage</code> facet (the medallion does).
 				</div>
-			{:else if graphView !== 'columns' && store.nodes.length === 0}
+			{:else if graphView !== "columns" && store.nodes.length === 0}
 				<div class="empty">
 					<b>Nothing yet — you trigger it.</b><br />
 					<code>uv run scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
@@ -375,11 +452,13 @@
 					{#each store.events as ev (ev.seq)}
 						<details class="event" {@attach enter({ y: 6 })}>
 							<summary>
-								<span class="badge" style:background={stateColor(ev.event_type)}>{ev.event_type}</span>
+								<span class="badge" style:background={stateColor(ev.event_type)}
+									>{ev.event_type}</span
+								>
 								<span class="mono job">{ev.job}</span>
-								<span class="out mono">{(ev.outputs ?? []).join(', ')}</span>
+								<span class="out mono">{(ev.outputs ?? []).join(", ")}</span>
 							</summary>
-							<div class="who">{ev.author ?? '—'} · {ev.event_time}</div>
+							<div class="who">{ev.author ?? "—"} · {ev.event_time}</div>
 							<pre class="mono json">{JSON.stringify(ev.event, null, 2)}</pre>
 						</details>
 					{/each}
@@ -387,17 +466,19 @@
 
 				<Tabs.Content value="jobs" class="tabbody">
 					<p class="hint board-intro">
-						Every compute identity that has run — governed like the rest: a job is listed only
-						if you may see every dataset it wrote.
+						Every compute identity that has run — governed like the rest: a job is listed only if
+						you may see every dataset it wrote.
 					</p>
 					<ul class="browse-list job-list">
-						{#each store.jobs as j (j.namespace + '/' + j.name)}
+						{#each store.jobs as j (j.namespace + "/" + j.name)}
 							<li>
 								<div class="job-row">
 									<span class="job-name mono">{j.name}</span>
 									<span class="browse-ns">{j.namespace}</span>
 									{#each j.outputs ?? [] as out (out)}
-										<button class="browse-tag mono" onclick={() => (store.selected = out)}>{out}</button>
+										<button class="browse-tag mono" onclick={() => (store.selected = out)}
+											>{out}</button
+										>
 									{/each}
 								</div>
 							</li>
@@ -418,7 +499,8 @@
 									<div class="rel-group">
 										<span class="rel-label">Upstream</span>
 										{#each upstream as u (u)}
-											<button class="rel-chip mono" onclick={() => (store.selected = u)}>{u}</button>
+											<button class="rel-chip mono" onclick={() => (store.selected = u)}>{u}</button
+											>
 										{/each}
 									</div>
 								{/if}
@@ -426,23 +508,28 @@
 									<div class="rel-group">
 										<span class="rel-label">Downstream</span>
 										{#each downstream as d (d)}
-											<button class="rel-chip mono" onclick={() => (store.selected = d)}>{d}</button>
+											<button class="rel-chip mono" onclick={() => (store.selected = d)}>{d}</button
+											>
 										{/each}
 									</div>
 								{/if}
-								<button class="rel-cols" onclick={() => (graphView = 'columns')}>
+								<button class="rel-cols" onclick={() => (graphView = "columns")}>
 									<Columns3 size={12} /> View column lineage
 								</button>
 							</div>
 						{/if}
 						<p class="hint">{selectedRuns.length} producing run(s)</p>
 						{#each selectedRuns as r (r.run_id)}
-							<div class="run" class:fail={/FAIL|ABORT/i.test(r.event_type ?? '')} {@attach enter({ y: 6 })}>
+							<div
+								class="run"
+								class:fail={/FAIL|ABORT/i.test(r.event_type ?? "")}
+								{@attach enter({ y: 6 })}
+							>
 								<div class="run-top">
 									<span class="badge" style:background={stateColor(r.event_type)}>
 										{r.dataset_version ? `v${r.dataset_version}` : r.event_type}
 									</span>
-									<span class="who">{r.author ?? '—'}</span>
+									<span class="who">{r.author ?? "—"}</span>
 								</div>
 								<div class="who">{r.event_time}</div>
 								{#if r.error_message}<div class="err">{r.error_message}</div>{/if}
@@ -456,7 +543,9 @@
 
 	<section class="storage" {@attach enter({ delay: 0.18 })}>
 		<div class="storage-head">
-			Lance tables on RustFS <span class="hint">— real object storage; columns appear as you run steps</span>
+			Lance tables on RustFS <span class="hint"
+				>— real object storage; columns appear as you run steps</span
+			>
 		</div>
 		<div class="cards">
 			{#each store.datasets as ds (ds.name)}
@@ -671,7 +760,7 @@
 	:global(.tab:hover) {
 		color: var(--ink);
 	}
-	:global(.tab[data-state='active']) {
+	:global(.tab[data-state="active"]) {
 		color: var(--ink);
 		box-shadow: inset 0 -2px 0 var(--accent);
 	}

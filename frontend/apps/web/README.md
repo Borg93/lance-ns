@@ -7,7 +7,7 @@ A SvelteKit (Svelte 5 + Bun) dashboard for the medallion demo. It polls the line
   OpenLineage lifecycle (`START → RUNNING → COMPLETE/FAIL`), with a state pill, a **GSAP**-animated
   progress bar (the custom `progress{done,total}` facet), author/outputs, and the error on failures.
   Runs in flight pulse; the Svelte Flow nodes get a matching run-state **ring** (running = amber
-  pulse, complete = green, failed = red). This is the *live* view — distinct from the durable
+  pulse, complete = green, failed = red). This is the _live_ view — distinct from the durable
   provenance graph.
 - **Graph** — the medallion DAG via [Svelte Flow](https://svelteflow.dev): nodes coloured by layer
   with their S3 `source_uri`, governance tags, Lance version chips (silver **v1 → v2**), and a red

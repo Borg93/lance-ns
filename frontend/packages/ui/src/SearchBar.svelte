@@ -5,7 +5,7 @@
 	 * The debounce reacts to the BOUND state via $effect rather than a DOM handler — Svelte 5
 	 * delegates common DOM events, and a workspace-lib component must not depend on sharing the
 	 * host app's delegation root (a handler that silently never fires is worse than no handler). */
-	import Chip from './Chip.svelte';
+	import Chip from "./Chip.svelte";
 
 	export type SearchHit = {
 		name: string;
@@ -17,8 +17,8 @@
 	let {
 		search,
 		onselect,
-		placeholder = 'Search datasets, tags, columns…',
-		debounceMs = 250
+		placeholder = "Search datasets, tags, columns…",
+		debounceMs = 250,
 	}: {
 		search: (q: string) => Promise<SearchHit[]>;
 		onselect: (name: string) => void;
@@ -26,7 +26,7 @@
 		debounceMs?: number;
 	} = $props();
 
-	let q = $state('');
+	let q = $state("");
 	let hits = $state<SearchHit[]>([]);
 	let open = $state(false);
 
@@ -50,7 +50,7 @@
 
 	function pick(name: string) {
 		open = false;
-		q = '';
+		q = "";
 		hits = [];
 		onselect(name);
 	}
@@ -69,7 +69,7 @@
 						<span class="name">{hit.name}</span>
 						<span class="chips">
 							{#each hit.matches ?? [] as reason (reason)}
-								<Chip label={reason} tone={reason === 'name' ? 'accent' : 'neutral'} />
+								<Chip label={reason} tone={reason === "name" ? "accent" : "neutral"} />
 							{/each}
 						</span>
 					</button>

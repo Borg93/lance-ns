@@ -1,8 +1,8 @@
 <script lang="ts">
-	import '../app.css';
-	import type { LayoutServerData } from './$types';
+	import "../app.css";
+	import type { LayoutServerData } from "./$types";
 
-	let { children, data }: { children: import('svelte').Snippet; data: LayoutServerData } = $props();
+	let { children, data }: { children: import("svelte").Snippet; data: LayoutServerData } = $props();
 </script>
 
 {#if data.authEnabled}

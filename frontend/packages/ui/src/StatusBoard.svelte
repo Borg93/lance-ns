@@ -3,8 +3,8 @@
 	 * strip. Transport-agnostic (rask convention: the caller polls and passes `runs`; the lib never
 	 * owns an API client) — `RunStatusLike` is the STRUCTURAL shape this board reads, so any app whose
 	 * generated run type carries these fields can pass it straight through without adapters. */
-	import { CheckCircle2, LoaderCircle, XCircle, CircleDashed } from '@lucide/svelte';
-	import { enter, bar, breathe } from './attachments';
+	import { CheckCircle2, LoaderCircle, XCircle, CircleDashed } from "@lucide/svelte";
+	import { enter, bar, breathe } from "./attachments";
 
 	export type RunStatusLike = {
 		run_id: string;
@@ -20,32 +20,46 @@
 
 	let { runs }: { runs: RunStatusLike[] } = $props();
 
-	const isRunning = (s?: string | null) => /START|RUNNING/i.test(s ?? '');
-	const isFail = (s?: string | null) => /FAIL|ABORT/i.test(s ?? '');
+	const isRunning = (s?: string | null) => /START|RUNNING/i.test(s ?? "");
+	const isFail = (s?: string | null) => /FAIL|ABORT/i.test(s ?? "");
 	const stateIcon = (s?: string | null) =>
-		isFail(s) ? XCircle : s === 'COMPLETE' ? CheckCircle2 : isRunning(s) ? LoaderCircle : CircleDashed;
+		isFail(s)
+			? XCircle
+			: s === "COMPLETE"
+				? CheckCircle2
+				: isRunning(s)
+					? LoaderCircle
+					: CircleDashed;
 	const color = (s?: string | null) =>
-		isFail(s) ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : isRunning(s) ? 'var(--amber)' : 'var(--mut)';
+		isFail(s)
+			? "var(--fail)"
+			: s === "COMPLETE"
+				? "var(--ok)"
+				: isRunning(s)
+					? "var(--amber)"
+					: "var(--mut)";
 
-	const shortJob = (j?: string | null) => (j ?? '').replace(/^ray-jobs\//, '');
+	const shortJob = (j?: string | null) => (j ?? "").replace(/^ray-jobs\//, "");
 
 	function pct(r: RunStatusLike): number {
-		if (r.state === 'COMPLETE') return 100;
+		if (r.state === "COMPLETE") return 100;
 		if (r.progress_total) return Math.round(((r.progress_done ?? 0) / r.progress_total) * 100);
 		return isRunning(r.state) ? 8 : 0;
 	}
 	function label(r: RunStatusLike): string {
-		if (r.state === 'COMPLETE') return 'COMPLETE';
-		if (isFail(r.state)) return r.state ?? 'FAIL';
+		if (r.state === "COMPLETE") return "COMPLETE";
+		if (isFail(r.state)) return r.state ?? "FAIL";
 		if (isRunning(r.state)) return `RUNNING ${r.progress_done ?? 0}/${r.progress_total ?? 3}`;
-		return r.state ?? '—';
+		return r.state ?? "—";
 	}
-	const time = (s?: string | null) => (s ? new Date(s).toLocaleTimeString() : '');
+	const time = (s?: string | null) => (s ? new Date(s).toLocaleTimeString() : "");
 </script>
 
 <div class="board">
 	{#if runs.length === 0}
-		<p class="hint">No runs yet — trigger a step and watch them go <b>queued → running → done/failed</b>.</p>
+		<p class="hint">
+			No runs yet — trigger a step and watch them go <b>queued → running → done/failed</b>.
+		</p>
 	{/if}
 	{#each runs as r (r.run_id)}
 		{@const StateIcon = stateIcon(r.state)}
@@ -59,7 +73,7 @@
 			<div class="top">
 				<span class="job mono" title={r.job}>{shortJob(r.job)}</span>
 				<span class="pill">
-					<StateIcon size={12} class={isRunning(r.state) ? 'spin' : ''} />
+					<StateIcon size={12} class={isRunning(r.state) ? "spin" : ""} />
 					{label(r)}
 				</span>
 			</div>
@@ -67,7 +81,10 @@
 				<div class="fill" {@attach bar(pct(r))} {@attach breathe(isRunning(r.state))}></div>
 			</div>
 			<div class="meta">
-				<span class="who">{r.author ?? '—'}{#if (r.outputs ?? []).length} · → {(r.outputs ?? []).join(', ')}{/if}</span>
+				<span class="who"
+					>{r.author ?? "—"}{#if (r.outputs ?? []).length}
+						· → {(r.outputs ?? []).join(", ")}{/if}</span
+				>
 				<span class="who">{time(r.updated_at)}</span>
 			</div>
 			{#if r.error_message}<div class="err">{r.error_message}</div>{/if}

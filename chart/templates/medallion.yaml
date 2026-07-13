@@ -71,6 +71,13 @@ spec:
             - { name: MEDALLION_PRODUCER_OPERATION, value: {{ .Values.medallion.producer.operation | quote }} }
             - { name: MEDALLION_PRODUCER_AUTHOR, value: {{ .Values.medallion.producer.author | quote }} }
             - { name: MEDALLION_RAW_TOPIC, value: {{ .Values.medallion.producer.rawTopic | quote }} }
+            # Ray TRAIN head (#115): values-wired passthrough (docs/RAY-TRAIN.md; defaults mirror
+            # core/config.py). lineageUrl defaults to the release's own lineage service.
+            - { name: MEDALLION_TRAIN_TOPIC, value: {{ .Values.medallion.train.topic | quote }} }
+            - { name: MEDALLION_TRAIN_ENTRYPOINT, value: {{ .Values.medallion.train.entrypoint | quote }} }
+            - { name: MEDALLION_TRAINER_IDENTITY, value: {{ .Values.medallion.train.trainerIdentity | quote }} }
+            - { name: MEDALLION_MODELS_NAMESPACE, value: {{ .Values.medallion.train.modelsNamespace | quote }} }
+            - { name: MEDALLION_TRAIN_LINEAGE_URL, value: {{ .Values.medallion.train.lineageUrl | default (printf "http://%s-lineage:%v" (include "lance.fullname" .) .Values.services.lineage.port) | quote }} }
             {{- if .Values.dapr.resiliency.enabled }}
             # Dapr-native DLQ (ships with the Resiliency CRD): the producer's raw-arrival + train
             # subscriptions park exhausted deliveries here, ERROR-logged by /dlq-event.

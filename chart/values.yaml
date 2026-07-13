@@ -37,6 +37,10 @@ vending:
   # The SAFER alternative to the blanket flag: a comma-separated allowlist of approved external base URIs
   # (e.g. "s3://media-bucket/approved,s3://other/base"). External Blob.from_uri pointers are accepted ONLY
   # under a registered base, with the blanket bypass left off — a curated media source without the SSRF door.
+  # Empty = the chart defaults it to the release's own model-artifact base (s3://<rustfs.bucket>/models/,
+  # the #92 allowlist for #115 registry pointers — plain-path artifacts in the lake's own bucket, no SSRF
+  # surface). Overriding REPLACES that default — include the models base yourself or the train registry's
+  # external pointers get rejected.
   externalBlobBases: ""
 
 # --- Catalog request limits -----------------------------------------------------------------------
@@ -509,6 +513,18 @@ medallion:
   # otherwise). Off by default.
   quality: false
   qualityKeyColumn: id
+  # Ray TRAIN head (#115, docs/RAY-TRAIN.md): values-wired passthrough for the /train head + the
+  # submit-and-ack trainer consumer (both live in the lance-ray app). Defaults mirror
+  # services/medallion/core/config.py so a deployment can retarget topic/entrypoint/identity/registry
+  # namespace without an image rebuild. lineageUrl empty = release-derived
+  # (http://<release>-lineage:<port>) — set it only to point the training job's self-emitted
+  # RunEvents elsewhere ("" in the CODE default disables emission; the chart always renders a URL).
+  train:
+    topic: training.jobs
+    entrypoint: "python /home/ray/jobs/ray_train_job.py"
+    trainerIdentity: service-trainer
+    modelsNamespace: models
+    lineageUrl: ""
   producer:
     daprAppId: lance-ray
     # Expose POST /produce through the gateway (the DEMO entry point for the cascade). It carries no

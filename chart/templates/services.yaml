@@ -54,7 +54,7 @@ spec:
             - { name: LANCE_REST_ROOT, value: "s3://{{ .Values.rustfs.bucket }}" }
             - { name: LANCE_NS_DELIMITER, value: "$" }
             - { name: LANCE_ALLOW_EXTERNAL_BLOBS, value: {{ .Values.vending.allowExternalBlobs | quote }} }
-            - { name: LANCE_EXTERNAL_BLOB_BASES, value: {{ .Values.vending.externalBlobBases | quote }} }
+            - { name: LANCE_EXTERNAL_BLOB_BASES, value: {{ .Values.vending.externalBlobBases | default (printf "s3://%s/models/" .Values.rustfs.bucket) | quote }} }
             - { name: LANCE_MAX_BODY_BYTES, value: {{ .Values.catalog.maxBodyBytes | int64 | quote }} }
             - { name: LANCE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }

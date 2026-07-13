@@ -140,6 +140,34 @@ fold-in, the externalization → operators mapping, the lance-ray seam contract,
   Dapr/NATS + HTTP, never a shared DB or each other's code; `common` is a flat shared lib. This (not infra)
   is the priority to validate before contributing.
 
+### Shipped this session (2026-07-13) — the full KIND-RUNBOOK live pass + 3 features
+The pass DROVE every 🟡 "code-complete, live-pending" item on the real kind union stack and found **8
+live-only bugs CI structurally can't catch** (fresh-cluster unit + chart-render). Full record: todo_fable
+§7a, verification matrix: todo_confirm. Both e2e suites green; 486 unit; ruff/ty clean.
+- ✅ **8 live-only bugs fixed + re-proven**: web image never booted (bun workspace); durable-consumer
+  config-drift kills all delivery ~25 min on a config-changing upgrade (reconcile added); 🔒 the trainer
+  FGA gate was DEAD (revoked trainer still trained); `TOKEN` env collided with Lance's AWS-session-token
+  fallback → training 100% broken (→ `TRAIN_TOKEN`); `MEDALLION_RAY_ENABLED` never reached the producer
+  (/train 409'd); 🔒 the ServiceAccount flip CrashLooped every Dapr pod (built-in k8s secret store);
+  🔒 RustFS was write-dead under the security flip (uid 1000 vs image/data 10001 — reads passed, writes
+  500'd); input version pins emitted-then-dropped at ingest (280 READ edges, 0 versions). The recurring
+  shape: a flag wired in one place but not another, or a check that only tested the easy direction.
+- ✅ **Trainer lineage credential (governed)** — the Ray train job authenticates to the HTTP ingest as
+  `service-trainer` (a `ServicePrincipal`: app token + bare FGA subject, NOT a Dex user), is stamped as
+  author, and is FGA-checked on outputs. Under auth ALL training provenance was silently 401'd before;
+  now it lands. e2e-guarded (governed-union test 5). See docs/RAY-TRAIN.md D2.
+- ✅ **`GET /runs/{id}/inputs`** — surfaces a run's PINNED input versions (the READ-edge version, #115 D1's
+  reproducibility claim), governed. Was Cypher-only. Answers "which feature versions made this model".
+- ✅ **Media stages run on Ray (Phase 3 multimodal)** — verified LIVE that lance-ray 0.4.2 `read_lance`
+  strips blob-v2 typing (`extension<lance.blob.v2>` → `large_binary`), so `ray_stage_job.py` gained a
+  pylance blob round-trip + inline derive (drift-pinned to services), the ray image ships Pillow, and the
+  in-process fallback gate is GONE. `/ingest-media` (ray on) now runs the media stage AS a Ray job with
+  blob-v2 preserved + thumbnail/embedding. **This advances P1 #6's media half** — the mover→Ray-job seam is
+  done; the KubeRay-operator swap is the remaining rask-merge step. Exit note (docs/RAY.md): a lance-ray
+  bump that preserves inline blob typing lets us drop the round-trip.
+- ✅ **PSA sidecar hardening** — gated `dapr.sidecarRestricted` flag (render-asserted); full `restricted`
+  enforce parked-by-design (Vector's hostPath structurally blocks single-namespace enforce). See §6.4.
+
 ### Shipped this session (2026-07-10)
 - ✅ **§7a governed-union audit follow-ups** (4 majors + smalls; the s3:// positive control RESOLVED AS
   IMPOSSIBLE — OpenFGA object ids hold exactly one `:`) and **compaction failure visibility** (FAIL
@@ -302,10 +330,15 @@ After reading the Lance Namespace spec docs (`lance-namespace/docs`) + an advers
     microfrontends later as a portable component. *(Fast-follow: schema-diffing between Lance versions.)*
 13. 🔶 **Governance P1** — `project` type + 3-axis (teams × projects × layers); versioned
     OpenFGA-model migrations + reconcile-from-catalog (Lakekeeper patterns).
-14. 🔶 **Async lineage ingest** (jobs → NATS → consume) · **Dapr** workflows. *(The old "OTel
-    traces/metrics" third of this line SHIPPED: OTLP-direct → GreptimeDB + Vector + Perses,
-    `make e2e-obs` — see todo_confirm §11; Lance-NATIVE IO metrics are pre-wired and activate at
-    the pylance 9 bump.)*
+14. 🔶 **Async lineage ingest** (jobs → NATS → consume). *(The old "OTel traces/metrics" third of this line
+    SHIPPED: OTLP-direct → GreptimeDB + Vector + Perses, `make e2e-obs` — see todo_confirm §11; Lance-NATIVE
+    IO metrics are pre-wired and activate at the pylance 9 bump.)* **⛔ The "· Dapr workflows" clause is
+    RETIRED (2026-07-12 rule, reaffirmed 2026-07-13):** the cascade stays **choreography** (each hop reacts
+    to its trigger + publishes the next), and the gold QC gate is a **mover-side quality check**, not a
+    Dapr Workflow — Dapr Workflow is reserved for a genuinely non-idempotent multi-step orchestration, and
+    none exists in this system (every hop is idempotent on a deterministic run-id). Docs that still show a
+    "Dapr-Workflow QC gate" (image-pipeline-event-driven.md) are ASPIRATIONAL-design records with a
+    built-differs caveat, not the built system.
 15. ✅ **Live medallion demo + SvelteKit UI** — `scripts/medallion_demo.py` *executes* the flow against
     the real stack (RustFS + lineage/AGE): writes bronze (blob `payload`), adds `embedding` then
     `caption` to silver (Lance write + add-column → v1, v2), aggregates gold with the embedded

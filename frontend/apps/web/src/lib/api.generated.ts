@@ -369,6 +369,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/runs/{run_id}/inputs": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Run Inputs
+         * @description The inputs a run consumed, each with the version it PINNED — the per-run reproducibility answer.
+         *
+         *     The pinned version rides the graph's ``READ`` edge (the Ray TRAIN job pins every feature — #115
+         *     D1); this endpoint is its API surface (before, Cypher-only). Kept OFF the 2s-polled ``/runs`` board
+         *     — it's a per-run drill-in, and adding a per-run READ-edge fetch to the board would be N+1 on the hot
+         *     path. Governed like every read: an input the caller can't ``can_get_metadata`` is dropped (an empty
+         *     list for a run the caller can't see into is itself non-disclosing). Auth off → pass-through.
+         */
+        get: operations["get_run_inputs_runs__run_id__inputs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/events": {
         parameters: {
             query?: never;
@@ -1006,6 +1032,34 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * RunInput
+         * @description One dataset a run consumed, with the PINNED version it read (``None`` = read floating LATEST).
+         *
+         *     The version is the OpenLineage ``version`` facet the producer stamped on the input — the Ray TRAIN
+         *     job pins every feature (#115 D1: training on floating LATEST is not reproducible). It rides the
+         *     graph's ``READ`` edge; this is the API surface for it (before, it was reachable only by Cypher).
+         */
+        RunInput: {
+            /** Name */
+            name: string;
+            /** Version */
+            version?: string | null;
+        };
+        /**
+         * RunInputs
+         * @description The inputs a run consumed, with their pinned versions — the reproducibility answer for one run.
+         *
+         *     Governed like every other read: an input the caller can't ``can_get_metadata`` is dropped, so this
+         *     can't enumerate datasets outside the caller's reach. For a training run this answers exactly *which
+         *     feature versions produced this model*.
+         */
+        RunInputs: {
+            /** Run Id */
+            run_id: string;
+            /** Inputs */
+            inputs?: components["schemas"]["RunInput"][];
+        };
+        /**
          * RunStatus
          * @description The *current* status of a run, folded from its OpenLineage lifecycle events.
          *
@@ -1135,7 +1189,10 @@ export interface operations {
     get_upstream_datasets__name__upstream_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1166,7 +1223,10 @@ export interface operations {
     get_downstream_datasets__name__downstream_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1197,7 +1257,10 @@ export interface operations {
     get_producers_datasets__name__producers_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1228,7 +1291,10 @@ export interface operations {
     get_creator_datasets__name__creator_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1261,7 +1327,10 @@ export interface operations {
             query?: {
                 version?: number | null;
             };
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1292,7 +1361,10 @@ export interface operations {
     get_graph_datasets__name__graph_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1328,7 +1400,10 @@ export interface operations {
                 offset?: number;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1360,7 +1435,10 @@ export interface operations {
                 q: string;
                 limit?: number;
             };
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1389,7 +1467,10 @@ export interface operations {
     list_jobs_jobs_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1404,12 +1485,24 @@ export interface operations {
                     "application/json": components["schemas"]["Jobs"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     list_namespaces_namespaces_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1424,12 +1517,24 @@ export interface operations {
                     "application/json": components["schemas"]["Namespaces"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_column_upstream_datasets__name__columns__field__upstream_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
                 field: string;
@@ -1461,7 +1566,10 @@ export interface operations {
     get_column_downstream_datasets__name__columns__field__downstream_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
                 field: string;
@@ -1493,7 +1601,10 @@ export interface operations {
     get_dataset_columns_datasets__name__columns_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1524,7 +1635,10 @@ export interface operations {
     get_reconcile_datasets__name__reconcile_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path: {
                 name: string;
             };
@@ -1555,7 +1669,10 @@ export interface operations {
     get_runs_runs_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1570,6 +1687,49 @@ export interface operations {
                     "application/json": components["schemas"]["Runs"];
                 };
             };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_run_inputs_runs__run_id__inputs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RunInputs"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
         };
     };
     get_events_events_get: {
@@ -1579,7 +1739,10 @@ export interface operations {
                 limit?: number;
                 summary?: boolean;
             };
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1608,7 +1771,10 @@ export interface operations {
     ingest_event_api_v1_lineage_post: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };

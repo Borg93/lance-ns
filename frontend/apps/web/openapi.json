@@ -46,6 +46,38 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -93,6 +125,38 @@
             "schema": {
               "type": "string",
               "title": "Name"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
             }
           }
         ],
@@ -142,6 +206,38 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -189,6 +285,38 @@
             "schema": {
               "type": "string",
               "title": "Name"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
             }
           }
         ],
@@ -254,6 +382,38 @@
               ],
               "title": "Version"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -301,6 +461,38 @@
             "schema": {
               "type": "string",
               "title": "Name"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
             }
           }
         ],
@@ -396,6 +588,38 @@
               "default": 100,
               "title": "Limit"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -458,6 +682,38 @@
               "default": 25,
               "title": "Limit"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -492,6 +748,45 @@
         "summary": "List Jobs",
         "description": "The jobs (compute identities) that have run \u2014 governed by the datasets each wrote.\n\nA job is shown only if the caller can see every dataset it wrote (a read-only / output-less job is\nhidden when auth is on, mirroring how ``/events`` drops a dataset-less row). Auth off \u2192 pass-through.",
         "operationId": "list_jobs_jobs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -502,13 +797,18 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/namespaces": {
@@ -519,6 +819,45 @@
         "summary": "List Namespaces",
         "description": "The namespaces containing at least one dataset the caller may see (for a namespace-tree browse).\n\nDerived from the governed dataset set, so a namespace the caller can see no dataset in never appears.",
         "operationId": "list_namespaces_namespaces_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -529,13 +868,18 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/datasets/{name}/columns/{field}/upstream": {
@@ -568,6 +912,38 @@
             "schema": {
               "type": "string",
               "title": "Field"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
             }
           }
         ],
@@ -626,6 +1002,38 @@
               "type": "string",
               "title": "Field"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -673,6 +1081,38 @@
             "schema": {
               "type": "string",
               "title": "Name"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
             }
           }
         ],
@@ -722,6 +1162,38 @@
               "type": "string",
               "title": "Name"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -756,6 +1228,45 @@
         "summary": "Get Runs",
         "description": "Live run-status board \u2014 each run's current state folded onto its ``(:Run)`` node in Apache AGE.\n\n**Durable** (survives restart / replica-shared) and **governed** like ``/events`` and the per-dataset\nreads: a run is shown only if the caller ``can_get_metadata`` on every dataset it wrote, so the board\ncan't enumerate dataset names / creators / errors outside the caller's reach. Auth off \u2192 pass-through.",
         "operationId": "get_runs_runs_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -766,13 +1277,98 @@
                 }
               }
             }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
           }
-        },
+        }
+      }
+    },
+    "/runs/{run_id}/inputs": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Run Inputs",
+        "description": "The inputs a run consumed, each with the version it PINNED \u2014 the per-run reproducibility answer.\n\nThe pinned version rides the graph's ``READ`` edge (the Ray TRAIN job pins every feature \u2014 #115\nD1); this endpoint is its API surface (before, Cypher-only). Kept OFF the 2s-polled ``/runs`` board\n\u2014 it's a per-run drill-in, and adding a per-run READ-edge fetch to the board would be N+1 on the hot\npath. Governed like every read: an input the caller can't ``can_get_metadata`` is dropped (an empty\nlist for a run the caller can't see into is itself non-disclosing). Auth off \u2192 pass-through.",
+        "operationId": "get_run_inputs_runs__run_id__inputs_get",
         "security": [
           {
             "HTTPBearer": []
           }
-        ]
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RunInputs"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
       }
     },
     "/events": {
@@ -827,6 +1423,38 @@
               "default": false,
               "title": "Summary"
             }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
           }
         ],
         "responses": {
@@ -861,15 +1489,54 @@
         "summary": "Ingest Event",
         "description": "Ingest one OpenLineage ``RunEvent`` into the lineage graph.\n\nThis is the OpenLineage HTTP-transport default path, so any OpenLineage producer\n(our emitter, Airflow, Spark, dbt, \u2026) configured with ``OPENLINEAGE_URL`` pointed\nhere ingests with no glue \u2014 the lightweight-Marquez contract.\n\nWhen OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token\n(401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that\ntoken's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`\nrequires ``can_write_data`` on every output dataset (a producer can't record provenance for a table\nit can't write). Both are no-ops when auth is off.",
         "operationId": "ingest_event_api_v1_lineage_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
         "requestBody": {
+          "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "$ref": "#/components/schemas/RunEvent"
               }
             }
-          },
-          "required": true
+          }
         },
         "responses": {
           "201": {
@@ -877,10 +1544,10 @@
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "type": "object",
                   "title": "Response Ingest Event Api V1 Lineage Post"
                 }
               }
@@ -896,12 +1563,7 @@
               }
             }
           }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ]
+        }
       }
     },
     "/livez": {
@@ -2102,6 +2764,52 @@
         ],
         "title": "RunEvent",
         "description": "An OpenLineage run event (START/RUNNING/COMPLETE/FAIL/ABORT) with its inputs and outputs."
+      },
+      "RunInput": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Version"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "RunInput",
+        "description": "One dataset a run consumed, with the PINNED version it read (``None`` = read floating LATEST).\n\nThe version is the OpenLineage ``version`` facet the producer stamped on the input \u2014 the Ray TRAIN\njob pins every feature (#115 D1: training on floating LATEST is not reproducible). It rides the\ngraph's ``READ`` edge; this is the API surface for it (before, it was reachable only by Cypher)."
+      },
+      "RunInputs": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "inputs": {
+            "items": {
+              "$ref": "#/components/schemas/RunInput"
+            },
+            "type": "array",
+            "title": "Inputs"
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "RunInputs",
+        "description": "The inputs a run consumed, with their pinned versions \u2014 the reproducibility answer for one run.\n\nGoverned like every other read: an input the caller can't ``can_get_metadata`` is dropped, so this\ncan't enumerate datasets outside the caller's reach. For a training run this answers exactly *which\nfeature versions produced this model*."
       },
       "RunStatus": {
         "properties": {

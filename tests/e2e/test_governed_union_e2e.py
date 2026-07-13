@@ -238,7 +238,16 @@ def test_governed_allow_full_cascade_with_quality_verdicts(
     assert silver is not None
     assert silver["row_count"], f"no measured rows — is medallion.compute on? {silver}"
     assert silver["quality_passed"] is True, silver
-    assert {a["assertion"] for a in silver["quality_assertions"]} == {"row_count_positive", "not_null"}
+    # Batch 21 (DATA-CONTRACT.md declared-columns clause): the demo movers DECLARE consumer
+    # dependencies (requiredColumns: id on the tabular stages), so the silver run carries a
+    # column_declared verdict per declared column alongside the compute-quality pair.
+    assert {a["assertion"] for a in silver["quality_assertions"]} == {
+        "row_count_positive",
+        "not_null",
+        "column_declared",
+    }
+    declared = [a for a in silver["quality_assertions"] if a["assertion"] == "column_declared"]
+    assert {(a["column"], a["success"]) for a in declared} == {("id", True)}, declared
 
     # Governance is live in the SAME stack: anonymous read 401s; an ungranted user 403s on the route gate.
     assert requests.get(f"{lineage}/runs", timeout=8).status_code == 401

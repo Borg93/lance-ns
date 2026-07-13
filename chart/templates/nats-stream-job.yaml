@@ -57,4 +57,29 @@ spec:
               # each app's durableName, which only avoids clashing with the app's main consumer
               # because the two live on different streams.
               add_if_missing DLQ "dlq.>"
+              # Reconcile app-durable config drift (the UPGRADE path): a Dapr jetstream subscription
+              # can only BIND an existing durable whose config matches its request — after a values
+              # change that alters consumer config (e.g. the resiliency flip's maxDeliver/backOff),
+              # the pre-existing durable makes every subscribe fail forever with "consumer name
+              # already in use" while pods stay Ready: a SILENT dead subscription (hit live
+              # 2026-07-13 — the whole cascade sat idle after the Batch-18 roll). Expected values
+              # are templated from the SAME conditional the pubsub components render, so the two
+              # cannot drift apart. A drifted durable is deleted; the sidecar's subscribe-retry
+              # recreates it with the new config within seconds. deliverPolicy=new means messages
+              # published inside that delete->recreate window are skipped — accepted on upgrades:
+              # the alternative is a permanently dead subscription. Matching durables are untouched
+              # (ordinary restarts re-attach as before). Backoff values are nanoseconds in the JSON.
+              EXP_MAXD="{{ if .Values.dapr.resiliency.enabled }}3{{ else }}5{{ end }}"
+              EXP_BOFF="{{ if .Values.dapr.resiliency.enabled }}720000000000,720000000000{{ else }}30000000000,60000000000,120000000000,300000000000{{ end }}"
+              for st in LINEAGE MEDALLION TRAINING DLQ; do
+                for c in $(nats --server "$S" consumer ls "$st" --names 2>/dev/null | grep -- '-durable$'); do
+                  info=$(nats --server "$S" consumer info "$st" "$c" --json 2>/dev/null | tr -d ' \n')
+                  maxd=$(echo "$info" | sed -n 's/.*"max_deliver":\(-\{0,1\}[0-9]*\).*/\1/p')
+                  boff=$(echo "$info" | sed -n 's/.*"backoff":\[\([0-9,]*\)\].*/\1/p')
+                  if [ "$maxd" != "$EXP_MAXD" ] || [ "$boff" != "$EXP_BOFF" ]; then
+                    echo "RECONCILE $st/$c: max_deliver=$maxd backoff=[$boff] != expected $EXP_MAXD/[$EXP_BOFF] — deleting (sidecar re-creates)"
+                    nats --server "$S" consumer rm "$st" "$c" -f
+                  fi
+                done
+              done
 {{- end }}

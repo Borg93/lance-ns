@@ -125,6 +125,27 @@ handler; the ~8.5 min total window covers a realistic dependency blip).
    marker (was silent — fixed + live-verified). **rename** is unsupported on the `dir` backend (501), so it
    emits nothing — moot, not a gap.
 
+7. **Durable-consumer config drift wedges every durable subscription at upgrade — self-heals in
+   ~20–25 min (observed live 2026-07-13).** JetStream durables are create-once: upgrading a
+   deployed stack whose `<app>-durable` consumers were created under a **different** consumer
+   config leaves the new sidecars unable to bind them — they retry-loop
+   `nats: consumer name already in use: creating consumer "<app>-durable" on stream "<STREAM>"`
+   while the pods stay **Ready** and **nothing is delivered** (a silent outage — the probes are
+   process-level, not delivery-level). Concrete trigger: the resiliency+DLQ default-ON change
+   (maxDeliver 5→3, backOff `30s,60s,120s,300s` → `720s,720s`) — durables created 2026-07-06 under
+   the old config blocked all 4 movers + lance-ray after the image roll. It **self-heals**:
+   JetStream reaps the old unbound durables at their `inactive_threshold` (~20–25 min observed —
+   rollout 06:53–07:00 UTC → reaped + recreated 07:19–07:20), the sidecars recreate them with the
+   new config, and delivery resumes with **no manual intervention**. *Fast cutover (operators):*
+   right after the rollout, `nats consumer rm` the `<app>-durable` consumers on
+   LINEAGE/MEDALLION/TRAINING/DLQ — the sidecars recreate them within seconds. Fresh installs and
+   CI never hit this (the consumers are created right the first time); only config-changing
+   upgrades of an already-deployed stack do. **Shipped mitigation:** the stream-provision Job now
+   reconciles drift on every `helm upgrade` — it deletes any `*-durable` whose
+   maxDeliver/backOff fingerprint differs from the render's expected config (templated from the
+   SAME values conditional as the pubsub components), and the sidecars recreate it within seconds;
+   the ~25 min window applies only when upgrading with a chart older than that Job.
+
 ## Operational hardening (k8s posture)
 
 Cloud-native guards on the *deployment*, complementing the event-path guarantees above. All applied via the

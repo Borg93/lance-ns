@@ -113,6 +113,16 @@ Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `
   owns delivery retries (30s→300s ×5) and exhaustion PARKS the message on the per-app `dlq.*` topic
   (own DLQ stream) — see docs/RESILIENCE.md gap #2. The durable PULL consumer move remains the last
   hardening follow-up.
+- **Upgrade caveat: a consumer-config-changing upgrade silently stalls durable subscriptions for up
+  to ~25 min** (observed live 2026-07-13). JetStream durables are create-once, so after an upgrade
+  that changes the consumer config (e.g. the resiliency/DLQ default-ON maxDeliver/backOff change)
+  the sidecars can't bind the old `<app>-durable` consumers — pods stay Ready but nothing is
+  delivered until JetStream reaps the old durables at their inactive threshold (~20–25 min), after
+  which delivery resumes on its own. The chart's stream-provision Job now reconciles this automatically at
+  every `helm upgrade` (drifted `*-durable` consumers are deleted; sidecars recreate them within
+  seconds); manual fast cutover — `nats consumer rm` the `<app>-durable` consumers on
+  LINEAGE/MEDALLION/TRAINING/DLQ — is only needed when upgrading with a chart older than that Job.
+  Fresh installs never hit this. Details: [`RESILIENCE.md`](RESILIENCE.md) gap #7.
 - **AGE + OpenFGA share one Postgres**: AGE's `ag_catalog` search-path would break OpenFGA migrations,
   so the openfga db is pinned to `search_path = public` in the AGE initdb.
 - **kind has no host ports** — reach services via `make dashboards` (port-forwards).

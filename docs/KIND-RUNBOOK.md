@@ -130,6 +130,12 @@ After `helm upgrade` + a rollout restart of the subscriber pods:
    LINEAGE/MEDALLION/TRAINING.
 2. Sanity (expected-pass): main durable consumers re-attach after restart with no
    "consumer name already in use" errors — per-stream consumer scoping proven live.
+   **Caveat (observed 2026-07-13): on an UPGRADED cluster whose durables predate a
+   consumer-config change** (this batch changes maxDeliver/backOff), those errors ARE expected
+   transiently — durables are create-once, so sidecars retry-loop until JetStream reaps the old
+   ones at their inactive threshold (~20–25 min; or `nats consumer rm` the `<app>-durable`
+   consumers on LINEAGE/MEDALLION/TRAINING/DLQ for an instant cutover). The assert holds on a
+   fresh install, or on an upgraded one only after the reap/rm. See RESILIENCE.md gap #7.
 3. Poison-inject: publish a stage trigger with a bogus payload the mover always RETRYs (or scale AGE
    to 0 and fire one event). Watch the sidecar retry ~5 times over ~7.5 min, then the app's
    `/dlq-event` log shows `dapr_dead_letter_parked` (ERROR) with the token — the message is PARKED,

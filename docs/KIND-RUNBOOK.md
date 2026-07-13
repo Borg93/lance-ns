@@ -110,13 +110,38 @@ In the audit's order, one flag at a time, re-asserting pods Ready after each:
    `kubectl exec deploy/lance-ns-web -- wget -T3 -qO- http://lance-ns-openbao:8200/v1/sys/health`
    **times out** (openbao is exclusive), while the catalog still consumes secrets at boot
    (positive control). ESO users: set `networkPolicy.openbaoExtraFrom` FIRST.
-2. `--set security.serviceAccounts.enabled=true` → all pods Ready AND `dapr mtls -k` still
-   verifies (the audit's pre-flip gate — the injector's projected token must be untouched).
-3. `--set security.infraContexts.enabled=true` → infra pods Ready; `kubectl rollout restart` on
-   rustfs/age/openbao → data intact after restart (the fsGroup proof; wrong uid = CrashLoop or
-   permission errors, fix via `security.infraContexts.<comp>.runAsUser` values).
-4. ONLY then: `kubectl label ns <ns> pod-security.kubernetes.io/enforce=baseline` (soak) →
-   `=restricted` — the wait-age init containers are now compliant, so nothing should be rejected.
+2. ✅ **PROVEN 2026-07-13** — `--set security.serviceAccounts.enabled=true` → all pods Ready, each
+   bound to `lance-ns-sa-<workload>`, the k8s-API token still NOT mounted (the audit's intent), daprd
+   reports zero component failures, and `POST /produce` still cascades.
+   > This flip was **unshippable before that date**: it CrashLooped every Dapr-injected pod. daprd
+   > auto-registers a built-in `kubernetes` secret store and initialises it from the SA token that
+   > `automountServiceAccountToken: false` removes → `[INIT_COMPONENT_FAILURE] secretstores.kubernetes/v1`
+   > → fatal. Fixed by disabling the unused store (`dapr.io/disable-builtin-k8s-secret-store`, now on
+   > every Dapr workload) — which keeps the no-mounted-JWT intent instead of walking it back.
+3. ✅ **PROVEN 2026-07-13** — `--set security.infraContexts.enabled=true` → infra pods Ready under
+   non-root (age uid 999, rustfs uid 1000, `runAsNonRoot: true`); `kubectl rollout restart` on
+   age + rustfs → **data intact**: 441 AGE Run nodes and 392 RustFS objects before and after (the
+   fsGroup proof; a wrong uid = CrashLoop or permission errors → fix via
+   `security.infraContexts.<comp>.runAsUser`).
+4. ⛔ **PSA `restricted` is NOT achievable today — the old claim here ("nothing should be rejected")
+   was wrong** (disproven live 2026-07-13). `enforce=restricted` **blocks pod creation**:
+   ```
+   pods "lance-ns-catalog-…" is forbidden: violates PodSecurity "restricted:latest":
+     unrestricted capabilities (container "daprd" must set securityContext.capabilities.drop=["ALL"]),
+     seccompProfile (pod or container "daprd" must set securityContext.seccompProfile.type to "RuntimeDefault")
+   ```
+   The blocker is the **Dapr-injected `daprd` sidecar**, which our chart does not author. Two levels:
+   - **`baseline`** — everything passes EXCEPT `vector` (hostPath volumes, inherent to a log collector).
+     Enforcing it would make Vector un-reschedulable, so do NOT set `enforce=baseline` until Vector is
+     exempted (own namespace, or an API-server PSA exemption).
+   - **`restricted`** — additionally needs: the Dapr control plane installed with
+     `sidecarDropALLCapabilities=true` + the `dapr.io/sidecar-seccomp-profile-type: RuntimeDefault`
+     annotation, AND a container-level `securityContext` on our own app containers
+     (`allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, `seccompProfile: RuntimeDefault`)
+     — none of which the chart sets today.
+
+   **Current end state (safe):** the namespace carries `warn=baseline` + `audit=baseline` — full
+   visibility, no admission blocking. Promote to `enforce` only after the two bullets above land.
 
 ## 6.5 · Dapr resiliency + DLQ (Batch 18 — DEFAULT ON; verify the deployed default)
 

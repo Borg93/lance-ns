@@ -74,7 +74,19 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
         # of maintain: failures at the source. The optimize_indices() right below folds the compacted
         # fragments into the indices; the interplay is pinned by
         # tests/unit/test_compaction_optimize.py::test_compact_one_defer_index_remap_keeps_indices_working.
-        metrics: Any = ds.optimize.compact_files(defer_index_remap=True)
+        try:
+            metrics: Any = ds.optimize.compact_files(defer_index_remap=True)
+        except Exception as exc:  # noqa: BLE001 — see the row_addrs fallback just below
+            # defer_index_remap needs row_addrs (a stable-row-id, fragment-reuse-able layout). A dataset
+            # WITHOUT them — e.g. a small model-REGISTRY dataset (models$<model>) — raises
+            # "defer_index_remap requires row_addrs but none were provided". Fall back to the plain
+            # (non-deferred) compaction so one such dataset doesn't get reported as a sweep failure. These
+            # registry datasets aren't concurrently indexed, so the CommitConflict that defer_index_remap
+            # avoids isn't a risk here. Any OTHER error propagates to the outer per-dataset error capture.
+            if "row_addrs" not in str(exc):
+                raise
+            log.warning("compact_defer_index_remap_unsupported", extra={"uri": uri, "error": str(exc)})
+            metrics = ds.optimize.compact_files()
         result.fragments_removed = int(getattr(metrics, "fragments_removed", 0))
         result.fragments_added = int(getattr(metrics, "fragments_added", 0))
         # Keep secondary indices (vector ANN / scalar / FTS) covering the new fragments. WITHOUT this a

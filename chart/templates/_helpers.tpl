@@ -35,6 +35,18 @@ This is what makes the docs/DURABILITY.md tier-3 externalization real (values-pr
 {{- define "lance.s3Endpoint" -}}
 {{- if .Values.rustfs.externalEndpoint -}}{{ .Values.rustfs.externalEndpoint }}{{- else -}}http://{{ include "lance.rustfsHost" . }}:{{ .Values.rustfs.port }}{{- end -}}
 {{- end -}}
+{{/*
+lance.stageBucket — the S3 bucket for a medallion stage NAMESPACE, honouring the ingest→medallion→sink
+zone model. `medallion.buckets` maps a namespace to its bucket; anything unset falls back to the shared
+`rustfs.bucket`. So raw (ingest SOURCE) and gold (SINK/output) can live in their own buckets/tenants while
+bronze/silver (the project's medallion internals) stay in the project bucket — and the DEFAULT (no override)
+is the single-bucket layout, unchanged. Call: {{ include "lance.stageBucket" (list $root "raw") }}.
+*/}}
+{{- define "lance.stageBucket" -}}
+{{- $root := index . 0 -}}{{- $ns := index . 1 -}}
+{{- $buckets := $root.Values.medallion.buckets | default dict -}}
+{{- default $root.Values.rustfs.bucket (index $buckets $ns) -}}
+{{- end -}}
 {{- define "lance.ageConnectHost" -}}
 {{- .Values.age.externalHost | default (include "lance.ageHost" .) -}}
 {{- end -}}

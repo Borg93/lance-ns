@@ -135,17 +135,41 @@ governed: ## Governed demo: turn auth ON, then prove Dex(OIDC) → catalog → O
 	@kubectl exec -i deploy/$(RELEASE)-catalog -c catalog -- python - < scripts/governed_demo_k8s.py
 	@echo "(reset to open dev mode with: make deploy)"
 
-dashboards: ## Port-forward all the UIs (Ctrl-C to stop)
-	@echo "web        → http://localhost:5173"
-	@echo "lineage    → http://localhost:8000"
-	@echo "Perses     → http://localhost:8080   (metrics+traces+logs dashboards over GreptimeDB)"
-	@echo "GreptimeDB → http://localhost:4000   (/dashboard — SQL + PromQL over all 3 signals)"
-	@echo "Dapr dash  → http://localhost:8081"
-	@kubectl port-forward svc/$(RELEASE)-web 5173:3000 & \
-	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 & \
-	 kubectl port-forward svc/$(RELEASE)-perses 8080:8080 & \
-	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 & \
-	 kubectl port-forward svc/$(RELEASE)-dapr-dashboard 8081:8080 & wait
+# PF_ADDR — the bind address for the forwards. Default 127.0.0.1 (localhost only, safe).
+# On a REMOTE box (e.g. SSH'd in from a laptop) run `make dashboards PF_ADDR=0.0.0.0` and browse the
+# host's LAN IP (`hostname -I`) at the ports below — no SSH tunnel needed. 0.0.0.0 exposes the UIs to
+# the whole network, so only do it on a trusted LAN.
+PF_ADDR ?= 127.0.0.1
+# local port for the web UI; override if 5173 is taken (e.g. another user's vite). NOTE: no inline
+# comment on the assignment below — GNU Make keeps trailing spaces before a `#`, which would break the port.
+WEB_PORT ?= 5173
+dashboards: ## Port-forward all the UIs (Ctrl-C to stop). Remote box: make dashboards PF_ADDR=0.0.0.0
+	@echo "bind $(PF_ADDR) — browse localhost (or the host LAN IP if PF_ADDR=0.0.0.0):"
+	@echo "web        → :$(WEB_PORT)"
+	@echo "lineage    → :8000"
+	@echo "Perses     → :8080   (metrics+traces+logs dashboards over GreptimeDB)"
+	@echo "GreptimeDB → :4000   (/dashboard — SQL + PromQL over all 3 signals)"
+	@echo "Dapr dash  → :8081"
+	@kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-web $(WEB_PORT):3000 & \
+	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-lineage 8000:8000 & \
+	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-perses 8080:8080 & \
+	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-greptimedb-standalone 4000:4000 & \
+	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-dapr-dashboard 8081:8080 & wait
+
+# --- Fire the cascade lanes (the demo triggers) ----------------------------------------------------
+# /produce and /ingest-media live on the medallion PRODUCER inside the lance-ray pod — token-guarded and
+# NOT browser-exposed, so we exec into the pod (where APP_API_TOKEN already is). Watch the effect in the
+# lineage graph (:8000 /runs /datasets), Greptime (:4000), or k9s. This is the "fire the demo" button.
+produce: ## Fire the tabular cascade: raw → bronze → silver → gold
+	@kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- python -c \
+	 "import os,httpx; print(httpx.post('http://localhost:8000/produce', headers={'dapr-api-token':os.environ['APP_API_TOKEN']}, timeout=30).json())"
+
+ingest-media: ## Fire the media lane: blob bronze → derived silver (thumbnail + embedding) on Ray
+	@kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- python -c \
+	 "import os,httpx; print(httpx.post('http://localhost:8000/ingest-media', headers={'dapr-api-token':os.environ['APP_API_TOKEN']}, timeout=60).json())"
+
+reset-lineage: ## DESTRUCTIVE clean slate: wipe the lineage graph so the frontend shows only new cascades (fixes clutter + lag)
+	@bash scripts/reset_lineage_graph.sh
 
 e2e-obs: ## Run the e2e observability test against the deployed stack (auto-forwards catalog/lineage/greptime)
 	@echo "port-forwarding catalog/lineage/greptime …"

@@ -190,6 +190,11 @@ class MedallionSettings(BaseSettings):
     raw_uri: str = Field(
         default="", alias="MEDALLION_RAW_URI"
     )  # where the producer seeds raw_events (compute)
+    stage_base_uri: str = Field(default="", alias="MEDALLION_STAGE_BASE_URI")
+    """The medallion (project) bucket base ``s3://<bucket>/medallion`` where the STAGE datasets (bronze/
+    silver) and the model registry live. The trainer resolves feature + model URIs from HERE, not from
+    ``raw_uri`` — so it stays correct when raw (ingest source) and gold (sink) are zoned into their OWN
+    buckets. Empty → derive from ``raw_uri`` (the single-bucket default, unchanged)."""
     producer_operation: str = Field(default="lance_ray_ingest", alias="MEDALLION_PRODUCER_OPERATION")
     producer_author: str = Field(default="ray", alias="MEDALLION_PRODUCER_AUTHOR")
     raw_topic: str = Field(default="medallion.raw", alias="MEDALLION_RAW_TOPIC")

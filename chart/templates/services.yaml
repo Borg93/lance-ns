@@ -269,7 +269,7 @@ spec:
             # RunEvent 401'd under auth and ALL training provenance was lost (live 2026-07-13). Only the
             # trainer is listed: the allowlist is what stops an app-token holder speaking as a human, and
             # its outputs are still FGA-checked as `service-trainer`, so D5's rung still bounds it.
-            - { name: LINEAGE_SERVICE_SUBJECTS, value: {{ .Values.medallion.train.trainerIdentity | quote }} }
+            - { name: LINEAGE_SERVICE_SUBJECTS, value: "{{ .Values.medallion.train.trainerIdentity }},{{ .Values.web.serviceIdentity }}" }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
@@ -316,6 +316,16 @@ spec:
           env:
             - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }
             - { name: PORT, value: "3000" }
+            {{- if .Values.auth.enabled }}
+            # Governed READ path: when no user is signed in, the BFF proxy authenticates to lineage as a
+            # SERVICE via the app-token door (services/lineage/api/security.py ServicePrincipal), so the
+            # read-only lineage UI works on the auth-ON stack WITHOUT a per-user browser login (which needs
+            # a browser-reachable Dex). Bounded by web.serviceIdentity's FGA READER rung (seed_medallion_fga.sh).
+            - name: LINEAGE_SERVICE_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
+            - { name: LINEAGE_SERVICE_ID, value: {{ .Values.web.serviceIdentity | quote }} }
+            {{- end }}
           ports: [{ name: http, containerPort: 3000 }]
           {{- include "lance.tcpProbes" "http" | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}

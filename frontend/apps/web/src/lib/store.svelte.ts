@@ -55,9 +55,16 @@ export class LineageState {
 	/** Overlap guard: a slow tick must not stack behind the 2s interval (§2 perf, 2026-07-11). */
 	#polling = false;
 
-	/** Load the column-level lineage subgraph for one dataset (the field-to-field view). */
+	/** Monotonic request id so a slow earlier column fetch can't overwrite a newer dataset's graph. */
+	#colReq = 0;
+
+	/** Load the column-level lineage subgraph for one dataset (the field-to-field view). Latest-wins:
+	 * only the most recent call's response is applied (guards the async race when the selection changes
+	 * mid-flight — bug hunt 2026-07-13). */
 	async loadColumns(name: string): Promise<void> {
-		this.columnGraph = await fetchColumnGraph(name);
+		const req = ++this.#colReq;
+		const graph = await fetchColumnGraph(name);
+		if (req === this.#colReq) this.columnGraph = graph;
 	}
 
 	async poll(): Promise<void> {

@@ -439,9 +439,10 @@ services:
     # competing-consumer group (single delivery per event); ingest is idempotent anyway (MERGE on run_id).
     replicas: 1
     # Demo data-peek router (/demo/*: live Lance schema/versions/rows for the UI) — DEMO ONLY: the
-    # endpoints carry no OIDC/FGA guard, so they'd disclose dataset metadata past the governance layer.
-    # values-prod sets it false (the router is then never mounted).
-    demoData: true
+    # endpoints carry no OIDC/FGA guard, so they'd disclose dataset metadata past the governance layer
+    # (reachable unauthenticated through the web BFF — bug hunt 2026-07-13). SECURE-BY-DEFAULT off; a demo
+    # opts in with `--set services.lineage.demoData=true`. The router is only mounted when true.
+    demoData: false
     # Periodic storage->graph reconciliation (B4) — a Dapr cron binding POSTs to /<bindingName> on `schedule`
     # to back-fill Lance writes whose lineage event was lost (the outbox gap). Off by default (the demo ships
     # without it); the /datasets/{name}/reconcile read endpoint is available regardless.
@@ -459,6 +460,11 @@ services:
 # Web (SvelteKit UI) replica count — stateless. (Demo scaffolding; rask supplies the real frontends.)
 web:
   replicas: 1
+  # The bare FGA subject the BFF names when it reads lineage as a SERVICE on the auth-on stack (no user
+  # session). Must be READER on the warehouse (seed_medallion_fga.sh) + allowlisted in
+  # LINEAGE_SERVICE_SUBJECTS (rendered on lineage when auth.enabled). Lets the read-only UI show the graph
+  # without a per-user browser login; per-user OIDC login still takes precedence when a user IS signed in.
+  serviceIdentity: service-web
 
 # --- HA: PodDisruptionBudget + (optional) HPA for the stateless request-serving services. Off by default
 # (single-node kind); the prod overlay turns the PDB on. Stateful stores (AGE/RustFS) get HA from their
@@ -488,6 +494,13 @@ pubsub:
 medallion:
   enabled: true
   port: 8000
+  # Storage ZONES (ingest SOURCE → medallion → gold SINK). Maps a stage NAMESPACE to its S3 bucket;
+  # anything unset falls back to the shared `rustfs.bucket`, so the DEFAULT here is the single-bucket
+  # layout (unchanged, e2e-safe). Override to separate the boundaries — raw (ingest source) and gold
+  # (sink/output) into their OWN buckets/tenants, while bronze/silver (the project's medallion internals)
+  # stay in the project bucket. Any non-default bucket listed here is auto-provisioned by rustfs-mkbucket.
+  # Same RustFS endpoint/creds serve all buckets; a truly external S3 per zone (own endpoint) is future.
+  buckets: {} # e.g. { raw: lance-source, gold: lance-sink }
   # ReBAC enforcement: when true, each mover CHECKS it's authorized (OpenFGA) to produce its target stage
   # before emitting — the silver→gold mover needs `can_promote` (validator), the others `can_create_table`
   # (writer). Off by default (the open-mode demo runs without it); seed the mover-identity grants first

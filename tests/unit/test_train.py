@@ -84,6 +84,25 @@ def test_head_resolves_omitted_versions_at_submit_time(monkeypatch: pytest.Monke
     assert payload["model"] == "churn" and payload["token"] == result["token"]
 
 
+def test_submit_train_request_reuses_idempotency_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    # REGRESSION (bug hunt 2026-07-13): a caller-supplied token (the route's 503-retry Idempotency-Key) is
+    # REUSED, so an ambiguous publish-timeout retry converges on the same deterministic run_ids (the graph
+    # MERGEs the duplicate) instead of double-firing an unrelated training run. Absent → a fresh token.
+    monkeypatch.setattr(train, "_resolve_version", lambda _s, _d: 1)
+    dapr = _FakeDapr()
+    result = asyncio.run(
+        train.submit_train_request(
+            cast(Any, dapr),
+            _settings(),
+            model="churn",
+            features=[{"dataset": "silver$features"}],
+            token="retry-key-1",
+        )
+    )
+    assert result["token"] == "retry-key-1"
+    assert json.loads(dapr.published[0]["data"])["token"] == "retry-key-1"
+
+
 def test_head_surfaces_resolution_and_publish_failures(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(_s: Any, _d: str) -> int:
         raise RuntimeError("no such dataset")

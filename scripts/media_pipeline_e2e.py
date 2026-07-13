@@ -63,8 +63,13 @@ SINK_PREFIX = f"external-sink-{RUN}"
 def _fs() -> pafs.S3FileSystem:
     scheme, _, host = SO["endpoint"].partition("://")
     return pafs.S3FileSystem(
-        access_key=SO["access_key_id"], secret_key=SO["secret_access_key"], endpoint_override=host,
-        scheme=scheme, region=SO["region"], allow_bucket_creation=True, allow_bucket_deletion=False,
+        access_key=SO["access_key_id"],
+        secret_key=SO["secret_access_key"],
+        endpoint_override=host,
+        scheme=scheme,
+        region=SO["region"],
+        allow_bucket_creation=True,
+        allow_bucket_deletion=False,
     )
 
 
@@ -72,9 +77,16 @@ def _emit(
     *, inputs: list[tuple[str, str]], out_ns: str, out_name: str, fields: list[dict[str, str]] | None
 ) -> None:
     event = build_run_event(
-        operation=f"mp3-{out_ns}", author="pipeline", job_namespace="medallion",
-        inputs=inputs, output_namespace=out_ns, output_name=out_name, version=1,
-        schema_fields=fields, source_uri=out_name, token=f"{RUN}-{out_ns}",
+        operation=f"mp3-{out_ns}",
+        author="pipeline",
+        job_namespace="medallion",
+        inputs=inputs,
+        output_namespace=out_ns,
+        output_name=out_name,
+        version=1,
+        schema_fields=fields,
+        source_uri=out_name,
+        token=f"{RUN}-{out_ns}",
     )
     request = urllib.request.Request(  # noqa: S310 - trusted in-cluster lineage URL
         f"{LINEAGE}/api/v1/lineage",
@@ -114,8 +126,12 @@ def _silver() -> list[dict[str, str]]:
         }
     )
     ds = lance.write_dataset(
-        table, SILVER, storage_options=SO, mode="overwrite",
-        data_storage_version="2.2", enable_stable_row_ids=True,
+        table,
+        SILVER,
+        storage_options=SO,
+        mode="overwrite",
+        data_storage_version="2.2",
+        enable_stable_row_ids=True,
     )
     return schema.facet_fields(ds.schema)
 
@@ -123,8 +139,12 @@ def _silver() -> list[dict[str, str]]:
 def _gold() -> list[dict[str, str]]:
     silver = lance.dataset(SILVER, storage_options=SO).to_table(columns=["id", "source_uri", "embedding"])
     ds = lance.write_dataset(
-        silver, GOLD, storage_options=SO, mode="overwrite",
-        data_storage_version="2.2", enable_stable_row_ids=True,
+        silver,
+        GOLD,
+        storage_options=SO,
+        mode="overwrite",
+        data_storage_version="2.2",
+        enable_stable_row_ids=True,
     )
     return schema.facet_fields(ds.schema)
 
@@ -144,19 +164,25 @@ def main() -> None:
     result = ingest_to_bronze(S3Source(fs, SRC_BUCKET, SRC_PREFIX), BRONZE, SO)
     _emit(
         inputs=[("source", uri) for uri in result.source_uris],
-        out_ns="bronze", out_name=f"mp3_{RUN}_bronze", fields=result.fields,
+        out_ns="bronze",
+        out_name=f"mp3_{RUN}_bronze",
+        fields=result.fields,
     )
 
     silver_fields = _silver()
     _emit(
         inputs=[("bronze", f"mp3_{RUN}_bronze")],
-        out_ns="silver", out_name=f"mp3_{RUN}_silver", fields=silver_fields,
+        out_ns="silver",
+        out_name=f"mp3_{RUN}_silver",
+        fields=silver_fields,
     )
 
     gold_fields = _gold()
     _emit(
         inputs=[("silver", f"mp3_{RUN}_silver")],
-        out_ns="gold", out_name=f"mp3_{RUN}_gold", fields=gold_fields,
+        out_ns="gold",
+        out_name=f"mp3_{RUN}_gold",
+        fields=gold_fields,
     )
 
     sink_uri = _egress(fs)

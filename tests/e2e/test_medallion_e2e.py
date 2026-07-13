@@ -26,6 +26,13 @@ LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
 # shared secret (empty on a token-less dev stack, where the guard is a no-op). `make e2e-medallion` fills it.
 DAPR_TOKEN = os.environ.get("LANCE_E2E_DAPR_TOKEN", "")
 
+# Governed lineage READS use the app-token SERVICE door as `service-web` (a warehouse reader — the same
+# read-only identity the web BFF uses). Auth-off → OIDC off → authenticate() pass-through (harmless);
+# auth-on → this is what lets the reads through instead of a 401.
+_LINEAGE_HEADERS = (
+    {"dapr-api-token": DAPR_TOKEN, "x-lance-service-identity": "service-web"} if DAPR_TOKEN else {}
+)
+
 pytestmark = [pytest.mark.e2e, pytest.mark.medallion]
 
 
@@ -43,7 +50,7 @@ def urls() -> tuple[str, str]:
 
 def _run_count(lineage: str) -> int:
     """How many runs the lineage graph has recorded — the freshness baseline for the cascade."""
-    resp = requests.get(f"{lineage}/runs?limit=1000", timeout=8)
+    resp = requests.get(f"{lineage}/runs?limit=1000", headers=_LINEAGE_HEADERS, timeout=8)
     resp.raise_for_status()
     return len(resp.json().get("runs", []))
 
@@ -68,7 +75,7 @@ def test_produce_cascades_raw_to_gold(urls: tuple[str, str]) -> None:
     deadline = time.monotonic() + 60.0
     upstream: list[str] = []
     while time.monotonic() < deadline:
-        resp = requests.get(f"{lineage}/datasets/gold$catalog/upstream", timeout=8)
+        resp = requests.get(f"{lineage}/datasets/gold$catalog/upstream", headers=_LINEAGE_HEADERS, timeout=8)
         if resp.status_code == 200:
             upstream = [ref["name"] for ref in resp.json().get("related", [])]
             if chain <= set(upstream) and _run_count(lineage) >= before + 4:

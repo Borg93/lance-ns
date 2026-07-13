@@ -225,7 +225,10 @@
 			return;
 		}
 
-		// Datasets plane (default).
+		// Datasets plane (default). Per-layer row counter (like the Jobs/Columns planes) so same-layer
+		// datasets — e.g. several non-medallion/media tables that all fall to layer 4 — stagger vertically
+		// instead of stacking at one point where they overlap and only the top one is clickable (bug hunt).
+		const perLayer: Record<number, number> = {};
 		nodes = store.nodes.map((n) => {
 			const runs = store.producers[n.id] ?? [];
 			const versions = [
@@ -233,10 +236,11 @@
 			].sort();
 			const failed = runs.some((r) => /FAIL|ABORT/i.test(r.event_type ?? ""));
 			const layer = LAYER[n.id] ?? 4;
+			const row = (perLayer[layer] = (perLayer[layer] ?? 0) + 1) - 1;
 			return {
 				id: n.id,
 				type: "medallion" as const,
-				position: prev.get(n.id)?.position ?? { x: 30 + layer * 300, y: 150 },
+				position: prev.get(n.id)?.position ?? { x: 30 + layer * 300, y: 150 + row * 130 },
 				data: {
 					id: n.id,
 					layer,
@@ -259,8 +263,9 @@
 	});
 
 	function selectNode(e: unknown) {
-		// Column nodes aren't datasets; in Columns view keep the dataset selection intact.
-		if (graphView === "columns") return;
+		// Only DATASET nodes set the dataset-scoped selection. A Job-node id (Jobs view) or a column-node id
+		// (Columns view) would pollute the Details/upstream panels + the Columns focus (bug hunt 2026-07-13).
+		if (graphView !== "datasets") return;
 		const ev = e as { node?: { id: string }; targetNode?: { id: string } };
 		store.selected = ev.node?.id ?? ev.targetNode?.id ?? null;
 	}
@@ -324,10 +329,10 @@
 
 	<div class="top">
 		<section class="graph" {@attach enter({ delay: 0.05 })}>
-			<SvelteFlow bind:nodes bind:edges {nodeTypes} fitView onnodeclick={selectNode}>
+			<SvelteFlow bind:nodes bind:edges {nodeTypes} colorMode="dark" fitView onnodeclick={selectNode}>
 				<Background variant={BackgroundVariant.Dots} gap={16} />
 				<Controls />
-				<MiniMap pannable zoomable />
+				<MiniMap pannable zoomable nodeColor="#6aa9ff" maskColor="rgba(11,15,23,0.72)" bgColor="#0e141d" />
 				<FlowAutoFit trigger={fitKey} />
 				<Panel position="top-left">
 					<div class="viewtoggle" role="tablist" aria-label="Graph view">

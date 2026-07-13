@@ -72,35 +72,45 @@ def train_head_enabled(settings: MedallionSettings) -> bool:
     return bool(settings.ray_enabled and settings.s3_endpoint and settings.raw_uri)
 
 
+def _stage_base(settings: MedallionSettings) -> str:
+    """The medallion (project) bucket base ``…/medallion`` where the STAGE datasets (bronze/silver) and the
+    model registry live. Prefers the explicit ``MEDALLION_STAGE_BASE_URI`` — which stays correct when raw
+    (ingest source) and gold (sink) are zoned into their OWN buckets — and falls back to the raw URI's
+    parent for the single-bucket default (unchanged)."""
+    if settings.stage_base_uri:
+        return settings.stage_base_uri.rstrip("/")
+    return settings.raw_uri.rstrip("/").rsplit("/", 1)[0]
+
+
 def stage_uri_for(settings: MedallionSettings, dataset: str) -> str:
     """Derive a medallion dataset's URI from its name — ``silver$features`` → ``…/medallion/silver``.
 
-    The cascade lays every stage out as a sibling of the raw dataset (``…/medallion/<stage>``), so the
-    stage URI is the raw URI's parent + the dataset's namespace segment. Demo-tier convention — a
-    catalog-registered feature table would resolve through describe instead (future #115 work).
+    The cascade lays every stage out as a sibling under the medallion base (``…/medallion/<stage>``), so the
+    stage URI is that base + the dataset's namespace segment. Demo-tier convention — a catalog-registered
+    feature table would resolve through describe instead (future #115 work).
     """
     stage = dataset.split("$", 1)[0]
-    parent = settings.raw_uri.rstrip("/").rsplit("/", 1)[0]
-    return f"{parent}/{stage}"
+    return f"{_stage_base(settings)}/{stage}"
 
 
 def registry_uri_for(settings: MedallionSettings, model: str) -> str:
     """The model-REGISTRY Lance dataset URI (D4 step 2): ``…/medallion/models/<model>`` — one dataset
-    per model under the stage layout's parent, so the registry sits beside the stages it trained on."""
-    parent = settings.raw_uri.rstrip("/").rsplit("/", 1)[0]
-    return f"{parent}/models/{model}"
+    per model under the medallion base, so the registry sits in the project bucket beside the stages it
+    trained on (NOT the raw source or gold sink bucket when those are zoned out)."""
+    return f"{_stage_base(settings)}/models/{model}"
 
 
 def artifact_base_for(settings: MedallionSettings, model: str) -> str:
     """The plain-path artifact base (D4 step 1): ``s3://<bucket>/models/<model>`` — at the BUCKET root,
     a separate tree from the registry dataset directory, so pointer targets are never inside any Lance
     dataset (GC must not see them as orphans; the #92 allowlist governs the ``models/`` prefix)."""
-    raw = settings.raw_uri.rstrip("/")
-    if raw.startswith("s3://"):
-        bucket = "/".join(raw.split("/", 3)[:3])  # s3://<bucket>
+    base = _stage_base(settings)  # …/medallion in the PROJECT bucket
+    if base.startswith("s3://"):
+        bucket = "/".join(base.split("/", 3)[:3])  # s3://<bucket>
         return f"{bucket}/models/{model}"
     # local tier (unit tests): a sibling of the medallion layout, still outside the registry dataset
-    return f"{raw.rsplit('/', 1)[0]}/model-artifacts/{model}"
+    # (`base` is already the medallion parent, so no further rsplit — keeps the pre-zone layout).
+    return f"{base}/model-artifacts/{model}"
 
 
 def _resolve_version(settings: MedallionSettings, dataset: str) -> int:
@@ -118,6 +128,7 @@ async def submit_train_request(
     model: str,
     features: list[dict[str, Any]],
     config: dict[str, Any] | None = None,
+    token: str | None = None,
 ) -> dict[str, Any]:
     """Resolve feature-version pins and publish the training trigger; returns ``{token, features}``.
 
@@ -125,7 +136,9 @@ async def submit_train_request(
     publish failure as ``publish_failed`` — the route maps both to explicit errors rather than a 202
     that silently trains against nothing.
     """
-    token = uuid.uuid4().hex[:12]
+    # Idempotency: a caller-supplied key (its 503-retry contract) REUSES the token, so deterministic
+    # run_ids MERGE the duplicate instead of double-firing an unrelated training run (bug hunt 2026-07-13).
+    token = token or uuid.uuid4().hex[:12]
     # Claim-check guard: the trigger carries pointers + a SMALL config — never data-shaped content
     # (NATS messages must stay small JSON; an inlined matrix would degrade the broker for everyone).
     if len(json.dumps(config or {})) > _MAX_CONFIG_BYTES:

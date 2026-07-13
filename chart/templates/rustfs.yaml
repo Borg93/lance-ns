@@ -143,4 +143,9 @@ spec:
               {{- if .Values.observability.enabled }}
               mc mb --ignore-existing rfs/{{ .Values.observability.bucket }}  # GreptimeDB object store
               {{- end }}
+              {{- range $ns, $bkt := .Values.medallion.buckets }}
+              {{- if and $bkt (ne $bkt $.Values.rustfs.bucket) }}
+              mc mb --ignore-existing rfs/{{ $bkt }}  # medallion storage zone ({{ $ns }}: ingest-source / gold-sink)
+              {{- end }}
+              {{- end }}
 {{- end }}

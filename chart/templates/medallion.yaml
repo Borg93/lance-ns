@@ -108,14 +108,19 @@ spec:
             # versioned data on RustFS). S3 secret follows the catalog's two-tier rule (plaintext only when
             # OpenBao is off — compute + OpenBao is not a shipped combo).
             - { name: MEDALLION_COMPUTE_ENABLED, value: "true" }
-            - { name: MEDALLION_RAW_URI, value: "s3://{{ .Values.rustfs.bucket }}/medallion/{{ .Values.medallion.producer.rawNamespace }}" }
+            - { name: MEDALLION_RAW_URI, value: "s3://{{ include "lance.stageBucket" (list . .Values.medallion.producer.rawNamespace) }}/medallion/{{ .Values.medallion.producer.rawNamespace }}" }
+            # The medallion (project) bucket base — where bronze/silver + the model registry live. The
+            # trainer resolves feature + model URIs from HERE (via silver's zone), so it stays in the project
+            # bucket even when raw (source) and gold (sink) are zoned out. `silver` is unmapped by default →
+            # rustfs.bucket, so this is s3://<project-bucket>/medallion, unchanged on the single-bucket path.
+            - { name: MEDALLION_STAGE_BASE_URI, value: "s3://{{ include "lance.stageBucket" (list . "silver") }}/medallion" }
             # The media ingest head (multimodal §9): /ingest-media seeds/reads the source prefix in the
             # lake bucket (demo stand-in for an external media store), lands bronze-media blobs at the
             # namespace-derived URI (MUST match the media mover's fromNamespace-derived FROM_URI), and
             # triggers the media lane. Dataset/namespace/topic/prefix use the code defaults.
             - { name: MEDALLION_MEDIA_SOURCE_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
             - { name: MEDALLION_MEDIA_SEED_SAMPLES, value: {{ .Values.medallion.mediaSeedSamples | quote }} }
-            - { name: MEDALLION_MEDIA_BRONZE_URI, value: "s3://{{ .Values.rustfs.bucket }}/medallion/bronze-media" }
+            - { name: MEDALLION_MEDIA_BRONZE_URI, value: "s3://{{ include "lance.stageBucket" (list . "bronze-media") }}/medallion/bronze-media" }
             - { name: MEDALLION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" .) }}
@@ -230,8 +235,8 @@ spec:
             # actual data. FROM/TO URIs derive from the stage namespaces, so the chain lines up. S3 secret
             # follows the catalog's two-tier rule (plaintext only when OpenBao is off).
             - { name: MEDALLION_COMPUTE_ENABLED, value: "true" }
-            - { name: MEDALLION_FROM_URI, value: "s3://{{ $root.Values.rustfs.bucket }}/medallion/{{ .fromNamespace }}" }
-            - { name: MEDALLION_TO_URI, value: "s3://{{ $root.Values.rustfs.bucket }}/medallion/{{ .toNamespace }}" }
+            - { name: MEDALLION_FROM_URI, value: "s3://{{ include "lance.stageBucket" (list $root .fromNamespace) }}/medallion/{{ .fromNamespace }}" }
+            - { name: MEDALLION_TO_URI, value: "s3://{{ include "lance.stageBucket" (list $root .toNamespace) }}/medallion/{{ .toNamespace }}" }
             - { name: MEDALLION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" $root }}" }
             - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ $root.Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" $root) }}

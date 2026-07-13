@@ -172,12 +172,8 @@ def write_bronze() -> None:
     schema = pa.schema(
         [pa.field("id", pa.int64()), blob_field("payload"), pa.field("payload_src", pa.string())]
     )
-    table = pa.table(
-        {"id": ids, "payload": blob_array(payloads), "payload_src": payload_src}, schema=schema
-    )
-    lance.write_dataset(
-        table, _BRONZE, storage_options=opts, mode="overwrite", data_storage_version="2.2"
-    )
+    table = pa.table({"id": ids, "payload": blob_array(payloads), "payload_src": payload_src}, schema=schema)
+    lance.write_dataset(table, _BRONZE, storage_options=opts, mode="overwrite", data_storage_version="2.2")
     _say(f"bronze$events written ({len(ids)} rows, real image blobs) -> {_BRONZE}")
 
 
@@ -212,9 +208,7 @@ def write_silver() -> None:
         },
         schema=schema,
     )
-    lance.write_dataset(
-        table, _SILVER, storage_options=opts, mode="overwrite", data_storage_version="2.2"
-    )
+    lance.write_dataset(table, _SILVER, storage_options=opts, mode="overwrite", data_storage_version="2.2")
     _say(f"silver$features v1 written ({rows} rows, thumbnail+embedding from media) -> {_SILVER}")
 
 
@@ -309,9 +303,7 @@ def write_gold() -> None:
             "lineage": lineage_col,
         }
     )
-    lance.write_dataset(
-        table, _GOLD, storage_options=opts, mode="overwrite", data_storage_version="2.2"
-    )
+    lance.write_dataset(table, _GOLD, storage_options=opts, mode="overwrite", data_storage_version="2.2")
     _say(f"gold$catalog v1 written ({sv.num_rows} rows, +lineage JSONB) -> {_GOLD}")
 
 

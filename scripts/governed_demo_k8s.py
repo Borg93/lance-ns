@@ -55,8 +55,11 @@ def main() -> None:
     a = httpx.post(f"{CATALOG}/v1/namespace/{ns}/describe", headers=bearer(alice), timeout=10)
     b = httpx.post(f"{CATALOG}/v1/namespace/{ns}/describe", headers=bearer(bob), timeout=10)
     print(f"4. OpenFGA authz — alice (owner): {a.status_code} (200) | bob (no grant): {b.status_code} (403)")
-    print("✓ Dex → catalog → OpenFGA governed flow verified" if (a.status_code, b.status_code) == (200, 403)
-          else "✗ unexpected authz result")
+    print(
+        "✓ Dex → catalog → OpenFGA governed flow verified"
+        if (a.status_code, b.status_code) == (200, 403)
+        else "✗ unexpected authz result"
+    )
 
 
 if __name__ == "__main__":

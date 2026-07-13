@@ -1,10 +1,13 @@
-"""Publish to the Dapr sidecar under a timeout — a hung sidecar must not pin the worker.
+"""Publish to the Dapr sidecar under a TIGHT per-site timeout — a hung sidecar must not pin the worker.
 
-``DaprClient.publish_event`` awaits the local sidecar with no reliable client-side timeout, so a wedged
-sidecar (or a NATS stall) blocks the calling coroutine indefinitely: a mover never reaches its RETRY, a
-best-effort lineage emit never returns. Wrapping every publish in ``asyncio.timeout`` turns that into a
-``TimeoutError`` the existing failure path already handles (mover → RETRY / redeliver; catalog+compaction emit
-→ best-effort swallow). One helper so the timeout is applied consistently at every publish site.
+The Dapr async SDK already bounds every unary RPC (incl. ``PublishEvent``) with a client-side gRPC
+deadline: ``DaprClientTimeoutInterceptorAsync`` applies ``DAPR_API_TIMEOUT_SECONDS`` on every call, and our
+chart sets that to 30s on every app pod as the global backstop. But that knob is GLOBAL — a 5s value would
+also throttle the same apps' ~80s retrying secret-store fetch — and ``publish_event`` exposes no per-call
+timeout arg. So we wrap each publish in a deliberately tighter ``asyncio.timeout`` (default 5s) that fires
+well before the 30s gRPC deadline, turning a wedged sidecar / NATS stall into a ``TimeoutError`` the existing
+failure path already handles (mover → RETRY / redeliver; catalog+compaction emit → best-effort swallow)
+without a coroutine sitting stalled for 30s. One helper so the tighter bound is applied at every publish site.
 
 CLAIM-CHECK GUARD (§9 P1, 2026-07-11): events carry POINTERS (dataset/version/URI), never data — NATS
 JetStream's default max message is ~1 MiB, so a data-shaped payload would fail at the broker ANYWAY,

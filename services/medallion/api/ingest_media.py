@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from common.dapr_auth import require_dapr_token
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
@@ -21,6 +21,9 @@ async def ingest_media(
     dapr: DaprClientDep,
     settings: SettingsDep,
     _: Annotated[None, Depends(require_dapr_token)],
+    idempotency_key: Annotated[
+        str | None, Header(alias="Idempotency-Key", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    ] = None,
 ) -> dict[str, str] | JSONResponse:
     """Land external media as bronze blobs and trigger the media chain — the multimodal cascade head (§9).
 
@@ -33,7 +36,7 @@ async def ingest_media(
     pod could drive the media pipeline / fabricate provenance.
     """
     try:
-        result = await run_ingest_media(dapr, settings)
+        result = await run_ingest_media(dapr, settings, token=idempotency_key)
     except ValueError as exc:
         # Client-addressable ingest refusals (empty source prefix, ingest ceilings exceeded) — a clear
         # 400 with the actionable message, never an opaque 500.

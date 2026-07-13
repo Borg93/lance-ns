@@ -74,4 +74,9 @@ w user:service-trainer reader namespace:silver
 w user:service-trainer reader namespace:gold
 w user:service-trainer writer namespace:models
 
+# The web BFF reads the WHOLE lineage graph as a service (no per-user login on the auth-on stack) — READER
+# on the warehouse so its rung cascades to can_get_metadata on every dataset, exactly like a warehouse
+# reader human. Read-only; never a writer. Pairs with LINEAGE_SERVICE_SUBJECTS + web.serviceIdentity.
+w user:service-web reader "$WAREHOUSE"
+
 echo "✓ seeded medallion grants (mover writers + media lane, silver→gold validator, trainer reader/models-writer, stage/table parent links) into store $SID"

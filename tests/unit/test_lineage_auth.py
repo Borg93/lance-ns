@@ -198,13 +198,16 @@ def test_gate_allows_with_permission(monkeypatch: pytest.MonkeyPatch) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _event(claimed_author: str = "anon", outputs: list[str] | None = None) -> RunEvent:
+def _event(
+    claimed_author: str = "anon", outputs: list[str] | None = None, inputs: list[str] | None = None
+) -> RunEvent:
     return RunEvent.model_validate(
         {
             "eventType": "COMPLETE",
             "eventTime": "2026-06-24T00:00:00Z",
             "run": {"runId": "r1", "facets": {"author": {"name": claimed_author}}},
             "job": {"namespace": "jobs", "name": "promote"},
+            "inputs": [{"namespace": "silver", "name": n} for n in (inputs or [])],
             "outputs": [{"namespace": "silver", "name": n} for n in (outputs or [])],
         }
     )
@@ -716,6 +719,38 @@ def test_output_authz_unauthenticated_raises() -> None:
         asyncio.run(
             fga_deps.enforce_output_authz(
                 _event(outputs=["a$b"]), _request(fga=object()), _settings(**_FULL_AUTH), None
+            )
+        )
+
+
+def test_output_authz_output_less_still_requires_auth() -> None:
+    # REGRESSION (bug hunt 2026-07-13): an event with NO outputs must STILL require a valid principal.
+    # The pre-fix code short-circuited (`if not outputs: return`) BEFORE the auth checks, so an
+    # unauthenticated caller could ingest a forged inputs-only run into the governed audit graph.
+    with pytest.raises(UnauthenticatedError):
+        asyncio.run(
+            fga_deps.enforce_output_authz(
+                _event(inputs=["a$b"]), _request(fga=object()), _settings(**_FULL_AUTH), None
+            )
+        )
+
+
+def test_output_authz_denies_unreadable_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    # REGRESSION (bug hunt 2026-07-13): you may only RECORD reading a dataset you can SEE. An authenticated
+    # reader claiming an unreadable input (forging READ-edge provenance like "service-web read gold$catalog")
+    # is refused. Output-less + an unreadable input → 403, checked via can_get_metadata.
+    async def _batch(_client: object, *, user: str, relation: str, objects: list[str]) -> dict[str, bool]:
+        assert relation == "can_get_metadata"
+        return dict.fromkeys(objects, False)  # nothing is visible to this caller
+
+    monkeypatch.setattr(fga, "batch_check", _batch)
+    with pytest.raises(PermissionDeniedError):
+        asyncio.run(
+            fga_deps.enforce_output_authz(
+                _event(inputs=["gold$catalog"]),
+                _request(fga=cast(OpenFgaClient, object())),
+                _settings(**_FULL_AUTH),
+                _token(),
             )
         )
 

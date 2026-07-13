@@ -10,7 +10,7 @@ from typing import Annotated, Any
 
 from common.dapr_auth import require_dapr_token
 from dapr.ext.fastapi import DaprApp
-from fastapi import APIRouter, Depends, FastAPI, Request
+from fastapi import APIRouter, Depends, FastAPI, Header, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
@@ -67,6 +67,9 @@ async def train(
     dapr: DaprClientDep,
     settings: SettingsDep,
     _: Annotated[None, Depends(require_dapr_token)],
+    idempotency_key: Annotated[
+        str | None, Header(alias="Idempotency-Key", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
+    ] = None,
 ) -> dict[str, Any] | JSONResponse:
     """Request a training run: pin feature versions (omitted → LATEST, resolved HERE) and publish the
     training trigger — 202 with the correlation ``token``. Token-guarded like ``/produce``; a disabled
@@ -80,6 +83,7 @@ async def train(
         model=body.model,
         features=[f.model_dump() for f in body.features],
         config=body.config,
+        token=idempotency_key,
     )
     if result.get("status") == "resolve_failed":
         return _problem(422, "ValidationError", f"cannot resolve feature dataset {result['dataset']!r}")

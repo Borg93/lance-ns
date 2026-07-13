@@ -50,20 +50,33 @@ def main() -> None:
     #    so the appended rows inherit it. min<max rows-per-file forces 4 files → 4 fragments written in
     #    parallel by Ray workers, committed once.
     lance.write_dataset(
-        pa.table({"id": list(range(64)), "v": list(range(64))}), src,
-        storage_options=so, mode="overwrite", data_storage_version="2.2",
+        pa.table({"id": list(range(64)), "v": list(range(64))}),
+        src,
+        storage_options=so,
+        mode="overwrite",
+        data_storage_version="2.2",
     )
     out_schema = pa.schema([("id", pa.int64()), ("v", pa.int64()), ("doubled", pa.int64())])
     lance.write_dataset(
-        out_schema.empty_table(), dst, storage_options=so, mode="overwrite",
-        data_storage_version="2.2", enable_stable_row_ids=True,
+        out_schema.empty_table(),
+        dst,
+        storage_options=so,
+        mode="overwrite",
+        data_storage_version="2.2",
+        enable_stable_row_ids=True,
     )
     transformed = lr.read_lance(src, storage_options=so).map_batches(
         lambda batch: {"id": batch["id"], "v": batch["v"], "doubled": batch["v"] * 2}, batch_format="numpy"
     )
     lr.write_lance(
-        transformed, dst, storage_options=so, mode="append", data_storage_version="2.2",
-        min_rows_per_file=8, max_rows_per_file=16, concurrency=2,
+        transformed,
+        dst,
+        storage_options=so,
+        mode="append",
+        data_storage_version="2.2",
+        min_rows_per_file=8,
+        max_rows_per_file=16,
+        concurrency=2,
     )
     written = lance.dataset(dst, storage_options=so)
     fragments_before = len(written.get_fragments())

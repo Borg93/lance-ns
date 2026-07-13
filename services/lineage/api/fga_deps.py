@@ -105,28 +105,47 @@ async def enforce_output_authz(
 
     :func:`enforce_author` proves WHO is ingesting; this proves they were AUTHORIZED to write those outputs —
     a producer cannot record provenance for a table it has no ``can_write_data`` on (the same write
-    permission the catalog requires to mutate that table). No-op when FGA is off. Fail-closed: unwired
-    client → 503, unauthenticated → 401, any non-writable output → 403. Inputs are NOT checked (recording
-    that you READ a dataset is not a claim to have written it).
+    permission the catalog requires to mutate that table). No-op when FGA is off. Fail-closed BEFORE any
+    empty-set short-circuit: unwired client → 503, unauthenticated → 401, any non-writable output → 403.
+    Inputs are also authorized (``can_get_metadata``): you may only record READING a dataset you can see,
+    so an authenticated reader can't forge READ-edge provenance for datasets outside its reach.
     """
     if not settings.fga_enabled:
         return
-    outputs = [d.name for d in event.outputs if d.name]
-    if not outputs:
-        return
+    # Fail-closed FIRST — BEFORE any empty-set short-circuit: an authenticated but unauthorized caller must
+    # not be able to ingest a run (forging graph state) merely by declaring no outputs. (bug hunt 2026-07-13)
     client = getattr(request.app.state, "fga", None)
     if client is None:
         raise ServiceUnavailableError("authorization service is not available")
     if token is None:
         raise UnauthenticatedError("authentication required")
     object_type = settings.fga_object_type
-    allowed = await fga.batch_check(
-        client, user=token.sub, relation="can_write_data", objects=[f"{object_type}:{n}" for n in outputs]
-    )
-    denied = sorted(n for n in outputs if not allowed.get(f"{object_type}:{n}"))
-    if denied:
-        log.info("ingest_denied", extra={"sub": token.sub, "relation": "can_write_data", "outputs": denied})
-        raise PermissionDeniedError(f"can_write_data required on outputs: {', '.join(denied)}")
+    outputs = [d.name for d in event.outputs if d.name]
+    if outputs:
+        allowed = await fga.batch_check(
+            client, user=token.sub, relation="can_write_data", objects=[f"{object_type}:{n}" for n in outputs]
+        )
+        denied = sorted(n for n in outputs if not allowed.get(f"{object_type}:{n}"))
+        if denied:
+            log.info(
+                "ingest_denied", extra={"sub": token.sub, "relation": "can_write_data", "outputs": denied}
+            )
+            raise PermissionDeniedError(f"can_write_data required on outputs: {', '.join(denied)}")
+    # Inputs: you may only RECORD reading a dataset you can SEE — else an authenticated reader (e.g. the
+    # service-web read identity) could forge READ-edge provenance like "service-web read gold$catalog" into
+    # the governed audit graph. `writer ⊇ reader` in model.fga, so movers (writers) and the trainer (reader)
+    # still pass; only a claim to have read an unreachable dataset is refused. (bug hunt 2026-07-13)
+    inputs = [d.name for d in event.inputs if d.name]
+    if inputs:
+        objs = [f"{object_type}:{n}" for n in inputs]
+        seen = await fga.batch_check(client, user=token.sub, relation="can_get_metadata", objects=objs)
+        hidden = sorted(n for n in inputs if not seen.get(f"{object_type}:{n}"))
+        if hidden:
+            log.info(
+                "ingest_input_denied",
+                extra={"sub": token.sub, "relation": "can_get_metadata", "inputs": hidden},
+            )
+            raise PermissionDeniedError(f"can_get_metadata required on inputs: {', '.join(hidden)}")
 
 
 class DatasetFilter:

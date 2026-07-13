@@ -78,6 +78,14 @@ spec:
             - { name: MEDALLION_TRAINER_IDENTITY, value: {{ .Values.medallion.train.trainerIdentity | quote }} }
             - { name: MEDALLION_MODELS_NAMESPACE, value: {{ .Values.medallion.train.modelsNamespace | quote }} }
             - { name: MEDALLION_TRAIN_LINEAGE_URL, value: {{ .Values.medallion.train.lineageUrl | default (printf "http://%s-lineage:%v" (include "lance.fullname" .) .Values.services.lineage.port) | quote }} }
+            {{- if .Values.medallion.ray }}
+            # The producer app ALSO needs the Ray Jobs seam when ray is on: the TRAIN head (#115) gates on
+            # ray_enabled and submits training jobs to the same cluster the movers use for stage jobs.
+            # Found live 2026-07-13: this flag was wired only in the movers loop below, so /train could
+            # never be configured through the chart (409 "train head not configured" on every POST).
+            - { name: MEDALLION_RAY_ENABLED, value: "true" }
+            - { name: MEDALLION_RAY_ADDRESS, value: {{ .Values.medallion.rayAddress | quote }} }
+            {{- end }}
             {{- if .Values.dapr.resiliency.enabled }}
             # Dapr-native DLQ (ships with the Resiliency CRD): the producer's raw-arrival + train
             # subscriptions park exhausted deliveries here, ERROR-logged by /dlq-event.

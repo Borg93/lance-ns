@@ -211,7 +211,7 @@ def _run_main(
     features = [{"dataset": "silver$features", "version": 1, "uri": str(tmp_path / "silver")}]
 
     monkeypatch.setenv("MODEL", "churn")
-    monkeypatch.setenv("TOKEN", "tok1")
+    monkeypatch.setenv("TRAIN_TOKEN", "tok1")
     monkeypatch.setenv("FEATURES", json.dumps(features))
     monkeypatch.setenv("REGISTRY_URI", str(tmp_path / "registry"))
     monkeypatch.setenv("ARTIFACT_BASE", str(tmp_path / "artifacts"))
@@ -275,7 +275,7 @@ def test_main_emits_an_attributable_fail_on_misconfiguration(
     # OUTSIDE the FAIL guard, a misconfigured run would vanish from provenance entirely.
     events: list[dict[str, Any]] = []
     monkeypatch.setenv("MODEL", "churn")
-    monkeypatch.setenv("TOKEN", "tok1")
+    monkeypatch.setenv("TRAIN_TOKEN", "tok1")
     monkeypatch.setenv("FEATURES", "{not json")
     monkeypatch.setenv("REGISTRY_URI", str(tmp_path / "registry"))
     monkeypatch.setenv("ARTIFACT_BASE", str(tmp_path / "artifacts"))

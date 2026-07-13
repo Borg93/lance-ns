@@ -174,7 +174,8 @@ async def submit_train_job(
                 "MODEL": model,
                 "FEATURES": features_json,
                 "CONFIG": config_json,
-                "TOKEN": token,
+                "TRAIN_TOKEN": token,  # NOT "TOKEN": lance's object-store env fallback reads a bare TOKEN as the AWS
+                # session token (x-amz-security-token on every request → RustFS 500s) — found live 2026-07-13.
                 "MODELS_NAMESPACE": settings.models_namespace,
                 # The D4 publish pointers (derived by the caller — layout convention lives in train.py)
                 # + where the job posts its OWN OpenLineage lifecycle (D2: no Dapr sidecar on Ray pods).

@@ -305,7 +305,8 @@ def main() -> None:
     # FEATURES/CONFIG or missing S3 env becomes an attributable FAILed run, not a silent vanish
     # (review 2026-07-11 — the consumer already acked; lineage is the only trace left).
     model = os.environ["MODEL"]
-    token = os.environ["TOKEN"]
+    token = os.environ["TRAIN_TOKEN"]  # NOT "TOKEN" — a bare TOKEN env is consumed by lance's object-store
+    # env fallback as the AWS session token (bogus x-amz-security-token → RustFS 500) — live 2026-07-13.
     namespace = os.environ.get("MODELS_NAMESPACE", "models")
     registry_uri = os.environ.get("REGISTRY_URI", "")
     features: list[dict[str, Any]] = []

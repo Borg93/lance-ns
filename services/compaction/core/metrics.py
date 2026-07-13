@@ -33,10 +33,10 @@ def record_run() -> None:
 
 
 def record_reclaimed(fragments_removed: int, versions_removed: int, indices_optimized: int = 0) -> None:
-    """Record what one sweep reclaimed + re-optimized across all datasets."""
-    if fragments_removed:
-        _fragments_removed.add(fragments_removed)
-    if versions_removed:
-        _versions_removed.add(versions_removed)
-    if indices_optimized:
-        _indices_optimized.add(indices_optimized)
+    """Record what one sweep reclaimed + re-optimized across all datasets. Always emit — adding 0 is a valid
+    no-op that still CREATES the counter series, so a dashboard/alert on ``rate(compaction_*_total[5m])``
+    has data from the first sweep instead of reading "no data" until the first non-zero reclaim (obs audit
+    2026-07-13)."""
+    _fragments_removed.add(fragments_removed)
+    _versions_removed.add(versions_removed)
+    _indices_optimized.add(indices_optimized)

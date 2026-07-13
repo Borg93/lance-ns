@@ -31,6 +31,11 @@ _ingest_duration = _meter.create_histogram(
     "lineage.ingest.duration",
     unit="s",
     description="Wall-clock seconds to ingest one event into the AGE graph (successful ingests only).",
+    # Second-scale bucket boundaries. WITHOUT this the SDK default explicit buckets apply, and those are
+    # millisecond-tuned (0, 5, 10, 25, … 10000) — a real ~10ms–2s ingest lands entirely in the first [0,5s]
+    # bucket, so histogram_quantile() (the p95 panel) reads a flat ~5 for every quantile (obs audit
+    # 2026-07-13). The advisory is honoured by the SDK when no View overrides the instrument.
+    explicit_bucket_boundaries_advisory=[0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0],
 )
 
 

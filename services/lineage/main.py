@@ -16,6 +16,7 @@ from common import fga
 from common.dapr_auth import assert_app_token_configured
 from common.exceptions import problem_detail
 from common.lance_metrics import instrument_lance_if_available
+from common.obs import configure_app_logging
 from common.oidc import OIDCVerifier
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -32,6 +33,7 @@ from lineage.core.config import apply_dapr_secrets, get_settings
 from lineage.services.repository import LineageRepository
 
 log = logging.getLogger(__name__)
+configure_app_logging()  # INFO audit/lifecycle logs reach OTLP (obs audit 2026-07-13)
 PROBLEM_JSON = "application/problem+json"
 
 

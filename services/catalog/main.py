@@ -15,6 +15,7 @@ import httpx
 from common import fga
 from common.exceptions import problem_detail
 from common.lance_metrics import instrument_lance_if_available
+from common.obs import configure_app_logging
 from common.oidc import OIDCVerifier
 from common.secrets import fetch_required_secrets
 from dapr.aio.clients import DaprClient
@@ -34,6 +35,7 @@ from catalog.core.namespace import build_namespace
 from catalog.core.vending import make_vendor
 
 log = logging.getLogger(__name__)
+configure_app_logging()  # INFO audit/lifecycle logs reach OTLP (obs audit 2026-07-13)
 
 PROBLEM_JSON = "application/problem+json"
 

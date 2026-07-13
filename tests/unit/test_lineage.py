@@ -831,3 +831,41 @@ def test_ingest_without_schema_facet_never_prunes(monkeypatch: pytest.MonkeyPatc
     }
     calls = _capture_with_graph_version(monkeypatch, event, graph_version="1")
     assert not any("DELETE r" in q for q, _ in calls)
+
+
+def test_input_version_reads_the_pinned_feature_version() -> None:
+    """A PINNED input exposes the version it consumed — the read twin of ``output_version``.
+
+    The Ray TRAIN job pins every feature dataset (#115 D1: training on floating LATEST is not
+    reproducible) and emits the pin as a spec ``version`` facet on the INPUT. Before 2026-07-13 the
+    ingest dropped it (280 READ edges in the live graph, zero versions), so the graph could not answer
+    the question the pin exists to answer: which exact feature versions produced this model.
+    """
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-07-13T09:00:00+00:00",
+            "producer": "https://github.com/Borg93/lance-ns",
+            "run": {"runId": "11111111-1111-5111-8111-111111111111", "facets": {}},
+            "job": {"namespace": "ray-jobs", "name": "train.churn"},
+            "inputs": [
+                {
+                    "namespace": "silver",
+                    "name": "silver$features",
+                    "facets": {"version": {"datasetVersion": "28"}},
+                },
+                {"namespace": "gold", "name": "gold$catalog", "facets": {}},  # unpinned read
+            ],
+            "outputs": [
+                {
+                    "namespace": "models",
+                    "name": "models$churn",
+                    "facets": {"version": {"datasetVersion": "3"}},
+                }
+            ],
+        }
+    )
+    assert event.input_version("silver$features") == "28"
+    assert event.input_version("gold$catalog") is None  # floating read → no pin to record
+    assert event.input_version("not-an-input") is None
+    assert event.output_version("models$churn") == "3"  # the write twin still works

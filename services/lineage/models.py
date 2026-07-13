@@ -305,3 +305,20 @@ class RunEvent(BaseModel):
                 version = facet.get("datasetVersion") if isinstance(facet, dict) else None
                 return str(version) if version is not None else None
         return None
+
+    def input_version(self, name: str) -> str | None:
+        """The Lance dataset version this run CONSUMED for input ``name`` (``version`` facet).
+
+        The read twin of :meth:`output_version`. A producer that pins its inputs — the Ray TRAIN job
+        pins every feature dataset (#115 D1: training on floating LATEST is not reproducible) — says
+        so with the same spec ``version`` facet on the input. Without persisting it the pin is emitted
+        and then dropped, and the graph can no longer answer the question the pin exists to answer:
+        *which exact feature versions produced this model?* (Found live 2026-07-13: 280 READ edges,
+        zero versions.) Producers that read floating LATEST simply omit the facet → ``None``.
+        """
+        for ds in self.inputs:
+            if ds.name == name:
+                facet = (ds.facets or {}).get("version")
+                version = facet.get("datasetVersion") if isinstance(facet, dict) else None
+                return str(version) if version is not None else None
+        return None

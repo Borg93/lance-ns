@@ -252,6 +252,12 @@ _DATASET_LAST_SUCCESS_OP: Final = (
 )
 _SET_DATASET_TAGS: Final = "MATCH (d:Dataset {name:$name}) SET d.tags=$tags RETURN 1"
 _LINK_READ: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:READ]->(d) RETURN 1"
+# The READ edge carries the Lance version this run CONSUMED, when the producer pinned it (the Ray TRAIN
+# job pins every feature — #115 D1). Same own-statement rule as _SET_WROTE_VERSION below (AGE drops a
+# $param in a SET that follows an edge MERGE in the same statement). Unpinned reads leave it absent.
+_SET_READ_VERSION: Final = (
+    "MATCH (r:Run {run_id:$rid})-[e:READ]->(d:Dataset {name:$name}) SET e.version=$ver RETURN 1"
+)
 # The WROTE edge carries the Lance dataset version this run produced (from the OpenLineage
 # ``version`` facet), so two refinement passes over one table are distinguishable in producers().
 _LINK_WROTE: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:WROTE]->(d) RETURN 1"
@@ -526,6 +532,17 @@ class LineageRepository:
                     _LINK_READ,
                     {"rid": event.run.run_id, "name": ds.name},
                 )
+                # A PINNED read records which version it consumed (the TRAIN job's feature pins — #115's
+                # reproducibility claim). Unlike the WROTE version this is NOT gated on is_success: a FAILed
+                # run still truthfully read those versions, and the pin is what makes the failure diagnosable.
+                in_version = event.input_version(ds.name)
+                if in_version:
+                    await run_cypher(
+                        conn,
+                        self._graph,
+                        _SET_READ_VERSION,
+                        {"rid": event.run.run_id, "name": ds.name, "ver": in_version},
+                    )
             for ds in event.outputs:
                 # A failed run keeps a WROTE edge (so producers() shows the attempt) but no version —
                 # it produced no data, so it must not claim to have written a Lance version.

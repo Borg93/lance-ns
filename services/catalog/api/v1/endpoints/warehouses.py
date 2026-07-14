@@ -19,14 +19,16 @@ import re
 from datetime import UTC, datetime
 
 from common import fga
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     CreateNamespaceRequest,
     CreateNamespaceResponse,
     InvalidInputError,
+    NamespaceAlreadyExistsError,
     PermissionDeniedError,
     TableNotFoundError,
+    UnsupportedOperationError,
 )
 from pydantic import BaseModel
 
@@ -65,8 +67,11 @@ class CreateWarehouseNamespaceRequest(BaseModel):
 
 
 def _require_enabled(settings: Settings) -> None:
+    # A DOMAIN error, not a raw HTTPException: this module was the only endpoint module bypassing the
+    # RFC 9457 problem+json handler, so its errors came back shaped differently from every other route in
+    # the API (audit 2026-07-14). UnsupportedOperationError maps to the spec-correct 501.
     if not settings.warehouses_enabled:
-        raise HTTPException(status_code=501, detail="warehouses are disabled (set LANCE_WAREHOUSES_ENABLED)")
+        raise UnsupportedOperationError("warehouses are disabled (set LANCE_WAREHOUSES_ENABLED)")
 
 
 def _validate_id(value: str, *, what: str) -> str:
@@ -103,8 +108,8 @@ async def create_warehouse(
     # A same-project re-create stays idempotent (the partial-failure retry path below relies on it).
     existing = await run_in_threadpool(warehouses.get_warehouse, settings.registry_root, so, warehouse_id)
     if existing is not None and existing.get("project") != project:
-        raise HTTPException(
-            status_code=409, detail=f"warehouse {warehouse_id!r} is already registered to another project"
+        raise NamespaceAlreadyExistsError(
+            f"warehouse {warehouse_id!r} is already registered to another project"
         )
 
     root_uri = f"s3://{bucket}"
@@ -206,8 +211,8 @@ async def create_warehouse_namespace(
         warehouses.warehouse_for_namespace, settings.registry_root, settings.storage_options(), ns_name
     )
     if existing_binding is not None and existing_binding != root_uri:
-        raise HTTPException(
-            status_code=409, detail=f"namespace {ns_name!r} is already bound to another warehouse"
+        raise NamespaceAlreadyExistsError(
+            f"namespace {ns_name!r} is already bound to another warehouse"
         )
 
     ns_conn = _namespace_for_root(request, settings, root_uri)

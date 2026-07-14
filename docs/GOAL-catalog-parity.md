@@ -78,6 +78,37 @@ enforcement-only, no managed surface) — see #3; (b) the physical **bucket-per-
   `FLAG_STABLE_ROW_IDS`; with `LANCE_OBJECT_STORE_METRICS_LABEL=full` each warehouse is a distinct
   `base` metric series.
 
+### GOAL + CONDITIONS (set 2026-07-14, building next in order #4 → #3)
+
+**#4 — transactional outbox for lineage (durability).**
+- **Goal:** no lineage event is ever lost when a producer crashes between the Lance commit and the Dapr
+  publish. The full event (inputs, author, columnLineage — not just version+schema) survives + is delivered
+  exactly-once.
+- **Design:** a durable OUTBOX in object storage (the stateless-over-object-store fit): the emitter writes
+  the full event to an `_lineage_outbox/<run_id>.json` object, publishes to Dapr, deletes on ack. A relay
+  (extend `lineage/core/reconcile.py`) lists the outbox on its cron, VERIFIES the referenced write actually
+  committed (dataset version on storage — discards phantom events from a crash before the data commit),
+  republishes the survivors (idempotent — the graph MERGEs on `run_id`), and deletes them.
+- **Done when (live, crash-injected):** kill the producer AFTER the Lance commit but BEFORE the publish;
+  the write is durable (version advanced), and after the relay runs the lineage event appears in AGE
+  EXACTLY ONCE (no dup `WROTE`/`DERIVED_FROM`, full inputs+author+columnLineage preserved). A permanently
+  failing publish lands in the DLQ, queryable, not silently lost. A phantom outbox (commit never landed) is
+  discarded, never published.
+
+**#3 — per-warehouse physical multi-tenancy (control plane).**
+- **Goal:** a warehouse = a runtime-provisioned, physically separate bucket (Lakekeeper parity), not the
+  shared `lance-catalog` bucket by prefix. Provisioned + governed through an admin control-plane API.
+- **Design:** admin `POST /v1/warehouse/{id}/create` (project-admin gated via `can_create_warehouse`):
+  provision the bucket (RustFS admin / `mc mb`), register it as the warehouse `base_uri`, stamp create-time
+  policy (`data_storage_version=2.2` + `enable_stable_row_ids`). Route table/namespace location production
+  under the warehouse `base_uri`. Consume side already handles arbitrary buckets (vending, open_dataset).
+- **Done when (live):** create two warehouses via the admin API → each backed by a DISTINCT bucket
+  (distinct `base_uri`); a table created in warehouse A is physically ABSENT from B's bucket (object-store
+  list); new datasets report `2.2` + `FLAG_STABLE_ROW_IDS`; the create is denied to a non-project-admin
+  (403); with `LANCE_OBJECT_STORE_METRICS_LABEL=full` each warehouse is a distinct `base` metric series.
+
+---
+
 ### #4 — Transactional outbox + DLQ for lineage
 - **State.** DLQ **already exists** (Dapr-native parking, default-on) + a reconcile back-fill
   (`reconcile.py`, #23) that recovers version+schema (not inputs/author/columnLineage). No transactional

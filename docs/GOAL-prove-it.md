@@ -139,6 +139,54 @@ Proving it means taking the messaging backbone offline, which is out of proporti
 authorized. The staged-survivor path above exercises the same recovery code the crash would, and the SIGKILL
 crash e2e (P1.3) covers the crash itself.
 
+## P0.1 GREEN (run 29369341977) — every suite runs, nothing skips
+
+```
+tests/e2e/test_object_store_cas_e2e.py ...      (was: sss — never ran)
+tests/e2e/test_client_direct_e2e.py    ..       (was: ss  — never ran)
+tests/e2e/test_warehouses_e2e.py       ..
+tests/e2e/test_multibase_e2e.py        ..
+tests/e2e/test_outbox_e2e.py           .
+tests/e2e/test_outbox_crash_e2e.py     .        (the SIGKILL proof)
+============================= 11 passed in 13.42s ==============================
+```
+All five CI jobs green: `test`, `frontend`, `lineage-e2e`, `auth-e2e`, `e2e-stack`.
+
+Getting here took **four** distinct bugs, and they share one root cause worth naming: **a fresh cluster
+exposes ordering and configuration that a warm local cluster silently hides.** "It works locally" was never
+evidence for any of this — the local stack had been migrated, injected and configured by previous runs.
+
+1. **`--set web.enabled=false` on a key that did not exist.** Helm accepts unknown `--set` keys silently;
+   the ungated web Deployment shipped anyway, its image is never built in CI, `ImagePullBackOff` blocked
+   `helm --wait` forever. *Guarded:* `test_every_helm_set_key_in_our_scripts_exists_in_values`.
+2. **`--wait` deadlocked against the OpenFGA post-install migration.** helm waits for Ready *before*
+   running post-install hooks; OpenFGA cannot be Ready until the hook migrates its schema. Three-way
+   deadlock — armed only on a database that was never migrated, i.e. only ever in CI.
+3. **The Dapr sidecar injector race.** The injector is a MutatingWebhook and only injects into pods created
+   *after* it is Ready; it ships in the same release as the apps, so the apps won the race, came up `0/1`
+   with no sidecar, and hung on `Dapr health check timed out`.
+4. **Two suites silently skipped and CI called it green** (below).
+
+Also fixed: the failure hook dumped a *hardcoded* catalog+lineage log tail, so the pod actually blocking the
+stack (OpenFGA) was never printed — two 12-minute CI round-trips learned nothing. It now describes every
+not-ready pod and tails every not-ready container. **A diagnostic that only reports the components you
+already suspected cannot find a surprise.**
+
+## P0.1b — the two suites that never ran, while CI showed a green check
+
+The job's first green read `6 passed, 5 skipped`. The skips were the story: **CAS (3 tests) and
+client-direct (2 tests) — two of the five suites this goal names — had never executed, on any run, ever.**
+
+* CAS reads `LANCE_E2E_S3_ENDPOINT`; the script exported `LANCE_E2E_S3`. A name mismatch.
+* client-direct probes Dex OIDC discovery; the script exported the bare host while Dex serves it under
+  `/dex/` — it **overrode each suite's correct default with a broken value**, the probe 404'd, and the suite
+  skipped *itself*.
+
+Both suites are skip-guarded on "is the stack reachable?" — correct on a laptop with nothing running, and a
+**lie** in the e2e job, where the stack is up by construction. So the guard: **the runner now fails if any
+test skips.** A green tick over a suite that never ran is worse than a red one; it actively buys false
+confidence, which is the exact currency this document exists to stop spending.
+
 ## P0.1 CORRECTION — the e2e job that exists to stop unproven claims was ITSELF unproven
 
 Clause (2) was marked done because the **workflow file existed**. It had never once run green.

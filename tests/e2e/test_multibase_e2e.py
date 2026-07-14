@@ -87,7 +87,10 @@ def test_multibase_redirects_data_and_reads_fan_out(catalog_ns: str) -> None:
     tbl = "mbns" + DELIM + "mbtbl"
     q = f"data_base={BASE_A}&data_base={BASE_B}"
     r = requests.post(
-        f"{catalog}/v1/table/{tbl}/create?{q}",
+        # mode=overwrite for REPEATABILITY (testing.md F.I.R.S.T.) — a re-run must not collide on the
+        # existing table. initial_bases is create-only, but target_bases applies on overwrite too, so the
+        # fragments still land in a data base (that is exactly what the audit's F1 fix made true).
+        f"{catalog}/v1/table/{tbl}/create?{q}&mode=overwrite",
         data=_arrow_many_rows(),
         headers={**_auth(), "content-type": ARROW_STREAM},
         timeout=60,

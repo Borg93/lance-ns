@@ -1,0 +1,170 @@
+#!/usr/bin/env bash
+# The e2e stack + suite runner — the SINGLE definition used by BOTH `make e2e-ci` and the CI job,
+# so "it passed in CI" and "it passed on my machine" cannot diverge (the repo's dagger/auth-e2e pattern).
+#
+# WHY THIS EXISTS (docs/GOAL-prove-it.md P0.1): every "live-verified" claim in this repo rested on a
+# MANUAL terminal run while `ci.yml` ran `pytest -m "not e2e"`. Nothing guarded them, so a regression
+# tomorrow would be silent. This script makes the live proof an artifact that runs on every push.
+#
+# It brings up the GOVERNED stack (Dex OIDC + OpenFGA + Dapr + RustFS + AGE) on kind with the feature
+# flags the suites need, seeds the exact grants/buckets they assume, then runs the five e2e suites the
+# goal names: CAS, client-direct (#2), warehouses (#3-A), multibase (#3-B), outbox (#4).
+#
+# Heavy optional components (observability/Vector/Perses/Greptime, web, compaction) are DISABLED — they
+# are not under test here and a GitHub runner is 2 cores / 7 GB. `make e2e-obs` covers observability.
+#
+# Idempotent: safe to re-run against an existing cluster. Env overrides: CLUSTER, RELEASE, KEEP_STACK=1.
+set -euo pipefail
+
+CLUSTER="${CLUSTER:-lance}"
+RELEASE="${RELEASE:-lance-ns}"
+CATALOG_IMG="${CATALOG_IMG:-lance-rest-catalog:dev}"
+BIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.localbin"
+export PATH="$BIN:$PATH"
+
+# The two data-distribution buckets #3-B spreads fragments across (must be allowlisted in the chart AND
+# physically provisioned — the allowlist is a governance gate, not a provisioner).
+BASE_A="s3://mb-a"
+BASE_B="s3://mb-b"
+
+PF_PIDS=()
+cleanup() {
+  local rc=$?
+  for pid in "${PF_PIDS[@]:-}"; do kill "$pid" 2>/dev/null || true; done
+  if [ $rc -ne 0 ]; then
+    echo "::group::stack diagnostics (failure)"
+    kubectl get pods -o wide || true
+    kubectl logs -l app.kubernetes.io/component=catalog -c catalog --tail=60 || true
+    kubectl logs -l app.kubernetes.io/component=lineage -c lineage --tail=60 || true
+    echo "::endgroup::"
+  fi
+  if [ "${KEEP_STACK:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
+    kind delete cluster --name "$CLUSTER" 2>/dev/null || true
+  fi
+  return $rc
+}
+trap cleanup EXIT
+
+step() { echo; echo "==> $*"; }
+
+# --------------------------------------------------------------------------------------------------
+step "1/8 cluster + chart deps"
+kind get clusters 2>/dev/null | grep -qx "$CLUSTER" || kind create cluster --config deploy/kind/kind-config.yaml --wait 180s
+for r in dapr https://dapr.github.io/helm-charts/ nats https://nats-io.github.io/k8s/helm/charts/ \
+         openfga https://openfga.github.io/helm-charts greptime https://greptimeteam.github.io/helm-charts/ \
+         vector https://helm.vector.dev perses https://perses.github.io/helm-charts; do :; done
+helm repo add dapr    https://dapr.github.io/helm-charts/            >/dev/null 2>&1 || true
+helm repo add nats    https://nats-io.github.io/k8s/helm/charts/     >/dev/null 2>&1 || true
+helm repo add openfga https://openfga.github.io/helm-charts          >/dev/null 2>&1 || true
+helm repo add greptime https://greptimeteam.github.io/helm-charts/   >/dev/null 2>&1 || true
+helm repo add vector  https://helm.vector.dev                        >/dev/null 2>&1 || true
+helm repo add perses  https://perses.github.io/helm-charts           >/dev/null 2>&1 || true
+helm repo update >/dev/null && helm dependency build ./chart >/dev/null
+
+step "2/8 build + side-load the app image"
+docker build -f .docker/rest-catalog.dockerfile -t "$CATALOG_IMG" . >/dev/null
+# EXPLICIT load + digest check: the same-":dev"-tag gotcha (a rebuilt tag does NOT update a running pod
+# under IfNotPresent) has bitten this repo repeatedly. Load, then verify the node really has the digest.
+kind load docker-image "$CATALOG_IMG" --name "$CLUSTER"
+
+step "3/8 deploy the governed stack (auth ON, #3-A/#3-B/#4 flags ON, heavy extras OFF)"
+helm upgrade --install "$RELEASE" ./chart --timeout 600s --wait \
+  --set auth.enabled=true \
+  --set medallion.fgaEnabled=true \
+  --set catalog.warehouses.enabled=true \
+  --set-json "catalog.multibase.dataBases=[\"$BASE_A\",\"$BASE_B\"]" \
+  --set services.lineage.outbox.enabled=true \
+  --set services.lineage.reconcile.enabled=true \
+  --set observability.enabled=false \
+  --set compaction.enabled=false \
+  --set web.enabled=false
+
+kubectl rollout status deploy/"$RELEASE"-catalog --timeout=300s
+kubectl rollout status deploy/"$RELEASE"-lineage --timeout=300s
+
+step "4/8 port-forward the services the suites talk to"
+kubectl port-forward "svc/$RELEASE-catalog" 2333:2333 >/tmp/pf-cat.log 2>&1 & PF_PIDS+=($!)
+kubectl port-forward "svc/$RELEASE-lineage" 18000:8000 >/tmp/pf-lin.log 2>&1 & PF_PIDS+=($!)
+kubectl port-forward "svc/$RELEASE-rustfs"  9900:9000 >/tmp/pf-rfs.log 2>&1 & PF_PIDS+=($!)
+kubectl port-forward "svc/$RELEASE-dex"     5556:5556 >/tmp/pf-dex.log 2>&1 & PF_PIDS+=($!)
+kubectl port-forward "svc/$RELEASE-openfga" 8081:8080 >/tmp/pf-fga.log 2>&1 & PF_PIDS+=($!)
+for i in $(seq 1 40); do
+  c=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:2333/livez 2>/dev/null || true)
+  l=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:18000/livez 2>/dev/null || true)
+  d=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:5556/dex/.well-known/openid-configuration 2>/dev/null || true)
+  [ "$c" = "200" ] && [ "$l" = "200" ] && [ "$d" = "200" ] && break
+  sleep 2
+done
+echo "   catalog=$c lineage=$l dex=$d"
+[ "$c" = "200" ] && [ "$l" = "200" ] && [ "$d" = "200" ] || { echo "!! services never became ready"; exit 1; }
+
+step "5/8 provision the #3-B data buckets (the allowlist GOVERNS, it does not provision)"
+uv run python - <<PYEOF
+import boto3
+c = boto3.client("s3", endpoint_url="http://localhost:9900",
+                 aws_access_key_id="rustfsadmin", aws_secret_access_key="rustfsadmin",
+                 region_name="us-east-1")
+for b in ("mb-a", "mb-b"):
+    try:
+        c.create_bucket(Bucket=b); print("   created", b)
+    except Exception as e:
+        print("   exists", b, type(e).__name__)
+PYEOF
+
+step "6/8 mint Dex tokens + seed the project-admin grant"
+mint() {
+  curl -s -m10 http://localhost:5556/dex/token \
+    -d grant_type=password -d client_id=lance-catalog -d client_secret=lance-catalog-secret \
+    -d scope="openid email" -d username="$1" -d password=password \
+  | uv run python -c "import sys,json;print(json.load(sys.stdin).get('id_token',''))"
+}
+ALICE="$(mint alice@example.com)"
+BOB="$(mint bob@example.com)"
+[ -n "$ALICE" ] && [ -n "$BOB" ] || { echo "!! Dex issued no token"; exit 1; }
+
+# The FGA subject is the token's `sub` (a Dex opaque id), NOT the email — granting the email silently
+# authorizes nobody. Decode it.
+SUB="$(ALICE="$ALICE" uv run python -c "
+import os,base64,json
+p = os.environ['ALICE'].split('.')[1]; p += '=' * (-len(p) % 4)
+print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
+SID="$(fga store list --api-url http://localhost:8081 \
+  | uv run python -c "import sys,json;print([s['id'] for s in json.load(sys.stdin)['stores'] if s['name']=='lance-catalog'][0])")"
+# project-admin => can_create_warehouse (the #3-A gate). bob gets NOTHING — he is the 403 leg.
+fga tuple write --api-url http://localhost:8081 --store-id "$SID" "user:$SUB" admin project:acme >/dev/null
+echo "   seeded user:${SUB:0:12}… admin project:acme (store ${SID:0:8}…)"
+
+# The parent namespace the multibase suite creates tables under — alice must OWN it or the create 403s
+# at the router before the allowlist check is ever reached.
+curl -s -o /dev/null -X POST "http://localhost:2333/v1/namespace/mbns/create" -H "authorization: Bearer $ALICE"
+
+step "7/8 the outbox suite's Dapr app token"
+DAPR_TOKEN="$(kubectl get secret "$RELEASE-dapr-app-token" -o jsonpath='{.data.token}' | base64 -d)"
+[ -n "$DAPR_TOKEN" ] || { echo "!! no dapr app token"; exit 1; }
+
+step "8/8 run the five e2e suites against the live stack"
+export LANCE_E2E_S3=http://localhost:9900
+export LANCE_E2E_CATALOG_URL=http://localhost:2333
+export LANCE_E2E_LINEAGE_URL=http://localhost:18000
+export LANCE_E2E_DEX=http://localhost:5556
+export LANCE_E2E_FGA=http://localhost:8081
+export LANCE_E2E_TOKEN="$ALICE"
+export LANCE_E2E_NONADMIN_TOKEN="$BOB"
+export LANCE_E2E_DAPR_TOKEN="$DAPR_TOKEN"
+export LANCE_E2E_PROJECT=acme
+export LANCE_E2E_DELIM='$'
+export LANCE_E2E_BASE_A="$BASE_A"
+export LANCE_E2E_BASE_B="$BASE_B"
+export LANCE_E2E_OUTBOX_URI="s3://lance-catalog/_lineage_outbox"
+export LANCE_E2E_RECONCILE_BINDING=lineage-reconcile-cron
+
+PYTHONPATH=services uv run pytest \
+  tests/e2e/test_object_store_cas_e2e.py \
+  tests/e2e/test_client_direct_e2e.py \
+  tests/e2e/test_warehouses_e2e.py \
+  tests/e2e/test_multibase_e2e.py \
+  tests/e2e/test_outbox_e2e.py \
+  -v -p no:cacheprovider
+
+echo
+echo "✓ e2e stack suite green — the live proof is now an artifact, not an anecdote"

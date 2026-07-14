@@ -353,3 +353,6 @@ clean: ## helm uninstall the release (keep the cluster)
 
 down: ## Delete the kind cluster
 	@kind delete cluster --name $(CLUSTER)
+
+e2e-ci: ## THE guarded live proof (P0.1): governed kind stack + the 5 e2e suites (CAS/#2/#3-A/#3-B/#4) — identical to the CI `e2e-stack` job
+	@bash scripts/e2e_stack.sh

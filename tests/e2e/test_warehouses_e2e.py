@@ -77,16 +77,22 @@ def test_per_warehouse_physical_isolation(catalog: str) -> None:
         assert r.json()["root_uri"] == f"s3://{wid}"  # distinct physical bucket per warehouse
 
     # A namespace bound to warehouse A, then a table under it — both must land in bucket-a.
+    # REPEATABLE (writing-python testing.md F.I.R.S.T.): re-running against a stack that already holds
+    # this namespace must NOT fail. A 409 means it exists and is ALREADY bound to this same warehouse
+    # (the binding is write-once — a bind to a DIFFERENT warehouse is what 409s in the hijack guard),
+    # so the isolation assertions below still hold. Without this the suite passes only on a fresh cluster,
+    # which is precisely the "green once, never again" trap this whole CI job exists to close.
     r = requests.post(
         f"{catalog}/v1/warehouses/{wh_a}/namespaces",
         json={"namespace": "e2ens"},
         headers=_auth(),
         timeout=30,
     )
-    assert r.status_code == 200, r.text
+    assert r.status_code in (200, 409), r.text
 
+    # mode=overwrite so a re-run replaces the prior version instead of colliding on an existing table.
     r = requests.post(
-        f"{catalog}/v1/table/e2ens{DELIM}e2etbl/create",
+        f"{catalog}/v1/table/e2ens{DELIM}e2etbl/create?mode=overwrite",
         data=_arrow_ipc(),
         headers={**_auth(), "content-type": ARROW_STREAM},
         timeout=60,

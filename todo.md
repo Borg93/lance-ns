@@ -298,6 +298,18 @@ After reading the Lance Namespace spec docs (`lance-namespace/docs`) + an advers
     produced (OpenLineage `version` facet → `producers().dataset_version`), so refinement passes
     (silver v1 → v2) are distinguishable and provenance lines up with time-travel. In-place refines
     bump the version instead of creating a self-`DERIVED_FROM` edge. `services/lineage/models.py`, `services/lineage/services/repository.py`.
+11. ⛔ **OpenBao off dev-mode + a secrets operator** (`docs/OPERATORS.md` §5, row 5). **Live incident
+    2026-07-14:** `server -dev` keeps secrets **in memory**, so an out-of-band OpenBao restart wipes
+    `secret/lance`; the `openbao-seed` re-seed is a *post-upgrade hook*, so a bare restart never
+    repopulates it → every app's `apply_dapr_secrets` retries a Dapr `500` forever → lifespan hangs,
+    pod stuck `0/2`, daprd deadlocked waiting for the app to bind. Two levels:
+    - **(a) Interim — a values flip, do soon (P1):** `openbao.devMode=false` → `server -config` on the
+      existing PVC so secrets survive restarts. Adds a one-time `operator init`/unseal (no fixed root
+      token) — the very chore the operator removes, so this is the bridge.
+    - **(b) Operator — the destination (P2, operator wave):** External Secrets Operator (lowest coupling,
+      cloud-agnostic) / Vault-OpenBao operator / bank-vaults for **auto-unseal** + **declarative secret
+      sync** (retire the seed Job) + rotation. First check whether rask already operates one (it operates
+      the other four operators) — if so the merge is a values flip, not an install.
 
 ### P1 — verified security/consistency cleanups (audit `w8u4rc2tg`)
 - ✅ **OpenFGA tuple cleanup on drop / deregister / rename** (DONE 2026-06-30) — added the revoke path to

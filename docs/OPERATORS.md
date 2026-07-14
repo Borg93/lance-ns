@@ -14,6 +14,7 @@ is "flip values at rask's operators", never "deploy operators ourselves".
 | 2 | **CloudNativePG** | hand-rolled AGE StatefulSet + OpenFGA datastore | Managed Postgres `Cluster` (HA, backups, failover) for the ONLY relational state of record (AGE + OpenFGA). ⚠️ Gated by the AGE-extension decision (stock CNPG images lack AGE): custom image vs separate operand vs Lance-native graph — `RASK-INTEGRATION.md` §Open decisions. |
 | 3 | **rustfs-operator** | hand-rolled RustFS Deployment | S3 `Tenant` CR with a declarative `buckets:` list — our lakehouse + observability buckets become list entries. |
 | 4 | **NACK** (NATS operator) — *optional* | the imperative `nats-stream-job.yaml` provision Job | Declarative `Stream` CRDs would replace the shell Job that today creates `LINEAGE` / `MEDALLION` / `TRAINING` (Dapr's jetstream component does not auto-create streams). Nice-to-have: the Job works and is idempotent; NACK removes a boot-ordering foot-gun, nothing more. |
+| 5 | **Secrets operator** (External Secrets Operator, the Vault/OpenBao operator, or bank-vaults) — *interim: no operator, just a values flip* | the `server -dev` in-memory OpenBao + the `openbao-seed` post-upgrade hook | Dev-mode OpenBao (`server -dev`) holds secrets **in memory**: any pod restart wipes `secret/lance`, and the ONLY re-seed path is the helm post-upgrade hook — so an *out-of-band* restart leaves every app's `apply_dapr_secrets` retrying a Dapr `500` on the missing key **forever** (lifespan never completes → pod stuck `0/2` → daprd waits on the app that never listens). **Observed live 2026-07-14** (§5) when an interrupted helm upgrade restarted OpenBao mid-churn. The **acute fix is NOT an operator** — it is `openbao.devMode=false` → `server -config` on the existing PVC, which the chart already supports and which makes secrets survive restarts. The operator earns its place only at prod tier: **auto-unseal** (retire manual `bao operator init`/unseal), **declarative secret sync** (retire the seed Job entirely), plus rotation/PKI. |
 
 **What we never build: a custom lance-ns operator.** An operator earns its complexity when state of
 record lives in CRDs and needs reconciling. Ours does not: catalog/lakehouse state lives in **Lance
@@ -86,3 +87,35 @@ DOES have are already owned elsewhere:
 So: nothing to install for either. The single actionable follow-up either way is the **orphan
 janitor** (already tracked in todo_fable §9 as blob-pointer lifecycle — GC must never collect
 registry-referenced artifact objects, and crashed-run tokens need a sweep).
+
+## 5 · Secrets: the dev-mode fragility, and the operator plan (added 2026-07-14)
+
+**What we hit.** Driving the #4 outbox live meant a helm upgrade that (via an unrelated interrupted
+run) restarted the OpenBao pod. OpenBao runs `server -dev` → its KV store is **in memory**, so the
+restart wiped `secret/lance`. The `openbao-seed` Job that repopulates it is a **post-upgrade hook**,
+so it only fires on a helm release — not on a bare pod restart. Every new app pod's lifespan calls
+`apply_dapr_secrets` → Dapr's vault secretstore → `GET /v1.0/secrets/lance-secrets/lance` → **`500`**;
+the Dapr client retries with growing backoff, so uvicorn stays at "Waiting for application startup",
+never binds `:8000`, and daprd sits "waiting for application to listen" — a two-sided deadlock that
+reads like a crash but is a **missing secret**. Root-caused by running `apply_dapr_secrets` inside the
+stuck pod under a watchdog; fixed by re-running the seed (the chart's own hook) + recreating the pod.
+
+**The plan (two levels, do the cheap one regardless):**
+
+1. **Interim — a values flip, NOT an operator (cheap, do soon):** set `openbao.devMode=false` so
+   OpenBao runs `server -config` against its **already-provisioned PVC**. Secrets then survive pod
+   restarts, and the seed Job becomes first-boot-only. Cost: OpenBao then needs a real
+   `operator init` + unseal step (no fixed root token) — which is the exact chore the operator
+   removes, so this is the bridge, not the destination. Tracked in `todo.md`.
+2. **Prod — a secrets operator (the destination):** adopt **External Secrets Operator** (cloud-agnostic,
+   syncs from any backend into k8s Secrets / Dapr), the **Vault/OpenBao operator**, or **bank-vaults**
+   for **auto-unseal** (no manual init/unseal) + **declarative secret sync** (retire `openbao-seed`
+   entirely) + rotation/PKI. Same "operators later" wave as rows 1–4. **First verify whether rask
+   already operates one** (it operates the other four — §2); if so, merge = flip values, not install.
+   If not, ESO is the lowest-coupling adopt because it is backend- and cloud-agnostic like our Dapr
+   secretstore seam already is.
+
+**Why it was invisible until now:** the seed hook makes the happy path (a clean `helm upgrade`) always
+re-seed, so dev-mode's in-memory loss only bites on an *out-of-band* restart. That is rare in a quiet
+demo and routine in prod (node drains, OOM, rollouts) — which is precisely why it belongs on the
+operator wave and not in the "never build" bucket.

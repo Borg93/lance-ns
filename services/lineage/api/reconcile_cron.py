@@ -18,6 +18,7 @@ from common import outbox
 from common.dapr_auth import require_dapr_token
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
+from pydantic import ValidationError
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.core.config import declared_columns_map, storage_options
@@ -30,8 +31,6 @@ from lineage.core.reconcile import (
     read_storage_version,
     reconcile_all,
 )
-from pydantic import ValidationError
-
 from lineage.models import RunEvent
 from lineage.services.consumer import record_event_best_effort
 

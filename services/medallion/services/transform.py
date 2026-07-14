@@ -236,13 +236,19 @@ async def handle_stage(
                 event_type="FAIL",
                 error_message=str(exc),
             )
-            await dapr_publish.publish_event(
+            # Through the OUTBOX (#4), like every other lineage emit. This path returns _DROP — Dapr will NOT
+            # redeliver — so a lost FAIL publish means the failed run is NEVER recorded and NEVER retried:
+            # the graph silently forgets it. Staging makes the failure durable. A staged FAIL is not a
+            # phantom: the relay re-ingests a truthful "this run failed" record; it implies no committed data.
+            await outbox.publish_lineage_with_outbox(
                 dapr,
-                timeout_seconds=settings.publish_timeout_seconds,
+                outbox_uri=settings.lineage_outbox_uri,
+                storage_options=settings.storage_options(),
+                run_id=fail_event["run"]["runId"],
+                event_json=json.dumps(fail_event),
                 pubsub_name=settings.pubsub,
                 topic_name=settings.lineage_topic,
-                data=json.dumps(fail_event),
-                data_content_type="application/json",
+                timeout_seconds=settings.publish_timeout_seconds,
             )
         return _DROP
     except Exception as exc:  # noqa: BLE001 — transient compute/publish failure → let Dapr redeliver
@@ -269,13 +275,18 @@ async def handle_stage(
                     event_type="FAIL",
                     error_message=str(exc),
                 )
-                await dapr_publish.publish_event(
+                # Through the OUTBOX (#4) — see the _DROP path above. Dapr DOES redeliver here, so a lost FAIL
+                # is eventually re-emitted; staging it anyway keeps the invariant UNIFORM ("every lineage
+                # publish is staged") rather than a special case that the next audit has to re-derive.
+                await outbox.publish_lineage_with_outbox(
                     dapr,
-                    timeout_seconds=settings.publish_timeout_seconds,
+                    outbox_uri=settings.lineage_outbox_uri,
+                    storage_options=settings.storage_options(),
+                    run_id=fail_event["run"]["runId"],
+                    event_json=json.dumps(fail_event),
                     pubsub_name=settings.pubsub,
                     topic_name=settings.lineage_topic,
-                    data=json.dumps(fail_event),
-                    data_content_type="application/json",
+                    timeout_seconds=settings.publish_timeout_seconds,
                 )
         return _RETRY
     if quality_blocked:

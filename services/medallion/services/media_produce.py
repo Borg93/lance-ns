@@ -19,7 +19,7 @@ import logging
 import uuid
 
 import pyarrow.fs as pafs
-from common import dapr_publish
+from common import dapr_publish, outbox
 from common.sources import S3Source
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
@@ -134,13 +134,21 @@ async def ingest_media(
     # COMPLETE in the graph maps to a real committed write (truthful, not duplicated), and the earlier
     # version's run simply has no derived silver, like any superseded write.
     try:
-        await dapr_publish.publish_event(
+        # Stage-then-publish-then-drop through the outbox (#4), like every other lineage emit (produce.py,
+        # transform.py) — the MEDIA head was the one producer still bypassing it (audit 2026-07-14), leaving
+        # the multimodal path the exact commit→publish loss window #4 exists to close. A crash between the
+        # blob commit and the publish ack now leaves the FULL event staged for the reconcile relay. The
+        # media-chain TRIGGER below stays a bare publish on purpose: the outbox re-ingests lineage, it never
+        # re-fires triggers — trigger loss is the documented idempotency-token caller-retry contract.
+        await outbox.publish_lineage_with_outbox(
             dapr,
-            timeout_seconds=settings.publish_timeout_seconds,
+            outbox_uri=settings.lineage_outbox_uri,
+            storage_options=settings.storage_options(),
+            run_id=event["run"]["runId"],
+            event_json=json.dumps(event),
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
-            data=json.dumps(event),
-            data_content_type="application/json",
+            timeout_seconds=settings.publish_timeout_seconds,
         )
     except Exception as exc:  # noqa: BLE001 — retryable 503; nothing landed, the retry starts clean
         log.warning(

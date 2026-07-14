@@ -14,7 +14,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
-from common import outbox
+from common import outbox, outbox_metrics
 from common.dapr_auth import require_dapr_token
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
@@ -161,8 +161,23 @@ async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: 
     An unparseable (poison) object is dropped so it can't wedge the drain. A well-formed event is ingested
     idempotently (``ingest_event`` MERGEs on ``run_id``) and then deleted; a delete that fails just leaves
     the object for the next tick to re-ingest (a no-op) and retry the delete. Returns the count ingested.
+
+    BOUNDED + OBSERVED (GOAL-prove-it P1.1/P1.2). The drain reads at most ``outbox_drain_limit`` events per
+    tick, OLDEST FIRST — it previously materialised the whole prefix inside the single-flight lock, so a
+    backlog (precisely the situation the outbox exists for) could OOM or stall the tick: the relay would fail
+    hardest exactly when it mattered most. The remainder drains next tick, so nothing starves. The saturation
+    snapshot is published on EVERY tick — including an empty one, so ``outbox.depth`` falls back to 0 instead
+    of going stale at its last non-zero reading and alerting forever.
     """
-    staged = await run_in_threadpool(lambda: list(outbox.list_events(settings.outbox_uri, opts)))
+    depth, oldest_age = await run_in_threadpool(outbox.backlog, settings.outbox_uri, opts)
+    outbox_metrics.observe_backlog(depth, oldest_age)
+    if depth:
+        log.info("lineage_outbox_backlog", extra={"depth": depth, "oldest_age_seconds": round(oldest_age, 1)})
+
+    cap = settings.outbox_drain_limit or None  # 0 => unbounded (the pre-P1.2 behavior)
+    staged = await run_in_threadpool(
+        lambda: list(outbox.list_events(settings.outbox_uri, opts, limit=cap))
+    )
     drained = 0
     for run_id, event_json in staged:
         try:
@@ -172,6 +187,7 @@ async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: 
             # broad `except Exception` it replaces deleted the staged object on ANY failure — a transient
             # error would destroy the event's ONLY durable copy, the exact loss #4 exists to prevent.
             log.warning("lineage_outbox_poison_dropped", extra={"run_id": run_id, "error": str(exc)})
+            outbox_metrics.record_poison_dropped()
             await run_in_threadpool(outbox.drop_event, settings.outbox_uri, opts, run_id)
             continue
         await repository.ingest_event(event)  # idempotent — MERGE on run_id (authoritative AGE graph)
@@ -182,6 +198,9 @@ async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: 
         await record_event_best_effort(repository, event)
         await run_in_threadpool(outbox.drop_event, settings.outbox_uri, opts, run_id)
         drained += 1
+    # Always emit — adding 0 CREATES the series, so a dashboard/alert has data from the first tick instead
+    # of reading "no data" until the first non-zero drain (the lesson the compaction metrics learned).
+    outbox_metrics.record_drained(drained)
     if drained:
         log.info("lineage_outbox_drained", extra={"drained": drained})
     return drained

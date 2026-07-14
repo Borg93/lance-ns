@@ -19,10 +19,13 @@ producer/relay already use; a local/``file://`` path uses the local filesystem (
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Iterator
 from contextlib import suppress
 
 import pyarrow.fs as pafs
+
+from common import outbox_metrics
 
 log = logging.getLogger(__name__)
 
@@ -65,13 +68,56 @@ def drop_event(outbox_uri: str, storage_options: StorageOptions, run_id: str) ->
         fs.delete_file(f"{base}/{run_id}.json")
 
 
-def list_events(outbox_uri: str, storage_options: StorageOptions) -> Iterator[tuple[str, str]]:
-    """Yield ``(run_id, event_json)`` for every staged event under the outbox prefix (the relay's input).
-    An absent prefix yields nothing. Blocking IO; the caller threadpools the whole drain."""
+def _staged_infos(outbox_uri: str, storage_options: StorageOptions) -> list[pafs.FileInfo]:
+    """Every staged `.json` object under the prefix, OLDEST FIRST.
+
+    Oldest-first matters for the bounded drain: when a backlog exceeds the per-tick cap, the events that
+    have been at risk LONGEST must drain first, and `outbox.oldest_age` must fall monotonically as the relay
+    catches up. A newest-first (or arbitrary) order would let the oldest event starve indefinitely behind a
+    steady arrival rate — the backlog would "drain" while the thing you are actually alerting on never moves.
+    """
     fs, base = _fs_and_base(outbox_uri, storage_options)
-    for info in fs.get_file_info(pafs.FileSelector(base, allow_not_found=True, recursive=False)):
-        if info.type != pafs.FileType.File or not info.path.endswith(".json"):
-            continue
+    infos = [
+        i
+        for i in fs.get_file_info(pafs.FileSelector(base, allow_not_found=True, recursive=False))
+        if i.type == pafs.FileType.File and i.path.endswith(".json")
+    ]
+    infos.sort(key=lambda i: i.mtime_ns or 0)
+    return infos
+
+
+def backlog(outbox_uri: str, storage_options: StorageOptions) -> tuple[int, float]:
+    """``(depth, oldest_age_seconds)`` — the saturation snapshot (#4 observability, GOAL-prove-it P1.1).
+
+    A metadata-only LIST: no object bodies are read, so this is cheap enough to run on every reconcile tick
+    even when the outbox is healthy and empty (which is exactly when it must still report depth=0, or the
+    gauge would go stale at its last non-zero reading and alert forever).
+    """
+    infos = _staged_infos(outbox_uri, storage_options)
+    if not infos:
+        return 0, 0.0
+    oldest_ns = infos[0].mtime_ns or 0
+    age = max(0.0, (time.time_ns() - oldest_ns) / 1e9) if oldest_ns else 0.0
+    return len(infos), age
+
+
+def list_events(
+    outbox_uri: str, storage_options: StorageOptions, *, limit: int | None = None
+) -> Iterator[tuple[str, str]]:
+    """Yield ``(run_id, event_json)`` for staged events under the outbox prefix (the relay's input), OLDEST
+    FIRST, at most ``limit`` of them.
+
+    BOUNDED (audit finding, GOAL-prove-it P1.2): the drain previously materialised the ENTIRE prefix into
+    memory inside the single-flight lock, so a backlog (exactly the situation the outbox exists for) could
+    OOM or stall the reconcile tick — the relay would fail hardest precisely when it was needed most. The cap
+    makes each tick's work bounded; the remainder drains on the next tick, oldest-first, so nothing starves.
+    An absent prefix yields nothing. Blocking IO; the caller threadpools the whole drain.
+    """
+    fs, _ = _fs_and_base(outbox_uri, storage_options)
+    infos = _staged_infos(outbox_uri, storage_options)
+    if limit is not None:
+        infos = infos[:limit]
+    for info in infos:
         run_id = info.path.rsplit("/", 1)[-1].removesuffix(".json")
         # TOCTOU: the medallion mover stages-then-drops on this SAME prefix continuously, so an object
         # listed above can vanish before we open it. A concurrently-dropped event was already published
@@ -110,14 +156,24 @@ async def publish_lineage_with_outbox(
     staged = bool(outbox_uri)
     if staged:
         await run_in_threadpool(stage_event, outbox_uri, storage_options, run_id, event_json)
-    await dapr_publish.publish_event(
-        publisher,
-        timeout_seconds=timeout_seconds,
-        pubsub_name=pubsub_name,
-        topic_name=topic_name,
-        data=event_json,
-        data_content_type="application/json",
-    )
+        outbox_metrics.record_staged()
+    try:
+        await dapr_publish.publish_event(
+            publisher,
+            timeout_seconds=timeout_seconds,
+            pubsub_name=pubsub_name,
+            topic_name=topic_name,
+            data=event_json,
+            data_content_type="application/json",
+        )
+    except Exception:
+        # The event REMAINS staged — that is the crash window working, not data loss. Count it so a
+        # sustained publish outage is visible (rising failures + rising depth) instead of silent, then
+        # re-raise unchanged: the producer's retry/redelivery contract is unaltered by the metric.
+        if staged:
+            outbox_metrics.record_publish_failed()
+        raise
+    outbox_metrics.record_published()
     if staged:
         with suppress(Exception):
             await run_in_threadpool(drop_event, outbox_uri, storage_options, run_id)

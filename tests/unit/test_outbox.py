@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from typing import Any, cast
 
 import pytest
@@ -109,8 +110,9 @@ class _Repo:
 
 
 class _Settings:
-    def __init__(self, uri: str) -> None:
+    def __init__(self, uri: str, drain_limit: int = 500) -> None:
         self.outbox_uri = uri
+        self.outbox_drain_limit = drain_limit  # the P1.2 per-tick cap (0 = unbounded)
 
 
 def test_relay_drain_reingests_valid_and_drops_poison(tmp_path: Any) -> None:
@@ -157,3 +159,53 @@ def test_relay_drain_is_idempotent_on_reingest(tmp_path: Any) -> None:
     outbox.stage_event(uri, {}, event["run"]["runId"], json.dumps(event))
     assert asyncio.run(_drain_outbox(cast("Any", repo), cast("Any", _Settings(uri)), {})) == 1
     assert repo.ingested.count(event["run"]["runId"]) == 2  # called twice; the GRAPH MERGE makes it a no-op
+
+
+# --------------------------------------------------------------------------- #
+# BOUNDED DRAIN + SATURATION SNAPSHOT (GOAL-prove-it P1.1/P1.2)
+# --------------------------------------------------------------------------- #
+
+
+def test_backlog_reports_depth_and_oldest_age(tmp_path: Any) -> None:
+    # The alertable pair. An outbox that silently stops draining — the one failure that loses lineage
+    # forever — used to look exactly like a healthy one, because NOTHING was measured.
+    uri = _uri(tmp_path)
+    assert outbox.backlog(uri, {}) == (0, 0.0)  # empty must report 0, not go stale
+    for i in range(3):
+        outbox.stage_event(uri, {}, f"run-{i}", "{}")
+    depth, age = outbox.backlog(uri, {})
+    assert depth == 3
+    assert age >= 0.0  # a real, non-negative age for the OLDEST staged event
+
+
+def test_list_events_is_bounded_and_oldest_first(tmp_path: Any) -> None:
+    # The drain used to materialise the WHOLE prefix inside the single-flight lock, so a backlog — exactly
+    # what the outbox exists to survive — could OOM/stall the tick. Cap it, oldest-first so nothing starves.
+    uri = _uri(tmp_path)
+    for i in range(5):
+        outbox.stage_event(uri, {}, f"run-{i}", "{}")
+        time.sleep(0.01)  # distinct mtimes so "oldest first" is actually assertable
+
+    first_two = [rid for rid, _ in outbox.list_events(uri, {}, limit=2)]
+    assert first_two == ["run-0", "run-1"]  # bounded AND oldest-first (not arbitrary order)
+
+    assert len({rid for rid, _ in outbox.list_events(uri, {})}) == 5  # no limit => everything
+
+
+def test_bounded_drain_makes_progress_across_ticks(tmp_path: Any) -> None:
+    # A capped tick must not starve the backlog: draining the cap, dropping those, then draining again
+    # must eventually clear it — and always take the OLDEST first, so `oldest_age` falls monotonically.
+    uri = _uri(tmp_path)
+    for i in range(5):
+        outbox.stage_event(uri, {}, f"run-{i}", "{}")
+        time.sleep(0.01)
+
+    seen: list[str] = []
+    for _ in range(3):  # 3 ticks x cap 2 > 5 staged
+        batch = list(outbox.list_events(uri, {}, limit=2))
+        for rid, _payload in batch:
+            seen.append(rid)
+            outbox.drop_event(uri, {}, rid)
+
+    assert seen == ["run-0", "run-1", "run-2", "run-3", "run-4"]  # strictly oldest-first, fully drained
+    assert outbox.backlog(uri, {}) == (0, 0.0)

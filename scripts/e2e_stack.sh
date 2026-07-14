@@ -100,6 +100,18 @@ helm upgrade --install "$RELEASE" ./chart --timeout 600s \
   --set compaction.enabled=false \
   --set web.enabled=false
 
+# Dapr's sidecar injector is a MUTATING WEBHOOK: it injects daprd only into pods created AFTER it is Ready.
+# The Dapr control plane is a SUBCHART of this same release, so on a fresh cluster the app pods are created
+# in the same breath as the injector — they win the race, come up with NO sidecar (0/1, not 0/2), and then
+# block forever on `TimeoutError: Dapr health check timed out`, taking every governed app into CrashLoop.
+# On a long-lived local cluster Dapr was already installed and Ready, so the race never armed — the third
+# fresh-cluster ordering bug in this script, and the reason "works locally" kept meaning nothing.
+kubectl rollout status deploy/dapr-sidecar-injector --timeout=300s
+# Recreate the app pods THROUGH the now-ready webhook so they actually receive their sidecar.
+for d in catalog lineage lance-ray raw-to-bronze bronze-to-silver silver-to-gold media-to-silver gateway; do
+  kubectl rollout restart deploy/"$RELEASE-$d" >/dev/null 2>&1 || true
+done
+
 # Explicit readiness, in dependency order. OpenFGA FIRST: its post-install migration must land before the
 # server can serve, and every governed app fails closed without it — so if it is not up, everything
 # downstream crash-loops and the real cause is buried under a pile of secondary failures.

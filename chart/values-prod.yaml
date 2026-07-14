@@ -22,7 +22,10 @@ auth:
   lockRootCreate: true # prod: a token alone can't create root namespaces — needs a warehouse create grant
 medallion:
   fgaEnabled: true
-  moverReplicas: 2
+  # 1, NOT 2 (audit 2026-07-14 claim-drift #2): the mover single-flight lock is PROCESS-LOCAL
+  # (transform.py), so 2 replicas can race concurrent overwrites of the same stage dataset.
+  # Raise only after a cross-pod lock ships.
+  moverReplicas: 1
   producer:
     expose: false # /produce is the unauthenticated demo entry — the prod head fires from real raw writes
 
@@ -34,6 +37,12 @@ services:
   lineage:
     replicas: 2
     demoData: false # the /demo data-peek router carries no OIDC/FGA guard — never mount it in prod
+    # #4's durability ON where it matters (audit claim-drift #1: was OFF in every shipped profile
+    # while documented "live-verified" — the exact loss window it exists to close stood open).
+    outbox:
+      enabled: true
+    reconcile:
+      enabled: true
 gateway:
   replicas: 2
 web:

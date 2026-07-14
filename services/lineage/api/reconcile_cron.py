@@ -30,6 +30,8 @@ from lineage.core.reconcile import (
     read_storage_version,
     reconcile_all,
 )
+from pydantic import ValidationError
+
 from lineage.models import RunEvent
 from lineage.services.consumer import record_event_best_effort
 
@@ -166,7 +168,10 @@ async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: 
     for run_id, event_json in staged:
         try:
             event = RunEvent.model_validate_json(event_json)
-        except Exception as exc:  # noqa: BLE001 — a poison object must not wedge the drain; drop it
+        except ValidationError as exc:
+            # ONLY a genuinely-unparseable event is poison. This must stay NARROW (audit 2026-07-14): the
+            # broad `except Exception` it replaces deleted the staged object on ANY failure — a transient
+            # error would destroy the event's ONLY durable copy, the exact loss #4 exists to prevent.
             log.warning("lineage_outbox_poison_dropped", extra={"run_id": run_id, "error": str(exc)})
             await run_in_threadpool(outbox.drop_event, settings.outbox_uri, opts, run_id)
             continue

@@ -3,4 +3,5 @@ node_modules
 apps/*/build
 apps/*/.svelte-kit
 apps/*/test-results
-frontend/.svelte-kit
+.svelte-kit
+test-results

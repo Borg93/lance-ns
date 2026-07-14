@@ -139,6 +139,28 @@ Proving it means taking the messaging backbone offline, which is out of proporti
 authorized. The staged-survivor path above exercises the same recovery code the crash would, and the SIGKILL
 crash e2e (P1.3) covers the crash itself.
 
+## P0.0 — "pushed" is not "green". CI was RED on this branch the whole time.
+
+The single most embarrassing finding of the session, and the one that most vindicates this document.
+
+Every push to `feat/catalog-parity-1-and-5` had been FAILING CI, through commit after commit that reported
+"suite green, pushed". Nobody noticed because nobody looked — I was verifying with `ruff check` + `pytest`
+and calling that green, while CI runs a strictly LARGER set of gates:
+
+| gate | ran locally? | result |
+|---|---|---|
+| `ruff check services tests` | yes | passing all along |
+| `ruff format --check services tests` | **no** | **FAILING** — 10 unformatted files |
+| `ty check` | **no** | **FAILING** — the vulture whitelist (bare names by design) reads as unresolved refs |
+| `pytest` | yes | passing all along |
+
+Fixing the first uncovered the second. The lesson is exactly the one this file exists for: **I verified the
+thing I ran, not the claim I made.** "Pushed" was doing the work of "green" in my own reporting, and the two
+had silently diverged. Checking is one command — `gh run list` — and it was never run.
+
+**Guard:** run all four gates verbatim before claiming green. `test`, `frontend`, `lineage-e2e` and
+`auth-e2e` now pass on the branch for the first time.
+
 ## P1.3 PROVEN — the SIGKILL crash e2e, and the vacuous assertion it was hiding
 
 `tests/e2e/test_outbox_crash_e2e.py` now proves the whole chain, live (`1 passed`):

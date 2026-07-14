@@ -141,7 +141,15 @@ enforcement-only, no managed surface) — see #3; (b) the physical **bucket-per-
 - [x] Frontend: field-level column-lineage panel (surfaces #1)
 - **Audit:** 3 adversarial rounds, 8 confirmed bugs (6 → 2 → 0), each fixed with a regression test that fails
   on the old code. Full unit+integration suite green (636); `ruff` + `ty` clean.
-- **Remaining before "done-done":** (a) live-drive on a kind cluster to prove the running system, not just
-  the tests; (b) build #2/#3/#4. Both need a cluster.
+- **LIVE-VERIFIED on the kind `lance` cluster (2026-07-14, governed stack, FGA on):**
+  - **#1** — drove `make produce`; AGE now holds the full field-to-field chain (6 `DERIVED_FROM_COLUMN`
+    edges: raw_events→bronze$events→silver$features→gold$catalog for `id`+`payload`, IDENTITY, 3 run_ids),
+    previously ZERO from live runs. `MEDALLION_RAY_ENABLED=true`, so this proved the **Ray path**
+    (`measure_stage` reconstructing edges from on-disk schemas) — the exact production seam the audit
+    caught as dead.
+  - **#5c** — the running OpenFGA store has the new `materialized_view`/`transaction` types + owner-tier
+    `can_restore`/`can_create_branch` (catalog reprovisioned `model.json` on restart).
+  - #5a/#5b/#5e deployed on the new image (catalog digest `993a6467…`), not individually driven yet.
+- **Remaining:** build #2/#3/#4 (now unblocked — the cluster is up).
 </content>
 </invoke>

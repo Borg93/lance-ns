@@ -91,6 +91,54 @@ OFFICIAL Svelte 5 runes docs via the Svelte MCP, not guessed.
 *Proof:* every CONFIRMED finding fixed with `bunx turbo run check test lint fmt:check` + Playwright green
 in CI; dead code deleted and proven unreferenced.
 
+## P1.1 PROVEN LIVE (2026-07-14) — outbox metrics in GreptimeDB, incl. the alert signal RISING
+
+Not "the code emits metrics" — the signal was driven end-to-end on the kind stack and read back out of
+GreptimeDB. Metrics reach Greptime via OTLP-direct (no Collector), tables auto-created from the metric names.
+
+**Traffic (happy path).** 3 × `POST /produce` → the cascade fired, every stage publishing through the outbox:
+
+| service | staged | published |
+|---|---|---|
+| lance-ray | 3 | 3 |
+| raw-to-bronze | 3 | 3 |
+| bronze-to-silver | 2 | 2 |
+| silver-to-gold | 5 | 5 |
+
+`staged == published` on every publisher → nothing stranded.
+
+**Saturation (the alert signal) — the part that actually matters.** A gauge pinned at 0 is
+indistinguishable from a *stuck* gauge, so 5 survivor events were staged into the outbox prefix (exactly
+what a crash between the Lance commit and the publish leaves behind) and the relay was ticked:
+
+```
+outbox_depth (service=lineage, 5s export interval)
+  0.0  0.0  0.0  0.0        <- steady state
+  5.0                       <- survivors staged: the gauge RISES
+  0.0  0.0  0.0  0.0  ...   <- relay drained them; falls back (does NOT alert forever)
+outbox_events_drained_total = 5.0
+```
+
+**Recovery (the payoff).** All 5 events were re-ingested into the graph — verified in Postgres/AGE, not
+inferred from a counter:
+
+```
+Run nodes recovered from the drained outbox survivors: 5
+Rows on the durable /events feed: 5
+```
+
+Both surfaces matter: the drained run reaching `/runs` but being **silently absent from `/events`** was a
+real bug fixed earlier this session, and this is its live regression proof.
+
+> Housekeeping: those 5 synthetic runs (`aaaaaaaa-0000-4000-8000-*`, job namespace `proof`) are still in
+> the dev graph. They are deliberately left rather than deleted — pruning graph nodes is a destructive DB
+> action and is the user's call, not mine.
+
+**What this does NOT prove:** the publish-failure path (`outbox.publish.failed` rising while NATS is down).
+Proving it means taking the messaging backbone offline, which is out of proportion to the claim and was not
+authorized. The staged-survivor path above exercises the same recovery code the crash would, and the SIGKILL
+crash e2e (P1.3) covers the crash itself.
+
 ## P4 STATUS (2026-07-14) — audit fixes: 8 landed, 3 open with precise plans
 
 **LANDED** (each with its mechanical proof, all pushed):

@@ -406,6 +406,39 @@ def _existing_location(ns: LanceNamespace, segments: list[str]) -> tuple[str | N
     return location, bool(getattr(resp, "is_only_declared", False))
 
 
+def _refuse_rename_with_branches(source_uri: str, so: StorageOptions, segments: list[str]) -> None:
+    """Refuse to rename a table that has BRANCHES (audit 2026-07-14 — Lance format conformance).
+
+    Rename is a byte-copy of the dataset root + a namespace repoint, which is safe precisely because a Lance
+    dataset's INTERNAL refs are relative. A branch is not internal: it is a shallow clone that references its
+    source root by ABSOLUTE path. Copying the root and deleting the source therefore leaves every branch
+    pointing at bytes that no longer exist — the branches are silently orphaned and their data is
+    unreadable, while the rename returns 200.
+
+    There is no cheap correct fix (the branch manifests would each have to be rewritten to the new root), so
+    the honest behavior is to refuse: a 400 the caller can act on beats a 200 that quietly destroys their
+    branches. Drop the branches first, or copy the table instead.
+
+    A dataset we cannot open (or whose branch listing the backend does not support) is NOT treated as
+    branch-free — that would fail OPEN into the exact silent-orphan case. It raises, so the rename stops.
+    """
+    try:
+        # `.branches` is a Branches HANDLE, not an iterable — `list(ds.branches)` raises TypeError. Probed
+        # against the installed pylance rather than assumed: the accessor is `.list()`.
+        branches = lance.dataset(source_uri, storage_options=so).branches.list()
+    except (ValueError, OSError) as exc:
+        raise ServiceUnavailableError(
+            f"cannot verify whether {'.'.join(segments)} has branches; refusing to rename: {exc}"
+        ) from exc
+    if branches:
+        names = sorted(branches) if isinstance(branches, dict) else [str(b) for b in branches]
+        raise InvalidInputError(
+            f"cannot rename {'.'.join(segments)}: it has branches {names}. A branch is a shallow clone that "
+            "references this table's root by ABSOLUTE path, so a rename (copy + delete source) would leave "
+            "them pointing at deleted bytes — silently orphaning them. Drop the branches first."
+        )
+
+
 def rename_table(
     ns: LanceNamespace,
     so: StorageOptions,
@@ -443,6 +476,7 @@ def rename_table(
         # Missing OR declared-but-unwritten → no dataset to relocate (404, symmetric with every op that
         # requires a written table).
         raise TableNotFoundError(f"table not found: {'.'.join(segments)}")
+    _refuse_rename_with_branches(source_uri, so, segments)
     # The destination must be free in EVERY form. A declared-only stub is TAKEN, never adopted: reusing it
     # would skip ``declare_table`` — the only ATOMIC arbiter — so two concurrent renames into the same
     # declared name would both copy into one location and both retire their sources, silently destroying a

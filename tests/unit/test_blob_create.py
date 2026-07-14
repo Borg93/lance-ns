@@ -392,3 +392,26 @@ def test_rejected_external_create_rolls_back_and_stays_retryable(tmp_path: Path)
     # retryable: the name is free (rollback dropped the declare), so a managed create at the same id succeeds
     create_table(ns, {}, ["rb"], _ipc(pa.table({"id": [1], "blob": blob_array([b"managed"])}, schema=schema)))
     assert _open(ns, ["rb"]).read_blobs("blob", indices=[0])[0][1] == b"managed"
+
+
+def test_rename_refuses_a_table_with_branches(tmp_path: Path) -> None:
+    """Renaming a BRANCHED table would silently ORPHAN its branches (audit 2026-07-14).
+
+    Rename is a byte-copy of the dataset root + a namespace repoint — safe only because a dataset's INTERNAL
+    refs are relative. A branch is NOT internal: it is a shallow clone that references its source root by
+    ABSOLUTE path. So copy-then-delete-source leaves every branch pointing at bytes that no longer exist,
+    while the rename cheerfully returns 200. Refusing is the honest behavior: a 400 the caller can act on
+    beats a 200 that quietly destroys their branches.
+    """
+    import pytest
+    from catalog.services.dataplane import _refuse_rename_with_branches
+    from lance_namespace import InvalidInputError
+
+    uri = str(tmp_path / "t")
+    ds = lance.write_dataset(pa.table({"id": [1, 2]}), uri)
+
+    _refuse_rename_with_branches(uri, {}, ["db", "t"])  # unbranched -> allowed
+
+    ds.create_branch("feature-x")
+    with pytest.raises(InvalidInputError, match="has branches"):
+        _refuse_rename_with_branches(uri, {}, ["db", "t"])

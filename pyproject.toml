@@ -82,6 +82,12 @@ markers = [
 python-version = "3.13"
 root = ["services", "."]
 
+[tool.ty.src]
+# The vulture whitelist is, by design, a file of BARE NAMES — that is how vulture marks a symbol as "used".
+# To a type-checker every line is an unresolved reference, so `ty check` fails on it. It is not real code and
+# is never imported; exclude it rather than contorting the file into something vulture no longer understands.
+exclude = [".vulture-whitelist.py"]
+
 [tool.ruff]
 line-length = 110
 

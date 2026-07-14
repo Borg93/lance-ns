@@ -38,6 +38,16 @@ jobs:
           [ -d tests/unit ] && paths="tests/unit $paths"
           uv run --no-sync pytest $paths -q -m "not e2e"
 
+      # CLAIM-LINT (GOAL-prove-it P0.2) — run FIRST-CLASS and loudly, because this repo's recurring
+      # failure was never a hard bug: it was a prose CLAIM the code did not honor, which every other
+      # gate happily passed. Each guard below fails on a bug that ACTUALLY SHIPPED:
+      #   · three publishers bypassed the #4 outbox while the docs said "every publish is staged"
+      #   · MEDALLION_LINEAGE_OUTBOX_URI was injected by the chart and read by nobody (a dead feature)
+      #   · seed_warehouse wrote `warehouse#parent`, a relation the type does not define → live 503,
+      #     invisible to every mocked-fga unit test
+      - name: Claim-lint (invariants that prose cannot fake)
+        run: uv run --no-sync pytest tests/unit/test_invariants.py -v
+
       # The Helm chart is a first-class deliverable (the whole stack deploys from it), so lint + a full
       # template render gate on every push — a broken template or values reference fails here, not at deploy.
       - name: Install Helm

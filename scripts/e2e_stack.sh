@@ -88,6 +88,9 @@ kubectl port-forward "svc/$RELEASE-lineage" 18000:8000 >/tmp/pf-lin.log 2>&1 & P
 kubectl port-forward "svc/$RELEASE-rustfs"  9900:9000 >/tmp/pf-rfs.log 2>&1 & PF_PIDS+=($!)
 kubectl port-forward "svc/$RELEASE-dex"     5556:5556 >/tmp/pf-dex.log 2>&1 & PF_PIDS+=($!)
 kubectl port-forward "svc/$RELEASE-openfga" 8081:8080 >/tmp/pf-fga.log 2>&1 & PF_PIDS+=($!)
+# The AGE Postgres itself. The outbox-crash suite asserts RECOVERY at the source of truth (the run landed in
+# the graph AND on the durable /events feed) — a non-zero `outbox_drained` only proves the relay counted it.
+kubectl port-forward "svc/$RELEASE-age"     5433:5432 >/tmp/pf-age.log 2>&1 & PF_PIDS+=($!)
 for i in $(seq 1 40); do
   c=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:2333/livez 2>/dev/null || true)
   l=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:18000/livez 2>/dev/null || true)
@@ -157,6 +160,12 @@ export LANCE_E2E_BASE_A="$BASE_A"
 export LANCE_E2E_BASE_B="$BASE_B"
 export LANCE_E2E_OUTBOX_URI="s3://lance-catalog/_lineage_outbox"
 export LANCE_E2E_RECONCILE_BINDING=lineage-reconcile-cron
+# The AGE Postgres, for the outbox-crash suite's recovery assertions (graph + /events feed at the source).
+# User/db/password are READ FROM THE CLUSTER, never hardcoded — the password lives in the infra secret.
+PG_USER=$(kubectl get sts "$RELEASE-age" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="POSTGRES_USER")].value}')
+PG_DB=$(kubectl get sts "$RELEASE-age" -o jsonpath='{.spec.template.spec.containers[0].env[?(@.name=="POSTGRES_DB")].value}')
+PG_PASS=$(kubectl get secret "$RELEASE-infra-credentials" -o jsonpath='{.data.postgres-password}' | base64 -d)
+export LINEAGE_DATABASE_URL="postgresql://${PG_USER}:${PG_PASS}@localhost:5433/${PG_DB}"
 
 PYTHONPATH=services uv run pytest \
   tests/e2e/test_object_store_cas_e2e.py \

@@ -357,6 +357,12 @@ down: ## Delete the kind cluster
 e2e-ci: ## THE guarded live proof (P0.1): governed kind stack + the 5 e2e suites (CAS/#2/#3-A/#3-B/#4) — identical to the CI `e2e-stack` job
 	@bash scripts/e2e_stack.sh
 
-deadcode: ## Dead-code sweep (vulture). The whitelist holds framework-invoked symbols so a REAL dead symbol still surfaces.
-	@uvx vulture services scripts tests .vulture-whitelist.py --min-confidence 60 || true
+deadcode: ## Dead-code sweep (vulture). Decorator-invoked symbols are IGNORED and reviewed knowns are whitelisted, so output ~0 == a REAL dead symbol surfaces instead of drowning in noise.
+	@uvx vulture services scripts tests .vulture-whitelist.py --min-confidence 60 \
+		--ignore-decorators "$(DEADCODE_IGNORE_DECORATORS)" || true
 	@cd frontend && bunx knip --no-exit-code 2>/dev/null || echo "  (frontend: oxlint --deny-warnings already gates unused imports/vars)"
+
+# Framework call sites vulture cannot see. WITHOUT these the sweep reported 70 "dead" symbols in services/,
+# every one a false positive (FastAPI routes/exception handlers, pydantic validators) — a sweep that cries
+# wolf 70 times is WORSE than none, because a genuine dead symbol is invisible in the noise.
+DEADCODE_IGNORE_DECORATORS = @app.*,@router.*,@model_validator,@field_validator,@asynccontextmanager,@pytest.*

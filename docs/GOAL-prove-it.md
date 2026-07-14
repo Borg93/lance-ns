@@ -139,6 +139,56 @@ Proving it means taking the messaging backbone offline, which is out of proporti
 authorized. The staged-survivor path above exercises the same recovery code the crash would, and the SIGKILL
 crash e2e (P1.3) covers the crash itself.
 
+## P1.3 PROVEN — the SIGKILL crash e2e, and the vacuous assertion it was hiding
+
+`tests/e2e/test_outbox_crash_e2e.py` now proves the whole chain, live (`1 passed`):
+
+1. a real child process stages a full `RunEvent` — the open commit→publish window,
+2. the OS `SIGKILL`s it (asserted: `returncode == -signal.SIGKILL`) — no `finally`, no flush, a real crash,
+3. the staged object SURVIVES on object storage,
+4. the run is verified **absent** from the graph first (see below), then the relay drains it,
+5. it lands in **BOTH** the AGE graph **and** the durable `/events` feed — read out of Postgres,
+6. the outbox ends empty.
+
+**The test was previously proving less than its docstring claimed**, in two ways, and both are now fixed:
+
+* It only asserted `outbox_drained >= 1`. That number just means *the relay counted the event* — it says
+  nothing about the run reaching the graph, and nothing about the `/events` feed. Those are separate writes,
+  and one landing without the other is a bug this repo **has actually shipped**. Both are now asserted at the
+  source of truth (`LINEAGE_DATABASE_URL`, port-forwarded by `scripts/e2e_stack.sh`).
+* Adding those assertions immediately exposed a **vacuity bug in the test itself**: `build_run_event` derives
+  `run_id` as a deterministic UUID5, so a FIXED token made the run_id stable across runs — after the first
+  run the event was already in the graph, and "the relay recovered it into the graph" would have passed
+  **even if the relay did nothing at all**. Fixed with a fresh token per invocation, and a pre-flight
+  `assert not pre_graph` that fails loudly if the run is ever present before the relay acts.
+
+That pre-flight guard is the point: an assertion that cannot fail is not a test.
+
+## P3 — dead-code sweep: the sweep itself was the bug
+
+`make deadcode` (vulture + knip). The finding is **not** "we deleted N dead functions" — it is that the
+sweep was useless and is now a guard.
+
+* **Before:** ~70 "dead" symbols reported in `services/`, **every one a false positive** — FastAPI route and
+  exception handlers, Dapr pub/sub + cron handlers, pydantic `model_config` / validators / model fields.
+  Vulture is a static reachability checker and cannot see call sites that live in a framework registry.
+  A sweep that cries wolf 70 times is WORSE than no sweep: a genuinely dead symbol is invisible in the noise.
+* **After:** decorator-invoked symbols are ignored and reviewed knowns are whitelisted (with the reasoning
+  written down in `.vulture-whitelist.py`). The sweep now prints **one** line, so a NEW dead symbol stands out.
+* `ruff --select F401,F811,F841` over `services/`: **clean** (no unused imports, redefinitions or variables).
+  Dead chart env vars are covered mechanically by `test_no_dead_chart_env_vars` in the claim-lint. Frontend
+  dead code (4 orphan type aliases + 2 CSS vars) was deleted earlier; knip's residue is generated types.
+
+**LANDMINE, recorded so nobody "cleans it up":** vulture flags `Image.MAX_IMAGE_PIXELS` in
+`services/medallion/services/media.py` as an unused attribute, because it is an assignment to a Pillow
+global. It is the **decompression-bomb guard**. Deleting what the tool reports would silently disarm a
+security control while every test stayed green. This is exactly why the sweep is triaged, not auto-trusted.
+
+**Deliberately NOT deleted:** `services/common/sinks.py` (the only surviving finding). No *service* imports
+it — its consumers are its own unit test and `scripts/media_pipeline_e2e.py`. It is the un-wired "gold sink"
+seam from the data-zone architecture. Deleting a designed seam is an architecture decision, not a cleanup,
+so it is left visible in the sweep rather than quietly whitelisted.
+
 ## P4 STATUS (2026-07-14) — audit fixes: 8 landed, 3 open with precise plans
 
 **LANDED** (each with its mechanical proof, all pushed):

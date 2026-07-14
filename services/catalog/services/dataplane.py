@@ -13,6 +13,7 @@ a direct 2.2 write, while every other schema delegates to the native create.
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Callable, Iterator
 from contextlib import suppress
@@ -31,6 +32,7 @@ from lance_namespace import (
     AlterTableAlterColumnsResponse,
     AlterTableDropColumnsRequest,
     AlterTableDropColumnsResponse,
+    ConcurrentModificationError,
     CreateTableBranchRequest,
     CreateTableBranchResponse,
     CreateTableIndexRequest,
@@ -57,6 +59,7 @@ from lance_namespace import (
     ListTableIndicesRequest,
     ListTableTagsRequest,
     ListTableTagsResponse,
+    ServiceUnavailableError,
     TableAlreadyExistsError,
     TableColumnNotFoundError,
     TableNotFoundError,
@@ -482,6 +485,102 @@ def _delete_dataset(uri: str, so: StorageOptions) -> None:
     # 5xx, a permission failure — propagates so the caller rolls the destination back.
     with suppress(FileNotFoundError):
         fs.delete_dir(path)
+
+
+#: Lance commit OSError message markers (transaction.md conflict taxonomy). A schema/version mismatch can
+#: NEVER succeed on retry (client error → 400); an incompatible transaction is a retryable concurrency
+#: conflict (409, re-read + re-commit); anything ELSE — a RustFS 5xx surfaces as ``ArrowIOError``, itself an
+#: ``OSError`` subclass — is a store OUTAGE (503), NOT a client conflict. Collapsing all three to 409 (the
+#: naive design) would loop a doomed retry on a schema mismatch and mislabel an outage as contention.
+_COMMIT_CLIENT_ERROR_MARKERS = ("different schema", "fields did not match", "same version", "invalid input")
+_COMMIT_CONFLICT_MARKERS = ("incompatible transaction", "commit conflict", "concurrent")
+#: An Append whose read_version has no committed base (a declared-only/never-written table, or a version
+#: compacted away) — a CLIENT error (400), NOT a store outage (audit 2026-07-14): otherwise a client that
+#: appends to a freshly-declared table (read_version=0) gets a 503 and retries the same version forever.
+_COMMIT_NO_BASE_MARKERS = ("must already exist unless", "manifest was not found", "no such file")
+
+
+def _classify_commit_error(exc: OSError) -> Exception:
+    """Map a raised ``LanceDataset.commit`` ``OSError`` to the right catalog error (audit 2026-07-14)."""
+    msg = str(exc).lower()
+    if any(m in msg for m in _COMMIT_NO_BASE_MARKERS):
+        return InvalidInputError(
+            f"append target has no committed base version — create or overwrite the table first: {exc}"
+        )
+    if any(m in msg for m in _COMMIT_CLIENT_ERROR_MARKERS):
+        return InvalidInputError(f"fragments are incompatible with the table: {exc}")
+    if any(m in msg for m in _COMMIT_CONFLICT_MARKERS):
+        return ConcurrentModificationError(
+            f"commit conflict — re-read the table version and re-commit the fragments: {exc}"
+        )
+    return ServiceUnavailableError(f"object store unavailable during commit: {exc}")
+
+
+def commit_appended_fragments(
+    location: str, so: StorageOptions, fragments: list[dict[str, Any]], read_version: int
+) -> tuple[int, int]:
+    """Commit client-written fragments as an APPEND — the catalog as the governed commit coordinator (#2).
+
+    The client wrote the data fragments DIRECTLY to object storage with vended, table-scoped creds
+    (``lance.fragment.write_fragments`` — the guide's distributed-write protocol); this folds the tiny
+    serialized ``FragmentMetadata`` into a metadata-ONLY Lance commit under ROOT creds, so no data byte ever
+    transits the catalog and the version + lineage emit stay atomic (the External Manifest Store pattern —
+    namespace.md). An Append INHERITS the dataset's ``data_storage_version`` + stable-row-id config from the
+    manifest (``write_fragments`` reads it) and Lance assigns/rebases stable row ids at commit
+    (row_id_lineage.md), so the 2.2 invariant needs no re-validation here — CREATE and OVERWRITE stay
+    server-side to centralize it and to owner-govern the destructive reset. Append auto-rebases against
+    concurrent appends and conflicts only with Overwrite/Restore (transaction.md); a stale/incompatible
+    commit raises, mapped by :func:`_classify_commit_error`. Returns ``(version, row_count)``.
+    """
+    if not fragments:
+        raise InvalidInputError("no fragments to commit")
+    if read_version < 0:
+        raise InvalidInputError(f"read_version must be non-negative, got {read_version}")
+    # Client-controlled input: a malformed fragment dict raises KeyError/TypeError/ValueError from
+    # ``from_json`` (outside the OSError taxonomy) — translate to a 400, never a 500 (audit 2026-07-14).
+    try:
+        frags = [lance.FragmentMetadata.from_json(json.dumps(f)) for f in fragments]
+    except (KeyError, TypeError, ValueError, AttributeError) as exc:
+        raise InvalidInputError(f"malformed fragment metadata: {exc}") from exc
+    # HIGH (audit 2026-07-14): Lance's commit validates NEITHER data-file existence NOR the declared row
+    # count, so a client whose direct write landed under a DIFFERENT prefix than the catalog-resolved
+    # location (no malice required) could otherwise commit a 200-OK-but-UNREADABLE current version that
+    # breaks reads for EVERY reader until an operator restores. Pre-verify the files exist under the table
+    # location; a failed check leaves the table untouched (400) instead of poisoning its current version.
+    _verify_fragment_data_files(location, so, fragments)
+    op = lance.LanceOperation.Append(frags)
+    try:
+        dataset = lance.LanceDataset.commit(location, op, read_version=read_version, storage_options=so)
+    except OSError as exc:
+        raise _classify_commit_error(exc) from exc
+    return int(dataset.version), dataset.count_rows()
+
+
+def _verify_fragment_data_files(
+    location: str, so: StorageOptions, fragments: list[dict[str, Any]]
+) -> None:
+    """Reject a commit that references data files ABSENT under ``<location>/data/`` (audit HIGH fix).
+
+    Each fragment's ``files[].path`` is a bare filename under the dataset's ``data/`` dir (``base_id`` null →
+    dataset root; a non-null ``base_id`` points into a registered external base we don't resolve here, so it
+    is skipped rather than false-rejected). A missing file means the client's direct write targeted the
+    wrong prefix — committing it would publish an unreadable version, so raise 400 and leave the table as-is.
+    """
+    fs, base = _dataset_fs(location, so)
+    prefix = base.rstrip("/") + "/data/"
+    missing: list[str] = []
+    for frag in fragments:
+        for data_file in (frag.get("files") if isinstance(frag, dict) else None) or []:
+            if not isinstance(data_file, dict) or data_file.get("base_id") is not None:
+                continue
+            rel = data_file.get("path")
+            if rel and fs.get_file_info(prefix + rel).type == pafs.FileType.NotFound:
+                missing.append(str(rel))
+    if missing:
+        raise InvalidInputError(
+            f"commit references {len(missing)} data file(s) not present under the table location "
+            f"(did the direct write target the wrong prefix?): {missing[:5]}"
+        )
 
 
 # Streaming window for the blob serving path: each chunk is one ``read_range`` call against

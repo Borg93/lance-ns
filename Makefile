@@ -240,6 +240,18 @@ e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malf
 	   uv run pytest tests/e2e/test_governance_e2e.py -v -m e2e; rc=$$?; \
 	 kill $$C $$L $$D 2>/dev/null; exit $$rc
 
+e2e-client-direct: ## Client-DIRECT write e2e (#2): vend → write_fragments (client→RustFS) → governed /commit, zero byte-ingress + 401/403 gates
+	@echo "port-forwarding catalog/dex/openfga/rustfs …"
+	@kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & C=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & D=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-openfga 8080:8080 >/dev/null 2>&1 & F=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
+	 sleep 5; \
+	 LANCE_E2E_CATALOG_URL=http://localhost:2333 LANCE_E2E_DEX=http://localhost:5556/dex \
+	 LANCE_E2E_FGA=http://localhost:8080 LANCE_E2E_S3=http://localhost:9900 \
+	   uv run pytest tests/e2e/test_client_direct_e2e.py -v -m e2e; rc=$$?; \
+	 kill $$C $$D $$F $$S 2>/dev/null; exit $$rc
+
 e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+quality ON, openbao OFF — see tests/e2e/test_governed_union_e2e.py)
 	@echo "port-forwarding lance-ray/lineage/dex/openfga/rustfs + the bronze-to-silver mover …"
 	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & PIDS=$$!; \

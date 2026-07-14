@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+import lance
 from botocore.exceptions import BotoCoreError, ClientError
 from common import fga
 from fastapi import APIRouter, Query
@@ -40,10 +41,16 @@ router = APIRouter(prefix="/v1/table", tags=["credentials"])
 
 class CredentialResponse(BaseModel):
     """The vending result. ``mode="direct"`` carries scoped ``credentials``; ``mode="server_mediated"``
-    means no credential was issued (Mode B / unknown bucket) — the client uses the data endpoints."""
+    means no credential was issued (Mode B / unknown bucket) — the client uses the data endpoints.
+
+    ``location`` + ``read_version`` give a client-direct writer its write TARGET and the optimistic-commit
+    BASE version in one round-trip (#2): the client writes fragments to ``location`` then commits them via
+    ``POST /{id}/commit`` at ``read_version`` — no second ``describe`` needed."""
 
     mode: str
     credentials: VendedCredentials | None = None
+    location: str | None = None
+    read_version: int | None = None
 
 
 @router.post("/{id}/credentials", response_model_exclude_none=True)
@@ -73,6 +80,9 @@ async def vend_credentials(
     )
     if described.location is None:  # no object-store location to scope to → fall back to server-mediated
         return CredentialResponse(mode="server_mediated")
+    # The client-direct write target + optimistic-commit base version (a declared-only/new table reads as 0).
+    # A tiny ROOT-cred manifest read to learn the version — not the byte-proxy (no data bytes move).
+    read_version = await run_in_threadpool(_current_version, described.location, settings.storage_options())
     # The blocking STS call (AssumeRole / AssumeRoleWithWebIdentity) runs in the threadpool. A rejected
     # exchange is most often the caller's token (web_identity: expired / untrusted issuer) → 401; otherwise
     # the STS backend is unavailable/misconfigured → 503. Either way a meaningful 4xx/5xx, never a bare 500.
@@ -80,10 +90,27 @@ async def vend_credentials(
         creds = await run_in_threadpool(
             vendor.vend, table_location=described.location, tier=tier, web_identity_token=web_identity_token
         )
-    except (ClientError, BotoCoreError) as exc:
+    except ClientError as exc:
+        # A REJECTED exchange (the STS backend refused the request). Only web_identity re-presents the
+        # caller's token, so only there is a rejection an AUTH problem (401); a rejection in any other mode
+        # is a backend/config fault (503).
         if settings.vending_mode == "web_identity":
             raise UnauthenticatedError("credential exchange rejected — token invalid or untrusted") from exc
+        raise ServiceUnavailableError("credential vending backend rejected the request") from exc
+    except BotoCoreError as exc:
+        # A TRANSPORT failure (endpoint unreachable / timeout) is a store OUTAGE in every mode, never an auth
+        # problem — reporting it as 401 would send an authorized caller into a futile re-login loop (audit).
         raise ServiceUnavailableError("credential vending backend unavailable") from exc
-    if creds is None:
-        return CredentialResponse(mode="server_mediated")
-    return CredentialResponse(mode="direct", credentials=creds)
+    mode = "server_mediated" if creds is None else "direct"
+    return CredentialResponse(
+        mode=mode, credentials=creds, location=described.location, read_version=read_version
+    )
+
+
+def _current_version(location: str, storage_options: dict[str, str]) -> int:
+    """The current Lance version at ``location`` (the client's optimistic-append base); 0 for a
+    declared-only/new table with no readable dataset yet."""
+    try:
+        return int(lance.dataset(location, storage_options=storage_options).version)
+    except (ValueError, OSError):
+        return 0

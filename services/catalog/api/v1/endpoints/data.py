@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from common import fga
 from fastapi import APIRouter, Body, Header, Query
@@ -19,6 +19,7 @@ from lance_namespace import (
     DeleteFromTableRequest,
     DeleteFromTableResponse,
     DescribeTableRequest,
+    DescribeTableResponse,
     DropTableRequest,
     ExplainTableQueryPlanRequest,
     InsertIntoTableRequest,
@@ -32,6 +33,7 @@ from lance_namespace import (
     UpdateTableRequest,
     UpdateTableResponse,
 )
+from pydantic import BaseModel
 
 from catalog.api import fga_deps, lineage_deps
 from catalog.api.dependencies import (
@@ -220,6 +222,65 @@ async def create_table(
         schema_fields=schema_fields,
     )
     return response
+
+
+class CommitFragmentsRequest(BaseModel):
+    """A client-direct APPEND commit (#2): the serialized Lance ``FragmentMetadata`` the client wrote
+    DIRECTLY to object storage (``[fragment.to_json() for fragment in write_fragments(...)]``), plus the
+    ``read_version`` those fragments were built against (optimistic concurrency)."""
+
+    fragments: list[dict[str, Any]]
+    read_version: int
+
+
+class CommitFragmentsResponse(BaseModel):
+    version: int
+    row_count: int
+
+
+@router.post("/{id}/commit", response_model_exclude_none=True)
+async def commit_fragments(
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    emitter: LineageEmitterDep,
+    body: CommitFragmentsRequest,
+    authorization: Annotated[str | None, Header()] = None,
+) -> CommitFragmentsResponse:
+    """Client-DIRECT append commit (#2) — the catalog as the governed commit coordinator.
+
+    The client wrote data fragments straight to object storage with vended, table-scoped creds (never
+    through here); this endpoint receives only the tiny serialized ``FragmentMetadata`` + the ``read_version``
+    and folds them into a metadata-only Lance ``commit`` under ROOT creds, then emits the INSERT lineage. So
+    NO data byte transits the catalog — the byte-proxy's scaling + OOM liability is gone for the bulk-append
+    path (the read-modify-write ops — insert/merge_insert/update/delete — and the 2.2-centralizing create
+    stay server-side; transaction.md/namespace.md). Writer tier: the router ``authorize`` gate maps
+    ``/commit`` to ``can_write_data``. Conflict → 409 (re-read the version + re-commit); schema/version
+    mismatch → 400; store outage → 503 (see ``dataplane._classify_commit_error``)."""
+    segments = parse_identifier(id, settings.delimiter)
+    described: DescribeTableResponse = await run_in_threadpool(
+        native.call, ns, "describe_table", DescribeTableRequest(id=segments)
+    )
+    if not described.location:
+        raise InvalidInputError("table has no object-store location for a client-direct commit")
+    version, row_count = await run_in_threadpool(
+        dataplane.commit_appended_fragments, described.location, so, body.fragments, body.read_version
+    )
+    # Reuse the shared measured-write emitter (reopens once for version + schema), same as /insert — so the
+    # WROTE edge + columnLineage-ready schema land identically whether the append was byte-proxy or direct.
+    await lineage_deps.emit_measured_write(
+        emitter,
+        segments,
+        ns=ns,
+        so=so,
+        settings=settings,
+        token=token,
+        operation=INSERT,
+        authorization=authorization,
+    )
+    return CommitFragmentsResponse(version=version, row_count=row_count)
 
 
 @router.post("/{id}/insert", response_model_exclude_none=True)

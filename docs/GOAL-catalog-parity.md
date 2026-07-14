@@ -135,7 +135,8 @@ enforcement-only, no managed surface) — see #3; (b) the physical **bucket-per-
 
 ## Status (2026-07-14 — code + unit/integration + audit verified; live-drive pending, no cluster up)
 - [x] **#1** producer emit — in-process AND Ray path (`measure_stage` reconstructs edges from on-disk schemas)
-- [ ] #2 client-direct · [ ] #3 per-warehouse bucket · [ ] #4 outbox+DLQ — *not built (live-only completion conditions)*
+- [x] **#2** client-direct writes — governed `POST /{id}/commit` (write_fragments→commit), byte-proxy retired for bulk append
+- [ ] #3 per-warehouse bucket · [ ] #4 outbox+DLQ — *not built (live-only completion conditions)*
 - [x] **#5a** stable-row-ids · [x] **#5b** rename (in-process, data-safe) · [x] **#5c** FGA types (MV + transaction)
 - [x] **#5d** doc truth-up · [x] **#5e** obs edge-auth
 - [x] Frontend: field-level column-lineage panel (surfaces #1)
@@ -149,7 +150,14 @@ enforcement-only, no managed surface) — see #3; (b) the physical **bucket-per-
     caught as dead.
   - **#5c** — the running OpenFGA store has the new `materialized_view`/`transaction` types + owner-tier
     `can_restore`/`can_create_branch` (catalog reprovisioned `model.json` on restart).
-  - #5a/#5b/#5e deployed on the new image (catalog digest `993a6467…`), not individually driven yet.
-- **Remaining:** build #2/#3/#4 (now unblocked — the cluster is up).
+  - **#2** — drove `scripts/client_direct_demo.py` + `tests/e2e/test_client_direct_e2e.py` (2/2) on the
+    governed stack: alice (Dex OIDC + FGA) vends `location`+`read_version`, writes fragments straight to
+    RustFS, and `POST /{id}/commit` folds only 396 B of metadata → version advances, 0 data bytes at the
+    catalog. Auth gates verified (no-token 401, unauthorized 403). Hardened after a 6-finding audit
+    (HIGH: pre-validate fragment data files exist so a mis-targeted write can't publish an unreadable
+    version; token-egress default reverted to `mode_b` + fail-closed STS-endpoint validator).
+  - #5a/#5b/#5e deployed on the new image, not individually driven yet.
+- **Remaining:** build #3 (per-warehouse buckets) + #4 (outbox). web_identity scoped-cred layer = opt-in
+  (needs `rustfs.oidc` + the STS endpoint); client-direct itself is live via `/commit` regardless.
 </content>
 </invoke>

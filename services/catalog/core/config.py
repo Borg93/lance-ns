@@ -106,6 +106,12 @@ class Settings(BaseSettings):
     # credential leaves the catalog (the simplest, backend-agnostic default). "sts": STS AssumeRole
     # short-TTL per-table scoped tokens (the recommended path; MinIO/Ceph/AWS all implement STS).
     # "static": pre-provisioned per-bucket keys (simple setups / GCS interop).
+    # Client-DIRECT is the default WRITE path via POST /{id}/commit (the catalog never proxies data bytes);
+    # the vending MODE is the separate CREDENTIAL mechanism. Default `mode_b` (server_mediated) is safe on
+    # any store; `web_identity`/`sts` are the SCOPED-credential upgrade and are opt-in because they need an
+    # STS endpoint — WITHOUT one, boto3 resolves to the PUBLIC AWS STS endpoint and would POST the caller's
+    # OIDC token there (audit 2026-07-14). The chart pairs `web_identity` with the endpoint + rustfs.oidc,
+    # and `_validate_vending` below fails closed if the mode needs an endpoint that isn't set.
     vending_mode: Literal["mode_b", "static", "sts", "web_identity"] = Field(
         default="mode_b", alias="LANCE_VENDING_MODE"
     )
@@ -154,6 +160,21 @@ class Settings(BaseSettings):
             )
         if self.lineage_emit_enabled and self.lineage_transport == "http" and not self.lineage_url:
             raise ValueError("LANCE_LINEAGE_URL is required for the http lineage transport")
+        return self
+
+    @model_validator(mode="after")
+    def _validate_vending(self) -> Self:
+        """Fail closed on a token-egressing vending config (audit 2026-07-14).
+
+        ``sts``/``web_identity`` build an STS client; without ``LANCE_S3_STS_ENDPOINT`` boto3 resolves the
+        PUBLIC AWS STS endpoint and would POST the caller's OIDC token there. Refuse to boot instead — a
+        clear misconfig error, never a silent third-party token egress.
+        """
+        if self.vending_mode in ("sts", "web_identity") and not self.s3_sts_endpoint:
+            raise ValueError(
+                f"LANCE_S3_STS_ENDPOINT is required for vending_mode={self.vending_mode!r} "
+                "(else the caller's token would be sent to the public AWS STS endpoint)"
+            )
         return self
 
     def namespace_properties(self) -> dict[str, str]:

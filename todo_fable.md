@@ -1,3 +1,5 @@
+> **⚠ SUPERSEDED for current priorities (2026-07-14): the single source of truth for WHAT WE DO NOW is [`docs/GOAL-prove-it.md`](docs/GOAL-prove-it.md). This file is kept as historical planning context only.**
+
 # todo_fable — complete fix backlog from the 2026-07-02 comprehensive audit
 
 Source: two adversarially-verified workflow audits (108 agents; 99 findings verified: **91 confirmed**, 6 refuted

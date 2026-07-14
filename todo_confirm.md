@@ -1,3 +1,5 @@
+> **⚠ SUPERSEDED for current priorities (2026-07-14): the single source of truth for WHAT WE DO NOW is [`docs/GOAL-prove-it.md`](docs/GOAL-prove-it.md). This file is kept as historical planning context only.**
+
 # todo_confirm — the "don't miss a thing" verification matrix
 
 One row per pillar-claim: what is **CONFIRMED live** (with the exact evidence + the command that

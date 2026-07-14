@@ -1,3 +1,5 @@
+> **⚠ SUPERSEDED for current priorities (2026-07-14): the single source of truth for WHAT WE DO NOW is [`docs/GOAL-prove-it.md`](docs/GOAL-prove-it.md). This file is kept as historical planning context only.**
+
 # Lance REST Catalog — Roadmap / TODO
 
 **Legend:** ✅ done · 🟡 in progress · ⛔ not started · 🔶 deferred

@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # buckets, manifest stays in the primary root, reads fan out). A per-request ``data_base`` MUST be on
     # this list — a caller can never point a base at an arbitrary bucket (data-exfil / rogue-write door).
     # Empty (default) = the feature is off and every create is byte-identical to today.
+    # INVARIANT (operator's responsibility): every base here MUST share the catalog's S3 endpoint + creds.
+    # The read path vends only the top-level storage_options to all bases, so a base on a different endpoint
+    # or needing different creds would accept writes but be UNREADABLE. (See dataplane._write_blob.)
     multibase_data_bases: str = Field(default="", alias="LANCE_MULTIBASE_DATA_BASES")
 
     @property

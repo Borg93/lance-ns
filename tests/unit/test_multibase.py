@@ -13,8 +13,10 @@ from unittest.mock import MagicMock, patch
 
 import lance
 import pyarrow as pa
+import pytest
 from catalog.core.config import Settings
 from catalog.services import dataplane
+from lance_namespace import InvalidInputError
 
 
 def _table() -> pa.Table:
@@ -82,7 +84,10 @@ def test_empty_data_bases_is_backward_compatible() -> None:
     assert captured["enable_stable_row_ids"] is True  # single-location create is still 2.2 + row-ids
 
 
-def test_data_bases_are_create_only() -> None:
+def test_overwrite_registers_none_but_targets_when_resupplied() -> None:
+    # audit F1: base REGISTRATION (initial_bases) is create-only, but the WRITE TARGET (target_bases) applies
+    # on a re-supplied overwrite too — so a re-sent overwrite still distributes rather than silently
+    # concentrating the new fragments in the primary root.
     captured, fake_write = _capture_write()
     with patch.object(lance, "write_dataset", fake_write):
         dataplane._write_blob(
@@ -94,9 +99,41 @@ def test_data_bases_are_create_only() -> None:
             external_blob_bases=[],
             data_bases=["s3://b1"],
         )
-    # overwrite/append inherit the manifest's registered layout — initial_bases + target_bases are create-only
-    assert captured["initial_bases"] is None
-    assert captured["target_bases"] is None
+    assert captured["initial_bases"] is None  # registration is create-only (pylance rejects re-register)
+    assert captured["target_bases"] == ["b1"]  # ...but the write still targets the registered base
+
+
+def test_colliding_data_base_names_rejected() -> None:
+    # audit F2: two DISTINCT approved URIs that collapse to the same lossy _base_name must be rejected loudly,
+    # not silently misroute fragments (one base becomes unaddressable / target resolution ambiguous).
+    _, fake_write = _capture_write()
+    with patch.object(lance, "write_dataset", fake_write), pytest.raises(InvalidInputError):
+        dataplane._write_blob(
+            _table(),
+            "s3://root/tbl",
+            _SO,
+            mode="create",
+            allow_external=False,
+            external_blob_bases=[],
+            data_bases=["s3://bkt/a/c", "s3://bkt/a-c"],  # both → base name "bkt-a-c"
+        )
+
+
+def test_duplicate_data_base_is_deduped() -> None:
+    # audit F2: a repeated base must not double-register / double-target the round-robin.
+    captured, fake_write = _capture_write()
+    with patch.object(lance, "write_dataset", fake_write):
+        dataplane._write_blob(
+            _table(),
+            "s3://root/tbl",
+            _SO,
+            mode="create",
+            allow_external=False,
+            external_blob_bases=[],
+            data_bases=["s3://b1", "s3://b1"],
+        )
+    assert captured["target_bases"] == ["b1"]  # deduped, not ["b1", "b1"]
+    assert len(captured["initial_bases"]) == 1
 
 
 def test_config_allowlist_parsing() -> None:

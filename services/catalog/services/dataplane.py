@@ -222,19 +222,36 @@ def _write_blob(
     (#3-B) are approved DATA-distribution bases the fragments round-robin across (the Uber pattern).
     Bases register on a fresh CREATE; an overwrite reuses the bases the table registered at create."""
     is_create = mode == "create"
-    data_bases = data_bases or []
+    # De-dup: a repeated data_base must not double-register / double-target the round-robin.
+    data_bases = list(dict.fromkeys(data_bases or []))
+    # _base_name is lossy (s3://b/a/c and s3://b/a-c both → b-a-c). A collision would silently make one
+    # approved base unaddressable + make target resolution ambiguous — reject it loudly, never misroute.
+    data_names = [_base_name(u) for u in data_bases]
+    if len(set(data_names)) != len(data_names):
+        raise InvalidInputError(f"data_base paths collide on base name {data_names}; use distinct base paths")
     # DatasetBasePath registers each approved base (is_dataset_root=False = a raw data location, not a nested
-    # dataset). initial_bases is CREATE-only (overwrite/append inherit the manifest's registered bases).
+    # dataset). initial_bases REGISTERS the bases in the manifest — CREATE-only (an overwrite/append reuses
+    # the already-registered set; re-registering on overwrite is rejected by pylance).
     external_paths = [lance.DatasetBasePath(b, is_dataset_root=False) for b in external_blob_bases]
-    data_paths = [lance.DatasetBasePath(u, is_dataset_root=False, name=_base_name(u)) for u in data_bases]
+    data_paths = [
+        lance.DatasetBasePath(u, is_dataset_root=False, name=n)
+        for u, n in zip(data_bases, data_names, strict=True)
+    ]
     _has_bases = bool(external_blob_bases or data_bases)
     initial_bases = (external_paths + data_paths) if is_create and _has_bases else None
-    # #3-B: target_bases round-robins the FRAGMENT writes across the data bases; the manifest + _versions stay
-    # in the primary root, so the dataset is still relative-path portable (only the base URIs move on a
-    # relocation, not 10M file paths). CREATE-only here — append/overwrite inherit the registered layout.
-    target_bases = [_base_name(u) for u in data_bases] if is_create and data_bases else None
-    # Each data base needs its object-store creds at runtime (not persisted to the manifest). All our bases
-    # share the catalog's endpoint/creds (bucket-agnostic on the S3 target), so hand each the same options.
+    # target_bases is the WRITE TARGET: it round-robins the FRAGMENT writes across the data bases while the
+    # manifest + _versions stay in the primary root (relative-path portable — a relocation moves the base
+    # URIs, not 10M file paths). Applied on ANY mode when data_bases is SUPPLIED, so a re-supplied overwrite
+    # ALSO distributes (the names must match the manifest's registered bases — deterministic _base_name makes
+    # a re-sent same list match). CAVEAT: a mutation that does NOT re-send data_base (a bare overwrite, or the
+    # /insert append route which has no data_base param) concentrates its NEW fragments in the primary root —
+    # create-time distribution is the firm guarantee; per-write distribution needs the bases re-supplied.
+    target_bases = data_names or None
+    # base_store_params: each base's object-store creds at RUNTIME (pylance does NOT persist these to the
+    # manifest — verified against the write_dataset/dataset docstrings). INVARIANT: every allowlisted data
+    # base MUST share the catalog's endpoint/creds — the READ path (open_dataset) passes only the top-level
+    # storage_options, so a base needing DIFFERENT creds/endpoint would write OK but be unreadable. The
+    # allowlist is operator-configured to hold this; see LANCE_MULTIBASE_DATA_BASES in core/config.py.
     base_store_params = {u: dict(so) for u in data_bases} if data_bases else None
     try:
         return lance.write_dataset(

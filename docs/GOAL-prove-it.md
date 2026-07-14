@@ -139,6 +139,27 @@ Proving it means taking the messaging backbone offline, which is out of proporti
 authorized. The staged-survivor path above exercises the same recovery code the crash would, and the SIGKILL
 crash e2e (P1.3) covers the crash itself.
 
+## P0.1 CORRECTION — the e2e job that exists to stop unproven claims was ITSELF unproven
+
+Clause (2) was marked done because the **workflow file existed**. It had never once run green.
+
+Root cause: `scripts/e2e_stack.sh` deploys a headless stack with `--set web.enabled=false`. **That key did
+not exist.** Helm silently accepts unknown `--set` keys, so the flag did nothing; the web Deployment (which
+had *no* `if` guard at all) rendered anyway; its image is never built in that job, so the pod sat in
+`ImagePullBackOff`; `helm upgrade --wait` could never converge; every dependent app crash-looped; the job
+died at the 600s timeout. **Every run. Since the day it was added.**
+
+The irony is the lesson: `e2e-stack` is the job whose entire purpose is to stop us shipping unproven
+claims, and it was the most unproven thing in the repo. A CI job that has never been green is not a proof,
+it is a decoration.
+
+**Fixed:** `web.enabled` added (default `true` = prior behavior) and the Deployment + Service gated on it.
+
+**Guard against the CLASS:** `test_every_helm_set_key_in_our_scripts_exists_in_values` asserts every `--set`
+key our scripts pass is actually defined in `values.yaml`. A flag you *believe* you are setting, that
+silently sets nothing, is worse than no flag — it makes a stack you never configured *look* configured.
+Verified non-vacuous: it scans 9 real keys, and with `web.enabled` removed it flags exactly this bug.
+
 ## P0.0 — "pushed" is not "green". CI was RED on this branch the whole time.
 
 The single most embarrassing finding of the session, and the one that most vindicates this document.

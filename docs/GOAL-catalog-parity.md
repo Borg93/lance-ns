@@ -254,10 +254,10 @@ KubeRay+Kueue, query engine, rask merge, the secrets operator (docs/OPERATORS.md
 - **Ref-plane mutations (tag/branch) emit no version** → invisible to a version-tailing outbox.
 - Implement to the **model files**, not the prose (`new_table_name`, not `new_id`).
 
-## Status (2026-07-14 — code + unit/integration + audit verified; live-drive pending, no cluster up)
+## Status (HISTORICAL SNAPSHOT, superseded — the current status is the "ALL OF #1–#5 COMPLETE" section above; kept for the audit trail only)
 - [x] **#1** producer emit — in-process AND Ray path (`measure_stage` reconstructs edges from on-disk schemas)
 - [x] **#2** client-direct writes — governed `POST /{id}/commit` (write_fragments→commit), byte-proxy retired for bulk append
-- [ ] #3 per-warehouse bucket · [ ] #4 outbox+DLQ — *not built (live-only completion conditions)*
+- [x] #3 per-warehouse bucket + multi-base · [x] #4 outbox+DLQ — *(built + live-verified LATER on 2026-07-14; this line predated them — the self-contradiction was audit claim-drift bug #3)*
 - [x] **#5a** stable-row-ids · [x] **#5b** rename (in-process, data-safe) · [x] **#5c** FGA types (MV + transaction)
 - [x] **#5d** doc truth-up · [x] **#5e** obs edge-auth
 - [x] Frontend: field-level column-lineage panel (surfaces #1)
@@ -278,7 +278,5 @@ KubeRay+Kueue, query engine, rask merge, the secrets operator (docs/OPERATORS.md
     (HIGH: pre-validate fragment data files exist so a mis-targeted write can't publish an unreadable
     version; token-egress default reverted to `mode_b` + fail-closed STS-endpoint validator).
   - #5a/#5b/#5e deployed on the new image, not individually driven yet.
-- **Remaining:** build #3 (per-warehouse buckets) + #4 (outbox). web_identity scoped-cred layer = opt-in
-  (needs `rustfs.oidc` + the STS endpoint); client-direct itself is live via `/commit` regardless.
-</content>
-</invoke>
+- **Remaining (as of this snapshot; since done):** build #3 + #4 — both shipped later the same day.
+  web_identity scoped-cred layer = opt-in (needs `rustfs.oidc` + the STS endpoint).

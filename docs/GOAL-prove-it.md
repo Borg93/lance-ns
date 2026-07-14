@@ -91,6 +91,44 @@ OFFICIAL Svelte 5 runes docs via the Svelte MCP, not guessed.
 *Proof:* every CONFIRMED finding fixed with `bunx turbo run check test lint fmt:check` + Playwright green
 in CI; dead code deleted and proven unreferenced.
 
+## P4 STATUS (2026-07-14) — audit fixes: 8 landed, 3 open with precise plans
+
+**LANDED** (each with its mechanical proof, all pushed):
+- `vend_credentials` honored on describe (the ONE confirmed reinvention — generic Lance clients, incl.
+  lance-ray in REST mode, previously got no credentials). Read-tier only; multi-base falls back to
+  server-mediated. `449f7ac`
+- **Incompatible commits are non-retryable** — our 409 said "re-read and re-commit", which after a
+  concurrent Overwrite would replay fragments into a semantically different table. *Our error message was
+  recommending corruption.* The existing test had PINNED that advice. `7ff1e17`
+- `warehouses.py` domain exceptions (was the only module forking the RFC 9457 contract). `138d4c0`
+- `dependencies.py` docstring corrected — it asserted fail-OPEN while the code fail-CLOSED. `449f7ac`
+- **GC sweeps every bucket** — #3-A/#3-B buckets were invisible to GC, leaking storage forever. `02013ad`
+- **Gateway hardened** + the "every Deployment" claim is now a CI-enforced loop, not prose. `18554a3`
+- **rename refuses branched tables** — it was silently orphaning branches (a branch is a shallow clone
+  referencing the root by ABSOLUTE path; copy+delete leaves it pointing at deleted bytes). `0acda6b`
+- **GC-vs-branches: REFUTED and pinned.** The audit flagged it as an unverified danger; probed live with
+  `older_than=0` — the branch survived, zero data files reclaimed. GC is branch-aware. `ff43e7b`
+
+**OPEN — attempted, reverted, and honestly deferred (NOT quietly dropped):**
+
+1. **Non-blob creates still pin format 2.1 / no stable row ids.** This makes `#5a`'s "DONE" **false** for
+   the default path, and it is CREATE-TIME-ONLY: every ordinary table created today is *permanently*
+   unable to gain row-version tracking. It also blocks `row_id_lineage` — the row-level provenance a
+   training lakehouse actually needs (model → dataset version → the exact source rows).
+   *Attempted:* route every create through the 2.2 path. *Reverted:* 8 tests failed, and not merely the
+   one pinning 2.1 routing — **the integration tests mock `ns.create_table`**, whereas the 2.2 path calls
+   `declare_table` then does a real Lance write, so a MagicMock location flows into `write_dataset`. The
+   fix therefore needs the integration-test **mocking strategy rewired** (real dir-namespace + tmp_path,
+   as `test_blob_create.py` already does), not a dispatch flip. That is a focused piece of work, and
+   rushing it is exactly the failure mode this whole document exists to stop.
+   *Next:* migrate the ~6 create-path integration tests to a real dir namespace, then flip the dispatch.
+2. **`source_rowid` not carried through the cascade** — blocks row-id lineage (see above) and leaves the
+   positional blob carry-forward (`compute.py` pairs rows to blobs by `range(rows)`) safe only by the
+   overwrite-only convention. The format's own answer (`_rowid`) is enabled on those datasets and never read.
+3. **MV lineage + rename `DERIVED_FROM` + catalog FAIL events** — the worst lineage completeness holes.
+   MVs emit *nothing*; rename hardcodes `inputs: []` so it severs the provenance chain while its docstring
+   claims otherwise.
+
 ## P4 — the audit-workflow findings (reserved — folded in when wgznqpmwd lands)
 
 Pending verdicts to triage into P-levels here:

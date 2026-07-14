@@ -95,3 +95,35 @@ def test_sweep_buckets_unions_primary_and_extras() -> None:
 
     bare = CompactionSettings.model_validate({"s3_bucket": "only"})
     assert bare.sweep_buckets == ["only"]  # no extras => unchanged single-bucket behavior
+
+
+def test_gc_does_not_reclaim_branch_referenced_data(tmp_path: Path) -> None:
+    """GC must not delete data that only a BRANCH still references (audit 2026-07-14 — was unverified).
+
+    The audit flagged this as an unknown and said to probe it live BEFORE anyone creates a branch: if
+    `cleanup_old_versions` did not walk branch manifests, the compaction cron would eventually reclaim data
+    files that a branch is the sole reference for — silent, unrecoverable data loss on a feature we ship.
+
+    Probed empirically: it is BRANCH-AWARE and safe. This test pins that, so a pylance upgrade that
+    regresses it fails here rather than in a customer's compaction cron.
+    """
+    import datetime
+
+    import lance
+    import pyarrow as pa
+
+    uri = str(tmp_path / "t")
+    ds = lance.write_dataset(pa.table({"id": [1]}), uri)
+    ds = lance.write_dataset(pa.table({"id": [2]}), uri, mode="append")
+    ds.create_branch("keepme")  # pins v2's data
+    ds = lance.write_dataset(pa.table({"id": [3]}), uri, mode="append")  # main advances past it
+
+    data_dir = tmp_path / "t" / "data"
+    before = {p.name for p in data_dir.iterdir()}
+
+    # The compaction cron's exact call, with the most aggressive window possible.
+    ds.cleanup_old_versions(older_than=datetime.timedelta(seconds=0), error_if_tagged_old_versions=False)
+
+    after = {p.name for p in data_dir.iterdir()}
+    assert lance.dataset(uri).branches.list(), "GC destroyed the branch — it would delete branch data"
+    assert before == after, f"GC reclaimed branch-referenced data files: {before - after}"

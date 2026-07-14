@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterable
 from typing import Annotated
 
 from fastapi import Depends, Request
 from fastapi.concurrency import run_in_threadpool
-from lance_namespace import LanceNamespace
+from lance_namespace import InvalidInputError, LanceNamespace, ServiceUnavailableError
 from openfga_sdk import OpenFgaClient
 
 from catalog.core.config import Settings, get_settings
@@ -41,9 +42,14 @@ async def _resolve_warehouse_root(request: Request, settings: Settings, top_ns: 
         root = await run_in_threadpool(
             warehouses.warehouse_for_namespace, settings.registry_root, settings.storage_options(), top_ns
         )
-    except Exception as exc:  # noqa: BLE001 — never let a registry hiccup break routing; fall back to default
-        log.debug("warehouse_binding_lookup_failed", extra={"top_ns": top_ns, "error": str(exc)})
-        return None
+    except Exception as exc:  # noqa: BLE001
+        # FAIL CLOSED on a registry READ ERROR. A legitimately-unbound namespace returns a clean None (no
+        # exception) from warehouse_for_namespace, so reaching here means the read itself failed (S3 blip,
+        # timeout). Falling through to the default shared bucket would physically create/read a MAYBE-bound
+        # tenant's table in the wrong bucket — an isolation break from a transient fault. 503 instead; the
+        # caller retries once the registry is reachable.
+        log.warning("warehouse_binding_lookup_failed", extra={"top_ns": top_ns, "error": str(exc)})
+        raise ServiceUnavailableError(f"warehouse binding lookup failed for {top_ns!r}") from exc
     if root is not None:
         cache[top_ns] = root
     return root
@@ -82,6 +88,28 @@ async def get_namespace(request: Request) -> LanceNamespace:
 
 
 NamespaceDep = Annotated[LanceNamespace, Depends(get_namespace)]
+
+
+async def assert_no_warehouse_bound_namespace(
+    request: Request, settings: Settings, id_segment_lists: Iterable[list[str] | None]
+) -> None:
+    """#3-A guard for the BATCH routes. They carry no ``{id}`` path param for :func:`get_namespace` to route
+    by (the tables are named in the body), so they run against the DEFAULT root — which would silently place
+    a warehouse-BOUND tenant's table in the SHARED bucket (isolation break) and split the same id across two
+    buckets vs. the per-table routes. Until batch routing resolves the body's namespaces, reject a batch that
+    references a warehouse-bound top-level namespace; the per-table routes handle those. No-op when the
+    feature is off."""
+    if not settings.warehouses_enabled:
+        return
+    for segments in id_segment_lists:
+        if not segments:
+            continue
+        root = await _resolve_warehouse_root(request, settings, segments[0])
+        if root is not None and root != settings.root:
+            raise InvalidInputError(
+                f"batch operations are not supported for warehouse-bound namespace {segments[0]!r}; "
+                "use the per-table routes"
+            )
 
 
 def get_fga_client(request: Request) -> OpenFgaClient | None:

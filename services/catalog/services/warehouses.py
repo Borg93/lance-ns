@@ -61,15 +61,21 @@ def provision_bucket(bucket: str, storage_options: StorageOptions) -> None:
     import boto3
     from botocore.exceptions import ClientError
 
+    region = storage_options.get("region") or "us-east-1"
     client = boto3.client(
         "s3",
         endpoint_url=storage_options.get("endpoint"),
         aws_access_key_id=storage_options.get("access_key_id"),
         aws_secret_access_key=storage_options.get("secret_access_key"),
-        region_name=storage_options.get("region") or "us-east-1",
+        region_name=region,
     )
+    # Real AWS S3 REJECTS create_bucket without a LocationConstraint outside us-east-1; RustFS/MinIO ignore
+    # it. Sending it only when region != us-east-1 keeps RustFS working and a real-S3 backend correct.
+    kwargs: dict[str, object] = {"Bucket": bucket}
+    if region != "us-east-1":
+        kwargs["CreateBucketConfiguration"] = {"LocationConstraint": region}
     try:
-        client.create_bucket(Bucket=bucket)
+        client.create_bucket(**kwargs)
     except ClientError as exc:
         code = str(exc.response.get("Error", {}).get("Code", ""))
         if code not in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):

@@ -61,6 +61,35 @@ def test_create_list_get_warehouse(
     assert got.status_code == 200 and got.json()["bucket"] == "wh-a"
 
 
+def test_create_warehouse_cross_project_collision_409(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Cross-tenant takeover guard (audit F1): an admin of a DIFFERENT project must NOT re-register an
+    # existing warehouse id under their project (which would ADD their project's read-cascade over the
+    # victim's tables). A same-project re-create stays idempotent for the partial-failure retry path.
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    client.app.dependency_overrides[get_settings] = lambda: _settings(tmp_path)
+    assert client.post("/v1/warehouses", json={"id": "wh-x", "project": "acme"}).status_code == 200
+    r = client.post("/v1/warehouses", json={"id": "wh-x", "project": "evil"})
+    assert r.status_code == 409, r.text
+    assert client.post("/v1/warehouses", json={"id": "wh-x", "project": "acme"}).status_code == 200
+
+
+def test_namespace_binding_is_write_once_409(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Namespace-binding hijack guard (audit F2): a top-level namespace already bound to one warehouse cannot
+    # be re-bound to another (which would overwrite routing + strand the first tenant's tables). The collision
+    # is caught BEFORE any namespace create, so no live backend connection is needed.
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    s = _settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    client.post("/v1/warehouses", json={"id": "wh-b", "project": "acme"})
+    wh_svc.bind_namespace(s.registry_root, s.storage_options(), "shared", "wh-a", "s3://wh-a")
+    r = client.post("/v1/warehouses/wh-b/namespaces", json={"namespace": "shared"})
+    assert r.status_code == 409, r.text
+
+
 def test_explicit_bucket_name(client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
     client.app.dependency_overrides[get_settings] = lambda: _settings(tmp_path)

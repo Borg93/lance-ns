@@ -94,8 +94,20 @@ async def create_warehouse(
     bucket = _validate_id(body.bucket or body.id, what="bucket name")
     await fga_deps.require_can_create_warehouse(client, settings, token, project=project)
 
-    root_uri = f"s3://{bucket}"
     so = settings.storage_options()
+    # Cross-tenant takeover guard: `can_create_warehouse` gates on the caller-named `project`, so an admin of
+    # ANY project could otherwise re-POST an EXISTING warehouse id under their own project — the seed ADDS
+    # `warehouse:<id> project project:<theirs>` alongside the original owner's tuples, making their project's
+    # members readers of the victim's warehouse + every table under it (routing still points at the same
+    # bucket → full cross-tenant disclosure). Reject a collision with a warehouse owned by another project.
+    # A same-project re-create stays idempotent (the partial-failure retry path below relies on it).
+    existing = await run_in_threadpool(warehouses.get_warehouse, settings.registry_root, so, warehouse_id)
+    if existing is not None and existing.get("project") != project:
+        raise HTTPException(
+            status_code=409, detail=f"warehouse {warehouse_id!r} is already registered to another project"
+        )
+
+    root_uri = f"s3://{bucket}"
     await run_in_threadpool(warehouses.provision_bucket, bucket, so)
     record = {
         "id": warehouse_id,
@@ -185,6 +197,18 @@ async def create_warehouse_namespace(
     if record is None:
         raise TableNotFoundError(f"warehouse not found: {warehouse_id}")
     root_uri = record["root_uri"]
+
+    # Binding is WRITE-ONCE: reject re-binding a top-level namespace already bound to a DIFFERENT warehouse.
+    # Without this, tenant B could bind tenant A's namespace name → the binding object is overwritten, A's
+    # existing tables become unreachable (routing sends the id to B's bucket where they don't exist) and A's
+    # new writes physically land in B's bucket; positive-cached-forever routing makes replicas disagree.
+    existing_binding = await run_in_threadpool(
+        warehouses.warehouse_for_namespace, settings.registry_root, settings.storage_options(), ns_name
+    )
+    if existing_binding is not None and existing_binding != root_uri:
+        raise HTTPException(
+            status_code=409, detail=f"namespace {ns_name!r} is already bound to another warehouse"
+        )
 
     ns_conn = _namespace_for_root(request, settings, root_uri)
     segments = parse_identifier(ns_name, settings.delimiter)

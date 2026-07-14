@@ -10,17 +10,18 @@ string, not that the relation is defined on the type).
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 from botocore.exceptions import ClientError
-from catalog.api import fga_deps
+from catalog.api import dependencies, fga_deps
 from catalog.core.config import Settings
 from catalog.services import warehouses
 from common import fga as fga_module
 from common.oidc import IDToken
-from lance_namespace import PermissionDeniedError, ServiceUnavailableError
+from lance_namespace import InvalidInputError, PermissionDeniedError, ServiceUnavailableError
 
 
 def _root(tmp_path: Any) -> str:
@@ -58,14 +59,24 @@ def test_bind_and_resolve(tmp_path: Any) -> None:
 # provisioning (idempotent, like `mc mb --ignore-existing`)
 # --------------------------------------------------------------------------- #
 
-_SO = {"endpoint": "http://rustfs:9000", "access_key_id": "k", "secret_access_key": "s", "region": "us-1"}
+_SO = {"endpoint": "http://rf:9000", "access_key_id": "k", "secret_access_key": "s", "region": "us-east-1"}
 
 
 def test_provision_creates_bucket() -> None:
     fake = MagicMock()
     with patch("boto3.client", return_value=fake):
         warehouses.provision_bucket("bkt-a", _SO)
-    fake.create_bucket.assert_called_once_with(Bucket="bkt-a")
+    fake.create_bucket.assert_called_once_with(Bucket="bkt-a")  # us-east-1 → no LocationConstraint
+
+
+def test_provision_adds_location_constraint_off_us_east_1() -> None:
+    # Real AWS S3 rejects create_bucket without a LocationConstraint outside us-east-1 (RustFS ignores it).
+    fake = MagicMock()
+    with patch("boto3.client", return_value=fake):
+        warehouses.provision_bucket("bkt-a", {**_SO, "region": "eu-west-1"})
+    fake.create_bucket.assert_called_once_with(
+        Bucket="bkt-a", CreateBucketConfiguration={"LocationConstraint": "eu-west-1"}
+    )
 
 
 @pytest.mark.parametrize("code", ["BucketAlreadyOwnedByYou", "BucketAlreadyExists"])
@@ -187,3 +198,43 @@ def test_seed_warehouse_writes_only_relations_the_model_defines(monkeypatch: pyt
     written = {(t.object.split(":", 1)[0], t.relation) for t in captured}
     assert ("warehouse", "project") in written  # the parent link uses the warehouse's real pointer relation
     assert ("warehouse", "parent") not in written  # ...never the namespace/table `parent` name (the old bug)
+
+
+# --------------------------------------------------------------------------- #
+# routing isolation guards (audit F3/F4)
+# --------------------------------------------------------------------------- #
+
+
+def _bare_request() -> Any:
+    return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(warehouse_binding_cache={})))
+
+
+def test_binding_lookup_fails_closed_on_read_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # F4: a registry READ ERROR (not a legitimately-unbound namespace) must fail CLOSED (503) — never fall
+    # through to the default shared bucket, which would create/read a maybe-bound tenant's table in the wrong
+    # bucket from a transient fault.
+    def boom(*_a: object, **_k: object) -> str | None:
+        raise OSError("s3 down")
+
+    monkeypatch.setattr(warehouses, "warehouse_for_namespace", boom)
+    with pytest.raises(ServiceUnavailableError):
+        asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1"))
+
+
+def test_binding_lookup_unbound_routes_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ...but a clean None (unbound) is NOT an error — it routes to the default root.
+    monkeypatch.setattr(warehouses, "warehouse_for_namespace", lambda *_a, **_k: None)
+    assert asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1")) is None
+
+
+def test_batch_guard_rejects_warehouse_bound_namespace(monkeypatch: pytest.MonkeyPatch) -> None:
+    # F3: the batch routes carry no {id} to route by, so they'd place a warehouse-bound tenant's table in the
+    # shared bucket. The guard rejects a batch that references a bound namespace; an unbound one passes.
+    on = Settings.model_validate(
+        {"warehouses_enabled": True, "s3_access_key_id": "x", "s3_secret_access_key": "x"}
+    )
+    monkeypatch.setattr(warehouses, "warehouse_for_namespace", lambda *_a, **_k: "s3://bkt-a")  # bound
+    with pytest.raises(InvalidInputError):
+        asyncio.run(dependencies.assert_no_warehouse_bound_namespace(_bare_request(), on, [["db1", "t1"]]))
+    monkeypatch.setattr(warehouses, "warehouse_for_namespace", lambda *_a, **_k: None)  # unbound → ok
+    asyncio.run(dependencies.assert_no_warehouse_bound_namespace(_bare_request(), on, [["db2", "t2"]]))

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     BatchCommitTablesRequest,
@@ -20,7 +20,12 @@ from lance_namespace import (
 )
 
 from catalog.api import fga_deps
-from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
+from catalog.api.dependencies import (
+    FgaClientDep,
+    NamespaceDep,
+    SettingsDep,
+    assert_no_warehouse_bound_namespace,
+)
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier
 from catalog.services import native
@@ -32,16 +37,26 @@ router = APIRouter(prefix="/v1/table", tags=["version"])
 
 
 @router.post("/version/batch-create", response_model_exclude_none=True)
-def batch_create_table_versions(
-    body: BatchCreateTableVersionsRequest, ns: NamespaceDep
+async def batch_create_table_versions(
+    request: Request,
+    body: BatchCreateTableVersionsRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
 ) -> BatchCreateTableVersionsResponse:
     """Atomically create version entries for multiple tables — delegates to the native
-    ``batch_create_table_versions`` (implemented by the 0.9 dir backend)."""
-    return native.call(ns, "batch_create_table_versions", body)
+    ``batch_create_table_versions`` (implemented by the 0.9 dir backend).
+
+    #3-A: this batch route has no ``{id}`` to route by, so it runs against the default root — reject a body
+    that names a warehouse-bound namespace rather than writing its version metadata to the wrong bucket."""
+    await assert_no_warehouse_bound_namespace(
+        request, settings, [getattr(e, "id", None) for e in (body.entries or [])]
+    )
+    return await run_in_threadpool(native.call, ns, "batch_create_table_versions", body)
 
 
 @router.post("/batch-commit", response_model_exclude_none=True)
 async def batch_commit_tables(
+    request: Request,
     body: BatchCommitTablesRequest,
     ns: NamespaceDep,
     settings: SettingsDep,
@@ -55,7 +70,16 @@ async def batch_commit_tables(
     edge exactly like the dedicated route — without this, a batch-declared table had NO owner tuple
     (fail-closed asymmetry: the creator couldn't manage their own table at owner tier, and the
     reused-id revoke assumptions didn't hold). ``seed_ownership`` is a no-op with FGA off.
+
+    #3-A: no ``{id}`` to route by → runs against the default root, so a ``declare_table`` for a
+    warehouse-bound namespace would create the table in the SHARED bucket. Reject that (use the per-table
+    routes) before touching storage.
     """
+    await assert_no_warehouse_bound_namespace(
+        request,
+        settings,
+        [getattr(getattr(op, "declare_table", None), "id", None) for op in (body.operations or [])],
+    )
     response: BatchCommitTablesResponse = await run_in_threadpool(
         native.call, ns, "batch_commit_tables", body
     )

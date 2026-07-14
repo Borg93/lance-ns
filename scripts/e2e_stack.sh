@@ -185,9 +185,15 @@ DAPR_TOKEN="$(kubectl get secret "$RELEASE-dapr-app-token" -o jsonpath='{.data.t
 
 step "8/8 run the five e2e suites against the live stack"
 export LANCE_E2E_S3=http://localhost:9900
+# The CAS suite reads LANCE_E2E_S3_ENDPOINT (a DIFFERENT name). It was never exported, so all 3 CAS tests
+# skipped on every run — the suite named in the goal has, until now, never actually executed.
+export LANCE_E2E_S3_ENDPOINT=http://localhost:9900
 export LANCE_E2E_CATALOG_URL=http://localhost:2333
 export LANCE_E2E_LINEAGE_URL=http://localhost:18000
-export LANCE_E2E_DEX=http://localhost:5556
+# WITH the /dex path prefix — that is what every suite defaults to, and what Dex actually serves the OIDC
+# discovery document under. Exporting the bare host OVERRODE the correct default with a broken one, so the
+# client-direct suite's reachability probe 404'd and it SKIPPED — silently, on every run.
+export LANCE_E2E_DEX=http://localhost:5556/dex
 export LANCE_E2E_FGA=http://localhost:8081
 export LANCE_E2E_TOKEN="$ALICE"
 export LANCE_E2E_NONADMIN_TOKEN="$BOB"
@@ -212,7 +218,20 @@ PYTHONPATH=services uv run pytest \
   tests/e2e/test_multibase_e2e.py \
   tests/e2e/test_outbox_e2e.py \
   tests/e2e/test_outbox_crash_e2e.py \
-  -v -p no:cacheprovider
+  -v -rs -p no:cacheprovider | tee /tmp/e2e-stack.log
+
+# NO SILENT SKIPS. Every suite above is skip-guarded on "is the stack reachable?" — which is the right
+# behaviour on a laptop with nothing running, and a LIE here: the stack IS up, so a skip means an env var is
+# misnamed and the suite silently did not run. That is not hypothetical. It is how the CAS suite (3 tests,
+# wrong var name) and the client-direct suite (2 tests, Dex URL missing its /dex prefix) went COMPLETELY
+# UNEXECUTED for the entire life of this job while it reported "6 passed" and a green check.
+# A green tick over a suite that never ran is worse than a red one.
+if grep -qE "[1-9][0-9]* skipped" /tmp/e2e-stack.log; then
+  echo
+  echo "!! FAIL: e2e suites SKIPPED against a LIVE stack — that is a misconfiguration, not 'not applicable':"
+  grep -E "^SKIPPED|skipped" /tmp/e2e-stack.log || true
+  exit 1
+fi
 
 echo
 echo "✓ e2e stack suite green — the live proof is now an artifact, not an anecdote"

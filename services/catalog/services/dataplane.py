@@ -543,7 +543,16 @@ def _delete_dataset(uri: str, so: StorageOptions) -> None:
 #: ``OSError`` subclass — is a store OUTAGE (503), NOT a client conflict. Collapsing all three to 409 (the
 #: naive design) would loop a doomed retry on a schema mismatch and mislabel an outage as contention.
 _COMMIT_CLIENT_ERROR_MARKERS = ("different schema", "fields did not match", "same version", "invalid input")
-_COMMIT_CONFLICT_MARKERS = ("incompatible transaction", "commit conflict", "concurrent")
+#: NON-RETRYABLE per the format spec's conflict taxonomy (file_format.md, transaction.md: an *Incompatible*
+#: conflict "fails with a non-retryable error"). This was previously lumped in with the retryable conflicts
+#: below and answered with a 409 advising "re-read the table version and re-commit the fragments" — advice
+#: that is actively DANGEROUS: after a concurrent Overwrite, the table's contents were REPLACED, so a client
+#: obeying us would append fragments describing the OLD data into a semantically different table. Silent
+#: corruption, recommended by our own error message. It is a client error: those fragments are now void and
+#: the write must be redone against the current version, not re-committed.
+_COMMIT_INCOMPATIBLE_MARKERS = ("incompatible transaction",)
+#: RETRYABLE contention — the losing side of a genuine race can re-read and re-commit safely.
+_COMMIT_CONFLICT_MARKERS = ("commit conflict", "concurrent")
 #: An Append whose read_version has no committed base (a declared-only/never-written table, or a version
 #: compacted away) — a CLIENT error (400), NOT a store outage (audit 2026-07-14): otherwise a client that
 #: appends to a freshly-declared table (read_version=0) gets a 503 and retries the same version forever.
@@ -559,6 +568,15 @@ def _classify_commit_error(exc: OSError) -> Exception:
         )
     if any(m in msg for m in _COMMIT_CLIENT_ERROR_MARKERS):
         return InvalidInputError(f"fragments are incompatible with the table: {exc}")
+    if any(m in msg for m in _COMMIT_INCOMPATIBLE_MARKERS):
+        # NON-RETRYABLE (spec). Do NOT tell the caller to re-commit: the table changed underneath them
+        # (e.g. a concurrent Overwrite), so these fragments describe data that no longer belongs. They must
+        # re-WRITE against the current version. Advising a re-commit here is how you corrupt a table.
+        return InvalidInputError(
+            "commit is incompatible with the table's current transaction — this is NOT retryable: the "
+            "table changed underneath these fragments (e.g. a concurrent overwrite). Discard them, re-read "
+            f"the current version, and re-WRITE the data; do not re-commit: {exc}"
+        )
     if any(m in msg for m in _COMMIT_CONFLICT_MARKERS):
         return ConcurrentModificationError(
             f"commit conflict — re-read the table version and re-commit the fragments: {exc}"

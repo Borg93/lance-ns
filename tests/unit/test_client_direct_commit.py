@@ -72,14 +72,22 @@ def test_stale_append_after_overwrite_is_a_conflict(tmp_path: Any) -> None:
     lance.LanceDataset.commit(uri, lance.LanceOperation.Overwrite(schema, ov), read_version=stale_base)
 
     frags = _fragments(uri, pa.table({"id": [5]}, schema=schema))
-    with pytest.raises(ConcurrentModificationError):
+    # NON-RETRYABLE (spec conflict taxonomy; audit 2026-07-14). This test previously asserted
+    # ConcurrentModificationError — i.e. it PINNED the dangerous contract: a 409 telling the client to
+    # "re-read and re-commit". After the Overwrite above, the table's contents were REPLACED, so replaying
+    # these fragments would append data describing the OLD table into a semantically different one. The
+    # fragments are void; the write must be redone. A test can pin the WRONG behavior just as confidently
+    # as the right one — this one did.
+    with pytest.raises(InvalidInputError, match="NOT retryable"):
         commit_appended_fragments(uri, {}, frags, stale_base)  # built against the pre-overwrite version
 
 
 def test_classify_commit_error_maps_the_taxonomy() -> None:
-    # The design review's correction: do NOT collapse every commit OSError to 409. A schema/version
-    # mismatch can never succeed on retry (400); an incompatible transaction is a real conflict (409); a
-    # raw store 5xx (ArrowIOError subclasses OSError) is an outage (503), not client contention.
+    # Do NOT collapse every commit OSError to 409. Four distinct outcomes:
+    #   schema/version mismatch  -> 400 (can never succeed on retry)
+    #   INCOMPATIBLE transaction -> 400, NON-RETRYABLE (spec) — re-WRITE, never re-commit
+    #   genuine contention       -> 409 (the loser of a race can safely re-read + re-commit)
+    #   raw store 5xx            -> 503 (ArrowIOError subclasses OSError) — an outage, not contention
     from catalog.services.dataplane import _classify_commit_error
     from lance_namespace import ServiceUnavailableError
 
@@ -90,8 +98,14 @@ def test_classify_commit_error_maps_the_taxonomy() -> None:
     assert isinstance(
         _classify_commit_error(OSError("All data files must have the same version")), InvalidInputError
     )
+    # Incompatible => a NON-RETRYABLE client error, and the message must NOT invite a re-commit.
+    incompatible = _classify_commit_error(OSError("Incompatible transaction: this Append is incompatible"))
+    assert isinstance(incompatible, InvalidInputError)
+    assert "NOT retryable" in str(incompatible)
+    assert "re-commit" not in str(incompatible).replace("do not re-commit", "")
+    # A genuine race, though, IS retryable — the loser re-reads and re-commits.
     assert isinstance(
-        _classify_commit_error(OSError("Incompatible transaction: this Append is incompatible")),
+        _classify_commit_error(OSError("commit conflict: concurrent writer won")),
         ConcurrentModificationError,
     )
     # An append to a never-created / declared-only table (no committed base) is a client error (400), NOT a

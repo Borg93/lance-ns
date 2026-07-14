@@ -104,6 +104,39 @@ Multimodal retrieval + the ML loop, in this order and nothing sooner:
 
 ## DONE-definition (applies to every item above, permanently)
 
-An item is DONE when: (1) its stated mechanical proof passes, (2) it survived an adversarial
-audit and the findings are fixed, (3) the proof runs in CI — not in a terminal. "It worked when
-I ran it" is not a state; it is an anecdote.
+An item is DONE only when it has been through the FULL loop, in order:
+
+1. **Build against the skill references** — READ the reference files named for the task below
+   (not the SKILL.md index) BEFORE writing code, and match them.
+2. **Unit + integration green** — `PYTHONPATH=services uv run pytest tests/unit tests/integration`.
+   New-bug rule (writing-python testing.md T6): when a bug is found, test EVERY similar case in the
+   same change — the outbox shipped with 3 of 4 publishers bypassing it because T6 was skipped.
+3. **Redeploy for real** — rebuild the image, explicit `kind load docker-image ... --name lance`,
+   DELETE the pods (not rollout-restart), verify the running imageID digest changed.
+4. **Live e2e on the redeployed stack** — the feature driven end to end against the cluster.
+5. **Adversarial audit** with the relevant skills as the rubric; findings fixed; fixes re-verified
+   live (steps 3–4 again).
+6. **The proof lands in CI** — the mechanical condition (grep-lint or e2e) runs on every push.
+
+"It worked when I ran it" is an anecdote, not a state.
+
+### Relevant skill references per task (read these files, not the index)
+
+| Task | Skill references to read + follow |
+|---|---|
+| P0.1 CI e2e | `writing-python/references/testing.md` (skip-rule: every skip needs its unblock — the CI job IS the unblock; F.I.R.S.T.; integration markers), `python-infrastructure/references/background-jobs.md` |
+| P0.2 claim-lint | `writing-python/references/testing.md` (T6 exhaustive-near-bugs — the lint IS T6 mechanized), `openfga/references/core-relations.md` (the model-contract half) |
+| P1.1 outbox metric | `python-infrastructure/references/observability.md` (four golden signals at EVERY external boundary — the outbox is an S3+pubsub boundary with zero metrics today = a direct violation; bounded cardinality; OTel meter not prometheus-client), `otel/references/python-sdk.md`, `otel/references/attributes.md` (semantic names) |
+| P1.2 bounded drain | `python-infrastructure/references/resilience.md` (tenacity conventions; retry only transient; fail-safe defaults), `python-infrastructure/references/background-jobs.md` |
+| P1.3 crash e2e | `writing-python/references/testing.md` (test behavior not implementation; a mocked exception is an implementation detail — SIGKILL is the behavior) |
+| P2 #3 pipeline | `writing-python/references/{error-handling,anti-patterns}.md`, `fastapi/references/{core-conventions,dependencies}.md` |
+| P3 commit contention | `writing-python/references/testing.md` (boundary conditions T5) |
+| P4 triage | `openfga/references/*` for any model change; `python-infrastructure/references/dapr-workflows.md` for the Dapr-native verdicts |
+
+## Housekeeping status (2026-07-14)
+
+- **LICENSE: pushed** — commit f816526 confirmed on `origin/feat/catalog-parity-1-and-5`
+  (the branch push `f816526..f044b4d` proved the remote already had it; everything since is up too).
+- **todo.md / todo_confirm.md / todo_fable.md: superseded-bannered** (commit 80d2d51), full
+  live-item extraction in progress — surviving items get folded into the P-levels here and the
+  stale bulk trimmed. This file is the single source of truth.

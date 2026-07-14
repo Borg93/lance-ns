@@ -26,9 +26,17 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 async def _resolve_warehouse_root(request: Request, settings: Settings, top_ns: str) -> str | None:
     """The physical root_uri bound to top-level namespace ``top_ns`` (#3-A), or ``None`` → default root.
 
-    Cached in-process (bindings are immutable). A registry read failure is swallowed to ``None`` (route to
-    the default root) so warehouse routing can NEVER break an existing single-bucket flow. Blocking S3 read
-    runs in the threadpool."""
+    FAILS CLOSED. A registry read ERROR raises ``ServiceUnavailableError`` (503) — it is NOT swallowed to
+    ``None``. Swallowing it would route a possibly-BOUND tenant's table to the shared default bucket on a
+    transient S3 blip: a tenant-isolation violation caused by a hiccup. Only a clean "not found" (an
+    unbound namespace) resolves to ``None`` and the default root.
+
+    (This docstring previously asserted the opposite — "swallowed to None ... can NEVER break an existing
+    flow" — describing the pre-audit behavior while the code below fail-closed. A docstring that lies about
+    a fail-open/fail-closed decision is worse than none: it is the sentence a future reader trusts.)
+
+    Cached in-process, POSITIVES ONLY (bindings are immutable, so a resolved root is safe forever; a
+    negative must not be cached — see the comment below). Blocking S3 read runs in the threadpool."""
     # Cache POSITIVES only: a binding is immutable, so a resolved root is safe to cache forever. A negative
     # (unbound) result must NOT be cached — else a namespace looked up while still unbound, then bound on
     # another replica, would keep routing to the default bucket on this one (a table meant for the tenant's

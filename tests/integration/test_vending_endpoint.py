@@ -66,3 +66,40 @@ def test_missing_location_falls_back_to_server_mediated(client: TestClient, fake
 def test_invalid_tier_is_rejected(client: TestClient, fake_ns: MagicMock) -> None:
     fake_ns.describe_table.return_value = _described("s3://lance-catalog/db$t")
     assert client.post("/v1/table/db$t/credentials?tier=admin").status_code == 422
+
+
+# --------------------------------------------------------------------------------------------------
+# The SPEC's own credential path: DescribeTable(vend_credentials=true) -> response.storage_options.
+# We previously DROPPED this field, so a generic Lance client (incl. lance-ray in REST mode) got no
+# credentials and had no way to discover our bespoke /credentials endpoint. The one confirmed
+# reinvention in the 2026-07-14 audit — interop-breaking.
+# --------------------------------------------------------------------------------------------------
+
+
+def test_describe_vends_storage_options_when_asked(client: TestClient, fake_ns: MagicMock) -> None:
+    fake_ns.describe_table.return_value = _described("s3://lance-catalog/db$t")
+    vendor = MagicMock()
+    vendor.vend.return_value = VendedCredentials(storage_options={"aws_access_key_id": "AK"})
+    client.app.dependency_overrides[get_vendor] = lambda: vendor
+
+    resp = client.post("/v1/table/db$t/describe?vend_credentials=true")
+    assert resp.status_code == 200
+    assert resp.json()["storage_options"] == {"aws_access_key_id": "AK"}
+
+    # READ tier ONLY: describe is gated on the reader rung, so vending a WRITE credential from it would be
+    # a privilege escalation. A write credential must still go through /credentials?tier=write.
+    assert vendor.vend.call_args.kwargs["tier"] == "read"
+    client.app.dependency_overrides.pop(get_vendor, None)
+
+
+def test_describe_does_not_vend_unless_asked(client: TestClient, fake_ns: MagicMock) -> None:
+    # Backward-compatible: the field is opt-in. A plain describe must not hand out credentials.
+    fake_ns.describe_table.return_value = _described("s3://lance-catalog/db$t")
+    vendor = MagicMock()
+    client.app.dependency_overrides[get_vendor] = lambda: vendor
+
+    resp = client.post("/v1/table/db$t/describe")
+    assert resp.status_code == 200
+    assert "storage_options" not in resp.json()  # response_model_exclude_none drops the null
+    vendor.vend.assert_not_called()
+    client.app.dependency_overrides.pop(get_vendor, None)

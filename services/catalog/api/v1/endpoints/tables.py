@@ -38,8 +38,10 @@ from catalog.api.dependencies import (
     NamespaceDep,
     SettingsDep,
     StorageOptionsDep,
+    VendorDep,
 )
 from catalog.api.security import CurrentToken
+from catalog.api.v1.endpoints.credentials import _has_external_bases
 from catalog.core.identifiers import parse_identifier
 from catalog.core.lineage_emit import (
     DECLARE_TABLE,
@@ -118,11 +120,13 @@ def describe_table(
     ns: NamespaceDep,
     settings: SettingsDep,
     so: StorageOptionsDep,
+    vendor: VendorDep,
     with_table_uri: bool | None = None,
     load_detailed_metadata: bool | None = None,
     check_declared: bool | None = None,
     version: int | None = None,
     tag: str | None = None,
+    vend_credentials: bool | None = None,
 ) -> DescribeTableResponse:
     """Describe the table at ``id`` (schema / uri / detailed metadata) via ``describe_table``,
     optionally at ``?version=N`` or ``?tag=<name>`` (spec 0.9: mutually exclusive).
@@ -131,6 +135,21 @@ def describe_table(
     pylance 8.0.0 silently IGNORES a describe-request ``tag`` (probed 2026-07-10 — a nonexistent tag
     described the LATEST version with no error), so forwarding it would lie; the catalog resolves
     (404 on an unknown tag, like ``/tags/version``) and describes at the resolved version instead.
+
+    ``vend_credentials`` (spec 0.9) returns short-lived, table-scoped ``storage_options`` in the response —
+    the SPEC'S OWN way for a client to get credentials. We previously ignored the field entirely and offered
+    only a bespoke ``POST /{id}/credentials``, which meant a GENERIC Lance client (including lance-ray in
+    REST mode) got no credentials and had no way to discover our endpoint: interop-breaking, and the one
+    confirmed reinvention in the 2026-07-14 audit. ``/credentials`` remains as the richer superset (tiers,
+    web-identity exchange).
+
+    READ TIER ONLY, deliberately. The router already gates describe on the reader rung; vending a WRITE
+    credential from a read-authorized call would be a privilege escalation. A write credential still requires
+    ``POST /{id}/credentials?tier=write``, which separately checks ``can_write_data``.
+
+    Multi-base tables fall back to server-mediated (no storage_options): the STS session policy is scoped to
+    the table's PRIMARY root bucket, so a vended client could not reach fragments living in a registered data
+    base — the same #3-B ⊥ #2 conflict the credentials endpoint already handles.
     """
     segments = parse_identifier(id, settings.delimiter)
     if tag is not None:
@@ -145,7 +164,15 @@ def describe_table(
         check_declared=check_declared,
         version=version,
     )
-    return native.call(ns, "describe_table", req)
+    response: DescribeTableResponse = native.call(ns, "describe_table", req)
+
+    if vend_credentials and response.location:
+        if settings.multibase_data_base_list and _has_external_bases(response.location, so):
+            return response  # multi-base: a root-scoped credential cannot reach the data bases
+        creds = vendor.vend(table_location=response.location, tier="read")
+        if creds is not None:
+            response.storage_options = creds.storage_options
+    return response
 
 
 @router.post("/{id}/exists", status_code=200)

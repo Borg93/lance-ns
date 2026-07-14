@@ -80,6 +80,14 @@ async def vend_credentials(
     )
     if described.location is None:  # no object-store location to scope to → fall back to server-mediated
         return CredentialResponse(mode="server_mediated")
+    # #3-B ⊥ #2: a multi-base table's fragments live in registered DATA bases the vended STS session policy
+    # (scoped to the primary root bucket only) cannot reach — a direct-vended client would be DENIED at the
+    # object store reading/writing them. Fall back to server-mediated IO (the catalog's root creds reach all
+    # bases). Gated on the feature flag so a single-bucket deployment never pays the fragment scan.
+    if settings.multibase_data_base_list and await run_in_threadpool(
+        _has_external_bases, described.location, settings.storage_options()
+    ):
+        return CredentialResponse(mode="server_mediated")
     # The client-direct write target + optimistic-commit base version (a declared-only/new table reads as 0).
     # A tiny ROOT-cred manifest read to learn the version — not the byte-proxy (no data bytes move).
     read_version = await run_in_threadpool(_current_version, described.location, settings.storage_options())
@@ -114,3 +122,15 @@ def _current_version(location: str, storage_options: dict[str, str]) -> int:
         return int(lance.dataset(location, storage_options=storage_options).version)
     except (ValueError, OSError):
         return 0
+
+
+def _has_external_bases(location: str, storage_options: dict[str, str]) -> bool:
+    """True if the table's data physically lives in registered NON-root bases (#3-B multi-base) — any data
+    file with a ``base_id`` set. Such a table cannot be safely direct-vended: the STS session policy is scoped
+    to the primary root bucket only, so a data-base fragment would be denied at the object store. Short-
+    circuits on the first external file; only called when the multi-base feature is enabled."""
+    try:
+        ds = lance.dataset(location, storage_options=storage_options)
+        return any(getattr(df, "base_id", None) for frag in ds.get_fragments() for df in frag.data_files())
+    except (ValueError, OSError):
+        return False

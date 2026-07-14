@@ -23,6 +23,17 @@ def build_namespace(settings: Settings) -> LanceNamespace:
     return connect(settings.impl, settings.namespace_properties())
 
 
+def build_namespace_for_root(settings: Settings, root_uri: str) -> LanceNamespace:
+    """A namespace backend rooted at ``root_uri`` instead of the default ``settings.root`` (#3-A).
+
+    Same impl + object-store credentials/endpoint as the default connection — only the ``root`` (the S3
+    bucket) differs, since a warehouse is physically a separate bucket and the creds are bucket-agnostic on
+    the S3 target. Callers cache the result per root (a warehouse's root never changes)."""
+    properties = settings.namespace_properties()
+    properties["root"] = root_uri
+    return connect(settings.impl, properties)
+
+
 def open_dataset(
     ns: LanceNamespace,
     storage_options: dict[str, str],

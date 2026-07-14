@@ -51,6 +51,12 @@ catalog:
   # with 413 before buffering. 256 MiB — generous for tabular batches + small inline blobs, bounded well
   # under a worker's memory. Big media must use the direct-write/vending path (claim-check), not this API.
   maxBodyBytes: 268435456 # 256 * 1024 * 1024
+  # #3-A per-warehouse physical multi-tenancy (admin control plane). On → POST /v1/warehouses provisions a
+  # physically separate bucket per warehouse (Lakekeeper parity) and binds top-level namespaces to it, so a
+  # table under a bound namespace lands in that warehouse's bucket. Additive + backward-compatible: an
+  # unbound namespace always routes to the shared rustfs.bucket, so single-tenant flows are untouched.
+  warehouses:
+    enabled: true
 
 # --- Graceful rollouts -----------------------------------------------------------------------------
 # preStop sleep: endpoint removal must propagate to kube-proxy/the Dapr sidecar BEFORE the app receives

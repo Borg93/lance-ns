@@ -446,3 +446,52 @@ async def require_create_on_parent(
     check = _create_parent_check(resource, segments, settings)
     if check is not None:  # None => open top-level create (authn already enforced)
         await _require(client, user=token.sub, relation=check[1], obj=check[0])
+
+
+async def require_can_create_warehouse(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    project: str,
+) -> None:
+    """Gate the #3-A admin control-plane warehouse-create on ``project#can_create_warehouse``.
+
+    This wires the model's highest-privilege action (``project.can_create_warehouse = admin``,
+    ``services/common/auth/model.fga``) that until now was defined but NEVER enforced — provisioning a
+    physical bucket is a platform/project-admin operation, not the writer-tier create-on-parent that guards
+    tables/namespaces. Fail-closed like every other gate: 403 on deny, 503 on an OpenFGA outage (via
+    ``_require``/``fga.check``). No-op when FGA is off / unwired / unauthenticated (parity with the other
+    ``require_*`` deps — those postures are enforced at the boot/authn layer)."""
+    if not (settings.fga_enabled and client is not None and token is not None):
+        return
+    await _require(client, user=token.sub, relation="can_create_warehouse", obj=f"project:{project}")
+
+
+async def seed_warehouse(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    warehouse_id: str,
+    project: str,
+) -> None:
+    """Grant the creator ``owner`` on the new ``warehouse:<id>`` and link it to its ``project:<project>``
+    parent, so the concentric cascade (project → warehouse → namespace → table) reaches everything created
+    under it. No-op when FGA is off / unauthenticated / unwired.
+
+    NOTE: the warehouse's parent-pointer relation is ``project`` (``define project: [project]`` in
+    ``services/common/auth/model.fga``) — NOT the ``parent`` name that namespaces/tables use. So this writes
+    the two tuples directly rather than via :func:`fga.grant_on_create` (whose parent edge is hardcoded to
+    ``parent``, a relation the ``warehouse`` type does not define — writing it makes OpenFGA reject the whole
+    seed → 503). Idempotent: ``write_tuples`` swallows duplicate-tuple writes on a create retry."""
+    if not (settings.fga_enabled and token is not None and client is not None):
+        return
+    obj = f"warehouse:{warehouse_id}"
+    await fga.write_tuples(
+        client,
+        [
+            fga.ClientTuple(user=f"user:{token.sub}", relation="owner", object=obj),
+            fga.ClientTuple(user=f"project:{project}", relation="project", object=obj),
+        ],
+    )

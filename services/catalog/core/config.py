@@ -46,6 +46,20 @@ class Settings(BaseSettings):
         """The registered external-blob base URIs (parsed from the comma-separated allowlist)."""
         return [b.strip() for b in self.external_blob_bases.split(",") if b.strip()]
 
+    # #3-A per-warehouse physical multi-tenancy (admin control plane). When enabled, an admin API
+    # (POST /v1/warehouses) provisions a physically separate S3 bucket per warehouse and binds top-level
+    # namespaces to it, so a table under a bound namespace lands in that warehouse's bucket (not the shared
+    # `root`). Default OFF: the request path is unchanged (no binding lookups) for single-bucket deployments;
+    # the chart turns it on for the catalog. Additive + backward-compatible — an unbound namespace always
+    # routes to the default `root`. The warehouse REGISTRY (records + bindings) lives under `control_root`.
+    warehouses_enabled: bool = Field(default=False, alias="LANCE_WAREHOUSES_ENABLED")
+    control_root: str = Field(default="", alias="LANCE_CONTROL_ROOT")
+
+    @property
+    def registry_root(self) -> str:
+        """Where warehouse records + namespace bindings live (defaults to the catalog `root` bucket)."""
+        return self.control_root or self.root
+
     # Object store (MinIO / S3). Credentials are required — no default — so a
     # missing secret fails loudly at startup instead of silently using a default.
     s3_endpoint: str = Field(default="http://minio:9000", alias="LANCE_S3_ENDPOINT")

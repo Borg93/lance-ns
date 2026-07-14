@@ -69,6 +69,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     elif not settings.s3_secret_access_key.get_secret_value():
         raise RuntimeError("LANCE_S3_SECRET_ACCESS_KEY is required when secrets_from_dapr is off")
     app.state.namespace = build_namespace(settings)  # fail fast if storage misconfigured
+    # #3-A warehouse routing caches (only used when warehouses_enabled): top-level-namespace → its physical
+    # root_uri (bindings are immutable, so cache-forever is safe) and root_uri → its namespace connection.
+    app.state.warehouse_binding_cache = {}
+    app.state.warehouse_namespaces = {}
     if settings.oidc_enabled and settings.oidc_issuer and settings.oidc_audience:
         app.state.oidc = OIDCVerifier(
             settings.oidc_issuer,

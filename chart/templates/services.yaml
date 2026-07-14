@@ -56,6 +56,11 @@ spec:
             - { name: LANCE_ALLOW_EXTERNAL_BLOBS, value: {{ .Values.vending.allowExternalBlobs | quote }} }
             - { name: LANCE_EXTERNAL_BLOB_BASES, value: {{ .Values.vending.externalBlobBases | default (printf "s3://%s/models/" .Values.rustfs.bucket) | quote }} }
             - { name: LANCE_MAX_BODY_BYTES, value: {{ .Values.catalog.maxBodyBytes | int64 | quote }} }
+            # #3-A per-warehouse physical multi-tenancy (admin control plane). On → POST /v1/warehouses
+            # provisions a bucket per warehouse + binds namespaces; an unbound namespace still routes to
+            # LANCE_REST_ROOT (backward-compatible). The warehouse registry lives under LANCE_REST_ROOT
+            # (control_root defaults to it), so no extra bucket is needed.
+            - { name: LANCE_WAREHOUSES_ENABLED, value: {{ .Values.catalog.warehouses.enabled | default false | quote }} }
             - { name: LANCE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" .) }}

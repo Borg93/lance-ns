@@ -17,6 +17,7 @@ from catalog.api.v1.endpoints import (
     transactions,
     versions,
     views,
+    warehouses,
 )
 
 # Router-level authn + authz (via authorize, which composes the OIDC token):
@@ -34,5 +35,6 @@ for _module in (
     transactions,
     views,
     credentials,
+    warehouses,
 ):
     api_router.include_router(_module.router)

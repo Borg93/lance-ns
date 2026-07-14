@@ -262,6 +262,16 @@ e2e-outbox: ## Transactional-outbox drain e2e (#4): stage a leftover event → t
 	   uv run pytest tests/e2e/test_outbox_e2e.py -v -m e2e; rc=$$?; \
 	 kill $$L $$S 2>/dev/null; exit $$rc
 
+e2e-warehouses: ## Per-warehouse physical-isolation e2e (#3-A): provision A/B buckets → table under A lands in bucket-a, absent from bucket-b (deploy with catalog.warehouses.enabled=true; set LANCE_E2E_TOKEN to a project-admin bearer)
+	@echo "port-forwarding catalog/rustfs …"
+	@kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & C=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_CATALOG_URL=http://localhost:2333 LANCE_E2E_S3=http://localhost:9900 \
+	 LANCE_E2E_TOKEN=$${LANCE_E2E_TOKEN} LANCE_E2E_NONADMIN_TOKEN=$${LANCE_E2E_NONADMIN_TOKEN} \
+	   uv run pytest tests/e2e/test_warehouses_e2e.py -v -m e2e; rc=$$?; \
+	 kill $$C $$S 2>/dev/null; exit $$rc
+
 e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+quality ON, openbao OFF — see tests/e2e/test_governed_union_e2e.py)
 	@echo "port-forwarding lance-ray/lineage/dex/openfga/rustfs + the bronze-to-silver mover …"
 	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & PIDS=$$!; \

@@ -133,6 +133,33 @@ An item is DONE only when it has been through the FULL loop, in order:
 | P3 commit contention | `writing-python/references/testing.md` (boundary conditions T5) |
 | P4 triage | `openfga/references/*` for any model change; `python-infrastructure/references/dapr-workflows.md` for the Dapr-native verdicts |
 
+## Consolidated from the superseded todo files (full-file extraction, 2026-07-14)
+
+Full reads of `todo_confirm.md` (214 lines) + `todo_fable.md` (1806 lines) — every item classified.
+**Stale-glyph corrections** (marked pending there, actually LIVE-PROVEN 2026-07-13 by the §7a done-done
+pass): merge_insert BTREE index, compaction FAIL-visibility (deterministic FAIL Run node), the three §7a
+majors, the #115 training lane drive, the artifact janitor. Do NOT re-do these.
+
+**Genuinely open items that survive consolidation** (beyond P0–P4 as already written):
+- **T1 (→ THEN #2, the one real training blocker): no trainer service credential** — the Ray job's
+  self-emitted lineage 401s against governed ingest, so ALL training provenance is lost in the shipped
+  auth-on stack (todo_fable 564-566).
+- **T2 (→ P1-adjacent): create_table process-crash strand** — a crash between write and FGA grant strands
+  the table; deeper fix = declare→grant→write reorder (todo_fable 210-211).
+- **T3 (→ P2.1, fold): `/insert` version-attribution race** — read-after-write, blocked upstream, reconcile
+  heals; same endpoint P2.1 touches (todo_fable 213-216).
+- **T4 (→ P4): external-base blob GC pointer-awareness watch** + AutoCleanupConfig-vs-sweep decision +
+  the **RAM-cache/Session audit** (Lance caches are per-dataset-object; per-request reopens silently
+  nullify ALL native caching — concretely actionable) (todo_fable 1377-80, 1648-66).
+- **T5 (→ P0-adjacent): OpenBao × medallion-compute un-integrated** — compute reads S3 creds from env
+  only, full-union e2e runs openbao off (todo_confirm 127-130).
+- **T6 (→ THEN #2): run-INPUTS API** — a run's input version pins reachable only via raw Cypher; needed
+  for "which feature versions trained this model" (todo_confirm 156-158).
+- **T7: governed-union re-confirm** — the 4/4 live evidence predates the §7a hardenings; re-run
+  `make e2e-governed-union` (subsumed by P0.1 once e2e is in CI) (todo_confirm 109-113).
+- Prod-hardening (L3 default-deny on a real CNI, PSA, mTLS pre-check, per-column masking): code-complete
+  or parked; deprioritized under the batch+training compass — NOT current work.
+
 ## Housekeeping status (2026-07-14)
 
 - **LICENSE: pushed** — commit f816526 confirmed on `origin/feat/catalog-parity-1-and-5`

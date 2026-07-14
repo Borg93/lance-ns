@@ -56,10 +56,26 @@ def _s3fs(settings: CompactionSettings) -> pafs.S3FileSystem:
 
 
 def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
-    """Discover every dataset in the bucket and compact + GC each; record what the sweep reclaimed."""
+    """Discover every dataset in EVERY swept bucket and compact + GC each; record what was reclaimed.
+
+    MULTI-BUCKET (audit 2026-07-14). This used to sweep exactly ONE bucket, so every #3-A per-warehouse
+    bucket and #3-B multi-base data bucket was invisible to GC — their tables accumulated superseded
+    manifest versions and small fragments FOREVER. A storage leak created by the very features that
+    introduce new buckets. A bucket that does not exist (or is unreadable) is skipped, not fatal: one
+    missing tenant bucket must not stop the sweep for everyone else.
+    """
     older_than = timedelta(days=settings.older_than_days)
     options = settings.storage_options()
-    uris = discover_dataset_uris(_s3fs(settings), settings.s3_bucket)
+    fs = _s3fs(settings)
+    uris: list[str] = []
+    for bucket in settings.sweep_buckets:
+        try:
+            found = discover_dataset_uris(fs, bucket)
+        except Exception as exc:  # noqa: BLE001 — one bad bucket must not blind the sweep to the others
+            log.warning("compaction_bucket_skipped", extra={"bucket": bucket, "error": str(exc)})
+            continue
+        log.info("compaction_bucket_discovered", extra={"bucket": bucket, "datasets": len(found)})
+        uris.extend(found)
     results: list[DatasetResult] = []
     for uri in uris:
         with tracer.start_as_current_span("compaction.compact") as span:

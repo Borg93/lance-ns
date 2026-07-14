@@ -76,3 +76,22 @@ def test_compact_one_open_error_prefix_for_a_missing_dataset(tmp_path: Path) -> 
     # non-dataset noise → never a FAIL event). Pin the prefix so a reword can't silently flip selection.
     result = compact_one(str(tmp_path / "nope.lance"), {}, older_than=timedelta(days=7))
     assert result.error is not None and result.error.startswith("open:")
+
+
+def test_sweep_buckets_unions_primary_and_extras() -> None:
+    """GC must cover EVERY bucket that can hold Lance data (audit 2026-07-14).
+
+    The sweep discovered exactly ONE bucket, so every #3-A per-warehouse bucket and #3-B multi-base data
+    bucket was invisible to it: their tables accumulated superseded manifest versions and small fragments
+    forever. A storage leak created by the very features that introduce new buckets.
+    """
+    from compaction.core.config import CompactionSettings
+
+    s = CompactionSettings.model_validate(
+        {"s3_bucket": "lance-catalog", "s3_extra_buckets": "lance-source, s3://mb-a/, lance-catalog, "}
+    )
+    # primary first, extras normalized (s3:// + slashes stripped), de-duplicated, empties dropped
+    assert s.sweep_buckets == ["lance-catalog", "lance-source", "mb-a"]
+
+    bare = CompactionSettings.model_validate({"s3_bucket": "only"})
+    assert bare.sweep_buckets == ["only"]  # no extras => unchanged single-bucket behavior

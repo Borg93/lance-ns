@@ -50,7 +50,20 @@ class CompactionSettings(BaseSettings):
     # SecretStr so it's redacted in repr/model_dump (parity with the catalog) — .get_secret_value() to read.
     s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="COMPACTION_S3_SECRET_ACCESS_KEY")
     s3_bucket: str = Field(default="lance-catalog", alias="COMPACTION_S3_BUCKET")
+    # ADDITIONAL buckets to sweep, comma-separated (audit 2026-07-14). The sweep discovered exactly ONE
+    # bucket, so every #3-A per-warehouse bucket and #3-B multi-base data bucket was INVISIBLE to GC: their
+    # tables accumulated superseded manifest versions and small fragments FOREVER. A storage leak introduced
+    # by the very features that create new buckets. The chart wires the medallion zone buckets + any
+    # multibase data bases here; per-warehouse buckets are added as they are provisioned.
+    s3_extra_buckets: str = Field(default="", alias="COMPACTION_S3_EXTRA_BUCKETS")
     s3_region: str = Field(default="us-east-1", alias="COMPACTION_S3_REGION")
+
+    @property
+    def sweep_buckets(self) -> list[str]:
+        """Every bucket the sweep must cover: the primary lakehouse bucket + the extras. De-duplicated and
+        order-stable so a bucket listed twice is swept once (and the report stays deterministic)."""
+        extras = [b.strip().removeprefix("s3://").strip("/") for b in self.s3_extra_buckets.split(",")]
+        return list(dict.fromkeys([self.s3_bucket, *[b for b in extras if b]]))
 
     # --- Secret consumption from the Dapr secret store (OpenBao) — symmetric with catalog + lineage.
     # When on, the S3 secret comes from the store at boot (NOT plaintext env); fails closed if absent.

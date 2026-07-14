@@ -95,6 +95,20 @@ spec:
             - { name: COMPACTION_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}
             - { name: COMPACTION_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
+            {{- /* EVERY bucket that can hold Lance data must be swept, or its tables accumulate superseded
+                   versions + small fragments FOREVER (audit 2026-07-14: the sweep saw exactly ONE bucket,
+                   so the medallion zone buckets and every #3-B multi-base data bucket leaked storage
+                   silently). Union of: the medallion storage zones (raw/gold live in their own buckets) and
+                   the approved multi-base data bases. Per-warehouse (#3-A) buckets are provisioned at
+                   RUNTIME, so they are appended by the operator as tenants are onboarded. */}}
+            {{- $extra := list }}
+            {{- range $ns, $bkt := .Values.medallion.buckets }}
+            {{- if ne $bkt $.Values.rustfs.bucket }}{{ $extra = append $extra $bkt }}{{ end }}
+            {{- end }}
+            {{- range .Values.catalog.multibase.dataBases }}
+            {{- $extra = append $extra (. | replace "s3://" "" | trimSuffix "/") }}
+            {{- end }}
+            - { name: COMPACTION_S3_EXTRA_BUCKETS, value: {{ $extra | uniq | join "," | quote }} }
             - { name: COMPACTION_S3_REGION, value: "us-east-1" }
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}

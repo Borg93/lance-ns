@@ -219,3 +219,38 @@ def test_load_bearing_relations_are_defined(obj_type: str, relation: str) -> Non
     assert relation in _model_relations()[obj_type], (
         f"{obj_type}#{relation} is load-bearing but missing from the compiled model"
     )
+
+
+def test_every_helm_set_key_in_our_scripts_exists_in_values() -> None:
+    """A `--set` key that does not exist in values.yaml is a SILENT no-op — helm accepts it without a word.
+
+    The bug this encodes (2026-07-14): `scripts/e2e_stack.sh` passed `--set web.enabled=false` to deploy a
+    headless stack. There was no `web.enabled` key. Helm shrugged, the web Deployment (which had no `if`
+    guard at all) rendered anyway, its image is never built in CI, so it sat in ImagePullBackOff and
+    `helm --wait` could never converge. The e2e-stack job — the entire point of P0.1, the job whose whole
+    purpose is to stop us shipping unproven claims — therefore FAILED ON EVERY RUN and nobody noticed.
+
+    A flag you *believe* you are setting, that silently sets nothing, is worse than no flag: it makes a
+    stack you never actually configured look configured. This asserts every key we --set actually exists.
+    """
+    import yaml
+
+    values = yaml.safe_load((CHART / "values.yaml").read_text())
+
+    def defined(dotted: str) -> bool:
+        node = values
+        for part in dotted.split("."):
+            if not isinstance(node, dict) or part not in node:
+                return False
+            node = node[part]
+        return True
+
+    # `--set a.b=c` / `--set-json a.b=[...]` / `--set a.b=c,d.e=f` across every script we ship.
+    pattern = re.compile(r"--set(?:-json|-string)?[= ]\"?([A-Za-z0-9_.\[\]-]+)=")
+    unknown: list[str] = []
+    for script in sorted((REPO / "scripts").glob("*.sh")):
+        for key in pattern.findall(script.read_text()):
+            base = key.split("[")[0]  # list index: catalog.multibase.dataBases[0] -> ...dataBases
+            if not defined(base):
+                unknown.append(f"{script.name}: --set {key} (no such key in values.yaml)")
+    assert not unknown, "helm --set keys that silently do nothing:\n  " + "\n  ".join(unknown)

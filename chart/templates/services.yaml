@@ -298,7 +298,13 @@ spec:
   ports: [{ name: http, port: {{ .Values.services.lineage.port }}, targetPort: http }]
   selector: { app.kubernetes.io/component: lineage, app.kubernetes.io/instance: {{ .Release.Name }} }
 ---
+{{- if .Values.web.enabled }}
 # Web — the SvelteKit UI; proxies /api → the lineage service in-cluster.
+#
+# GATED (2026-07-14). This block had NO guard, while `scripts/e2e_stack.sh` passed `--set web.enabled=false`
+# — a key that did not exist, so helm silently accepted it and the web pod deployed anyway. In CI its image
+# is never built, so it sat in ImagePullBackOff, `helm --wait` could never converge, and the e2e-stack job
+# failed EVERY time. A headless stack (CI, any API-only deploy) must be able to switch the UI off.
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -353,3 +359,4 @@ metadata:
 spec:
   ports: [{ name: http, port: 3000, targetPort: http }]
   selector: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }
+{{- end }}

@@ -498,6 +498,10 @@ services:
 
 # Web (SvelteKit UI) replica count — stateless. (Demo scaffolding; rask supplies the real frontends.)
 web:
+  # Deploy the SvelteKit UI. Default true = the current behavior (it always deployed, ungated). A headless
+  # stack turns it OFF: `scripts/e2e_stack.sh` needs that, and until this key existed its --set was a silent
+  # no-op — the web pod deployed, could not pull its (never-built) image, and blocked `helm --wait` forever.
+  enabled: true
   replicas: 1
   # The bare FGA subject the BFF names when it reads lineage as a SERVICE on the auth-on stack (no user
   # session). Must be READER on the warehouse (seed_medallion_fga.sh) + allowlisted in

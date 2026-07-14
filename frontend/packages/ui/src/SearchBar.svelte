@@ -30,25 +30,38 @@
 	let hits = $state<SearchHit[]>([]);
 	let open = $state(false);
 
+	/** Monotonic request id — the LATEST-WINS guard (audit B3). `clearTimeout` only cancels a debounce
+	 * that has not fired yet; once the fetch is in flight nothing stopped its stale response from
+	 * overwriting a newer one (the old comment claimed otherwise). Mirrors the store's `#colReq`/`#fieldReq`,
+	 * which got this right. Bumping on every input AND on pick/clear also kills the second bug: an
+	 * in-flight resolve used to set `open = true` unconditionally, reopening the dropdown under a box the
+	 * user had already cleared or picked from. */
+	let req = 0;
+
 	$effect(() => {
 		const value = q.trim();
+		const mine = ++req;
 		if (!value) {
 			hits = [];
 			open = false;
 			return;
 		}
 		const timer = setTimeout(async () => {
+			let next: SearchHit[];
 			try {
-				hits = await search(value);
+				next = await search(value);
 			} catch {
-				hits = []; // a failed fetch degrades to "no matches", never a wedged-closed dropdown
+				next = []; // a failed fetch degrades to "no matches", never a wedged-closed dropdown
 			}
+			if (mine !== req) return; // a newer keystroke (or a pick/clear) superseded this one — drop it
+			hits = next;
 			open = true;
 		}, debounceMs);
-		return () => clearTimeout(timer); // retype within the debounce window cancels the stale fetch
+		return () => clearTimeout(timer);
 	});
 
 	function pick(name: string) {
+		req++; // supersede any in-flight search so it cannot reopen the dropdown after selection
 		open = false;
 		q = "";
 		hits = [];

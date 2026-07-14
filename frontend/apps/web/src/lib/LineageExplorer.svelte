@@ -377,10 +377,23 @@
 
 	<div class="top">
 		<section class="graph" {@attach enter({ delay: 0.05 })}>
-			<SvelteFlow bind:nodes bind:edges {nodeTypes} colorMode="dark" fitView onnodeclick={selectNode}>
+			<SvelteFlow
+				bind:nodes
+				bind:edges
+				{nodeTypes}
+				colorMode="dark"
+				fitView
+				onnodeclick={selectNode}
+			>
 				<Background variant={BackgroundVariant.Dots} gap={16} />
 				<Controls />
-				<MiniMap pannable zoomable nodeColor="#6aa9ff" maskColor="rgba(11,15,23,0.72)" bgColor="#0e141d" />
+				<MiniMap
+					pannable
+					zoomable
+					nodeColor="#6aa9ff"
+					maskColor="rgba(11,15,23,0.72)"
+					bgColor="#0e141d"
+				/>
 				<FlowAutoFit trigger={fitKey} />
 				<Panel position="top-left">
 					<div class="viewtoggle" role="tablist" aria-label="Graph view">
@@ -461,7 +474,8 @@
 									<li class="fp-row" class:masked={e?.masking}>
 										<button
 											class="fp-col mono"
-											onclick={() => (store.selectedColumn = { dataset: r.dataset, field: r.field })}
+											onclick={() =>
+												(store.selectedColumn = { dataset: r.dataset, field: r.field })}
 										>
 											<span class="fp-col-field">{r.field}</span>
 											<span class="fp-col-ds">{shortDs(r.dataset)}</span>
@@ -487,7 +501,8 @@
 									<li class="fp-row" class:masked={e?.masking}>
 										<button
 											class="fp-col mono"
-											onclick={() => (store.selectedColumn = { dataset: r.dataset, field: r.field })}
+											onclick={() =>
+												(store.selectedColumn = { dataset: r.dataset, field: r.field })}
 										>
 											<span class="fp-col-field">{r.field}</span>
 											<span class="fp-col-ds">{shortDs(r.dataset)}</span>

@@ -84,6 +84,12 @@ export class LineageState {
 	 * stale field's neighbors. */
 	async loadColumnNeighbors(name: string, field: string): Promise<void> {
 		const req = ++this.#fieldReq;
+		// Clear FIRST (audit B2): the neighbors were previously left in place across a selection change,
+		// so on a slow backend the panel rendered the PREVIOUS field's provenance under the NEW field's
+		// header — and a failed fetch rendered the affirmative lie "No upstream fields — a source column."
+		// null now means "unknown/loading", which the panel distinguishes from an empty result.
+		this.columnUpstream = null;
+		this.columnDownstream = null;
 		const [upstream, downstream] = await Promise.all([
 			fetchColumnUpstream(name, field),
 			fetchColumnDownstream(name, field),
@@ -106,7 +112,18 @@ export class LineageState {
 			// than a hardcoded list; fall back to the known medallion names when discovery is
 			// empty/unavailable so the demo still renders offline.
 			const cat = await fetchDatasets({ limit: 500 });
-			this.catalog = cat?.datasets ?? [];
+			// HARD-FAILURE GUARD (audit B1). `getJSON` maps timeout / 4xx / 5xx / network error to null —
+			// indistinguishable from "empty". Every assignment below used to be an unconditional `?? []`,
+			// so ONE failed tick blanked the whole UI: the graph emptied, the counters animated to zero,
+			// the empty states fabricated instructions ("run the cascade") from a swallowed error, and the
+			// reconcile effect rebuilt its position map from the emptied nodes — permanently destroying the
+			// user's dragged node positions. A failed discovery now PRESERVES the last good state and just
+			// reports offline; the header's "waiting" is then the honest signal it always claimed to be.
+			if (cat === null) {
+				this.online = false;
+				return;
+			}
+			this.catalog = cat.datasets ?? [];
 			const names = this.catalog.length ? this.catalog.map((d) => d.name) : [...KNOWN];
 
 			const producers: Record<string, ProducerInfo[]> = {};
@@ -133,17 +150,28 @@ export class LineageState {
 				for (const e of g.edges) edgeSet.add(`${e.source}|${e.target}`);
 			}
 
-			this.runs = runs?.runs ?? [];
-			this.jobs = jobs?.jobs ?? [];
-			this.namespaceList = namespaces?.namespaces ?? [];
-			this.producers = producers;
-			this.nodes = [...nodeMap.values()];
-			this.edges = [...edgeSet].map((key) => {
-				const [source, target] = key.split("|");
-				return { source, target, kind: "derived_from" };
-			});
-			this.events = events?.events ?? [];
-			this.datasets = demo?.datasets ?? [];
+			// Assign only what actually RESOLVED (audit B1). A null sub-fetch means "this slice failed
+			// this tick", NOT "this slice is now empty" — keeping the prior value is both truthful and
+			// what the user expects (a transient blip must not erase the feed they are reading).
+			if (runs) this.runs = runs.runs ?? [];
+			if (jobs) this.jobs = jobs.jobs ?? [];
+			if (namespaces) this.namespaceList = namespaces.namespaces ?? [];
+			if (events) this.events = events.events ?? [];
+			if (demo) this.datasets = demo.datasets ?? [];
+
+			// The graph is rebuilt from the per-dataset fan-out. Replace it only if at least one graph
+			// fetch succeeded — otherwise every graph call failed and an empty nodeMap would wipe the
+			// canvas (and the dragged positions) on a blip.
+			const anyGraph = graphs.some((g) => g !== null);
+			if (anyGraph || present.length === 0) {
+				this.producers = producers;
+				this.nodes = [...nodeMap.values()];
+				this.edges = [...edgeSet].map((key) => {
+					const [source, target] = key.split("|");
+					return { source, target, kind: "derived_from" };
+				});
+			}
+
 			this.online = events !== null || present.length > 0;
 			this.lastUpdated = new Date().toLocaleTimeString();
 		} finally {

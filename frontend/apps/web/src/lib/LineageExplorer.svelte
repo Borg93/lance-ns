@@ -21,12 +21,12 @@
 	} from "@xyflow/svelte";
 	import "@xyflow/svelte/dist/style.css";
 	import { Tabs } from "bits-ui";
-	import { Radio, Boxes, Cpu, Columns3 } from "@lucide/svelte";
+	import { Radio, Boxes, Cpu, Columns3, ShieldAlert } from "@lucide/svelte";
 	import FlowAutoFit from "$lib/FlowAutoFit.svelte";
 	import { LineageState } from "$lib/store.svelte";
 	import { SearchBar, StatusBoard, enter, stagger, countUp } from "@lance/ui";
 	import { fetchSearch } from "$lib/api";
-	import { LAYER, type DemoDataset } from "$lib/types";
+	import { LAYER, type ColumnEdge, type ColumnRef, type DemoDataset } from "$lib/types";
 
 	const store = new LineageState();
 
@@ -90,8 +90,23 @@
 	$effect(() => {
 		if (graphView !== "columns" || !store.selected) return;
 		const name = store.selected;
+		// Focusing a new dataset (or (re)entering Columns) drops any open field panel — a field from the
+		// previous root has no place in the new subgraph. This effect does NOT track selectedColumn (only
+		// writes it), so there's no self-retrigger.
+		store.selectedColumn = null;
 		store.loadColumns(name);
 		const t = setInterval(() => store.loadColumns(name), 2000);
+		return () => clearInterval(t);
+	});
+
+	// When a column node is focused, keep that field's provenance/impact fresh on the same 2s cadence.
+	// Re-runs when the focused column changes (tracks store.selectedColumn); the neighbor fetches are
+	// latest-wins guarded in the store so a mid-flight switch can't apply a stale field's result.
+	$effect(() => {
+		if (graphView !== "columns" || !store.selectedColumn) return;
+		const { dataset, field } = store.selectedColumn;
+		store.loadColumnNeighbors(dataset, field);
+		const t = setInterval(() => store.loadColumnNeighbors(dataset, field), 2000);
 		return () => clearInterval(t);
 	});
 
@@ -263,11 +278,22 @@
 	});
 
 	function selectNode(e: unknown) {
-		// Only DATASET nodes set the dataset-scoped selection. A Job-node id (Jobs view) or a column-node id
-		// (Columns view) would pollute the Details/upstream panels + the Columns focus (bug hunt 2026-07-13).
-		if (graphView !== "datasets") return;
 		const ev = e as { node?: { id: string }; targetNode?: { id: string } };
-		store.selected = ev.node?.id ?? ev.targetNode?.id ?? null;
+		const id = ev.node?.id ?? ev.targetNode?.id ?? null;
+		if (!id) return;
+		// Datasets plane: a node id IS a dataset id → drive the dataset-scoped Details/upstream panels.
+		if (graphView === "datasets") {
+			store.selected = id;
+			return;
+		}
+		// Columns plane (#24): a node id is `${dataset}::${field}` → open the field-level provenance/impact
+		// panel WITHOUT touching store.selected (a column id would pollute the dataset panels). A Job-node id
+		// (Jobs view) is neither, so it selects nothing (bug hunt 2026-07-13).
+		if (graphView === "columns") {
+			const sep = id.indexOf("::");
+			if (sep < 0) return;
+			store.selectedColumn = { dataset: id.slice(0, sep), field: id.slice(sep + 2) };
+		}
 	}
 
 	const stateColor = (s?: string | null) =>
@@ -287,6 +313,28 @@
 			? store.edges.filter((e) => e.target === store.selected).map((e) => e.source)
 			: [],
 	);
+
+	// ---- Field-level provenance / impact panel (Columns plane, #24) ----
+	// The per-field endpoints give the (transitive) provenance/impact LIST; the already-loaded subgraph's
+	// edges carry the transformation kind + masking bit for each DIRECT hop, cross-referenced by edgeFor.
+	const focusedColumn = $derived(store.selectedColumn);
+	const colUpstream = $derived(store.columnUpstream?.related ?? []);
+	const colDownstream = $derived(store.columnDownstream?.related ?? []);
+	const shortDs = (ds: string) => ds.split("$").at(-1) ?? ds;
+
+	// The direct field-to-field edge between two columns (if the subgraph carries it), for its
+	// transformation label + masking cue. Transitive (multi-hop) neighbors have no direct edge → no label.
+	function edgeFor(src: ColumnRef, tgt: ColumnRef): ColumnEdge | undefined {
+		return (store.columnGraph?.edges ?? []).find(
+			(e) =>
+				e.source_dataset === src.dataset &&
+				e.source_field === src.field &&
+				e.target_dataset === tgt.dataset &&
+				e.target_field === tgt.field,
+		);
+	}
+	const transformLabel = (e: ColumnEdge | undefined) =>
+		e ? e.transformation_subtype || e.transformation_type || "derived" : "";
 
 	// Per-version column evolution, marking columns added since the previous Lance version.
 	function evolution(ds: DemoDataset) {
@@ -374,8 +422,8 @@
 				</div>
 			{:else if graphView === "columns" && (store.columnGraph?.columns?.length ?? 0) === 0}
 				<div class="empty">
-					<b>No column lineage for {store.selected} yet.</b><br />
-					Producers must emit the <code>columnLineage</code> facet (the medallion does).
+					<b>No field lineage for {store.selected} yet.</b><br />
+					Run the cascade to populate the <code>columnLineage</code> facet.
 				</div>
 			{:else if graphView !== "columns" && store.nodes.length === 0}
 				<div class="empty">
@@ -383,6 +431,78 @@
 					<code>uv run scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
 					Then <code>--step 2</code> (a failed run), <code>3</code> (silver v1), <code>4</code>
 					(silver v2), <code>5</code> (gold).
+				</div>
+			{/if}
+
+			{#if graphView === "columns" && focusedColumn}
+				<!-- Field-level provenance/impact (#24): click a column node → its direct upstream (what it was
+				     derived from) and downstream (what derives from it), each with the transformation kind and,
+				     for a masking derivation, the same red PII cue the masked edges use. -->
+				<div class="field-panel" {@attach enter({ y: 6 })}>
+					<div class="fp-head">
+						<div class="fp-title">
+							<Columns3 size={13} />
+							<span class="mono fp-field">{focusedColumn.field}</span>
+						</div>
+						<button
+							class="fp-close"
+							aria-label="Close field panel"
+							onclick={() => (store.selectedColumn = null)}>×</button
+						>
+					</div>
+					<div class="fp-ds mono">{focusedColumn.dataset}</div>
+
+					<div class="fp-group">
+						<span class="rel-label">Provenance · derived from</span>
+						{#if colUpstream.length}
+							<ul class="fp-list">
+								{#each colUpstream as r (r.dataset + "::" + r.field)}
+									{@const e = edgeFor(r, focusedColumn)}
+									<li class="fp-row" class:masked={e?.masking}>
+										<button
+											class="fp-col mono"
+											onclick={() => (store.selectedColumn = { dataset: r.dataset, field: r.field })}
+										>
+											<span class="fp-col-field">{r.field}</span>
+											<span class="fp-col-ds">{shortDs(r.dataset)}</span>
+										</button>
+										{#if transformLabel(e)}
+											<span class="fp-xf" class:masked={e?.masking}>{transformLabel(e)}</span>
+										{/if}
+										{#if e?.masking}<ShieldAlert size={12} class="fp-mask-ic" />{/if}
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="hint fp-none">No upstream fields — a source column.</p>
+						{/if}
+					</div>
+
+					<div class="fp-group">
+						<span class="rel-label">Impact · feeds</span>
+						{#if colDownstream.length}
+							<ul class="fp-list">
+								{#each colDownstream as r (r.dataset + "::" + r.field)}
+									{@const e = edgeFor(focusedColumn, r)}
+									<li class="fp-row" class:masked={e?.masking}>
+										<button
+											class="fp-col mono"
+											onclick={() => (store.selectedColumn = { dataset: r.dataset, field: r.field })}
+										>
+											<span class="fp-col-field">{r.field}</span>
+											<span class="fp-col-ds">{shortDs(r.dataset)}</span>
+										</button>
+										{#if transformLabel(e)}
+											<span class="fp-xf" class:masked={e?.masking}>{transformLabel(e)}</span>
+										{/if}
+										{#if e?.masking}<ShieldAlert size={12} class="fp-mask-ic" />{/if}
+									</li>
+								{/each}
+							</ul>
+						{:else}
+							<p class="hint fp-none">No downstream fields — nothing derives from this column.</p>
+						{/if}
+					</div>
 				</div>
 			{/if}
 		</section>
@@ -898,6 +1018,137 @@
 	}
 	.rel-cols:hover {
 		background: color-mix(in srgb, var(--accent) 26%, transparent);
+	}
+
+	/* ---- Columns plane: the clicked field's provenance/impact panel (#24) ---- */
+	.field-panel {
+		position: absolute;
+		top: 14px;
+		right: 14px;
+		width: 250px;
+		max-height: calc(100% - 28px);
+		overflow: auto;
+		z-index: 5;
+		padding: 10px 12px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		background: linear-gradient(180deg, var(--panel-2), var(--panel));
+		box-shadow: var(--shadow);
+		font-size: 12px;
+	}
+	.fp-head {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 8px;
+	}
+	.fp-title {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		min-width: 0;
+	}
+	.fp-field {
+		font-weight: 600;
+		font-size: 13px;
+		color: var(--ink);
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.fp-close {
+		flex: 0 0 auto;
+		border: none;
+		background: transparent;
+		color: var(--mut);
+		font-size: 16px;
+		line-height: 1;
+		cursor: pointer;
+		padding: 0 2px;
+	}
+	.fp-close:hover {
+		color: var(--ink);
+	}
+	.fp-ds {
+		font-size: 10.5px;
+		color: #6f86a6;
+		word-break: break-all;
+		margin: 1px 0 8px;
+	}
+	.fp-group {
+		margin-bottom: 10px;
+	}
+	.fp-group .rel-label {
+		display: block;
+		margin-bottom: 5px;
+	}
+	.fp-list {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		display: flex;
+		flex-direction: column;
+		gap: 4px;
+	}
+	.fp-row {
+		display: flex;
+		align-items: center;
+		gap: 5px;
+		padding-left: 7px;
+		border-left: 2px solid var(--line-2);
+	}
+	/* Same red PII cue the masked derivation edges use. */
+	.fp-row.masked {
+		border-left-color: var(--fail);
+	}
+	.fp-col {
+		display: flex;
+		align-items: baseline;
+		gap: 6px;
+		flex: 1;
+		min-width: 0;
+		padding: 3px 6px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		background: var(--panel);
+		color: var(--ink);
+		cursor: pointer;
+		text-align: left;
+		transition:
+			border-color 0.2s var(--ease),
+			background 0.2s var(--ease);
+	}
+	.fp-col:hover {
+		border-color: var(--accent);
+		background: color-mix(in srgb, var(--accent) 12%, transparent);
+	}
+	.fp-col-field {
+		font-size: 11.5px;
+		font-weight: 600;
+		overflow: hidden;
+		text-overflow: ellipsis;
+	}
+	.fp-col-ds {
+		font-size: 9.5px;
+		color: var(--mut);
+		margin-left: auto;
+	}
+	.fp-xf {
+		flex: 0 0 auto;
+		font-size: 9.5px;
+		color: var(--mut);
+		text-transform: uppercase;
+		letter-spacing: 0.3px;
+	}
+	.fp-xf.masked {
+		color: var(--fail);
+	}
+	:global(.fp-mask-ic) {
+		flex: 0 0 auto;
+		color: var(--fail);
+	}
+	.fp-none {
+		margin: 0;
+		font-style: italic;
 	}
 
 	/* ---- Storage (Lance tables on RustFS) ---- */

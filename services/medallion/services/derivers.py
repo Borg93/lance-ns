@@ -28,6 +28,12 @@ Deriver = Callable[[pa.Table, list[bytes]], pa.Table]
 _THUMBNAIL_COLUMN = "thumbnail"
 _EMBEDDING_COLUMN = "embedding"
 
+#: The columns a deriver may ADD to the carried table (absent upstream) — the single source of truth for
+#: compute's columnLineage edge classification (#1): an output column matching one of these that is NOT in
+#: the upstream schema was DERIVED from the blob content (TRANSFORMATION); everything else that survives a
+#: stage is carried forward (IDENTITY). Extend alongside ``_DERIVERS`` when a new modality adds artifacts.
+ARTIFACT_COLUMNS: tuple[str, ...] = (_THUMBNAIL_COLUMN, _EMBEDDING_COLUMN)
+
 
 class UnderivableMediaError(ValueError):
     """A payload matched a deriver's probe but cannot actually be derived (e.g. a truncated image).

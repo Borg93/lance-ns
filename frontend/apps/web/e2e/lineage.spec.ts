@@ -183,6 +183,84 @@ test("governed search finds by column and focuses the hit; jobs tab lists comput
 	await expect(page.locator(".job-name", { hasText: "embed_features" })).toBeVisible();
 });
 
+test("columns view: clicking a field opens its provenance/impact panel with the masking cue", async ({
+	page,
+}) => {
+	// ASSERTS (#24 field lineage): the two per-field endpoints (columns/{field}/upstream|downstream) now
+	// have a frontend caller. Clicking a ColumnNode opens the side panel listing that field's direct
+	// provenance + impact, each with its transformation kind, and the same red PII cue on a masking hop.
+	// Column subgraph for silver$features: a masking derivation into pii_hash + a plain hop out of it.
+	const COLGRAPH = {
+		root: "silver$features",
+		columns: [
+			{ dataset: "bronze$events", field: "pii_email", type: "string" },
+			{ dataset: "silver$features", field: "pii_hash", type: "string" },
+			{ dataset: "gold$catalog", field: "exposed", type: "bool" },
+		],
+		edges: [
+			{
+				source_dataset: "bronze$events",
+				source_field: "pii_email",
+				target_dataset: "silver$features",
+				target_field: "pii_hash",
+				transformation_type: "MASKED",
+				transformation_subtype: "sha256",
+				masking: true,
+			},
+			{
+				source_dataset: "silver$features",
+				source_field: "pii_hash",
+				target_dataset: "gold$catalog",
+				target_field: "exposed",
+				transformation_type: "IDENTITY",
+				transformation_subtype: "",
+				masking: false,
+			},
+		],
+	};
+	// Registered after beforeEach → these more-specific routes win for their URLs (columns graph vs the
+	// two per-field neighbor endpoints), leaving every other /api call to the shared mock.
+	await page.route("**/datasets/*/columns", (route) => json(route, COLGRAPH));
+	await page.route("**/columns/*/upstream", (route) =>
+		json(route, {
+			dataset: "silver$features",
+			field: "pii_hash",
+			related: [{ dataset: "bronze$events", field: "pii_email", type: "string" }],
+		}),
+	);
+	await page.route("**/columns/*/downstream", (route) =>
+		json(route, {
+			dataset: "silver$features",
+			field: "pii_hash",
+			related: [{ dataset: "gold$catalog", field: "exposed", type: "bool" }],
+		}),
+	);
+
+	await page.goto("/lineage");
+	await expect(page.locator(".svelte-flow__node")).toHaveCount(4, { timeout: 15_000 });
+	// Focus silver$features, then switch to the Columns plane — the field-to-field subgraph renders.
+	await page.locator(".svelte-flow__node").filter({ hasText: "silver$features" }).click();
+	await page.getByRole("tab", { name: "Columns" }).click();
+	const piiNode = page.locator(".svelte-flow__node").filter({ hasText: "pii_hash" });
+	await expect(piiNode).toBeVisible({ timeout: 15_000 });
+
+	// Click the column node → the field panel opens for that field.
+	await piiNode.click();
+	const panel = page.locator(".field-panel");
+	await expect(panel).toBeVisible();
+	await expect(panel.locator(".fp-field")).toHaveText("pii_hash");
+	// Provenance: derived from bronze pii_email via a MASKED sha256 hop → the row carries the red cue.
+	await expect(panel.getByText("pii_email")).toBeVisible();
+	await expect(panel.getByText("sha256")).toBeVisible();
+	await expect(panel.locator(".fp-row.masked")).toHaveCount(1);
+	// Impact: pii_hash feeds gold.exposed (a non-masking hop).
+	await expect(panel.getByText("exposed")).toBeVisible();
+
+	// Walking the chain: clicking an upstream column re-focuses the panel on it.
+	await panel.getByText("pii_email").click();
+	await expect(panel.locator(".fp-field")).toHaveText("pii_email");
+});
+
 test("status board renders live runs from the workspace lib (@lance/ui StatusBoard)", async ({
 	page,
 }) => {

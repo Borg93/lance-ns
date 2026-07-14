@@ -57,8 +57,26 @@ data:
         location /produce   { proxy_pass http://127.0.0.1:3500/v1.0/invoke/{{ .Values.medallion.producer.daprAppId }}/method/produce; }
         {{- end }}
         {{- if .Values.observability.enabled }}
+        {{- if .Values.observability.edgeAuth.enabled }}
+        # §5e hardening — Perses (dashboard) AND GreptimeDB (RAW SQL/ingest on :4000) are BOTH
+        # unauthenticated upstreams; in prod this gateway sits behind a public Ingress, so guard the edge
+        # with basic-auth. htpasswd comes from the {{ include "lance.fullname" . }}-observability-edge-auth
+        # Secret, mounted read-only below (an infra-tier credential — never a pod env/arg value). Gated on
+        # observability.edgeAuth.enabled (default off → dev / `make dashboards` is unchanged, no auth).
+        location /perses/   {
+          auth_basic "{{ .Values.observability.edgeAuth.realm }}";
+          auth_basic_user_file /etc/nginx/edge-auth/htpasswd;
+          proxy_pass http://{{ include "lance.fullname" . }}-perses:8080/;
+        }
+        location /greptime/ {
+          auth_basic "{{ .Values.observability.edgeAuth.realm }}";
+          auth_basic_user_file /etc/nginx/edge-auth/htpasswd;
+          proxy_pass http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/;
+        }
+        {{- else }}
         location /perses/   { proxy_pass http://{{ include "lance.fullname" . }}-perses:8080/; }
         location /greptime/ { proxy_pass http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/; }
+        {{- end }}
         {{- end }}
 
         # Gateway's own liveness (doesn't depend on any upstream).
@@ -112,11 +130,23 @@ spec:
           ports: [{ name: http, containerPort: {{ $port }} }]
           volumeMounts:
             - { name: conf, mountPath: /etc/nginx/nginx.conf, subPath: nginx.conf }
+            {{- if and .Values.observability.enabled .Values.observability.edgeAuth.enabled }}
+            # §5e — the auth_basic htpasswd, mounted read-only (file-only, never a pod env/arg value).
+            - { name: edge-auth, mountPath: /etc/nginx/edge-auth, readOnly: true }
+            {{- end }}
           readinessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
       volumes:
         - name: conf
           configMap: { name: {{ include "lance.fullname" . }}-gateway }
+        {{- if and .Values.observability.enabled .Values.observability.edgeAuth.enabled }}
+        # §5e — the observability edge-auth htpasswd Secret (templates/observability.yaml), projected as a
+        # single file for nginx's auth_basic_user_file. Infra-tier: the credential lives only in the Secret.
+        - name: edge-auth
+          secret:
+            secretName: {{ include "lance.fullname" . }}-observability-edge-auth
+            items: [{ key: htpasswd, path: htpasswd }]
+        {{- end }}
 ---
 apiVersion: v1
 kind: Service

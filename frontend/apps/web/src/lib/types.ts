@@ -24,6 +24,7 @@ export type ColumnRef = S["ColumnRef"];
 export type ColumnNode = S["ColumnNode"];
 export type ColumnEdge = S["ColumnEdge"];
 export type ColumnGraph = S["ColumnGraph"];
+export type ColumnNeighbors = S["ColumnNeighbors"];
 export type DatasetSummary = S["DatasetSummary"];
 export type Datasets = S["Datasets"];
 export type JobSummary = S["JobSummary"];

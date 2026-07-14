@@ -31,4 +31,23 @@ spec:
   tracing:
     samplingRate: {{ .Values.observability.samplingRate | quote }}
 {{- end }}
+---
+{{- if .Values.observability.edgeAuth.enabled }}
+# Edge basic-auth htpasswd for the gateway's public /perses/ + /greptime/ locations (§5e). Both are
+# otherwise UNAUTHENTICATED (the Perses dashboard + GreptimeDB's raw SQL/ingest on :4000), and the prod
+# Ingress→gateway proxies them publicly — this Secret backs the nginx `auth_basic_user_file` (gateway.yaml)
+# that closes that hole. INFRA-TIER credential (the two-tier secret model, like infra-credentials.yaml):
+# held ONLY in this k8s Secret and mounted read-only into the gateway pod as a file — never a plaintext pod
+# env/arg value. In prod the operator populates `observability.edgeAuth.htpasswd` out-of-band from
+# OpenBao/Vault (external-secrets), so no credential ships in values.yaml; `required` fails the render
+# CLOSED when edgeAuth is enabled but the htpasswd line is unset.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-observability-edge-auth
+  labels: {{- include "lance.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  htpasswd: {{ required "observability.edgeAuth.htpasswd must be set when observability.edgeAuth.enabled=true — supply an htpasswd line (user:apr1/bcrypt-hash) via --set / an external secret, e.g. `htpasswd -nbB observer <pw>`" .Values.observability.edgeAuth.htpasswd | quote }}
+{{- end }}
 {{- end }}

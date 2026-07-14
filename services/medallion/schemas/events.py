@@ -13,7 +13,13 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for, schema_facet
+from common.openlineage import (
+    RUN_EVENT_SCHEMA_URL,
+    column_lineage_facet,
+    custom_facet,
+    run_id_for,
+    schema_facet,
+)
 from common.schema import SchemaFields
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event.
@@ -64,6 +70,7 @@ def _dataset(
     assertions: list[dict[str, Any]] | None = None,
     source_uri: str | None = None,
     schema_fields: SchemaFields | None = None,
+    column_edges: list[tuple[str, str, str, str, str, str, bool]] | None = None,
 ) -> dict[str, Any]:
     ds: dict[str, Any] = {"namespace": namespace, "name": name}
     facets: dict[str, Any] = {}
@@ -72,6 +79,13 @@ def _dataset(
     # Built by the SHARED common.openlineage helper — one spec version across all emitters.
     if schema_fields:
         facets["schema"] = schema_facet(_PRODUCER, schema_fields)
+    # columnLineage is an OUTPUT facet — field-to-field provenance (#1). Present only when the transform
+    # declared its input→output column edges; the lineage consumer persists each as a DERIVED_FROM_COLUMN
+    # edge, and the frontend "columns" view renders it. Empty edges collapse to no facet (helper returns {}).
+    if column_edges:
+        column_facet = column_lineage_facet(_PRODUCER, column_edges)
+        if column_facet:
+            facets["columnLineage"] = column_facet
     if version is not None:
         facets["version"] = {
             "_producer": _PRODUCER,
@@ -141,6 +155,7 @@ def build_run_event(
     assertions: list[dict[str, Any]] | None = None,
     source_uri: str | None = None,
     schema_fields: SchemaFields | None = None,
+    column_map: list[tuple[str, str, str]] | None = None,
     token: str | None = None,
     event_type: str = "COMPLETE",
     error_message: str | None = None,
@@ -180,6 +195,16 @@ def build_run_event(
     # version/stats/assertions. It does NOT fabricate lineage: the repo also gates DERIVED_FROM on
     # is_success, so keeping the inputs records the READ, not a derivation.
     failed = event_type.upper() in {"FAIL", "ABORT"}
+    # Resolve the stage's declared column map to full columnLineage edges: a medallion transform has exactly
+    # ONE upstream input, so each (out_field, in_field, subtype) edge points at inputs[0] (#1). No masking in
+    # the cascade compute (identity carry-forward / artifact derivation); a PII-hash stage would set it true.
+    column_edges: list[tuple[str, str, str, str, str, str, bool]] | None = None
+    if column_map and len(inputs) == 1:
+        in_ns, in_name = inputs[0]
+        column_edges = [
+            (out_field, in_ns, in_name, in_field, "DIRECT", subtype, False)
+            for out_field, in_field, subtype in column_map
+        ]
     outputs = [
         _dataset(output_namespace, output_name)
         if failed
@@ -192,6 +217,7 @@ def build_run_event(
             assertions=assertions,
             source_uri=source_uri,
             schema_fields=schema_fields,
+            column_edges=column_edges,
         )
     ]
     return {

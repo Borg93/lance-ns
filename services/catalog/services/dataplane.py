@@ -21,6 +21,7 @@ from typing import Any
 
 import lance
 import pyarrow as pa
+import pyarrow.fs as pafs
 from common import blobs
 from common.schema import SchemaFields, facet_fields
 from lance_namespace import (
@@ -44,6 +45,7 @@ from lance_namespace import (
     DeleteTableBranchResponse,
     DeleteTableTagRequest,
     DeleteTableTagResponse,
+    DeregisterTableRequest,
     DescribeTableRequest,
     DropTableRequest,
     GetTableTagVersionRequest,
@@ -55,6 +57,7 @@ from lance_namespace import (
     ListTableIndicesRequest,
     ListTableTagsRequest,
     ListTableTagsResponse,
+    TableAlreadyExistsError,
     TableColumnNotFoundError,
     TableNotFoundError,
     TableTagNotFoundError,
@@ -212,6 +215,14 @@ def _write_blob(
             mode=mode,
             storage_options=so,
             data_storage_version="2.2",
+            # #5a: durable row identity — ``_rowid`` stays constant across compaction (which rewrites
+            # fragments and invalidates row ADDRESSES), gating the row-id index + row-version tracking
+            # (``_row_*_at_version``) that field-level/temporal lineage rests on. CREATE-TIME-ONLY (silently
+            # no-ops on an existing dataset), so it's set on every blob create/overwrite here — matching the
+            # medallion cascade writes (compute.py). The NON-blob native create (``native.call``) pins format
+            # 2.1 and exposes no row-id flag through CreateTableRequest, so those tables are covered only once
+            # creates route through the client-direct write path (#2); this closes the path the catalog owns.
+            enable_stable_row_ids=True,
             initial_bases=initial_bases,
             allow_external_blob_outside_bases=allow_external,
         )
@@ -340,6 +351,137 @@ def _existing_location(ns: LanceNamespace, segments: list[str]) -> tuple[str | N
         return None, False
     location = getattr(resp, "table_uri", None) or getattr(resp, "location", None)
     return location, bool(getattr(resp, "is_only_declared", False))
+
+
+def rename_table(
+    ns: LanceNamespace,
+    so: StorageOptions,
+    segments: list[str],
+    new_table_name: str,
+    new_namespace_id: list[str] | None,
+) -> tuple[list[str], str]:
+    """Rename a table IN-PROCESS (#5b) — the ``dir`` backend's ``rename_table`` is a hard 501, and Lance
+    has no format-level rename because table rename is a namespace-layer remap, not a data-plane commit.
+
+    A Lance dataset is self-contained under one root with RELATIVE internal refs, so a rename is a byte
+    copy of the dataset root to the destination location + a repoint of the namespace: declare the
+    destination to learn its canonical location, relocate the data there, deregister the source. The copy
+    preserves the full version history a read→rewrite would collapse to v1. Returns
+    ``(new_segments, new_location)``. Raises ``TableNotFoundError`` (source missing / declared-only) or
+    ``TableAlreadyExistsError`` (destination already a written table) so the endpoint maps 404 / 409.
+
+    Data-safe within a single call, but NOT crash-atomic (documented limitation): a crash BETWEEN the copy
+    and the source delete leaves the data under BOTH ids — a duplicate, never data loss — and the retry
+    then 409s on the now-written destination until an operator drops one copy. The atomic fix is to copy
+    into a staging path and publish it as the final step (future). No in-call failure loses data: a copy
+    failure drops the half-copy (source intact + name free), and a source-delete failure orphans the source
+    bytes for the reconcile sweep (the data is already safe at the destination — never roll it back).
+    """
+    # A blank/whitespace name would declare the identifier ``['']``, byte-copy the dataset to
+    # ``<root>/.lance`` and DESTROY the named source — all while returning 200 (audit 2026-07-14).
+    if not new_table_name.strip():
+        raise InvalidInputError("new_table_name is required")
+    dest_parent = list(new_namespace_id) if new_namespace_id else segments[:-1]
+    new_segments = [*dest_parent, new_table_name]
+    if new_segments == segments:
+        raise InvalidInputError("the rename destination is identical to the source")
+    source_uri, source_only_declared = _existing_location(ns, segments)
+    if source_uri is None or source_only_declared:
+        # Missing OR declared-but-unwritten → no dataset to relocate (404, symmetric with every op that
+        # requires a written table).
+        raise TableNotFoundError(f"table not found: {'.'.join(segments)}")
+    # The destination must be free in EVERY form. A declared-only stub is TAKEN, never adopted: reusing it
+    # would skip ``declare_table`` — the only ATOMIC arbiter — so two concurrent renames into the same
+    # declared name would both copy into one location and both retire their sources, silently destroying a
+    # table (reproduced 9/10 under load, audit 2026-07-14). A stub from a crashed rename is cleared with an
+    # explicit drop, never implicitly reused. (This pre-check is only a fast path — ``declare_table`` below
+    # is the real guard, so a rename racing us for the same name loses there and surfaces a clean 409.)
+    dest_uri, _dest_only_declared = _existing_location(ns, new_segments)
+    if dest_uri is not None:
+        raise TableAlreadyExistsError(f"table already exists: {'.'.join(new_segments)}")
+    location = ns.declare_table(DeclareTableRequest(id=new_segments)).location
+    if not location:
+        raise InvalidInputError("namespace did not return a location for the rename destination")
+    try:
+        _copy_dataset(source_uri, location, so)
+    except Exception:
+        # The COPY failed: the destination is a partial half-copy and the SOURCE is untouched, so dropping
+        # the half-copy is safe — it leaves the source intact and the destination name free (retryable).
+        with suppress(Exception):
+            ns.drop_table(DropTableRequest(id=new_segments))
+        raise
+    # The copy SUCCEEDED — the destination now holds a COMPLETE copy and is authoritative. From here the
+    # destination must NEVER be rolled back: the source delete is NON-ATOMIC (S3 batches DeleteObjects; a
+    # local walk can fail mid-directory), so a partial delete can leave the source unreadable — and dropping
+    # the destination on that error would lose the data the copy just secured, recoverable NOWHERE (audit
+    # 2026-07-14: strictly worse than the swallowed-error bug it replaced). A source-delete failure instead
+    # ORPHANS the source bytes for the reconcile sweep; the rename still succeeds because the data is safe.
+    try:
+        _delete_dataset(source_uri, so)
+    except Exception as exc:  # noqa: BLE001 — the data is safe at the destination; never roll it back
+        log.warning(
+            "rename_source_bytes_orphaned",
+            extra={"source": ".".join(segments), "dest": ".".join(new_segments), "error": str(exc)},
+        )
+    # Backends that keep a namespace pointer SEPARATE from the bytes retire it here; on ``dir`` the delete
+    # above already did (so this raises TableNotFound). The destination is already published and correct, so
+    # a failure here is a stale-pointer ops cleanup, not a failed rename.
+    try:
+        ns.deregister_table(DeregisterTableRequest(id=segments))
+    except TableNotFoundError:
+        pass
+    except Exception as exc:  # noqa: BLE001 — the rename SUCCEEDED; a retained pointer is an ops warning
+        log.warning(
+            "rename_source_pointer_retained",
+            extra={"source": ".".join(segments), "error": str(exc)},
+        )
+    return new_segments, location
+
+
+def _dataset_fs(uri: str, so: StorageOptions) -> tuple[pafs.FileSystem, str]:
+    """Resolve ``uri`` to a ``(filesystem, path)`` pair for a dataset relocation.
+
+    A local ``file://`` / bare-path location (the ``dir`` backend default) needs no credentials; an
+    ``s3://`` location builds an ``S3FileSystem`` from the SAME storage options the datasets are opened
+    with (path-style, http-ok endpoint) — mirroring the media head's filesystem so RustFS/MinIO work.
+    """
+    if uri.startswith("s3://") and so.get("endpoint"):
+        scheme, _, host = so["endpoint"].partition("://")
+        fs = pafs.S3FileSystem(
+            access_key=so.get("access_key_id"),
+            secret_key=so.get("secret_access_key"),
+            endpoint_override=host or so["endpoint"],
+            scheme=scheme or "http",
+            region=so.get("region", ""),
+        )
+        return fs, uri[len("s3://") :]
+    resolved, path = pafs.FileSystem.from_uri(uri)
+    return resolved, path
+
+
+def _copy_dataset(source_uri: str, dest_uri: str, so: StorageOptions) -> None:
+    """Byte-copy a self-contained Lance dataset root ``source_uri`` → ``dest_uri``, preserving ALL versions
+    (a read→rewrite would collapse the history to v1). ``copy_files`` recurses the dataset directory."""
+    src_fs, src_path = _dataset_fs(source_uri, so)
+    dst_fs, dst_path = _dataset_fs(dest_uri, so)
+    pafs.copy_files(src_path, dst_path, source_filesystem=src_fs, destination_filesystem=dst_fs)
+
+
+def _delete_dataset(uri: str, so: StorageOptions) -> None:
+    """Delete a dataset root AUTHORITATIVELY — only an ALREADY-ABSENT root is tolerated.
+
+    Deliberately NOT best-effort: on the shipped ``dir`` backend ``deregister_table`` is a no-op, so this
+    delete IS the table's retirement. Swallowing a store error here would report a *successful* rename over
+    a source that still resolves to half-deleted bytes — and ``pyarrow``'s ``ArrowIOError`` subclasses
+    ``OSError``, which is exactly how a RustFS/S3 5xx used to be eaten silently (audit 2026-07-14). A real
+    IO error must PROPAGATE so the caller can decide — ``rename_table`` orphans the source bytes for the
+    reconcile sweep rather than rolling the destination back (the destination already holds the only copy).
+    """
+    fs, path = _dataset_fs(uri, so)
+    # An ALREADY-ABSENT root is the retirement we wanted (idempotent on retry); every OTHER error — an S3
+    # 5xx, a permission failure — propagates so the caller rolls the destination back.
+    with suppress(FileNotFoundError):
+        fs.delete_dir(path)
 
 
 # Streaming window for the blob serving path: each chunk is one ``read_range`` call against

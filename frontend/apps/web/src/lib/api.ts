@@ -1,5 +1,6 @@
 import type {
 	ColumnGraph,
+	ColumnNeighbors,
 	Datasets,
 	DemoDatasets,
 	Events,
@@ -63,3 +64,9 @@ export const fetchJobs = () => getJSON<Jobs>("jobs");
 export const fetchNamespaces = () => getJSON<Namespaces>("namespaces");
 export const fetchColumnGraph = (name: string) =>
 	getJSON<ColumnGraph>(`datasets/${enc(name)}/columns`);
+// Per-FIELD provenance (upstream) / impact (downstream) — the field-level analogue of the dataset
+// graph's neighbors, gated by require_metadata_access (a GET read → served through the read-only proxy).
+export const fetchColumnUpstream = (name: string, field: string) =>
+	getJSON<ColumnNeighbors>(`datasets/${enc(name)}/columns/${enc(field)}/upstream`);
+export const fetchColumnDownstream = (name: string, field: string) =>
+	getJSON<ColumnNeighbors>(`datasets/${enc(name)}/columns/${enc(field)}/downstream`);

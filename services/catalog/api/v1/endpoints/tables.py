@@ -263,33 +263,72 @@ async def rename_table(
     id: str,
     body: RenameTableRequest,
     ns: NamespaceDep,
+    so: StorageOptionsDep,
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    emitter: LineageEmitterDep,
+    authorization: Annotated[str | None, Header()] = None,
 ) -> RenameTableResponse:
-    """Rename the table at ``id`` to its new id via ``rename_table``, then revoke
-    the source id's FGA tuples and seed ownership on the destination id.
+    """Rename the table at ``id`` IN-PROCESS (#5b), then migrate its FGA ownership and emit dest←source
+    lineage.
 
-    No lineage is emitted: the ``dir`` namespace backend returns 501 for ``rename_table`` (unsupported), so a
-    rename can't happen on the shipped stack — provenance can't be lost on an op that never runs. If a
-    rename-supporting backend is adopted, emit dest←source lineage here (see todo_fable §11)."""
+    Lance has no format-level rename (table rename is a namespace-layer remap, not a data-plane commit) and
+    the ``dir`` backend's ``rename_table`` is a hard 501 — 501 is also off-spec (the Namespace REST spec
+    makes rename a first-class Metadata op). So the rename is done in-process: the self-contained dataset
+    root is byte-copied to the destination location (preserving version history) and the source pointer is
+    deregistered (``dataplane.rename_table``). The caller must hold ``can_drop`` on the source (owner tier,
+    gated by the router ``authorize``) AND ``can_create_table`` on the DESTINATION parent — else a source
+    owner could plant their table into a namespace/tenant they lack create rights on. FGA tuples migrate
+    from the old id to the new; a versionless REGISTER marker records the (re)attachment at the new location
+    so the destination appears in the graph with its provenance (#23 reconcile back-fills its on-disk
+    version). Source missing → 404 ``TableNotFound``; destination name taken → 409 ``TableAlreadyExists``."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
     # Rename mints a new table identifier under ``new_namespace_id`` (defaulting to the source's parent
     # namespace, i.e. all source segments but the last) + ``new_table_name``.
     dest_parent = list(body.new_namespace_id) if body.new_namespace_id else segments[:-1]
     new_segments = [*dest_parent, body.new_table_name]
     # Renaming INTO a namespace is a create in that namespace: authorize can_create_table on the DESTINATION
-    # parent BEFORE the (destructive, relocating) native rename — else a source-table owner could plant their
-    # table into a namespace/tenant they have no create rights on. (authorize already gated can_drop on the
-    # source at owner tier.)
+    # parent BEFORE the (destructive, relocating) rename — else a source-table owner could plant their table
+    # into a namespace/tenant they have no create rights on. (authorize already gated can_drop on the source.)
     await fga_deps.require_create_on_parent(client, settings, token, resource="table", segments=new_segments)
-    response: RenameTableResponse = await run_in_threadpool(native.call, ns, "rename_table", body)
+    new_segments, location = await run_in_threadpool(
+        dataplane.rename_table, ns, so, segments, body.new_table_name, body.new_namespace_id
+    )
+    # Emit the SOURCE's terminal DROP marker BEFORE revoking its tuples. The default ``http`` lineage
+    # transport runs ``enforce_output_authz`` (``can_write_data`` on the source); revoking first deletes the
+    # parent→writer edge, so even an admin would 403 and this best-effort emit would be silently swallowed —
+    # the sibling drop/deregister endpoints emit-before-revoke for exactly this reason (audit 2026-07-14). A
+    # rename DELETES the source bytes, so it is a DROP (not a deregister, which keeps data); without this
+    # marker the source's most recent successful run stays a WRITE and it looks alive forever
+    # (``dropped_at()`` never fires; reconcile WARNs ``missing_on_storage`` against the deleted location).
+    await emit_write_event(
+        emitter,
+        segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=None,
+        operation=DROP_TABLE,
+        authorization=authorization,
+    )
     # Revoke the SOURCE id's tuples (it no longer names a table) then seed the destination — so no
     # stale grant survives under the old id and the caller keeps ownership under the new one.
     await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=new_segments)
-    return response
+    # …then the DESTINATION's (re)attachment at its new location — AFTER its ownership is seeded, so the
+    # emit's own ``can_write_data`` check passes on the http transport. Versionless: #23 reconcile back-fills
+    # the real on-disk version, which the relocate preserved along with the whole version history.
+    await emit_write_event(
+        emitter,
+        new_segments,
+        delimiter=settings.delimiter,
+        author=token.sub if token is not None else None,
+        version=None,
+        operation=REGISTER_TABLE,
+        authorization=authorization,
+        source_uri=location,
+    )
+    return RenameTableResponse()
 
 
 @router.post("/{id}/restore", response_model_exclude_none=True)

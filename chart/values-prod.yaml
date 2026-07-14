@@ -88,6 +88,18 @@ ingress:
   className: nginx # match your cluster's Ingress controller (nginx / traefik / …)
   host: "" # e.g. lance.example.com
 
+# --- Observability edge auth (§5e): nginx auth_basic on the public /greptime/ + /perses/ Ingress routes.
+# BOTH are otherwise UNAUTHENTICATED — GreptimeDB exposes raw SQL/ingest on :4000 and Perses is the
+# dashboard — and the gateway proxies them through the prod Ingress, so without this they are publicly
+# reachable. The htpasswd line is an INFRA-tier credential: supply it OUT-OF-BAND (never in this file) via
+# `--set observability.edgeAuth.htpasswd=…` sourced from OpenBao / external-secrets (an apr1/bcrypt hash,
+# e.g. `htpasswd -nbB observer <pw>`). The render FAILS CLOSED if enabled with no htpasswd (like the other
+# prod-secret guards). Full GreptimeDB `auth.enabled` (client-cred propagation to the OTLP exporters /
+# Vector / the Perses datasource) + Perses OIDC via Dex are the documented follow-on.
+observability:
+  edgeAuth:
+    enabled: true
+
 # ===================================================================================================
 # EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Disable the in-cluster component
 # AND set its external endpoint — the apps then connect to the managed service (verified: no in-cluster

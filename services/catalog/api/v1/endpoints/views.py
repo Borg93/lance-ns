@@ -31,16 +31,19 @@ async def create_materialized_view(
 ) -> CreateMaterializedViewResponse:
     """Create a materialized view via the native backend's ``create_materialized_view``.
 
-    Then seeds FGA ownership on the ``table`` type so the creator keeps refresh/read rights on it.
+    Then seeds FGA ownership on the ``materialized_view`` type so the creator keeps refresh/read rights.
     """
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments
     response: CreateMaterializedViewResponse = await run_in_threadpool(
         native.call, ns, "create_materialized_view", body
     )
-    # An MV is scoped to the ``table`` FGA type and create is gated on the parent — without
-    # seeding ownership the creator would be locked out of refresh/reads on their own view.
-    await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+    # Create is gated on the parent namespace (can_create_materialized_view); seed owner + the parent edge
+    # on the ``materialized_view`` object so the creator keeps can_refresh/can_read on their own view and a
+    # namespace writer inherits refresh rights via the cascade. Without it the creator would be locked out.
+    await fga_deps.seed_ownership(
+        client, settings, token, resource="materialized_view", segments=segments
+    )
     return response
 
 

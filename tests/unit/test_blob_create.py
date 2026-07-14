@@ -21,6 +21,7 @@ from lance_namespace import (
     DescribeTableRequest,
     InvalidInputError,
     TableAlreadyExistsError,
+    TableNotFoundError,
     connect,
 )
 
@@ -87,6 +88,9 @@ def test_create_table_writes_blob_at_2_2_and_roundtrips(tmp_path: Path) -> None:
     assert resp.location
     dataset = _open(ns, ["clips"])
     assert dataset.data_storage_version == "2.2"
+    # #5a: the catalog's own blob create path stamps durable row identity (create-time-only), matching the
+    # medallion cascade — so field/temporal lineage over catalog-created blob tables has a stable anchor.
+    assert dataset.has_stable_row_ids
     assert dataset.count_rows() == 2
     assert dataset.read_blobs("payload", indices=[0])[0][1] == b"img-1"
 
@@ -229,6 +233,145 @@ def test_external_blob_allowlist_accepts_in_base_rejects_out_of_base(tmp_path: P
     # OUTSIDE every registered base → rejected (allowlist doesn't cover it, blanket flag off).
     with pytest.raises(InvalidInputError, match="external"):
         create_table(ns, {}, ["out_base"], _pointer(outside.as_uri()), external_blob_bases=bases)
+
+
+# --- in-process rename (#5b): the dir backend's native rename is a 501; relocate + repoint ------------ #
+
+
+def test_rename_relocates_dataset_and_frees_source(tmp_path: Path) -> None:
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["clips"], _blob_ipc([b"a", b"b"]), mode="create")
+
+    new_segments, location = rename_table(ns, {}, ["clips"], "reels", None)
+    assert new_segments == ["reels"] and location
+
+    # Discoverable under the NEW id (data intact), gone under the OLD id.
+    ds = _open(ns, ["reels"])
+    assert ds.count_rows() == 2
+    assert ds.read_blobs("payload", indices=[0])[0][1] == b"a"
+    with pytest.raises(TableNotFoundError):
+        ns.describe_table(DescribeTableRequest(id=["clips"]))
+
+
+def test_rename_preserves_version_history(tmp_path: Path) -> None:
+    # A byte relocation keeps ALL versions — a read→rewrite would collapse the table to v1.
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["t"], _blob_ipc([b"a"]), mode="create")
+    create_table(ns, {}, ["t"], _blob_ipc([b"a", b"b"]), mode="overwrite")  # commits v2
+
+    rename_table(ns, {}, ["t"], "t2", None)
+    assert len(_open(ns, ["t2"]).versions()) >= 2  # history survived the rename
+
+
+def test_rename_into_another_namespace(tmp_path: Path) -> None:
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["src", "clip"], _blob_ipc([b"x"]), mode="create")
+
+    new_segments, _ = rename_table(ns, {}, ["src", "clip"], "clip", ["dst"])
+    assert new_segments == ["dst", "clip"]
+    assert _open(ns, ["dst", "clip"]).count_rows() == 1
+    with pytest.raises(TableNotFoundError):
+        ns.describe_table(DescribeTableRequest(id=["src", "clip"]))
+
+
+def test_rename_onto_existing_name_conflicts(tmp_path: Path) -> None:
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["a"], _blob_ipc([b"x"]), mode="create")
+    create_table(ns, {}, ["b"], _blob_ipc([b"y"]), mode="create")
+    with pytest.raises(TableAlreadyExistsError):
+        rename_table(ns, {}, ["a"], "b", None)
+    # The source is untouched by a rejected rename — still readable at its original id.
+    assert _open(ns, ["a"]).read_blobs("payload", indices=[0])[0][1] == b"x"
+
+
+def test_rename_missing_source_is_not_found(tmp_path: Path) -> None:
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    with pytest.raises(TableNotFoundError):
+        rename_table(ns, {}, ["ghost"], "x", None)
+
+
+# --- rename data-safety regressions (audit 2026-07-14) ------------------------------------------------ #
+
+
+def test_rename_rejects_a_blank_name_and_keeps_the_source(tmp_path: Path) -> None:
+    """A blank/whitespace name used to declare the identifier ``['']``, byte-copy the dataset to
+    ``<root>/.lance`` and DESTROY the named source — all while returning 200. It must be a 400."""
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["keep"], _blob_ipc([b"x"]), mode="create")
+
+    for blank in ("", "   "):
+        with pytest.raises(InvalidInputError):
+            rename_table(ns, {}, ["keep"], blank, None)
+    assert _open(ns, ["keep"]).read_blobs("payload", indices=[0])[0][1] == b"x"  # source untouched
+
+
+def test_rename_onto_itself_is_rejected(tmp_path: Path) -> None:
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["same"], _blob_ipc([b"x"]), mode="create")
+
+    with pytest.raises(InvalidInputError):
+        rename_table(ns, {}, ["same"], "same", None)
+    assert _open(ns, ["same"]).count_rows() == 1  # not relocated onto itself / deleted
+
+
+def test_rename_treats_a_declared_only_destination_as_taken(tmp_path: Path) -> None:
+    """The old code REUSED a declared-only destination, which skipped ``declare_table`` — the only ATOMIC
+    arbiter. Two concurrent renames into the same declared name then both copied into one location and both
+    retired their sources, silently destroying a table. A declared stub is now TAKEN (409), never adopted."""
+    from catalog.services.dataplane import rename_table
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["src"], _blob_ipc([b"x"]), mode="create")
+    ns.declare_table(DeclareTableRequest(id=["stub"]))  # declared-but-unwritten destination
+
+    with pytest.raises(TableAlreadyExistsError):
+        rename_table(ns, {}, ["src"], "stub", None)
+    assert _open(ns, ["src"]).read_blobs("payload", indices=[0])[0][1] == b"x"  # source intact
+
+
+def test_rename_keeps_destination_when_source_delete_fails(tmp_path: Path, monkeypatch) -> None:
+    """Once the copy succeeds the DESTINATION holds the only complete copy and is authoritative. Deleting
+    the source is NON-ATOMIC (an S3 batch, a local mid-directory walk), so a partial-then-failed delete must
+    NOT roll the destination back — that would lose the data the copy just secured, recoverable nowhere
+    (the CRITICAL regression the naive rollback introduced). The rename SUCCEEDS; the corrupted source bytes
+    are orphaned for the reconcile sweep, and the data stays readable at the destination."""
+    import os
+    import shutil
+
+    from catalog.services import dataplane
+
+    ns = connect("dir", {"root": str(tmp_path)})
+    create_table(ns, {}, ["a"], _blob_ipc([b"x", b"y"]), mode="create")
+
+    def _partial_then_fail(uri: str, _so: dict) -> None:
+        # Worst case: a NON-ATOMIC delete removes PART of the source (corrupting it), then raises like a 5xx.
+        path = uri[len("file://") :] if uri.startswith("file://") else uri
+        versions = os.path.join(path, "_versions")
+        if os.path.isdir(versions):
+            shutil.rmtree(versions)  # source is now unreadable — the copy at dest is the ONLY good copy
+        raise OSError("rustfs 503 mid-batch")
+
+    monkeypatch.setattr(dataplane, "_delete_dataset", _partial_then_fail)
+
+    # The rename SUCCEEDS (does not raise) — a source-delete failure never rolls the destination back.
+    new_segments, location = dataplane.rename_table(ns, {}, ["a"], "b", None)
+    assert new_segments == ["b"] and location
+    # The data is intact and readable at the DESTINATION — recoverable, not lost.
+    assert _open(ns, ["b"]).read_blobs("payload", indices=[0])[0][1] == b"x"
 
 
 def test_rejected_external_create_rolls_back_and_stays_retryable(tmp_path: Path) -> None:

@@ -1,13 +1,15 @@
 """Fine-grained authorization via OpenFGA (Zanzibar-style relationship checks).
 
-The authorization model (``services/common/auth/model.fga`` / ``model.json``) defines seven types —
+The authorization model (``services/common/auth/model.fga`` / ``model.json``) defines nine types —
 ``user``, ``team`` (with ``team#member`` as a group subject), ``role`` (``role#assignee``), ``project``,
-``warehouse`` (the S3-bucket root), a self-nesting ``namespace``, and ``table``. Privileges are concentric
-(``owner`` ⊇ ``writer`` ⊇ ``reader``, plus a separate ``validator`` rung gating ``can_promote``) and cascade
-DOWN the hierarchy via ``parent`` (team → project → warehouse → namespace → nested namespace → table). Every
-API operation is checked against a ``can_*`` ACTION relation — the model owns the op→privilege map, the app
-just names the action (see ``services/catalog/api/fga_deps.py``). Tuples persist in the OpenFGA datastore
-(Postgres in the deployed stack; SQLite for the auth-e2e).
+``warehouse`` (the S3-bucket root), a self-nesting ``namespace``, ``table``, plus ``materialized_view`` and
+``transaction`` (both hanging off namespace/warehouse and inheriting the same rungs via ``parent``).
+Privileges are concentric (``owner`` ⊇ ``writer`` ⊇ ``reader``, plus a separate ``validator`` rung gating
+``can_promote``) and cascade DOWN the hierarchy via ``parent`` (team → project → warehouse → namespace →
+nested namespace → table / materialized_view / transaction). Every API operation is checked against a
+``can_*`` ACTION relation — the model owns the op→privilege map, the app just names the action (see
+``services/catalog/api/fga_deps.py``). Tuples persist in the OpenFGA datastore (Postgres in the deployed
+stack; SQLite for the auth-e2e).
 
 Resilience: ``check`` / ``batch_check`` / ``list_objects`` and the post-create grant
 writes go through a bounded retry with exponential backoff + jitter (tenacity). Only

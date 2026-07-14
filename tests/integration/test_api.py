@@ -211,8 +211,11 @@ def test_domain_conflict_maps_to_409(client: TestClient, fake_ns: MagicMock) -> 
 
 
 def test_backend_stub_message_maps_to_501(client: TestClient, fake_ns: MagicMock) -> None:
-    fake_ns.rename_table.side_effect = RuntimeError("rename_table not implemented")
-    resp = client.post("/v1/table/db$t/rename", json={"new_table_name": "t2"})
+    # native.call laundering: a backend that stubs an op with "not implemented" surfaces as 501 (spec
+    # "unsupported"), not a 500. rename_table is now implemented in-process (#5b), so register_table — a
+    # still-native-delegated op — stands in for a genuinely-unwired backend op.
+    fake_ns.register_table.side_effect = RuntimeError("register_table not implemented")
+    resp = client.post("/v1/table/db$t/register", json={"location": "s3://b/db$t"})
     assert resp.status_code == 501
     assert resp.json()["status"] == 501
 

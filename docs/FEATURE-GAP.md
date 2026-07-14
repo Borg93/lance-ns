@@ -16,7 +16,11 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 - **Multimodal (blob-v2) create** — `create_table` picks the write path by schema (§9 P1): a `lance.blob.v2`
   column needs file format 2.2, which the native create pins at 2.1 and rejects, so it routes to a direct
   `write_dataset(data_storage_version="2.2")` (declare → write, with rollback-on-failure); every other schema
-  delegates to native. Client `storage_options` are still not accepted (the catalog vends storage access).
+  delegates to native. Both `data_storage_version` and `enable_stable_row_ids` are **create-time immutable** —
+  a dataset cannot be upgraded 2.1→2.2 nor have stable row-ids turned on in place (a later `alter` silently
+  no-ops), so the 2.2 + row-id policy must be stamped at the create/fresh-bucket boundary; this is *why* blob
+  create is routed server-side rather than left to a post-hoc alter. Client `storage_options` are still not
+  accepted (the catalog vends storage access).
   **Serving (2026-07-12, Batch 13)**: `GET /v1/table/{id}/blobs?column=&row=[&version=]` streams blob bytes
   to credential-less consumers (browser/notebook) with RFC 9110 Range support — a `Range: bytes=…` request
   reads ONLY the window from storage via the lazy `BlobFile` (206 + `Content-Range`; 416 when unsatisfiable)

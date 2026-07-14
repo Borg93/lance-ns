@@ -116,7 +116,12 @@ def test_mover_emits_lineage_then_triggers_next_stage() -> None:
 
 def test_mover_ray_branch_submits_job_then_emits_measured_lineage(monkeypatch: pytest.MonkeyPatch) -> None:
     """ray_enabled: handle_stage submits the Ray job, measures the written dataset, and emits the SAME
-    lineage (with the measured version) + triggers the next stage — the in-process contract, via Ray."""
+    lineage (measured version AND column edges) + triggers the next stage — the in-process contract, via Ray.
+
+    The Ray branch must read back with ``measure_stage``, not a bare ``measure``: the transform happened
+    out-of-process, so the column edges are reconstructed from the on-disk schemas. A bare measure would
+    hand ``build_run_event`` an empty column_map and the columnLineage facet would silently vanish on the
+    production seam (the real end-to-end proof is in tests/unit/test_column_lineage_emit.py)."""
     from medallion.services.compute import WriteResult
 
     submitted: dict[str, Any] = {}
@@ -125,16 +130,26 @@ def test_mover_ray_branch_submits_job_then_emits_measured_lineage(monkeypatch: p
         submitted.update({"from": from_uri, "to": to_uri, "stage": stage, "token": token})
 
     monkeypatch.setattr(mover, "submit_stage_job", fake_submit)
-    measured = WriteResult(version=7, row_count=5, size_bytes=99)
-    monkeypatch.setattr(mover, "measure", lambda _uri, _so: measured)
+    measured = WriteResult(version=7, row_count=5, size_bytes=99, column_map=[("id", "id", "IDENTITY")])
+    measured_uris: dict[str, str] = {}
+
+    def fake_measure_stage(from_uri: str, to_uri: str, _so: dict[str, str]) -> WriteResult:
+        measured_uris.update({"from": from_uri, "to": to_uri})
+        return measured
+
+    monkeypatch.setattr(mover, "measure_stage", fake_measure_stage)
     dapr = _FakeDapr()
 
     status = asyncio.run(mover.handle_stage(cast(Any, dapr), _RAY_MOVER, {"data": {"token": "tok"}}))
 
     assert status == {"status": "SUCCESS"}
     assert submitted == {"from": "/tmp/from", "to": "/tmp/to", "stage": "silver", "token": "tok"}
+    # The measure reads BOTH ends — it needs the upstream schema to reconstruct the edges.
+    assert measured_uris == {"from": "/tmp/from", "to": "/tmp/to"}
     lineage, trigger = dapr.calls  # emit then next-stage trigger
-    assert lineage["data"]["outputs"][0]["facets"]["version"]["datasetVersion"] == "7"  # the measured version
+    facets = lineage["data"]["outputs"][0]["facets"]
+    assert facets["version"]["datasetVersion"] == "7"  # the measured version
+    assert facets["columnLineage"]["fields"]["id"]["inputFields"][0]["field"] == "id"
     assert trigger["topic"] == "medallion.silver"
 
 
@@ -189,7 +204,7 @@ def test_ray_mover_submits_for_blob_upstreams(monkeypatch: pytest.MonkeyPatch) -
     from medallion.services.compute import WriteResult
 
     measured = WriteResult(version=7, row_count=5, size_bytes=99)
-    monkeypatch.setattr(mover, "measure", lambda _uri, _so: measured)
+    monkeypatch.setattr(mover, "measure_stage", lambda _from, _to, _so: measured)
     submitted: list[str] = []
 
     async def fake_submit(*_a: Any, **_k: Any) -> None:

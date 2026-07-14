@@ -27,7 +27,7 @@ from common import blobs, schema
 from lance import blob_array, blob_field
 from pydantic import BaseModel, Field
 
-from medallion.services.derivers import derive_artifacts
+from medallion.services.derivers import ARTIFACT_COLUMNS, derive_artifacts
 
 _STAGE_COLUMN = "stage"
 
@@ -48,6 +48,15 @@ class WriteResult(BaseModel):
     #: ``SchemaDatasetFacet`` fields (``[{"name", "type"}]``, blob/vector-aware) of the written dataset —
     #: what the emit records on the WROTE edge so the lineage graph shows real media column types.
     fields: list[dict[str, str]] = Field(default_factory=list)
+    #: The stage's declared input→output column edges as ``(out_field, in_field, transformation_subtype)``
+    #: — carried columns are ``IDENTITY``, derived artifacts ``TRANSFORMATION``. The emit attaches these as
+    #: the standard ``columnLineage`` facet so the LIVE cascade populates the field-to-field graph (#1), not
+    #: just ``seed.py``. Populated by :func:`transform_stage` (in-process, from the table it just built) and
+    #: by :func:`measure_stage` (distributed, RECONSTRUCTED from the on-disk schemas of a write this process
+    #: never saw). Empty only where there is genuinely nothing to declare: the raw head (no upstream), the
+    #: dummy compute-off emit, and a bare :func:`measure` — which is why a stage the Ray job wrote MUST be
+    #: read back with ``measure_stage``, or its columnLineage facet silently disappears.
+    column_map: list[tuple[str, str, str]] = Field(default_factory=list)
 
 
 def measure(uri: str, storage_options: dict[str, str]) -> WriteResult:
@@ -63,6 +72,29 @@ def measure(uri: str, storage_options: dict[str, str]) -> WriteResult:
         size_bytes=size_bytes,
         fields=schema.facet_fields(ds.schema),
     )
+
+
+def measure_stage(from_uri: str, to_uri: str, storage_options: dict[str, str]) -> WriteResult:
+    """Measure a stage ANOTHER engine wrote (the Ray job) and reconstruct its input→output column edges.
+
+    The distributed path writes the downstream dataset out-of-process (``scripts/ray_stage_job.py``), so
+    nothing here ever sees the transformed table — a bare :func:`measure` would return an empty
+    ``column_map`` and the emit would drop the ``columnLineage`` facet, leaving the field-to-field graph (#1)
+    dead exactly where production runs. The Ray job writes the SAME columns as :func:`transform_stage`
+    (upstream columns carried forward + the ``stage`` stamp + whatever the blob content derived), so those
+    edges are recoverable from the two ON-DISK schemas alone: an output column that already exists upstream
+    is IDENTITY, an artifact column that does not is TRANSFORMATION from the blob column the deriver
+    dispatches on. Schema-only — no payload is re-read.
+    """
+    upstream_schema = lance.dataset(from_uri, storage_options=storage_options).schema
+    result = measure(to_uri, storage_options)
+    # result.fields IS the written schema (facet_fields of the just-measured dataset) — its names are all
+    # the edge reconstruction needs on the output side, so the target is opened once, not twice.
+    written_columns = [field["name"] for field in result.fields]
+    result.column_map = _column_map(
+        upstream_schema, written_columns, set(blobs.blob_field_names(upstream_schema))
+    )
+    return result
 
 
 def seed_raw(uri: str, storage_options: dict[str, str], *, rows: int = 8) -> WriteResult:
@@ -118,7 +150,39 @@ def transform_stage(
         data_storage_version="2.2",
         enable_stable_row_ids=True,
     )
-    return measure(to_uri, storage_options)
+    result = measure(to_uri, storage_options)
+    # Declare the input→output column edges for the columnLineage facet (#1) — blob_payloads' keys ARE this
+    # stage's blob columns (the deriver source). The mover attaches the single upstream dataset identity.
+    result.column_map = _column_map(ds.schema, out.column_names, set(blob_payloads))
+    return result
+
+
+def _column_map(
+    in_schema: pa.Schema, out_names: list[str], blob_cols: set[str]
+) -> list[tuple[str, str, str]]:
+    """This stage's input→output column edges: ``(out_field, in_field, transformation_subtype)``.
+
+    The generic transform carries every upstream column forward (``IDENTITY``, keyed on the same name) and
+    derives blob artifacts (``thumbnail``/``embedding``) from their source blob column
+    (``TRANSFORMATION``). The ``stage`` provenance stamp is a constant with no input, so it gets no edge.
+    A carried-forward artifact (a later stage that didn't re-derive) is IDENTITY like any other column.
+
+    Keyed on NAMES only — the upstream schema plus the names of the written columns — so the same rules
+    classify a table this process built (:func:`transform_stage`) and one only its on-disk schema is known
+    for (:func:`measure_stage`, the Ray path).
+    """
+    in_names = {f.name for f in in_schema}
+    deps: list[tuple[str, str, str]] = [
+        (name, name, "IDENTITY") for name in out_names if name != _STAGE_COLUMN and name in in_names
+    ]
+    if blob_cols:
+        source = min(blob_cols)  # matches derivers' ``min(blob_payloads)`` dispatch — deterministic source
+        deps += [
+            (artifact, source, "TRANSFORMATION")
+            for artifact in ARTIFACT_COLUMNS
+            if artifact in out_names and artifact not in in_names
+        ]
+    return deps
 
 
 def _carry_forward(ds: lance.LanceDataset, stage: str) -> tuple[pa.Table, dict[str, list[bytes]]]:

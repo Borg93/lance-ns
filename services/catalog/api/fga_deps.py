@@ -42,14 +42,17 @@ from catalog.core.identifiers import parse_identifier
 
 log = logging.getLogger(__name__)
 
-# Guarded resource prefixes, in match order. ``materialized_view`` and ``transaction`` have
-# no dedicated FGA type yet, so they are scoped to the ``table`` type (stopgap).
+# Guarded resource prefixes, in match order. Each maps to its own dedicated FGA type in the model
+# (``services/common/auth/model.fga``): ``materialized_view`` and ``transaction`` are no longer aliased
+# to ``table``. A transaction is authorized PARENT-SCOPED against its enclosing namespace (see
+# ``_authorize_transaction``) — the old ``table:<txn-id>`` alias targeted an object nothing ever seeds,
+# so every transaction op always-denied.
 _RESOURCES: tuple[str, ...] = ("namespace", "table", "materialized_view", "transaction")
 _FGA_TYPE: dict[str, str] = {
     "namespace": "namespace",
     "table": "table",
-    "materialized_view": "table",
-    "transaction": "table",
+    "materialized_view": "materialized_view",
+    "transaction": "transaction",
 }
 
 # Read-only trailing actions (reader rung). ``query``/``count_rows`` read DATA; the rest
@@ -70,13 +73,25 @@ _CREATE_ON_PARENT_SUFFIXES: dict[str, frozenset[str]] = {
     "materialized_view": frozenset({"create"}),
 }
 
-# Full route suffixes that are lifecycle/destructive on the object itself (owner rung).
+# Full route suffixes that are lifecycle/destructive/ref-plane on the object itself (owner rung).
 # Matched on the FULL suffix so ``index/{name}/drop`` / ``version/delete`` stay writer-tier.
 # ``rename`` is owner-tier: it DESTROYS the source id (revokes its tuples) and re-seeds the caller as owner
 # of the destination, so a writer-tier gate would let a non-owner rename another user's table and seize sole
 # ownership (the same escalation closed for Overwrite via require_can_drop_table). Owner-gate the source.
+# ``restore`` REWINDS the table to an older version (destructive); ``branches/create`` / ``tags/create`` /
+# ``tags/update`` FORK or re-point the ref-plane — all privileged history ops kept strictly above the
+# writer rung (a plain data writer appends/overwrites within the current line only). Their ``*/delete`` /
+# ``*/list`` / ``*/version`` siblings fall through to the reader/writer tiers below.
 _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
-    "table": {"drop": "can_drop", "deregister": "can_deregister", "rename": "can_drop"},
+    "table": {
+        "drop": "can_drop",
+        "deregister": "can_deregister",
+        "rename": "can_drop",
+        "restore": "can_restore",
+        "branches/create": "can_create_branch",
+        "tags/create": "can_create_tag",
+        "tags/update": "can_update_tag",
+    },
     "namespace": {"drop": "can_delete"},
 }
 
@@ -126,7 +141,15 @@ def _action_relation(fga_type: str, suffix: str) -> str:
         if action in _META_READ_ACTIONS or action in _DATA_READ_ACTIONS:
             return "can_get_metadata"
         return "can_update_properties"
-    # table type (materialized_view / transaction are aliased to table)
+    if fga_type == "materialized_view":
+        # Only ``create`` (create-on-parent, handled elsewhere) and ``refresh`` reach a view. A read maps
+        # to can_read/can_get_metadata; ``refresh`` is the async rematerialize (writer-tier can_refresh).
+        if action in _DATA_READ_ACTIONS:
+            return "can_read"
+        if action in _META_READ_ACTIONS:
+            return "can_get_metadata"
+        return "can_refresh"
+    # table type (transaction is authorized parent-scoped by _authorize_transaction, never here)
     if action in _DATA_READ_ACTIONS:
         return "can_read_data"
     if action in _META_READ_ACTIONS:
@@ -141,9 +164,14 @@ def _create_parent_check(
 
     Nested child -> its parent ``namespace:<parent>``. Top-level child -> the catalog root
     object only when ``fga_lock_root_create`` is set; otherwise ``None`` (open self-serve
-    top-level create — preserves the default behaviour).
+    top-level create — preserves the default behaviour). The relation is named after the child
+    being created (``can_create_namespace`` / ``can_create_materialized_view`` / ``can_create_table``),
+    all of which reduce to the writer rung on the parent namespace.
     """
-    relation = "can_create_namespace" if resource == "namespace" else "can_create_table"
+    relation = {
+        "namespace": "can_create_namespace",
+        "materialized_view": "can_create_materialized_view",
+    }.get(resource, "can_create_table")
     parent_id = fga.parent_namespace_id(id_segments, delimiter=settings.delimiter)
     if parent_id is not None:
         return f"namespace:{parent_id}", relation
@@ -157,6 +185,45 @@ async def _require(client: OpenFgaClient, *, user: str, relation: str, obj: str)
     if not await fga.check(client, user=user, relation=relation, obj=obj):
         log.info("access_denied", extra={"sub": user, "relation": relation, "object": obj})
         raise PermissionDeniedError(f"{relation} required on {obj}")
+
+
+async def _authorize_transaction(
+    client: OpenFgaClient, settings: Settings, segments: list[str], suffix: str, *, user: str
+) -> None:
+    """Authorize a transaction op — PARENT-SCOPED to the enclosing namespace when the id carries one.
+
+    A transaction is a coordination artifact over its namespace's tables; nothing mints a per-transaction
+    FGA object, so the previous ``table:<txn-id>`` check always denied (that object is never seeded).
+    Instead:
+
+    - A NAMESPACED txn id (``<ns>$<txn>``) inherits the caller's grant on ``namespace:<ns>``. ``describe``
+      is a read (``can_get_metadata``); ``alter`` may commit/abort, so it is writer-tier
+      (``can_update_properties``). Resolves on the FIRST call with no seed — this is the always-deny fix.
+    - An OPAQUE root txn id (no enclosing namespace) is authorized against the ``transaction:`` object
+      itself (``can_describe`` / ``can_set_status``), so it stays fail-closed until a grant is seeded on it.
+
+    The dedicated ``transaction`` model type (``can_describe``/``can_set_property``/``can_set_status``/
+    ``can_cancel``, cascading from ``parent``) backs the object-scoped branch and any future per-transaction
+    direct grants; the finer set_status/set_property split lives in the model.
+
+    The writer-tier relation on the PARENT branch must be one the ``namespace`` type actually defines: a
+    namespace has no data plane, so ``can_write_data`` is a ``table``-only action and checking it against a
+    ``namespace:`` object is a model error (OpenFGA 400 ``relation 'namespace#can_write_data' not found``)
+    that fails closed to a 503 for EVERY caller — owners included. ``can_update_properties: writer`` IS the
+    namespace writer rung, and it is exactly the rung the object-scoped branch resolves to for a parented
+    transaction (``can_set_status: committer``, and ``committer`` ⊇ ``writer from parent``), so the two
+    branches gate on the same privilege. ``tests/unit/test_fga_model_contract.py`` now proves every
+    (type, relation) this module can check exists in the compiled model.
+    """
+    is_read = suffix == "describe"
+    parent_ns = fga.parent_namespace_id(segments, delimiter=settings.delimiter)
+    if parent_ns is not None:
+        relation = "can_get_metadata" if is_read else "can_update_properties"
+        obj = f"namespace:{parent_ns}"
+    else:
+        relation = "can_describe" if is_read else "can_set_status"
+        obj = _object("transaction", segments, settings.delimiter)
+    await _require(client, user=user, relation=relation, obj=obj)
 
 
 async def _authorize_batch(request: Request, client: OpenFgaClient, settings: Settings, *, user: str) -> None:
@@ -263,6 +330,11 @@ async def authorize(request: Request, settings: SettingsDep, token: CurrentToken
         check = _create_parent_check(resource, segments, settings)
         if check is not None:  # None => open top-level create (authn already enforced)
             await _require(client, user=token.sub, relation=check[1], obj=check[0])
+        return
+
+    # Transactions authorize parent-scoped (against their enclosing namespace), not on a per-txn object.
+    if resource == "transaction":
+        await _authorize_transaction(client, settings, segments, suffix, user=token.sub)
         return
 
     fga_type = _FGA_TYPE[resource]

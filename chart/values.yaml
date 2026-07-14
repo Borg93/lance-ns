@@ -330,6 +330,27 @@ observability:
   dbName: public # the GreptimeDB database all signals land in (x-greptime-db-name header)
   tracePipeline: greptime_trace_v1 # required pipeline header for OTLP trace ingestion → opentelemetry_traces
   samplingRate: "1" # Dapr trace sampling — full, so the catalog→lineage context always propagates
+  # Edge auth (§5e hardening) — nginx `auth_basic` on the gateway's /perses/ + /greptime/ locations.
+  # BOTH are otherwise UNAUTHENTICATED: Perses is the dashboard, and GreptimeDB exposes its RAW SQL/ingest
+  # API on :4000 — and in prod the Ingress→gateway proxies both publicly (a wide-open telemetry store +
+  # dashboard). This closes that hole AT THE EDGE without touching GreptimeDB's own `auth.enabled` (which
+  # would force EVERY client — the app OTLP exporters, Dapr tracing, the Vector logs sink, the Perses
+  # datasource proxy — to carry credentials; that full GreptimeDB `auth.enabled` + Perses OIDC is the
+  # documented follow-on). Default OFF so local dev / `make dashboards` stays unauthenticated + frictionless;
+  # values-prod flips it TRUE to close the prod hole. Completion condition (#5e): an unauthenticated request
+  # to /greptime/ or /perses/ is rejected at the gateway.
+  edgeAuth:
+    enabled: false
+    # The realm shown on the browser basic-auth prompt (not a secret).
+    realm: "lance observability"
+    # The htpasswd LINE(S) (`user:hash`) for the basic-auth file. INFRA-TIER credential (the two-tier
+    # secret model): NOT stored here as plaintext — it lands ONLY in the `<release>-observability-edge-auth`
+    # k8s Secret (templates/observability.yaml) and is mounted read-only into the gateway as the
+    # `auth_basic_user_file` (never a pod env/arg value). Empty by default; the render FAILS CLOSED when
+    # edgeAuth.enabled with no htpasswd supplied, so provide it out-of-band in prod:
+    # `--set observability.edgeAuth.htpasswd=…` sourced from OpenBao / external-secrets (an apr1/bcrypt
+    # hash — e.g. `htpasswd -nbB observer <pw>`).
+    htpasswd: ""
 
 # GreptimeDB standalone subchart — unified metrics/logs/traces store on the in-cluster RustFS S3.
 greptimedb-standalone:

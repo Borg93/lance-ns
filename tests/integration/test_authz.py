@@ -47,7 +47,6 @@ from lance_namespace import (
     DropTableResponse,
     ListNamespacesResponse,
     ListTablesResponse,
-    RenameTableResponse,
 )
 
 ARROW_STREAM = {"content-type": "application/vnd.apache.arrow.stream"}
@@ -444,7 +443,15 @@ def test_rename_table_revokes_source_then_seeds_destination(
 ) -> None:
     """CONTRACT: rename revokes the SOURCE id's tuples and seeds the DEST — and revoke fires BEFORE seed,
     so no stale grant survives under the old id (``table:db1$users``) while the dest (``db1$u2``) is owned."""
-    fake_ns.rename_table.return_value = RenameTableResponse()
+    # rename is now an in-process relocate (#5b); stub the dataplane seam so the FGA choreography is exercised
+    # without a real dataset move (returns the resolved new segments + destination location).
+    monkeypatch.setattr(
+        "catalog.services.dataplane.rename_table",
+        lambda ns, so, segments, name, nsid: (
+            [*(list(nsid) if nsid else segments[:-1]), name],
+            "s3://b/db1$u2",
+        ),
+    )
     _wire(client)
     monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
     order: list[str] = []
@@ -718,8 +725,9 @@ def test_batch_create_versions_requires_writer(client: TestClient, fake_ns: Magi
 
 
 def test_transaction_route_requires_authz(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
-    """CONTRACT: a transaction op is authorized (scoped to the ``table`` FGA type for now),
-    not merely authenticated. A denial is 403."""
+    """CONTRACT: a transaction op is authorized, not merely authenticated. An OPAQUE (no enclosing
+    namespace) txn id is checked against the dedicated ``transaction`` FGA type — no longer the
+    ``table:<txn-id>`` alias that nothing ever seeds (the old always-deny). A denial is 403."""
     _wire(client)
     captured: list[dict] = []
     monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
@@ -727,15 +735,47 @@ def test_transaction_route_requires_authz(client: TestClient, fake_ns: MagicMock
     resp = client.post("/v1/transaction/txn1/describe", headers={"Authorization": "Bearer t"})
     assert resp.status_code == 403
     assert captured, "transaction route must run an authz check, not pass on authn only"
-    assert captured[-1]["obj"] == "table:txn1"  # transaction scoped to table type
-    assert captured[-1]["relation"] == "can_get_metadata"  # describe is a read op
+    assert captured[-1]["obj"] == "transaction:txn1"  # dedicated transaction type, not table alias
+    assert captured[-1]["relation"] == "can_describe"  # describe → viewer rung on the transaction
+
+
+def test_transaction_namespaced_is_parent_scoped(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: a NAMESPACED txn id (``<ns>$<txn>``) is authorized PARENT-SCOPED against its enclosing
+    namespace — where the caller's grant already lives — so it resolves on the first call with no
+    per-transaction seed (the always-deny fix). ``describe`` = reader tier, ``alter`` = writer tier.
+
+    The writer-tier relation MUST be one the ``namespace`` type defines: this test used to assert
+    ``can_write_data``, a TABLE-only action, which OpenFGA rejects on a namespace (400, "relation not
+    found") — fail-closed to a 503 for EVERY caller, owners included. Mocking ``fga.check`` made the
+    phantom relation look fine, so ``tests/unit/test_fga_model_contract.py`` now cross-checks every
+    (type, relation) the app can send against the compiled model."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    # describe → can_get_metadata on the enclosing namespace
+    resp = client.post("/v1/transaction/db1$txn1/describe", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_get_metadata", "obj": "namespace:db1"}
+
+    # alter (may commit/abort) → the namespace WRITER rung: can_update_properties (`writer`), the same
+    # rung `transaction#can_set_status: committer` resolves to for a parented txn (committer ⊇ writer
+    # from parent) — so both branches gate on the identical privilege.
+    resp = client.post(
+        "/v1/transaction/db1$txn1/alter",
+        json={"actions": [{"setStatusAction": {"status": "Succeeded"}}]},
+        headers={"Authorization": "Bearer t"},
+    )
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_update_properties", "obj": "namespace:db1"}
 
 
 def test_materialized_view_create_is_create_on_parent(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:
-    """CONTRACT: creating a materialized view is authorized (create-on-parent), not
-    authn-only. Scoped to the ``table`` FGA type; the check is on the parent namespace."""
+    """CONTRACT: creating a materialized view is authorized (create-on-parent), not authn-only. It has
+    its OWN ``can_create_materialized_view`` relation on the parent namespace (no longer the ``table``
+    alias's ``can_create_table``); the check is on the parent namespace."""
     _wire(client)
     captured: list[dict] = []
     monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
@@ -747,12 +787,59 @@ def test_materialized_view_create_is_create_on_parent(
     )
     assert resp.status_code == 403
     assert captured, "materialized_view create must run an authz check"
-    assert captured[-1]["relation"] == "can_create_table"
+    assert captured[-1]["relation"] == "can_create_materialized_view"
     assert captured[-1]["obj"] == "namespace:db1"  # create-on-parent
     # NOTE: the post-create owner+parent seeding (the audit's deny-all-on-own-MV fix) uses the
-    # same fga.grant_on_create path proven by test_create_table_seeds_owner_and_parent_tuples;
-    # a dedicated success-path test is omitted only because CreateMaterializedViewRequest needs
-    # a full Arrow output_schema body to get past validation.
+    # same fga.grant_on_create path proven by test_create_table_seeds_owner_and_parent_tuples,
+    # now with resource="materialized_view"; a dedicated success-path test is omitted only because
+    # CreateMaterializedViewRequest needs a full Arrow output_schema body to get past validation.
+
+
+def test_materialized_view_refresh_checks_can_refresh(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT: refreshing a materialized view (the async rematerialize) is authorized against the
+    dedicated ``materialized_view`` object at the writer-tier ``can_refresh`` relation."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.post("/v1/materialized_view/db1$mv/refresh", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_refresh", "obj": "materialized_view:db1$mv"}
+
+
+def test_table_restore_is_owner_tier(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    """CONTRACT: ``restore`` REWINDS a table to an older version (destructive) — authorized at the OWNER
+    tier via ``can_restore``, strictly ABOVE the writer rung a plain data write clears."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.post("/v1/table/db1$t/restore", json={"version": 1}, headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_restore", "obj": "table:db1$t"}
+
+
+def test_table_branch_and_tag_create_are_owner_tier(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """CONTRACT: forking/re-pointing the ref-plane (branch/tag create, tag update) is OWNER-tier —
+    a plain writer is denied. Each maps to its own ``can_create_branch``/``can_create_tag``/
+    ``can_update_tag`` relation on the table."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    cases = [
+        ("branches/create", {"name": "exp"}, "can_create_branch"),
+        ("tags/create", {"tag": "v1", "version": 1}, "can_create_tag"),
+        ("tags/update", {"tag": "v1", "version": 2}, "can_update_tag"),
+    ]
+    for suffix, body, relation in cases:
+        resp = client.post(f"/v1/table/db1$t/{suffix}", json=body, headers={"Authorization": "Bearer t"})
+        assert resp.status_code == 403, suffix
+        assert captured[-1] == {"user": "alice", "relation": relation, "obj": "table:db1$t"}, suffix
 
 
 # --------------------------------------------------------------------------- #

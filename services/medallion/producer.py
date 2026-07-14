@@ -50,7 +50,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     await run_in_threadpool(apply_dapr_secrets, get_settings())
     instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # The Dapr client targets the local sidecar (localhost) — cheap to build, no broker reachability
-    # needed at boot. The sidecar persists publishes to NATS JetStream; no DLQ (docs/RESILIENCE.md gap #2).
+    # needed at boot. The sidecar persists publishes to NATS JetStream; a delivery that exhausts its
+    # retries dead-letter-parks on the subscriber's dlq.* topic (Dapr-native DLQ, default-on via the
+    # dapr.resiliency.enabled chart resiliency; the /dlq-event route ERROR-logs + acks — park-and-alert,
+    # not replay — docs/RESILIENCE.md gap #2, fixed 2026-07-12).
     app.state.dapr = DaprClient()
     # The trainer consumer (#115a) gates as its own identity — the client MUST exist here or the gate
     # is silently off with MEDALLION_FGA_ENABLED=true (review 2026-07-10 caught exactly that bypass).

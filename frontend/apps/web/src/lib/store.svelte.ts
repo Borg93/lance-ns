@@ -1,5 +1,7 @@
 import {
+	fetchColumnDownstream,
 	fetchColumnGraph,
+	fetchColumnUpstream,
 	fetchDatasets,
 	fetchDemo,
 	fetchEvents,
@@ -12,6 +14,7 @@ import {
 import {
 	KNOWN,
 	type ColumnGraph,
+	type ColumnNeighbors,
 	type DatasetSummary,
 	type DemoDataset,
 	type EventRecord,
@@ -51,12 +54,21 @@ export class LineageState {
 	online = $state(false);
 	selected = $state<string | null>(null);
 	columnGraph = $state<ColumnGraph | null>(null);
+	/** The field the user clicked in the Columns plane — drives the field-level provenance/impact panel
+	 * (#24). Kept separate from ``selected`` (a dataset handle) so a column click never pollutes the
+	 * dataset-scoped Details/upstream panels (bug hunt 2026-07-13). */
+	selectedColumn = $state<{ dataset: string; field: string } | null>(null);
+	columnUpstream = $state<ColumnNeighbors | null>(null);
+	columnDownstream = $state<ColumnNeighbors | null>(null);
 
 	/** Overlap guard: a slow tick must not stack behind the 2s interval (§2 perf, 2026-07-11). */
 	#polling = false;
 
 	/** Monotonic request id so a slow earlier column fetch can't overwrite a newer dataset's graph. */
 	#colReq = 0;
+	/** Same latest-wins guard, for the per-FIELD neighbor fetches (a slow earlier field's response must
+	 * not overwrite a newer selection's provenance/impact). */
+	#fieldReq = 0;
 
 	/** Load the column-level lineage subgraph for one dataset (the field-to-field view). Latest-wins:
 	 * only the most recent call's response is applied (guards the async race when the selection changes
@@ -65,6 +77,21 @@ export class LineageState {
 		const req = ++this.#colReq;
 		const graph = await fetchColumnGraph(name);
 		if (req === this.#colReq) this.columnGraph = graph;
+	}
+
+	/** Load one FIELD's provenance (upstream) + impact (downstream) — the two per-field endpoints (#24).
+	 * Mirrors ``loadColumns``'s latest-wins guard so switching the focused column mid-flight can't apply a
+	 * stale field's neighbors. */
+	async loadColumnNeighbors(name: string, field: string): Promise<void> {
+		const req = ++this.#fieldReq;
+		const [upstream, downstream] = await Promise.all([
+			fetchColumnUpstream(name, field),
+			fetchColumnDownstream(name, field),
+		]);
+		if (req === this.#fieldReq) {
+			this.columnUpstream = upstream;
+			this.columnDownstream = downstream;
+		}
 	}
 
 	async poll(): Promise<void> {

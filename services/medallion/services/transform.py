@@ -30,7 +30,7 @@ from opentelemetry import trace
 from medallion.core.config import MedallionSettings
 from medallion.core.metrics import record_denied, record_quality_blocked, record_transition
 from medallion.schemas.events import build_run_event
-from medallion.services.compute import measure, transform_stage
+from medallion.services.compute import measure_stage, transform_stage
 from medallion.services.derivers import UnderivableMediaError
 from medallion.services.quality import Assertion, assert_quality, passed
 from medallion.services.ray_submit import submit_stage_job
@@ -131,7 +131,15 @@ async def handle_stage(
                             stage=settings.to_namespace,
                             token=token,  # deterministic submission id → redelivery re-attaches (idempotent)
                         )
-                        result = await run_in_threadpool(measure, settings.to_uri, settings.storage_options())
+                        # measure_stage, not a bare measure: the Ray job transformed out-of-process, so the
+                        # column edges are RECONSTRUCTED from the upstream + written schemas — otherwise the
+                        # columnLineage facet would be empty on exactly the path production runs.
+                        result = await run_in_threadpool(
+                            measure_stage,
+                            settings.from_uri,
+                            settings.to_uri,
+                            settings.storage_options(),
+                        )
                     else:
                         if not settings.ray_enabled:  # the blob fallback above already named the path
                             span.set_attribute("lance.medallion.compute", "in_process")
@@ -165,6 +173,10 @@ async def handle_stage(
             size_bytes=result.size_bytes if result else None,
             source_uri=settings.to_uri if result else None,
             schema_fields=result.fields if result else None,
+            # Field-to-field column lineage (#1): the compute declares which upstream column each output
+            # column came from — declared by the in-process transform, reconstructed from the on-disk schemas
+            # on the Ray path — so the LIVE cascade populates the columnLineage graph (not just seed).
+            column_map=result.column_map if result else None,
             # exclude_none: an assertion with no column omits the key entirely — a serialized
             # ``"column": null`` fails strict DataQualityAssertionsDatasetFacet validation (column: string).
             assertions=[a.model_dump(exclude_none=True) for a in assertions] or None,

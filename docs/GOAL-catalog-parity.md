@@ -110,6 +110,42 @@ NOTE (2026-07-14): two DISTINCT, complementary axes — do not conflate:
 - **#3-B goal:** expose `base_paths` so ONE dataset can span N buckets, portably + governed.
   **Done when:** a dataset created with `initial_bases` across 2 buckets round-robins writes + fans out
   reads, stays relative-path portable, and the catalog vends/governs per-base.
+
+### #3-A implementation design (DECIDED 2026-07-14, grounded in the code map)
+
+Current state (map): the `warehouse` FGA type + `project.can_create_warehouse`/`can_administer` EXIST
+but are **dead in code**; there is **no admin API and no runtime bucket creation** (only a Helm `mc mb`
+Job at `chart/templates/rustfs.yaml:146`); the catalog is **single-root** (`LANCE_REST_ROOT`, one
+`connect()` at startup); multi-base is used only for external-blob allowlisting. So #3-A is net-new
+control-plane wiring — NOT a model change (the model already has the types).
+
+Design (mirrors the outbox's stateless-over-object-store pattern + the existing FGA seed pattern):
+1. **Warehouse registry** — `services/catalog/services/warehouses.py` (NEW). S3-backed records at
+   `s3://<control-root>/_warehouses/<id>.json` = `{id, bucket, root_uri, project, created_at}`, plus a
+   namespace→warehouse binding at `_warehouses/bindings/<top-ns>.json`. Functions: `provision_bucket`
+   (boto3 `create_bucket`, idempotent like `mc mb --ignore-existing`), `put/get/list_warehouse`,
+   `bind_namespace`/`warehouse_for_namespace`. Uses the same `S3FileSystem`-from-storage_options helper
+   shape as `common/outbox.py`.
+2. **Admin API** — `services/catalog/api/v1/endpoints/warehouses.py` (NEW). `POST /v1/warehouses`
+   {id, bucket?, project} → gate `can_create_warehouse` on `project:<project>` → provision bucket +
+   write registry + seed FGA (`warehouse:<id>` parent `project:<project>`, grant caller owner, mirroring
+   `seed_ownership`). `GET /v1/warehouses` + `GET /v1/warehouses/{id}` (reader/administer gated).
+3. **FGA gate** — `fga_deps.py`: `require_can_create_warehouse(project)` checks the dormant
+   `can_create_warehouse` on `project:<project>`; fail-closed 503 on outage, 403 on deny (mirror the
+   existing deps). Wires the model action that was never enforced.
+4. **Warehouse-aware storage routing** — a per-root `connect()` cache in `core/namespace.py`
+   (`namespace_for_root`) + warehouse-aware `NamespaceDep`/`StorageOptionsDep` variants that resolve the
+   binding for the request's TOP-LEVEL namespace segment and return that warehouse's rooted connection +
+   storage_options. **No binding → default root** (existing single-bucket flows unchanged — backward
+   compatible + low-risk). A table under a warehouse-bound namespace physically lands in its bucket, so
+   describe/commit/read MUST route to the same root (Lance is self-describing under its root).
+   Namespace-create binds the top-level namespace to its warehouse (a `warehouse` selector).
+
+**#3-A done when (live on kind):** admin provisions warehouse A→bucket-a + B→bucket-b (distinct
+buckets, created at runtime by the API not Helm); a table created under A physically lands in bucket-a
+and is ABSENT from bucket-b (verified by listing both buckets); new datasets report data_storage
+2.2 + FLAG_STABLE_ROW_IDS; `POST /v1/warehouses` denied to a non-project-admin (403). Unit + integration
++ live e2e, adversarially audited.
 - **Design:** admin `POST /v1/warehouse/{id}/create` (project-admin gated via `can_create_warehouse`):
   provision the bucket (RustFS admin / `mc mb`), register it as the warehouse `base_uri`, stamp create-time
   policy (`data_storage_version=2.2` + `enable_stable_row_ids`). Route table/namespace location production

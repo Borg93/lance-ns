@@ -57,6 +57,12 @@ catalog:
   # unbound namespace always routes to the shared rustfs.bucket, so single-tenant flows are untouched.
   warehouses:
     enabled: true
+  # #3-B Lance multi-base DATA distribution: the ALLOWLIST of bucket URIs a single table's fragments may be
+  # spread across (?data_base=s3://... per create, round-robin write, fan-out read — the Uber pattern). A
+  # per-request base MUST be on this list (a caller can never target an arbitrary bucket). Empty = feature
+  # off (single-location creates, byte-identical to before). Populate with pre-provisioned data buckets.
+  multibase:
+    dataBases: []
 
 # --- Graceful rollouts -----------------------------------------------------------------------------
 # preStop sleep: endpoint removal must propagate to kube-proxy/the Dapr sidecar BEFORE the app receives

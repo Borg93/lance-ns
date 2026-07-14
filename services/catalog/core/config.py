@@ -46,6 +46,18 @@ class Settings(BaseSettings):
         """The registered external-blob base URIs (parsed from the comma-separated allowlist)."""
         return [b.strip() for b in self.external_blob_bases.split(",") if b.strip()]
 
+    # #3-B Lance multi-base DATA distribution: a comma-separated ALLOWLIST of approved data-base URIs a
+    # create may spread its fragments across (the Uber pattern — one table's data round-robins over N
+    # buckets, manifest stays in the primary root, reads fan out). A per-request ``data_base`` MUST be on
+    # this list — a caller can never point a base at an arbitrary bucket (data-exfil / rogue-write door).
+    # Empty (default) = the feature is off and every create is byte-identical to today.
+    multibase_data_bases: str = Field(default="", alias="LANCE_MULTIBASE_DATA_BASES")
+
+    @property
+    def multibase_data_base_list(self) -> list[str]:
+        """The approved multi-base data-distribution base URIs (parsed from the comma-separated allowlist)."""
+        return [b.strip() for b in self.multibase_data_bases.split(",") if b.strip()]
+
     # #3-A per-warehouse physical multi-tenancy (admin control plane). When enabled, an admin API
     # (POST /v1/warehouses) provisions a physically separate S3 bucket per warehouse and binds top-level
     # namespaces to it, so a table under a bound namespace lands in that warehouse's bucket (not the shared

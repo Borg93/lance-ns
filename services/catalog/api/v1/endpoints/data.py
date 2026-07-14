@@ -99,6 +99,7 @@ async def create_table(
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
     properties: str | None = None,
+    data_base: Annotated[list[str], Query()] = [],  # noqa: B006 — FastAPI Query default, not mutated
     authorization: Annotated[str | None, Header()] = None,
 ) -> CreateTableResponse:
     """Create a Lance table from an Arrow-IPC stream — ``create_table``; seeds ownership + lineage.
@@ -106,7 +107,20 @@ async def create_table(
     ``properties`` is the spec-0.9 JSON-encoded query parameter. Client-supplied ``storage_options``
     are deliberately NOT accepted: storage access is the catalog's to vend (two-tier secret model),
     so callers can't redirect writes or splice credentials.
+
+    ``data_base`` (#3-B, repeatable) spreads the table's fragments across the named approved buckets (Lance
+    multi-base). Each MUST be on the ``LANCE_MULTIBASE_DATA_BASES`` allowlist — a caller can never point a
+    base at an arbitrary bucket. Omitted → a single-location table exactly as before.
     """
+    # #3-B governance (the security crux): validate BEFORE any write. An off-allowlist base is a client
+    # error (400), never a silent write to an unapproved bucket.
+    if data_base:
+        approved = set(settings.multibase_data_base_list)
+        rogue = [b for b in data_base if b not in approved]
+        if rogue:
+            raise InvalidInputError(
+                f"data_base(s) not in the LANCE_MULTIBASE_DATA_BASES allowlist: {rogue}"
+            )
     parsed_properties = None
     if properties:
         try:
@@ -160,6 +174,7 @@ async def create_table(
         properties=parsed_properties,
         allow_external_blobs=settings.allow_external_blobs,
         external_blob_bases=settings.external_blob_base_list,
+        data_bases=data_base or None,
     )
     # An Overwrite that replaced an EXISTING table (owner-authorized above) resets its ACL: revoke the prior
     # incarnation's grants (any reader/writer/validator that must not survive onto the reused id) before

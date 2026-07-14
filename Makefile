@@ -272,6 +272,16 @@ e2e-warehouses: ## Per-warehouse physical-isolation e2e (#3-A): provision A/B bu
 	   uv run pytest tests/e2e/test_warehouses_e2e.py -v -m e2e; rc=$$?; \
 	 kill $$C $$S 2>/dev/null; exit $$rc
 
+e2e-multibase: ## Lance multi-base e2e (#3-B): create a table across 2 approved data buckets → fragments distributed across both (deploy with catalog.multibase.dataBases naming the buckets; set LANCE_E2E_TOKEN + LANCE_E2E_BASE_A/B)
+	@echo "port-forwarding catalog/rustfs …"
+	@kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & C=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_CATALOG_URL=http://localhost:2333 LANCE_E2E_S3=http://localhost:9900 \
+	 LANCE_E2E_TOKEN=$${LANCE_E2E_TOKEN} LANCE_E2E_BASE_A=$${LANCE_E2E_BASE_A} LANCE_E2E_BASE_B=$${LANCE_E2E_BASE_B} \
+	   uv run pytest tests/e2e/test_multibase_e2e.py -v -m e2e; rc=$$?; \
+	 kill $$C $$S 2>/dev/null; exit $$rc
+
 e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+quality ON, openbao OFF — see tests/e2e/test_governed_union_e2e.py)
 	@echo "port-forwarding lance-ray/lineage/dex/openfga/rustfs + the bronze-to-silver mover …"
 	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & PIDS=$$!; \

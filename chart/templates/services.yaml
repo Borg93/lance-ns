@@ -61,6 +61,9 @@ spec:
             # LANCE_REST_ROOT (backward-compatible). The warehouse registry lives under LANCE_REST_ROOT
             # (control_root defaults to it), so no extra bucket is needed.
             - { name: LANCE_WAREHOUSES_ENABLED, value: {{ .Values.catalog.warehouses.enabled | default false | quote }} }
+            # #3-B Lance multi-base DATA distribution: the ALLOWLIST of bucket URIs a create may spread its
+            # fragments across (?data_base=... per request, validated against this list). Empty = feature off.
+            - { name: LANCE_MULTIBASE_DATA_BASES, value: {{ .Values.catalog.multibase.dataBases | default (list) | join "," | quote }} }
             - { name: LANCE_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: LANCE_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
             {{- if not (include "lance.secretsViaDapr" .) }}

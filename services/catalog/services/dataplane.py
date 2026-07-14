@@ -148,6 +148,7 @@ def create_table(
     properties: dict[str, str] | None = None,
     allow_external_blobs: bool = False,
     external_blob_bases: list[str] | None = None,
+    data_bases: list[str] | None = None,
 ) -> CreateTableResponse:
     """Create a table from an Arrow-IPC payload, choosing the write path by schema.
 
@@ -157,8 +158,12 @@ def create_table(
     ``allow_external_blobs`` permits ``Blob.from_uri`` columns pointing ANYWHERE outside the dataset root
     (the blanket bypass); ``external_blob_bases`` is the safer allowlist — external pointers are accepted
     only under one of these registered bases, with the blanket bypass left off.
+
+    ``data_bases`` (#3-B) spreads the table's fragments across N approved buckets (Lance multi-base). It also
+    forces the direct 2.2 ``write_dataset`` path even for a NON-blob schema, since the native create can't
+    distribute — so a regular table can go multi-bucket too. Empty (the default) → unchanged behavior.
     """
-    if _schema_is_blob(data):
+    if _schema_is_blob(data) or data_bases:
         return _create_blob_table(
             ns,
             so,
@@ -168,6 +173,7 @@ def create_table(
             properties=properties,
             allow_external=allow_external_blobs,
             external_blob_bases=external_blob_bases or [],
+            data_bases=data_bases,
         )
     request = CreateTableRequest(id=segments, mode=mode, properties=properties)
     response: CreateTableResponse = native.call(ns, "create_table", request, data)
@@ -190,6 +196,14 @@ def _schema_is_blob(data: bytes) -> bool:
         return False
 
 
+def _base_name(uri: str) -> str:
+    """A stable, deterministic base NAME for a #3-B data-distribution base URI.
+
+    ``target_bases`` references bases by name; deriving the name from the URI (not a random id) means a create
+    and any later op agree byte-for-byte, and the manifest's registered-base names stay human-readable."""
+    return uri.replace("s3://", "").strip("/").replace("/", "-") or "base"
+
+
 def _write_blob(
     table: pa.Table,
     uri: str,
@@ -198,19 +212,30 @@ def _write_blob(
     mode: str,
     allow_external: bool,
     external_blob_bases: list[str],
+    data_bases: list[str] | None = None,
 ) -> lance.LanceDataset:
-    """Write a blob-v2 table at file format 2.2. ``allow_external`` opts into ``Blob.from_uri`` columns
-    ANYWHERE outside the dataset root (blanket bypass); ``external_blob_bases`` registers approved base URIs
-    so external pointers UNDER a registered base are accepted with the blanket bypass left off — the safer
-    allowlist posture (lance_docs/guide.md — external blob bases). Bases register on a fresh CREATE; an
-    overwrite reuses the bases the table registered at create."""
-    # DatasetBasePath registers each approved base; only on create (initial_bases is a create-time arg —
-    # overwrite/append inherit the manifest's registered bases).
-    initial_bases = (
-        [lance.DatasetBasePath(b, is_dataset_root=False) for b in external_blob_bases]
-        if external_blob_bases and mode == "create"
-        else None
-    )
+    """Write a table at file format 2.2 (blob-v2 columns need it; native create pins 2.1).
+
+    ``allow_external`` opts into ``Blob.from_uri`` columns ANYWHERE outside the dataset root (blanket bypass);
+    ``external_blob_bases`` registers approved base URIs so external pointers UNDER a registered base are
+    accepted with the bypass left off — the safer allowlist posture (lance_docs/guide.md). ``data_bases``
+    (#3-B) are approved DATA-distribution bases the fragments round-robin across (the Uber pattern).
+    Bases register on a fresh CREATE; an overwrite reuses the bases the table registered at create."""
+    is_create = mode == "create"
+    data_bases = data_bases or []
+    # DatasetBasePath registers each approved base (is_dataset_root=False = a raw data location, not a nested
+    # dataset). initial_bases is CREATE-only (overwrite/append inherit the manifest's registered bases).
+    external_paths = [lance.DatasetBasePath(b, is_dataset_root=False) for b in external_blob_bases]
+    data_paths = [lance.DatasetBasePath(u, is_dataset_root=False, name=_base_name(u)) for u in data_bases]
+    _has_bases = bool(external_blob_bases or data_bases)
+    initial_bases = (external_paths + data_paths) if is_create and _has_bases else None
+    # #3-B: target_bases round-robins the FRAGMENT writes across the data bases; the manifest + _versions stay
+    # in the primary root, so the dataset is still relative-path portable (only the base URIs move on a
+    # relocation, not 10M file paths). CREATE-only here — append/overwrite inherit the registered layout.
+    target_bases = [_base_name(u) for u in data_bases] if is_create and data_bases else None
+    # Each data base needs its object-store creds at runtime (not persisted to the manifest). All our bases
+    # share the catalog's endpoint/creds (bucket-agnostic on the S3 target), so hand each the same options.
+    base_store_params = {u: dict(so) for u in data_bases} if data_bases else None
     try:
         return lance.write_dataset(
             table,
@@ -227,6 +252,8 @@ def _write_blob(
             # creates route through the client-direct write path (#2); this closes the path the catalog owns.
             enable_stable_row_ids=True,
             initial_bases=initial_bases,
+            target_bases=target_bases,
+            base_store_params=base_store_params,
             allow_external_blob_outside_bases=allow_external,
         )
     except OSError as exc:
@@ -252,6 +279,7 @@ def _create_blob_table(
     properties: dict[str, str] | None,
     allow_external: bool,
     external_blob_bases: list[str],
+    data_bases: list[str] | None = None,
 ) -> CreateTableResponse:
     """Create a blob-v2 table at file format 2.2 (the native create pins 2.1 and rejects it).
 
@@ -277,6 +305,7 @@ def _create_blob_table(
                 mode="overwrite",
                 allow_external=allow_external,
                 external_blob_bases=external_blob_bases,
+                data_bases=data_bases,
             )
             return CreateTableResponse(location=existing, version=dataset.version, properties=properties)
         if normalized in ("existok", "exist_ok"):  # keep it untouched, just report its current version
@@ -294,6 +323,7 @@ def _create_blob_table(
             properties,
             allow_external=allow_external,
             external_blob_bases=external_blob_bases,
+            data_bases=data_bases,
         )
 
     location = ns.declare_table(DeclareTableRequest(id=segments, properties=properties)).location
@@ -308,6 +338,7 @@ def _create_blob_table(
         properties,
         allow_external=allow_external,
         external_blob_bases=external_blob_bases,
+        data_bases=data_bases,
     )
 
 
@@ -321,6 +352,7 @@ def _write_blob_into(
     *,
     allow_external: bool,
     external_blob_bases: list[str],
+    data_bases: list[str] | None = None,
 ) -> CreateTableResponse:
     """Write the blob table's first data version into an already-declared ``location``, rolling the declare
     back with ``drop_table`` on failure so the name stays retryable rather than stuck declared-but-unreadable.
@@ -333,6 +365,7 @@ def _write_blob_into(
             mode="create",
             allow_external=allow_external,
             external_blob_bases=external_blob_bases,
+            data_bases=data_bases,
         )
     except Exception:
         with suppress(Exception):  # best-effort rollback; re-raise the real write error

@@ -19,7 +19,7 @@ so this suite asserts, live:
      provenance silently lost) until the service-door credential. The run must land COMPLETE
      **attributed to ``service-trainer``** (a bare FGA subject, not a Dex sub), with the model node
      governed like the rest of the estate — the exact combination that was broken. (The pinned feature
-     version rides the graph's READ edge but no API surfaces run inputs yet — docs/GOAL-prove-it.md follow-up.)
+     version rides the graph's READ edge but no API surfaces run inputs yet — see docs/GOAL-prove-it.md.)
 
 Deploy the union + seed, then ``make e2e-governed-union`` (which port-forwards + seeds + fills env):
 

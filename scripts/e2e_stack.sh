@@ -34,8 +34,22 @@ cleanup() {
   if [ $rc -ne 0 ]; then
     echo "::group::stack diagnostics (failure)"
     kubectl get pods -o wide || true
-    kubectl logs -l app.kubernetes.io/component=catalog -c catalog --tail=60 || true
-    kubectl logs -l app.kubernetes.io/component=lineage -c lineage --tail=60 || true
+    # Dump EVERY not-ready pod, not a hardcoded list. The hardcoded catalog+lineage dump is why two 12-minute
+    # CI round-trips told us nothing: the pod actually blocking the stack was OpenFGA, and we never looked at
+    # it. A diagnostic that only reports the components you already suspected cannot find a surprise.
+    for p in $(kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{" "}{.status.phase}{"\n"}{end}' \
+                 | awk '$2!="Running" && $2!="Succeeded" {print $1}'); do
+      echo "--- NOT READY: $p"
+      kubectl describe pod "$p" 2>/dev/null | sed -n '/Events:/,$p' | head -15 || true
+    done
+    for p in $(kubectl get pods -o jsonpath='{range .items[*]}{.metadata.name}{"\n"}{end}'); do
+      ready=$(kubectl get pod "$p" -o jsonpath='{.status.containerStatuses[*].ready}' 2>/dev/null)
+      case "$ready" in *false*)
+        echo "--- LOGS (not-ready containers): $p"
+        kubectl logs "$p" --all-containers --tail=40 2>/dev/null | head -40 || true ;;
+      esac
+    done
+    kubectl get jobs -o wide || true   # the OpenFGA migration is a post-install HOOK job — surface its state
     echo "::endgroup::"
   fi
   if [ "${KEEP_STACK:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
@@ -68,7 +82,14 @@ docker build -f .docker/rest-catalog.dockerfile -t "$CATALOG_IMG" . >/dev/null
 kind load docker-image "$CATALOG_IMG" --name "$CLUSTER"
 
 step "3/8 deploy the governed stack (auth ON, #3-A/#3-B/#4 flags ON, heavy extras OFF)"
-helm upgrade --install "$RELEASE" ./chart --timeout 600s --wait \
+# NO `--wait` — it DEADLOCKS on a fresh cluster, which is why this job never once passed in CI.
+# helm's order is: apply manifests → (--wait) block until every resource is Ready → run post-install hooks.
+# The OpenFGA schema migration IS a post-install hook, and the OpenFGA server cannot become Ready until its
+# schema exists. So --wait blocks on OpenFGA, OpenFGA blocks on the migration, and the migration blocks on
+# --wait. It "worked" on a long-lived local cluster only because a PREVIOUS install had already migrated the
+# database, so the server came up Ready immediately and the deadlock never armed. Textbook works-on-my-machine.
+# Dropping --wait lets the hook run; we then wait EXPLICITLY, below, for what the suites actually need.
+helm upgrade --install "$RELEASE" ./chart --timeout 600s \
   --set auth.enabled=true \
   --set medallion.fgaEnabled=true \
   --set catalog.warehouses.enabled=true \
@@ -79,8 +100,13 @@ helm upgrade --install "$RELEASE" ./chart --timeout 600s --wait \
   --set compaction.enabled=false \
   --set web.enabled=false
 
+# Explicit readiness, in dependency order. OpenFGA FIRST: its post-install migration must land before the
+# server can serve, and every governed app fails closed without it — so if it is not up, everything
+# downstream crash-loops and the real cause is buried under a pile of secondary failures.
+kubectl rollout status deploy/"$RELEASE"-openfga --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-catalog --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-lineage --timeout=300s
+kubectl rollout status deploy/"$RELEASE"-lance-ray --timeout=300s
 
 step "4/8 port-forward the services the suites talk to"
 kubectl port-forward "svc/$RELEASE-catalog" 2333:2333 >/tmp/pf-cat.log 2>&1 & PF_PIDS+=($!)

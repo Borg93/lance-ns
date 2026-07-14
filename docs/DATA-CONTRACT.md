@@ -74,7 +74,7 @@ features, path-unsafe names, oversized/non-dict config — `services/medallion/s
   promotion time. The fix is the §9 per-project **schema declaration** item (declare expected
   columns; the quality gate asserts they landed; reconcile flags undeclared writes) — that turns
   a runtime stall into a pre-promotion contract violation. Un-built by decision, tracked in
-  `todo_fable.md` §9.
+  `docs/GOAL-prove-it.md`.
 - **The claim-check rule is convention + spot-enforcement, not a universal guard.** The train
   path caps config at 8 KiB (head AND consumer); but there is no payload-size guard at EVERY
   publish site yet (§9 P1, open), and no cap on facet metadata bloat for thousand-column tables
@@ -123,4 +123,4 @@ the breaking-change detector in §4 is OUR item to build, not something the form
 [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`DURABILITY.md`](DURABILITY.md) (CAS validation) ·
 [`RAY-TRAIN.md`](RAY-TRAIN.md) (D1 pins, D4 registry) · [`RESILIENCE.md`](RESILIENCE.md)
 (delivery semantics) · [`SYSTEM-SKETCH.md`](SYSTEM-SKETCH.md) (Lakekeeper diff) ·
-`todo_fable.md` §9 (schema declaration + claim-check hardening, the tracked gaps)
+`docs/GOAL-prove-it.md` (schema declaration + claim-check hardening, the tracked gaps)

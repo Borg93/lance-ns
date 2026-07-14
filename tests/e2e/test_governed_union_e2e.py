@@ -19,7 +19,7 @@ so this suite asserts, live:
      provenance silently lost) until the service-door credential. The run must land COMPLETE
      **attributed to ``service-trainer``** (a bare FGA subject, not a Dex sub), with the model node
      governed like the rest of the estate — the exact combination that was broken. (The pinned feature
-     version rides the graph's READ edge but no API surfaces run inputs yet — todo_fable §7a follow-up.)
+     version rides the graph's READ edge but no API surfaces run inputs yet — docs/GOAL-prove-it.md follow-up.)
 
 Deploy the union + seed, then ``make e2e-governed-union`` (which port-forwards + seeds + fills env):
 
@@ -479,7 +479,7 @@ def test_media_lane_derives_under_governance(stack: tuple[str, str], alice: dict
     # `table:s3://…` can never be written as a tuple — s3:// source datasets are structurally
     # ungovernable-per-object and therefore invisible to EVERY governed principal. That is the
     # contract; making sources governable would need an id-encoding scheme or a `namespace:source`
-    # parent with encoded ids (logged in todo_fable §7a as the open design decision).
+    # parent with encoded ids (logged in docs/GOAL-prove-it.md as the open design decision).
     sources = requests.get(f"{lineage}/datasets/bronze-media$objects/upstream", headers=alice, timeout=8)
     sources.raise_for_status()
     assert not any(d["name"].startswith("s3://") for d in sources.json().get("related", []))

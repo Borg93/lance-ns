@@ -1,4 +1,10 @@
-# GOAL: catalog + lakehouse parity (build items #1–#5 + control plane)
+# DESIGN RECORD — catalog parity #1–#5 (SHIPPED)
+
+> **This is an ARCHIVE of shipped design, not a goal.** The single live goal is
+> [`GOAL-prove-it.md`](GOAL-prove-it.md). Kept because the control-plane/data-plane split, the
+> #3-A (per-warehouse bucket) + #3-B (Lance multi-base) designs, and the Lance-spec landmines below
+> are still load-bearing. All five items are built, live-verified on kind, and adversarially audited.
+
 
 **Set 2026-07-13.** Source: the competitive benchmark vs Lakekeeper / Unity / Polaris / Gravitino,
 re-grounded against the actual code (5 scout audits) and a deep read of the Lance format spec, guide,
@@ -253,30 +259,3 @@ KubeRay+Kueue, query engine, rask merge, the secrets operator (docs/OPERATORS.md
 - Conflict matrix is **per-op**: `Append`↔`Append` rebases; `Overwrite`/`Restore` don't — retry loop must classify.
 - **Ref-plane mutations (tag/branch) emit no version** → invisible to a version-tailing outbox.
 - Implement to the **model files**, not the prose (`new_table_name`, not `new_id`).
-
-## Status (HISTORICAL SNAPSHOT, superseded — the current status is the "ALL OF #1–#5 COMPLETE" section above; kept for the audit trail only)
-- [x] **#1** producer emit — in-process AND Ray path (`measure_stage` reconstructs edges from on-disk schemas)
-- [x] **#2** client-direct writes — governed `POST /{id}/commit` (write_fragments→commit), byte-proxy retired for bulk append
-- [x] #3 per-warehouse bucket + multi-base · [x] #4 outbox+DLQ — *(built + live-verified LATER on 2026-07-14; this line predated them — the self-contradiction was audit claim-drift bug #3)*
-- [x] **#5a** stable-row-ids · [x] **#5b** rename (in-process, data-safe) · [x] **#5c** FGA types (MV + transaction)
-- [x] **#5d** doc truth-up · [x] **#5e** obs edge-auth
-- [x] Frontend: field-level column-lineage panel (surfaces #1)
-- **Audit:** 3 adversarial rounds, 8 confirmed bugs (6 → 2 → 0), each fixed with a regression test that fails
-  on the old code. Full unit+integration suite green (636); `ruff` + `ty` clean.
-- **LIVE-VERIFIED on the kind `lance` cluster (2026-07-14, governed stack, FGA on):**
-  - **#1** — drove `make produce`; AGE now holds the full field-to-field chain (6 `DERIVED_FROM_COLUMN`
-    edges: raw_events→bronze$events→silver$features→gold$catalog for `id`+`payload`, IDENTITY, 3 run_ids),
-    previously ZERO from live runs. `MEDALLION_RAY_ENABLED=true`, so this proved the **Ray path**
-    (`measure_stage` reconstructing edges from on-disk schemas) — the exact production seam the audit
-    caught as dead.
-  - **#5c** — the running OpenFGA store has the new `materialized_view`/`transaction` types + owner-tier
-    `can_restore`/`can_create_branch` (catalog reprovisioned `model.json` on restart).
-  - **#2** — drove `scripts/client_direct_demo.py` + `tests/e2e/test_client_direct_e2e.py` (2/2) on the
-    governed stack: alice (Dex OIDC + FGA) vends `location`+`read_version`, writes fragments straight to
-    RustFS, and `POST /{id}/commit` folds only 396 B of metadata → version advances, 0 data bytes at the
-    catalog. Auth gates verified (no-token 401, unauthorized 403). Hardened after a 6-finding audit
-    (HIGH: pre-validate fragment data files exist so a mis-targeted write can't publish an unreadable
-    version; token-egress default reverted to `mode_b` + fail-closed STS-endpoint validator).
-  - #5a/#5b/#5e deployed on the new image, not individually driven yet.
-- **Remaining (as of this snapshot; since done):** build #3 + #4 — both shipped later the same day.
-  web_identity scoped-cred layer = opt-in (needs `rustfs.oidc` + the STS endpoint).

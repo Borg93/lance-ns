@@ -41,7 +41,7 @@ The externalization hooks added in this repo make this a **values flip**, not a 
 | `observability.externalOtlpEndpoint` | rask's GreptimeDB OTLP | shared observability |
 
 - **Add the buckets** to rask's `rustfs.buckets`: the lakehouse (`lance-catalog`) + observability (`lance-observability`).
-- **Add the databases** to CNPG: `lineage` + `openfga`. ⚠️ **AGE caveat** — the lineage graph needs the Apache **AGE extension**; CNPG runs stock Postgres, so either (a) point CNPG at a **custom Postgres image with AGE**, (b) keep AGE as a separate operand, or (c) execute the `todo.md` open decision to move lineage to a **Lance-native graph** (drops the AGE/Postgres dependency entirely). Decide before the fold-in.
+- **Add the databases** to CNPG: `lineage` + `openfga`. ⚠️ **AGE caveat** — the lineage graph needs the Apache **AGE extension**; CNPG runs stock Postgres, so either (a) point CNPG at a **custom Postgres image with AGE**, (b) keep AGE as a separate operand, or (c) execute the `docs/GOAL-prove-it.md` decision to move lineage to a **Lance-native graph** (drops the AGE/Postgres dependency entirely). Decide before the fold-in.
 
 ### 2. lance-ray → a real Ray Data job (the one in-scope gap)
 Today `services/medallion/producer.py` + the movers are **dummy Ray jobs** — pure lineage emitters by
@@ -102,7 +102,7 @@ Reproduce those four behaviors in the Ray Data job and the cascade keeps working
   `<release>-postgres` / `<release>-rustfs`, with **no in-cluster DNS leaks** and **no plaintext secrets**.
 
 ## Open decisions (resolve before/early in the merge)
-1. **AGE on CNPG** — custom AGE image vs separate operand vs Lance-native graph (`todo.md`). Affects §1.
+1. **AGE on CNPG** — custom AGE image vs separate operand vs Lance-native graph (`docs/GOAL-prove-it.md`). Affects §1.
 2. **Tenancy** — this repo is single-warehouse (`warehouse:lance_catalog`); rask is single implicit `default`
    project. Confirm one warehouse-per-deploy stays the model (no multi-warehouse routing).
 3. **Catalog 501s** — the **7** genuinely backend-stubbed ops (`docs/COVERAGE.md`: rename / backfill /

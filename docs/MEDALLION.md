@@ -45,7 +45,7 @@ every other stage, the pipeline is event-driven end to end — nothing polls or 
 > still serves the unauthenticated `/produce` on its ClusterIP, and this route is *not* sidecar-delivered
 > so it skips `require_dapr_token`; no NetworkPolicy ships either. So an in-cluster workload can still
 > reach it. Hardening that (a NetworkPolicy, or a token/authz on `/produce`) is tracked in
-> `todo_fable.md` §9.
+> `docs/GOAL-prove-it.md`.
 
 ### Does the cascade produce real data, or just lineage?
 

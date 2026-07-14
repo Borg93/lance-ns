@@ -1,7 +1,7 @@
 # System sketch — where we are, the holes, and how we differ from Lakekeeper
 
 > Living status doc (bird's-eye). Detailed design: [`ARCHITECTURE.md`](ARCHITECTURE.md)
-> (catalog) and [`LINEAGE.md`](LINEAGE.md) (provenance). Roadmap: [`../todo.md`](../todo.md).
+> (catalog) and [`LINEAGE.md`](LINEAGE.md) (provenance). Roadmap: [`docs/GOAL-prove-it.md`](GOAL-prove-it.md).
 > This file = the sketch of everything + the gap register + the Lakekeeper diff.
 >
 > ⚠️ **Point-in-time markers.** Some ✅/⛔ status cells below are historical. Since this was written,
@@ -54,7 +54,7 @@ emit an OpenLineage event. Layers are **separate Lance tables** (namespaces); pr
 **compute client**, never a catalog endpoint.
 
 > ### ⚠️ Audit-verified corrections (`w8u4rc2tg`, 2026-06-24)
-> A grounded re-audit of the real code (full citations in §6 / [`../todo.md`](../todo.md)) refined three things:
+> A grounded re-audit of the real code (full citations in §6 / [`docs/GOAL-prove-it.md`](GOAL-prove-it.md)) refined three things:
 > - **Secret responsibility (least-privilege).** Only the **catalog** and **lineage svc** consume
 >   OpenBao. Compute jobs (**lance-ray**) never read it — they get short-TTL scoped creds *from the
 >   catalog* and authenticate with **workload identity** (KubeRay SA / OIDC token). The sketch showing
@@ -163,7 +163,7 @@ _The three sections below are the **cited Lakekeeper study output** (study `wfb2
 | 5 | **lance-ray promotion + compaction jobs** with idempotency keys | LANCE_RAY_JOBS | Absent — no background-job framework; promotions vulnerable to duplicate work on retry. | Build the promotion (bronze→silver→gold) + compaction jobs as catalog *clients*. Add `Idempotency-Key` handling for the write ops (Lakekeeper idempotency.rs check-on-read + insert-at-commit); use in-memory/Redis for dev, no Postgres advisory lock yet. | **P1** | M |
 | 6 | **Pluggable OpenBao SecretStore** (KV v2) with background token refresh | SECRETS | S3 master creds + OIDC config are env-only (config.py:34-35,42-44). No vault, no refresh. | Add a `SecretStore` protocol (shape it like `CredentialVendor`): `OpenBaoKV2Backend` (hvac, Vault-API/KV-v2 compatible) + `EnvBackend` fallback. Instantiate in `main.py` lifespan; static-vendor keys and OIDC client secret read via SecretStore. Include a daemon refresh task (Lakekeeper login_task lib.rs:174-196). | **P1** | M |
 | 7 | **NATS JetStream event backbone** (Dapr pub/sub) | EVENTS / LINEAGE | ✅ Built & deployed — Dapr pub/sub over NATS JetStream carries the medallion triggers + the OpenLineage events; the movers emit OpenLineage that the lineage service ingests. See [`FLOW.md`](FLOW.md). | The catalog publishes structural lineage; the medallion movers emit OpenLineage transform events; they meet at shared `table:<id>` identity. | done | — |
-| 8 | **Routes-vs-spec conformance test** (parse spec.yaml, diff against implemented routes) | CONFORMANCE | Absent — smoke_test.py exercises ops manually; spec drift can deploy silently (todo.md #6). | Add `test_endpoint_completeness()` parsing spec.yaml `(method, path)` pairs vs FastAPI routes; fail on drift (Lakekeeper endpoints.rs:413). Cheap CI gate. | **P1** | S |
+| 8 | **Routes-vs-spec conformance test** (parse spec.yaml, diff against implemented routes) | CONFORMANCE | Absent — smoke_test.py exercises ops manually; spec drift can deploy silently (docs/GOAL-prove-it.md). | Add `test_endpoint_completeness()` parsing spec.yaml `(method, path)` pairs vs FastAPI routes; fail on drift (Lakekeeper endpoints.rs:413). Cheap CI gate. | **P1** | S |
 | 9 | **Versioned authz-model migration** (`ACTIVE_MODEL_VERSION` + idempotent `migrate()`) | AUTHZ / GOVERNANCE_P1 | `model.json` loaded with no versioning, no migration hooks (services/common/auth/). | Add `ACTIVE_MODEL_VERSION` + versioned schema files + idempotent `migrate()` recording applied version (Lakekeeper migration.rs:11-18,142-163). Mandatory **before** the 3-axis (teams×projects×layers) model introduces new types. | **P1** | M |
 | 10 | **Split hierarchy vs ownership tuple helpers + golden tuple tests** | AUTHZ / GOVERNANCE_P1 | Single inline grant in `grant_on_create` (fga.py:408+); no split, no golden tests. | Extract `tuples.py` with `hierarchy_tuples_for_*()` / `ownership_tuples_for_*()`; add golden unit tests pinning exact triples per entity (Lakekeeper tuples.rs:248-547). Precondition for reconcile (#11). | **P1** | M |
 | 11 | **Reconcile-from-catalog (additive + drift deletion)** for safe model evolution | AUTHZ / GOVERNANCE_P1 | Absent — no rebuild path, no drift detection/deletion, no dry-run. | Implement `reconcile.py`: `rebuild_*` (additive) + `reconcile_*` (drift deletion, dry-run flag). Deletion only targets managed structural relations; preserves ownership/grants (Lakekeeper reconcile.rs:1-108,199-247). Use `asyncio.Lock` not Postgres advisory lock at our scale. | **P1** | L |

@@ -139,7 +139,7 @@ The toggle is the *credential-delivery* shape — both modes run on the **same**
 >    audit fact at `GET /datasets/{id}/creator` (P0 #3). Insert/delete/merge-insert/update and the
 >    compaction sweeper all emit too — the write surface is fully covered.
 >
-> Tracked in [`todo.md`](../todo.md). Run the whole loop: `scripts/governance_e2e.sh` (or
+> Tracked in [`docs/GOAL-prove-it.md`](GOAL-prove-it.md). Run the whole loop: `scripts/governance_e2e.sh` (or
 > `DEMO=1 scripts/governance_e2e.sh` for the narrated [`governance_demo.py`](../scripts/governance_demo.py)).
 
 ---
@@ -151,4 +151,4 @@ The toggle is the *credential-delivery* shape — both modes run on the **same**
 - **"Where does lineage come from?"** — run *Promote*; the last two steps (emit → MERGE) show provenance is a **byproduct of the job**. Ingest now **binds the verified author** (P0 #2). The event-driven medallion movers that emit this lineage are built & deployed ([`FLOW.md`](FLOW.md)); only the *distributed* lance-ray Ray Data job is still the rask future.
 - **"What's still open?"** — *Lineage query*, steps 2–3 are now the SHIPPED authz gate
   (`LINEAGE_OIDC_ENABLED` + `LINEAGE_FGA_ENABLED`, on in the chart); the remaining opens live in
-  [`todo_fable.md`](../todo_fable.md) §7a (live-verification residuals) and §9 (feature gaps).
+  [`docs/GOAL-prove-it.md`](GOAL-prove-it.md) §7a (live-verification residuals) and §9 (feature gaps).

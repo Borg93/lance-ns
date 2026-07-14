@@ -81,6 +81,16 @@ flag) — no tenant offboarding story exists at all. Delete stays guarded/manual
 nothing drives N concurrent `POST /commit` racing one table through the API. Assert exactly one
 winner per version, losers get 409 and converge on retry. *Proof:* e2e green in CI.
 
+## P2.5 — frontend: audit + fix (user-directed 2026-07-14)
+
+Skills-driven audit (`w1yn6g2r5`) covering: real bugs (poll-loop races, runes misuse, leaks,
+error swallowing), **backend-contract drift** (the UI predates warehouses/multibase/commit/credentials —
+are the generated OpenAPI types stale? does the BFF allowlist block them?), **dead code** (the ~8 orphan
+type aliases = `/jobs` + `/namespaces` never wired in), and a11y/perf/type quality — verified against the
+OFFICIAL Svelte 5 runes docs via the Svelte MCP, not guessed.
+*Proof:* every CONFIRMED finding fixed with `bunx turbo run check test lint fmt:check` + Playwright green
+in CI; dead code deleted and proven unreferenced.
+
 ## P4 — the audit-workflow findings (reserved — folded in when wgznqpmwd lands)
 
 Pending verdicts to triage into P-levels here:

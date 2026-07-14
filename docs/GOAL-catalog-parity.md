@@ -146,6 +146,31 @@ buckets, created at runtime by the API not Helm); a table created under A physic
 and is ABSENT from bucket-b (verified by listing both buckets); new datasets report data_storage
 2.2 + FLAG_STABLE_ROW_IDS; `POST /v1/warehouses` denied to a non-project-admin (403). Unit + integration
 + live e2e, adversarially audited.
+
+**#3-A STATUS: DONE (2026-07-14).** Shipped (f1a50e4) + audit-hardened (ac02757: 5 isolation holes fixed
+incl. a CRITICAL cross-tenant takeover), live-verified on kind (provision A/B → distinct buckets; table
+in A absent from B; non-admin 403; F1 cross-project 409 + F2 binding-hijack 409 driven live).
+
+### #3-B implementation design (multi-base data distribution — the differentiator)
+
+Feasibility CONFIRMED (2026-07-14): pinned **pylance 8.0.0** exposes the full write API — `DatasetBasePath`,
+`write_dataset(initial_bases=, target_bases=, base_store_params=)`, `LanceDataset.add_bases`. The catalog
+already uses `initial_bases` (is_dataset_root=False) for external-blob allowlisting (`dataplane.py`), so
+#3-B EXTENDS that seam to DATA distribution (the Uber pattern).
+
+Design:
+- **Create path:** the create-table request accepts optional `data_bases: list[str]` (additional
+  is_dataset_root=False S3 base URIs) + implicit `target_bases` = round-robin across them, threaded into
+  `dataplane.create_table` → `write_dataset(initial_bases=[DatasetBasePath(b, is_dataset_root=False) ...],
+  target_bases=[...])`. Preserves the existing external-blob behavior + the #5a 2.2/stable-row-id invariant.
+- **Governance (REQUIRED — this is the security crux):** a caller must NOT be able to point base_paths at
+  an arbitrary bucket (data exfil / write to a bucket they shouldn't). Restrict `data_bases` to an
+  ALLOWLIST (`LANCE_MULTIBASE_DATA_BASES`, mirroring `external_blob_bases`) — reject an off-list base (400).
+  A registered-warehouse-bucket check is the richer future option; the allowlist is the MVP.
+- **Read:** transparent — `lance.dataset(uri)` fans out across all registered bases; no catalog change.
+**#3-B done when (live on kind):** a table created with 2 data bases has its data files DISTRIBUTED across
+both buckets (list both — each holds fragments), `to_table()` returns ALL rows (fan-out read), the dataset
+stays relative-path portable, an off-allowlist base is rejected (400), and #5a (2.2 + stable-row-ids) holds.
 - **Design:** admin `POST /v1/warehouse/{id}/create` (project-admin gated via `can_create_warehouse`):
   provision the bucket (RustFS admin / `mc mb`), register it as the warehouse `base_uri`, stamp create-time
   policy (`data_storage_version=2.2` + `enable_stable_row_ids`). Route table/namespace location production

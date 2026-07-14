@@ -164,6 +164,7 @@ PYTHONPATH=services uv run pytest \
   tests/e2e/test_warehouses_e2e.py \
   tests/e2e/test_multibase_e2e.py \
   tests/e2e/test_outbox_e2e.py \
+  tests/e2e/test_outbox_crash_e2e.py \
   -v -p no:cacheprovider
 
 echo

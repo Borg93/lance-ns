@@ -66,6 +66,9 @@ spec:
             # subscribes on /raw-arrival AND publishes through the same handle (same NATS subjects).
             - { name: MEDALLION_PUBSUB, value: {{ include "lance.subPubsub" (list $root .Values.medallion.producer.daprAppId) | quote }} }
             - { name: MEDALLION_LINEAGE_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            {{- if .Values.services.lineage.outbox.enabled }}
+            - { name: MEDALLION_LINEAGE_OUTBOX_URI, value: "s3://{{ .Values.rustfs.bucket }}/_lineage_outbox" }
+            {{- end }}
             - { name: MEDALLION_RAW_DATASET, value: {{ .Values.medallion.producer.rawDataset | quote }} }
             - { name: MEDALLION_RAW_NAMESPACE, value: {{ .Values.medallion.producer.rawNamespace | quote }} }
             - { name: MEDALLION_PRODUCER_OPERATION, value: {{ .Values.medallion.producer.operation | quote }} }
@@ -208,6 +211,9 @@ spec:
             # subscribes to its stage trigger AND publishes lineage + the next trigger through it.
             - { name: MEDALLION_PUBSUB, value: {{ include "lance.subPubsub" (list $root .daprAppId) | quote }} }
             - { name: MEDALLION_LINEAGE_TOPIC, value: {{ $root.Values.pubsub.topic | quote }} }
+            {{- if $root.Values.services.lineage.outbox.enabled }}
+            - { name: MEDALLION_LINEAGE_OUTBOX_URI, value: "s3://{{ $root.Values.rustfs.bucket }}/_lineage_outbox" }
+            {{- end }}
             - name: APP_API_TOKEN  # verify the Dapr-stamped header on /medallion-event (forged-trigger guard)
               valueFrom:
                 secretKeyRef: { name: {{ $root.Release.Name }}-dapr-app-token, key: token }

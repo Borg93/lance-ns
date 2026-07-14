@@ -23,6 +23,11 @@ class MedallionSettings(BaseSettings):
     # --- shared Dapr wiring (same component + lineage topic as catalog/lineage) -----------------
     pubsub: str = Field(default="lineage-pubsub", alias="MEDALLION_PUBSUB")
     lineage_topic: str = Field(default="lineage.events.v1", alias="MEDALLION_LINEAGE_TOPIC")
+    # #4: durable object-store outbox for lineage events — stage each event here BEFORE the fire-and-forget
+    # publish so a crash between the Lance commit and the publish can't lose it (the lineage relay drains any
+    # survivor, idempotent on run_id). Empty = disabled (plain publish, pre-#4). A shared prefix both the
+    # movers and the lineage service can reach, e.g. ``s3://<bucket>/_lineage_outbox``.
+    lineage_outbox_uri: str = Field(default="", alias="MEDALLION_LINEAGE_OUTBOX_URI")
     # Bound every Dapr publish so a hung sidecar raises TimeoutError → the mover's RETRY path fires (the
     # handler contract expects a prompt return), instead of pinning the worker until the ack window lapses.
     publish_timeout_seconds: float = Field(default=5.0, gt=0, alias="MEDALLION_PUBLISH_TIMEOUT_SECONDS")

@@ -255,6 +255,9 @@ spec:
             - { name: LINEAGE_S3_SECRET_ACCESS_KEY, value: {{ .Values.rustfs.secretKey | quote }} }
             {{- end }}
             - { name: LINEAGE_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
+            {{- if .Values.services.lineage.outbox.enabled }}
+            - { name: LINEAGE_OUTBOX_URI, value: "s3://{{ .Values.rustfs.bucket }}/_lineage_outbox" }
+            {{- end }}
             {{- if .Values.auth.enabled }}
             - { name: LINEAGE_OIDC_ENABLED, value: "true" }
             - { name: LINEAGE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }

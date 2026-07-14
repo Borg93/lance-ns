@@ -471,6 +471,12 @@ services:
       enabled: false
       bindingName: lineage-reconcile-cron
       schedule: "@every 300s" # demo cadence (prod: e.g. "0 */15 * * * *")
+    # #4 transactional outbox: producers stage each lineage event to s3://<rustfs.bucket>/_lineage_outbox
+    # BEFORE the fire-and-forget publish; the reconcile sweep DRAINS any survivor (a crash between the Lance
+    # commit and the publish), re-ingesting the FULL event (inputs/author/columnLineage) — closing the loss
+    # window the DLQ + version-only back-fill cannot. Requires reconcile.enabled (the drain runs in the sweep).
+    outbox:
+      enabled: false
     # Run-node retention (§4): the reconcile cron prunes graph :Run nodes older than this many days
     # (batched DETACH DELETE under the sweep's single-flight lock). 0 = off — keep full provenance
     # (the dev/demo default). Only meaningful with reconcile.enabled (the cron is the pruner).

@@ -454,6 +454,7 @@ def test_cron_route_post_with_token_returns_sweep_report(monkeypatch: pytest.Mon
     # rely on every key being present on every tick.
     assert body == {
         "checked": 0,
+        "outbox_drained": 0,
         "backfilled": [],
         "storage_loss": [],
         "dangling_blobs": {},

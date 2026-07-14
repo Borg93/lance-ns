@@ -14,6 +14,7 @@ import logging
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 
+from common import outbox
 from common.dapr_auth import require_dapr_token
 from fastapi import APIRouter, Depends
 from fastapi.concurrency import run_in_threadpool
@@ -29,6 +30,8 @@ from lineage.core.reconcile import (
     read_storage_version,
     reconcile_all,
 )
+from lineage.models import RunEvent
+from lineage.services.consumer import record_event_best_effort
 
 log = logging.getLogger(__name__)
 
@@ -72,6 +75,20 @@ async def _on_cron(
             # estate-wide — only declared datasets pay the schema read.
             declared=declared_columns_map(settings),
         )
+        # Drain the lineage OUTBOX (#4): re-ingest any event a producer STAGED but whose publish never got
+        # acked — a crash between the Lance commit and the fire-and-forget publish — then delete it. Unlike
+        # the version+schema back-fill above, this recovers the FULL event (inputs, author, columnLineage).
+        # Idempotent: ingest_event MERGEs on run_id, so a redundant republish (publish DID land, producer
+        # crashed before deleting) is a no-op. Runs inside the same single-flight lock — no double-drain.
+        # Isolated like the prune below: a drain error (e.g. a storage hiccup) must degrade to a warning,
+        # never 500 the tick — the version+schema back-fill above already committed and its report must
+        # reach the log/response regardless of whether the full-event drain succeeds this tick.
+        drained = 0
+        if settings.outbox_uri:
+            try:
+                drained = await _drain_outbox(repository, settings, opts)
+            except Exception as exc:  # noqa: BLE001 — full-event recovery is best-effort; next tick retries
+                log.warning("lineage_outbox_drain_failed", extra={"error": str(exc)})
         # Opt-in Run retention (§4) — prune old graph runs while we still hold the single-flight lock,
         # so two replicas never race the same delete. 0 days (the default) = keep full provenance.
         # Isolated: a prune failure must degrade to a warning, never 500 the tick — the sweep above
@@ -121,6 +138,7 @@ async def _on_cron(
             "dangling_blobs": len(dangling),
             "stale": len(stale),
             "contract_violations": len(violations),
+            "outbox_drained": drained,
             "pruned_runs": pruned_runs,
         },
     )
@@ -131,8 +149,38 @@ async def _on_cron(
         "dangling_blobs": dangling,
         "stale": stale,
         "contract_violations": violations,
+        "outbox_drained": drained,
         "pruned_runs": pruned_runs,
     }
+
+
+async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: dict[str, str]) -> int:
+    """Re-ingest + delete every staged lineage event (#4) — the full-event recovery half of the outbox.
+
+    An unparseable (poison) object is dropped so it can't wedge the drain. A well-formed event is ingested
+    idempotently (``ingest_event`` MERGEs on ``run_id``) and then deleted; a delete that fails just leaves
+    the object for the next tick to re-ingest (a no-op) and retry the delete. Returns the count ingested.
+    """
+    staged = await run_in_threadpool(lambda: list(outbox.list_events(settings.outbox_uri, opts)))
+    drained = 0
+    for run_id, event_json in staged:
+        try:
+            event = RunEvent.model_validate_json(event_json)
+        except Exception as exc:  # noqa: BLE001 — a poison object must not wedge the drain; drop it
+            log.warning("lineage_outbox_poison_dropped", extra={"run_id": run_id, "error": str(exc)})
+            await run_in_threadpool(outbox.drop_event, settings.outbox_uri, opts, run_id)
+            continue
+        await repository.ingest_event(event)  # idempotent — MERGE on run_id (authoritative AGE graph)
+        # Mirror BOTH live ingest paths (JetStream consumer + HTTP ingest): also project onto the durable
+        # `lineage_events` feed. Without this the drained run reaches /runs + /producers but is SILENTLY
+        # absent from the /events audit surface — exactly the run the outbox exists to save. The feed INSERT
+        # is ON CONFLICT DO NOTHING on the natural key, so a later genuine redelivery won't duplicate.
+        await record_event_best_effort(repository, event)
+        await run_in_threadpool(outbox.drop_event, settings.outbox_uri, opts, run_id)
+        drained += 1
+    if drained:
+        log.info("lineage_outbox_drained", extra={"drained": drained})
+    return drained
 
 
 async def _ack_binding() -> dict[str, str]:

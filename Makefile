@@ -252,6 +252,16 @@ e2e-client-direct: ## Client-DIRECT write e2e (#2): vend → write_fragments (cl
 	   uv run pytest tests/e2e/test_client_direct_e2e.py -v -m e2e; rc=$$?; \
 	 kill $$C $$D $$F $$S 2>/dev/null; exit $$rc
 
+e2e-outbox: ## Transactional-outbox drain e2e (#4): stage a leftover event → trigger the reconcile sweep → re-ingested + object gone (deploy with services.lineage.outbox.enabled=true,reconcile.enabled=true)
+	@echo "port-forwarding lineage/rustfs …"
+	@kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-rustfs 9900:9000 >/dev/null 2>&1 & S=$$!; \
+	 sleep 4; \
+	 LANCE_E2E_LINEAGE_URL=http://localhost:8000 LANCE_E2E_S3=http://localhost:9900 \
+	 LANCE_E2E_DAPR_TOKEN=$$(kubectl get secret $(RELEASE)-dapr-app-token -o jsonpath='{.data.token}' | base64 -d) \
+	   uv run pytest tests/e2e/test_outbox_e2e.py -v -m e2e; rc=$$?; \
+	 kill $$L $$S 2>/dev/null; exit $$rc
+
 e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+quality ON, openbao OFF — see tests/e2e/test_governed_union_e2e.py)
 	@echo "port-forwarding lance-ray/lineage/dex/openfga/rustfs + the bronze-to-silver mover …"
 	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & PIDS=$$!; \

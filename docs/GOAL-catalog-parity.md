@@ -95,9 +95,21 @@ enforcement-only, no managed surface) — see #3; (b) the physical **bucket-per-
   failing publish lands in the DLQ, queryable, not silently lost. A phantom outbox (commit never landed) is
   discarded, never published.
 
-**#3 — per-warehouse physical multi-tenancy (control plane).**
-- **Goal:** a warehouse = a runtime-provisioned, physically separate bucket (Lakekeeper parity), not the
-  shared `lance-catalog` bucket by prefix. Provisioned + governed through an admin control-plane API.
+**#3 — physical multi-tenancy (control plane) + Lance Multi-Base (differentiator).**
+NOTE (2026-07-14): two DISTINCT, complementary axes — do not conflate:
+  - **#3-A = per-warehouse bucket = multi-TENANCY** (one tenant → one bucket; ISOLATION). Lakekeeper parity.
+  - **#3-B = Lance Multi-Base** (one TABLE → N buckets via `base_paths[]`+`base_id`; THROUGHPUT/tiering/DR/
+    shallow-clone — the Uber use case). Iceberg (absolute paths, v4 rework) + Delta (hybrid, lost portability
+    on shallow-clone) can't do this cleanly; Lance keeps strict relative-path portability AND multi-location →
+    this is where we EXCEED the peers, not just reach parity. Partial support already exists (`initial_bases`/
+    `DatasetBasePath` in the blob-create path; `layout.md` documents hot/cold, multi-region, DR, shallow-clone).
+- **#3-A goal:** a warehouse = a runtime-provisioned, physically separate bucket, not the shared
+  `lance-catalog` bucket by prefix. Provisioned + governed through an admin control-plane API.
+  **Done when:** two warehouses → DISTINCT buckets; a table in A is physically ABSENT from B's bucket;
+  new datasets report 2.2 + FLAG_STABLE_ROW_IDS; denied to a non-project-admin (403).
+- **#3-B goal:** expose `base_paths` so ONE dataset can span N buckets, portably + governed.
+  **Done when:** a dataset created with `initial_bases` across 2 buckets round-robins writes + fans out
+  reads, stays relative-path portable, and the catalog vends/governs per-base.
 - **Design:** admin `POST /v1/warehouse/{id}/create` (project-admin gated via `can_create_warehouse`):
   provision the bucket (RustFS admin / `mc mb`), register it as the warehouse `base_uri`, stamp create-time
   policy (`data_storage_version=2.2` + `enable_stable_row_ids`). Route table/namespace location production

@@ -16,7 +16,7 @@ import json
 import logging
 import uuid
 
-from common import dapr_publish
+from common import outbox
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
@@ -77,13 +77,20 @@ async def produce(
         # The cascade HEAD is this raw-write lineage event: lance-ray's own /raw-arrival subscription reacts
         # to it and publishes the medallion.raw trigger, so the pipeline is driven by the arrival EVENT, not
         # by this call directly (event-driven head — the trigger publish moved to ingest_trigger.py).
-        await dapr_publish.publish_event(
+        # Stage-then-publish-then-drop through the outbox (#4), same as every mover in transform.py — so a
+        # crash between the raw Lance commit and the publish ack leaves the cascade HEAD's event staged for
+        # the reconcile relay to recover (author + source_uri the version+schema back-fill can't reconstruct).
+        # Degrades to a plain publish when lineage_outbox_uri is unset (the default). This makes the feature
+        # uniform ("every lineage publish is staged") and the values.yaml claim literally true.
+        await outbox.publish_lineage_with_outbox(
             dapr,
-            timeout_seconds=settings.publish_timeout_seconds,
+            outbox_uri=settings.lineage_outbox_uri,
+            storage_options=settings.storage_options(),
+            run_id=raw_event["run"]["runId"],
+            event_json=json.dumps(raw_event),
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
-            data=json.dumps(raw_event),
-            data_content_type="application/json",
+            timeout_seconds=settings.publish_timeout_seconds,
         )
     except Exception as exc:  # noqa: BLE001 — best-effort: a publish outage must not 500 the producer
         log.warning("medallion_produce_failed", extra={"token": token, "error": str(exc)})

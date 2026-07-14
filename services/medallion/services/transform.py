@@ -20,7 +20,7 @@ import logging
 from contextlib import suppress
 from typing import Any
 
-from common import dapr_publish, fga
+from common import dapr_publish, fga, outbox
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import ServiceUnavailableError
@@ -182,15 +182,20 @@ async def handle_stage(
             assertions=[a.model_dump(exclude_none=True) for a in assertions] or None,
             token=token,
         )
-        # 1. Emit the transform's lineage (-> the lineage service ingests the DERIVED_FROM edge). This runs
-        # even on a quality failure, so the failed assertions are recorded and the bad batch is auditable.
-        await dapr_publish.publish_event(
+        # 1. Emit the transform's lineage DURABLY (#4): stage the full event in the object-store outbox,
+        # publish, drop on ack — so a crash between the Lance commit above and this publish can't lose it
+        # (the lineage relay re-ingests any staged survivor, idempotent on run_id). Degrades to a plain
+        # publish when no outbox_uri is set. Runs even on a quality failure, so the failed assertions are
+        # recorded and the bad batch stays auditable.
+        await outbox.publish_lineage_with_outbox(
             dapr,
-            timeout_seconds=settings.publish_timeout_seconds,
+            outbox_uri=settings.lineage_outbox_uri,
+            storage_options=settings.storage_options(),
+            run_id=run_event["run"]["runId"],
+            event_json=json.dumps(run_event),
             pubsub_name=settings.pubsub,
             topic_name=settings.lineage_topic,
-            data=json.dumps(run_event),
-            data_content_type="application/json",
+            timeout_seconds=settings.publish_timeout_seconds,
         )
         completed = True  # the COMPLETE is recorded — a later trigger-publish failure is NOT a run failure
         # 2. Quality gate: a failed assertion BLOCKS promotion — record it, but do NOT trigger the next

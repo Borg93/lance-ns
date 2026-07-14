@@ -99,6 +99,11 @@ class LineageSettings(BaseSettings):
     s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="LINEAGE_S3_SECRET_ACCESS_KEY")
     s3_region: str = Field(default="us-east-1", alias="LINEAGE_S3_REGION")
     s3_bucket: str = Field(default="lakehouse", alias="LINEAGE_S3_BUCKET")
+    # #4: the durable lineage-outbox prefix (shared with the medallion movers). When set, the reconcile
+    # sweep also DRAINS it — re-ingesting any event a producer staged but whose publish never got acked
+    # (a crash between the Lance commit and the publish), then deleting it. Empty = drain disabled. Must
+    # point at the SAME object-store prefix as ``MEDALLION_LINEAGE_OUTBOX_URI``.
+    outbox_uri: str = Field(default="", alias="LINEAGE_OUTBOX_URI")
 
     # --- Secret consumption from the Dapr secret store (OpenBao) — the audit's 'wired but never read' /
     # 'plaintext still ships' fix, symmetric with the catalog. When on, the S3 secret (reconcile reads the

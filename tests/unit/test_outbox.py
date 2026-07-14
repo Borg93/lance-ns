@@ -55,8 +55,14 @@ def test_publish_with_outbox_stages_then_drops_on_ack(tmp_path: Any) -> None:
     event = '{"run":{"runId":"r1"}}'
     asyncio.run(
         outbox.publish_lineage_with_outbox(
-            dapr, outbox_uri=uri, storage_options={}, run_id="r1", event_json=event,
-            pubsub_name="p", topic_name="t", timeout_seconds=5,
+            dapr,
+            outbox_uri=uri,
+            storage_options={},
+            run_id="r1",
+            event_json=event,
+            pubsub_name="p",
+            topic_name="t",
+            timeout_seconds=5,
         )
     )
     assert dapr.published == [event]
@@ -72,8 +78,14 @@ def test_publish_failure_leaves_event_staged_for_the_relay(tmp_path: Any) -> Non
     with pytest.raises(TimeoutError):
         asyncio.run(
             outbox.publish_lineage_with_outbox(
-                dapr, outbox_uri=uri, storage_options={}, run_id="r1", event_json=event,
-                pubsub_name="p", topic_name="t", timeout_seconds=5,
+                dapr,
+                outbox_uri=uri,
+                storage_options={},
+                run_id="r1",
+                event_json=event,
+                pubsub_name="p",
+                topic_name="t",
+                timeout_seconds=5,
             )
         )
     assert dict(outbox.list_events(uri, {})) == {"r1": event}  # survived
@@ -83,8 +95,14 @@ def test_no_outbox_uri_degrades_to_plain_publish(tmp_path: Any) -> None:
     dapr = _Dapr()
     asyncio.run(
         outbox.publish_lineage_with_outbox(
-            dapr, outbox_uri="", storage_options={}, run_id="r1", event_json='{"x":1}',
-            pubsub_name="p", topic_name="t", timeout_seconds=5,
+            dapr,
+            outbox_uri="",
+            storage_options={},
+            run_id="r1",
+            event_json='{"x":1}',
+            pubsub_name="p",
+            topic_name="t",
+            timeout_seconds=5,
         )
     )
     assert dapr.published == ['{"x":1}']  # published, nothing staged
@@ -123,9 +141,14 @@ def test_relay_drain_reingests_valid_and_drops_poison(tmp_path: Any) -> None:
 
     uri = _uri(tmp_path)
     event = build_run_event(
-        operation="ingest_events", author="alice", job_namespace="medallion",
-        inputs=[("raw", "raw_events")], output_namespace="bronze", output_name="bronze$events",
-        version=2, token="t1",
+        operation="ingest_events",
+        author="alice",
+        job_namespace="medallion",
+        inputs=[("raw", "raw_events")],
+        output_namespace="bronze",
+        output_name="bronze$events",
+        version=2,
+        token="t1",
     )
     run_id = event["run"]["runId"]
     outbox.stage_event(uri, {}, run_id, json.dumps(event))
@@ -148,9 +171,14 @@ def test_relay_drain_is_idempotent_on_reingest(tmp_path: Any) -> None:
 
     uri = _uri(tmp_path)
     event = build_run_event(
-        operation="ingest_events", author="alice", job_namespace="medallion",
-        inputs=[("raw", "raw_events")], output_namespace="bronze", output_name="bronze$events",
-        version=1, token="t2",
+        operation="ingest_events",
+        author="alice",
+        job_namespace="medallion",
+        inputs=[("raw", "raw_events")],
+        output_namespace="bronze",
+        output_name="bronze$events",
+        version=1,
+        token="t2",
     )
     outbox.stage_event(uri, {}, event["run"]["runId"], json.dumps(event))
     repo = _Repo()

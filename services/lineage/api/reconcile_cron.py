@@ -175,9 +175,7 @@ async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: 
         log.info("lineage_outbox_backlog", extra={"depth": depth, "oldest_age_seconds": round(oldest_age, 1)})
 
     cap = settings.outbox_drain_limit or None  # 0 => unbounded (the pre-P1.2 behavior)
-    staged = await run_in_threadpool(
-        lambda: list(outbox.list_events(settings.outbox_uri, opts, limit=cap))
-    )
+    staged = await run_in_threadpool(lambda: list(outbox.list_events(settings.outbox_uri, opts, limit=cap)))
     drained = 0
     for run_id, event_json in staged:
         try:

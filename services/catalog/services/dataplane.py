@@ -658,9 +658,7 @@ def commit_appended_fragments(
     return int(dataset.version), dataset.count_rows()
 
 
-def _verify_fragment_data_files(
-    location: str, so: StorageOptions, fragments: list[dict[str, Any]]
-) -> None:
+def _verify_fragment_data_files(location: str, so: StorageOptions, fragments: list[dict[str, Any]]) -> None:
     """Reject a commit that references data files ABSENT under ``<location>/data/`` (audit HIGH fix).
 
     Each fragment's ``files[].path`` is a bare filename under the dataset's ``data/`` dir (``base_id`` null →

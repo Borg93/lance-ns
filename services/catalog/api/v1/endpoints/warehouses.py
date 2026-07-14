@@ -211,16 +211,12 @@ async def create_warehouse_namespace(
         warehouses.warehouse_for_namespace, settings.registry_root, settings.storage_options(), ns_name
     )
     if existing_binding is not None and existing_binding != root_uri:
-        raise NamespaceAlreadyExistsError(
-            f"namespace {ns_name!r} is already bound to another warehouse"
-        )
+        raise NamespaceAlreadyExistsError(f"namespace {ns_name!r} is already bound to another warehouse")
 
     ns_conn = _namespace_for_root(request, settings, root_uri)
     segments = parse_identifier(ns_name, settings.delimiter)
     req = CreateNamespaceRequest(id=segments)
-    response: CreateNamespaceResponse = await run_in_threadpool(
-        native.call, ns_conn, "create_namespace", req
-    )
+    response: CreateNamespaceResponse = await run_in_threadpool(native.call, ns_conn, "create_namespace", req)
     # Persist + cache the binding BEFORE returning, so the very next table-create routes to this bucket.
     await run_in_threadpool(
         warehouses.bind_namespace,

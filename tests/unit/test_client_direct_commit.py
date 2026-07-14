@@ -169,5 +169,7 @@ def test_vending_mode_requires_sts_endpoint_fail_closed() -> None:
     base = {"s3_access_key_id": "x", "s3_secret_access_key": "x"}
     with pytest.raises(ValueError, match="LANCE_S3_STS_ENDPOINT"):
         Settings.model_validate({**base, "vending_mode": "web_identity"})
-    ok = Settings.model_validate({**base, "vending_mode": "web_identity", "s3_sts_endpoint": "http://sts:9000"})
+    ok = Settings.model_validate(
+        {**base, "vending_mode": "web_identity", "s3_sts_endpoint": "http://sts:9000"}
+    )
     assert ok.vending_mode == "web_identity"

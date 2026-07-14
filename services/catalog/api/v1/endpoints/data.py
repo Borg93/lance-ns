@@ -118,9 +118,7 @@ async def create_table(
         approved = set(settings.multibase_data_base_list)
         rogue = [b for b in data_base if b not in approved]
         if rogue:
-            raise InvalidInputError(
-                f"data_base(s) not in the LANCE_MULTIBASE_DATA_BASES allowlist: {rogue}"
-            )
+            raise InvalidInputError(f"data_base(s) not in the LANCE_MULTIBASE_DATA_BASES allowlist: {rogue}")
     parsed_properties = None
     if properties:
         try:

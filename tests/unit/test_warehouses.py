@@ -123,9 +123,7 @@ def test_gate_checks_can_create_warehouse_on_the_project(monkeypatch: pytest.Mon
         return True
 
     monkeypatch.setattr(fga_module, "check", fake_check)
-    asyncio.run(
-        fga_deps.require_can_create_warehouse(MagicMock(), _fga_settings(), _TOKEN, project="acme")
-    )
+    asyncio.run(fga_deps.require_can_create_warehouse(MagicMock(), _fga_settings(), _TOKEN, project="acme"))
     # The gate must check the DORMANT project-admin action on the PROJECT, not a table/namespace relation.
     assert captured == [("alice", "can_create_warehouse", "project:acme")]
 
@@ -162,11 +160,7 @@ def test_model_actually_defines_the_warehouse_relations() -> None:
     # (type, relation) pairs this feature checks are really in the compiled model, so a phantom relation
     # (which OpenFGA rejects with a 400 → fail-closed 503 for every caller) is caught here, not in prod.
     model = fga_module.load_model()
-    defined = {
-        (t["type"], rel)
-        for t in model["type_definitions"]
-        for rel in (t.get("relations") or {})
-    }
+    defined = {(t["type"], rel) for t in model["type_definitions"] for rel in (t.get("relations") or {})}
     assert ("project", "can_create_warehouse") in defined
     assert ("warehouse", "can_get_metadata") in defined
     assert ("warehouse", "can_create_namespace") in defined

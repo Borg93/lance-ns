@@ -41,9 +41,7 @@ async def create_materialized_view(
     # Create is gated on the parent namespace (can_create_materialized_view); seed owner + the parent edge
     # on the ``materialized_view`` object so the creator keeps can_refresh/can_read on their own view and a
     # namespace writer inherits refresh rights via the cascade. Without it the creator would be locked out.
-    await fga_deps.seed_ownership(
-        client, settings, token, resource="materialized_view", segments=segments
-    )
+    await fga_deps.seed_ownership(client, settings, token, resource="materialized_view", segments=segments)
     return response
 
 

@@ -171,9 +171,7 @@ def _catalog_pairs(monkeypatch: pytest.MonkeyPatch) -> set[tuple[str, str]]:
 
     for segments in (["db1", "txn1"], ["txn1"]):  # namespaced (parent-scoped) + opaque (object-scoped)
         for suffix in ("describe", "alter"):
-            asyncio.run(
-                fga_deps._authorize_transaction(_CLIENT, settings, segments, suffix, user="alice")
-            )
+            asyncio.run(fga_deps._authorize_transaction(_CLIENT, settings, segments, suffix, user="alice"))
 
     body = {
         "entries": [{"id": ["db1", "users"]}],
@@ -184,9 +182,7 @@ def _catalog_pairs(monkeypatch: pytest.MonkeyPatch) -> set[tuple[str, str]]:
         ],
     }
     asyncio.run(
-        fga_deps._authorize_batch(
-            cast("Request", _FakeRequest(body)), _CLIENT, settings, user="alice"
-        )
+        fga_deps._authorize_batch(cast("Request", _FakeRequest(body)), _CLIENT, settings, user="alice")
     )
 
     # 4. The endpoint-level gates that check outside `authorize` (Overwrite / rename-into-namespace).

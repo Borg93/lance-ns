@@ -87,8 +87,7 @@ def schema_facet(producer: str, fields: object) -> dict[str, object]:
 #: One builder so the ``_schemaURL`` version can never drift between emitters (the medallion cascade + the
 #: catalog DDL path); the lineage consumer persists each input→output pair as a ``DERIVED_FROM_COLUMN`` edge.
 COLUMN_LINEAGE_FACET_SCHEMA_URL = (
-    "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json"
-    "#/$defs/ColumnLineageDatasetFacet"
+    "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json#/$defs/ColumnLineageDatasetFacet"
 )
 
 #: One flattened input→output column dependency, as the emitters declare it:

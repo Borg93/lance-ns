@@ -171,6 +171,23 @@ Design:
 **#3-B done when (live on kind):** a table created with 2 data bases has its data files DISTRIBUTED across
 both buckets (list both — each holds fragments), `to_table()` returns ALL rows (fan-out read), the dataset
 stays relative-path portable, an off-allowlist base is rejected (400), and #5a (2.2 + stable-row-ids) holds.
+
+**#3-B STATUS: DONE (2026-07-14).** Shipped (86d0afc) + audit-hardened (55f1945). Adversarial audit
+confirmed the security surface solid (allowlist complete, base_store_params runtime-only/no credential
+persistence, #5a + portability hold) and fixed 3 correctness findings (overwrite now distributes when
+re-supplied; base-name collision/dedup rejected; single-endpoint invariant documented). Live-verified on
+kind: a table created with 2 data bases redirects its fragment into a data bucket (NOT the primary root),
+the fan-out read resolves all 4000 rows, an off-allowlist base → 400. NOTE on the "both buckets" condition:
+a SINGLE create produces one fragment → the first base; round-robin spreads across the set as fragment
+count grows, so the live proof asserts REDIRECTION (data in a data base, manifest in the primary root) +
+fan-out read rather than literal both-bucket spread from one small write.
+
+---
+## ALL OF #1–#5 COMPLETE (2026-07-14) — built, live-verified on kind, adversarially audited, on `feat/catalog-parity-1-and-5`
+#1 columnLineage · #2 client-direct writes · #3-A per-warehouse bucket + control-plane · #3-B multi-base ·
+#4 transactional outbox+DLQ · #5a–e housekeeping. Every feature got an adversarial audit; #4 (3), #3-A (5,
+incl. a CRITICAL cross-tenant takeover), #3-B (3) findings fixed + re-verified. Parked per user: NATS HA,
+KubeRay+Kueue, query engine, rask merge, the secrets operator (docs/OPERATORS.md §5).
 - **Design:** admin `POST /v1/warehouse/{id}/create` (project-admin gated via `can_create_warehouse`):
   provision the bucket (RustFS admin / `mc mb`), register it as the warehouse `base_uri`, stamp create-time
   policy (`data_storage_version=2.2` + `enable_stable_row_ids`). Route table/namespace location production

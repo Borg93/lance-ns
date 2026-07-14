@@ -356,3 +356,7 @@ down: ## Delete the kind cluster
 
 e2e-ci: ## THE guarded live proof (P0.1): governed kind stack + the 5 e2e suites (CAS/#2/#3-A/#3-B/#4) — identical to the CI `e2e-stack` job
 	@bash scripts/e2e_stack.sh
+
+deadcode: ## Dead-code sweep (vulture). The whitelist holds framework-invoked symbols so a REAL dead symbol still surfaces.
+	@uvx vulture services scripts tests .vulture-whitelist.py --min-confidence 60 || true
+	@cd frontend && bunx knip --no-exit-code 2>/dev/null || echo "  (frontend: oxlint --deny-warnings already gates unused imports/vars)"

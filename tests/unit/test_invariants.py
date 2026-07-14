@@ -168,6 +168,42 @@ def test_every_fga_relation_in_code_exists_in_the_compiled_model() -> None:
     )
 
 
+def test_every_first_party_deployment_is_hardened() -> None:
+    """The docs claim "every Deployment has probes + preStop". The gateway had NEITHER (audit 2026-07-14).
+
+    An "every" claim in prose is worth nothing; this loop is what makes it true. It renders the chart and
+    checks each FIRST-PARTY Deployment (third-party subcharts — dapr/nats/openfga/dex — are not ours to
+    template). preStop matters most on the gateway: it is the INGRESS, so without a drain delay a rolling
+    update drops in-flight requests while kube-proxy is still routing to the terminating pod.
+    """
+    import shutil
+    import subprocess
+
+    helm = shutil.which("helm") or str(REPO / ".localbin/helm")
+    if not Path(helm).exists():
+        pytest.skip("helm not available")
+    rendered = subprocess.run(  # noqa: S603
+        [helm, "template", str(CHART)], capture_output=True, text=True, check=True
+    ).stdout
+
+    first_party = (
+        "gateway", "catalog", "lineage", "compaction", "lance-ray",
+        "raw-to-bronze", "bronze-to-silver", "silver-to-gold", "media-to-silver", "web",
+    )  # fmt: skip
+    unhardened: list[str] = []
+    for doc in rendered.split("\n---"):
+        if "kind: Deployment" not in doc:
+            continue
+        m = re.search(r"^\s*name:\s*(\S+)", doc, re.M)
+        name = m.group(1) if m else "?"
+        if not any(f in name for f in first_party):
+            continue
+        missing = [k for k in ("livenessProbe", "readinessProbe", "preStop") if k not in doc]
+        if missing:
+            unhardened.append(f"{name} missing {missing}")
+    assert not unhardened, f"first-party Deployments are not hardened: {unhardened}"
+
+
 @pytest.mark.parametrize(
     ("obj_type", "relation"),
     [

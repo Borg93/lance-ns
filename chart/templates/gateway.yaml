@@ -135,6 +135,20 @@ spec:
             - { name: edge-auth, mountPath: /etc/nginx/edge-auth, readOnly: true }
             {{- end }}
           readinessProbe: { httpGet: { path: /healthz, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          # LIVENESS + preStop (audit 2026-07-14: the gateway was the ONE first-party Deployment with
+          # neither, while the docs claimed "every Deployment has probes + preStop" — a false "every").
+          # Liveness is deliberately slower/more tolerant than readiness (the app-probe contract): a busy
+          # but alive nginx must never be SIGKILLed by an impatient probe.
+          livenessProbe:
+            httpGet: { path: /healthz, port: http }
+            initialDelaySeconds: 10
+            periodSeconds: 20
+            timeoutSeconds: 3
+            failureThreshold: 3
+          # preStop matters MOST here of anywhere: the gateway is the INGRESS. Without a drain delay a
+          # rolling update tears nginx down the instant the pod is marked Terminating — while kube-proxy is
+          # still routing to it — so in-flight requests are dropped. The sleep lets endpoints propagate first.
+          {{- include "lance.preStop" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
       volumes:
         - name: conf

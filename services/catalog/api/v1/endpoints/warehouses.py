@@ -19,6 +19,7 @@ import re
 from datetime import UTC, datetime
 
 from common import fga
+from common.oidc import IDToken
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
@@ -33,6 +34,7 @@ from lance_namespace import (
     TableNotFoundError,
     UnsupportedOperationError,
 )
+from openfga_sdk import OpenFgaClient
 from pydantic import BaseModel
 
 from catalog.api import fga_deps
@@ -62,6 +64,7 @@ class WarehouseResponse(BaseModel):
     bucket: str
     root_uri: str
     project: str
+    status: str | None = None  # "active" / "deactivated" (P2.3 lifecycle); absent on pre-lifecycle records
     created_at: str | None = None
 
 
@@ -135,6 +138,7 @@ async def create_warehouse(
         "bucket": bucket,
         "root_uri": root_uri,
         "project": project,
+        "status": "active",  # P2.3 lifecycle: a fresh warehouse is live; deactivate quarantines it
         "created_at": datetime.now(UTC).isoformat(),
     }
     await run_in_threadpool(warehouses.put_warehouse, settings.registry_root, so, record)
@@ -184,6 +188,53 @@ async def get_warehouse(
     if record is None:
         raise TableNotFoundError(f"warehouse not found: {warehouse_id}")
     return WarehouseResponse(**record)
+
+
+async def _set_warehouse_status(
+    warehouse_id: str,
+    status: str,
+    settings: Settings,
+    token: IDToken | None,
+    client: OpenFgaClient | None,
+) -> WarehouseResponse:
+    """Shared deactivate/activate: admin-gate on the warehouse's OWN project, flip ``status``, persist.
+
+    Lifecycle is a platform-admin op (same rung as create): a project admin may quarantine or restore a
+    warehouse they own. Fail-closed: the record is read first (404 if absent) so the gate checks the REAL
+    owning project, not a caller-supplied one. Status is read LIVE by the resolver, so no cache invalidation
+    is needed — the very next routed request sees the new status."""
+    _require_enabled(settings)
+    so = settings.storage_options()
+    record = await run_in_threadpool(warehouses.get_warehouse, settings.registry_root, so, warehouse_id)
+    if record is None:
+        raise TableNotFoundError(f"warehouse not found: {warehouse_id}")
+    await fga_deps.require_can_create_warehouse(client, settings, token, project=record["project"])
+    updated = await run_in_threadpool(
+        warehouses.set_warehouse_status, settings.registry_root, so, warehouse_id, status
+    )
+    if updated is None:  # raced away between the read and the write — treat as gone
+        raise TableNotFoundError(f"warehouse not found: {warehouse_id}")
+    log.info("warehouse_status_changed", extra={"warehouse": warehouse_id, "status": status})
+    return WarehouseResponse(**updated)
+
+
+@router.post("/{warehouse_id}/deactivate", response_model_exclude_none=True)
+async def deactivate_warehouse(
+    warehouse_id: str, settings: SettingsDep, token: CurrentToken, client: FgaClientDep
+) -> WarehouseResponse:
+    """Quarantine a warehouse (#3-A lifecycle): the resolver then refuses EVERY op on its bound namespaces
+    (403), so no new tables are created and existing ones are suspended — the tenant-offboarding first step.
+    Admin-gated on the warehouse's project. Idempotent (re-deactivating is a no-op)."""
+    return await _set_warehouse_status(warehouse_id, "deactivated", settings, token, client)
+
+
+@router.post("/{warehouse_id}/activate", response_model_exclude_none=True)
+async def activate_warehouse(
+    warehouse_id: str, settings: SettingsDep, token: CurrentToken, client: FgaClientDep
+) -> WarehouseResponse:
+    """Reactivate a quarantined warehouse (#3-A lifecycle) — restores routing to its bound namespaces.
+    Admin-gated on the warehouse's project. Idempotent."""
+    return await _set_warehouse_status(warehouse_id, "active", settings, token, client)
 
 
 @router.post("/{warehouse_id}/namespaces", response_model_exclude_none=True)
@@ -254,7 +305,7 @@ async def create_warehouse_namespace(
         warehouse_id,
         root_uri,
     )
-    request.app.state.warehouse_binding_cache[ns_name] = root_uri
+    request.app.state.warehouse_binding_cache[ns_name] = {"warehouse_id": warehouse_id, "root_uri": root_uri}
     # Seed FGA: owner on the namespace + parent edge to the WAREHOUSE (not the shared root), so the
     # concentric cascade project → warehouse → namespace → table reaches the tables created here.
     if settings.fga_enabled and token is not None and client is not None:

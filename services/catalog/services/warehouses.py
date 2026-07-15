@@ -146,3 +146,36 @@ def warehouse_for_namespace(control_root: str, storage_options: StorageOptions, 
     root). This is the routing lookup on the request hot path; callers cache the (immutable) result."""
     record = _read_json(control_root, storage_options, f"{_BINDINGS_PREFIX}/{top_ns}.json")
     return record.get("root_uri") if record else None
+
+
+def binding_for_namespace(
+    control_root: str, storage_options: StorageOptions, top_ns: str
+) -> dict[str, str] | None:
+    """The FULL binding record (``{top_ns, warehouse_id, root_uri}``) for a top-level namespace, or ``None``
+    when unbound. The resolver needs ``warehouse_id`` (not just ``root_uri``) to check the warehouse's
+    lifecycle status; the binding itself is immutable, so the record is safe to cache."""
+    return _read_json(control_root, storage_options, f"{_BINDINGS_PREFIX}/{top_ns}.json")
+
+
+def warehouse_status(control_root: str, storage_options: StorageOptions, warehouse_id: str) -> str | None:
+    """A warehouse's lifecycle status: ``"active"`` / ``"deactivated"``. Returns ``"active"`` when the field
+    is ABSENT (backward compat — records written before the lifecycle feature have no status and are live),
+    and ``None`` only when the warehouse record does not exist. Read LIVE on the routing path (status is
+    mutable, so unlike ``root_uri`` it must never be cached)."""
+    record = get_warehouse(control_root, storage_options, warehouse_id)
+    if record is None:
+        return None
+    return record.get("status") or "active"
+
+
+def set_warehouse_status(
+    control_root: str, storage_options: StorageOptions, warehouse_id: str, status: str
+) -> dict[str, str] | None:
+    """Flip a warehouse's ``status`` (deactivate/activate) and persist it. Returns the updated record, or
+    ``None`` if the warehouse does not exist. Overwrite-safe like ``put_warehouse`` (idempotent re-runs)."""
+    record = get_warehouse(control_root, storage_options, warehouse_id)
+    if record is None:
+        return None
+    record["status"] = status
+    put_warehouse(control_root, storage_options, record)
+    return record

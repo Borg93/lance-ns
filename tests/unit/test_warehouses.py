@@ -207,17 +207,17 @@ def test_binding_lookup_fails_closed_on_read_error(monkeypatch: pytest.MonkeyPat
     # F4: a registry READ ERROR (not a legitimately-unbound namespace) must fail CLOSED (503) — never fall
     # through to the default shared bucket, which would create/read a maybe-bound tenant's table in the wrong
     # bucket from a transient fault.
-    def boom(*_a: object, **_k: object) -> str | None:
+    def boom(*_a: object, **_k: object) -> dict[str, str] | None:
         raise OSError("s3 down")
 
-    monkeypatch.setattr(warehouses, "warehouse_for_namespace", boom)
+    monkeypatch.setattr(warehouses, "binding_for_namespace", boom)
     with pytest.raises(ServiceUnavailableError):
         asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1"))
 
 
 def test_binding_lookup_unbound_routes_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     # ...but a clean None (unbound) is NOT an error — it routes to the default root.
-    monkeypatch.setattr(warehouses, "warehouse_for_namespace", lambda *_a, **_k: None)
+    monkeypatch.setattr(warehouses, "binding_for_namespace", lambda *_a, **_k: None)
     assert asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1")) is None
 
 
@@ -227,8 +227,15 @@ def test_batch_guard_rejects_warehouse_bound_namespace(monkeypatch: pytest.Monke
     on = Settings.model_validate(
         {"warehouses_enabled": True, "s3_access_key_id": "x", "s3_secret_access_key": "x"}
     )
-    monkeypatch.setattr(warehouses, "warehouse_for_namespace", lambda *_a, **_k: "s3://bkt-a")  # bound
+    # bound + ACTIVE (the resolver reads status live, so a bound namespace must resolve past the deactivation
+    # gate to reach the batch guard's own rejection).
+    monkeypatch.setattr(
+        warehouses,
+        "binding_for_namespace",
+        lambda *_a, **_k: {"warehouse_id": "wh-a", "root_uri": "s3://bkt-a"},
+    )
+    monkeypatch.setattr(warehouses, "warehouse_status", lambda *_a, **_k: "active")
     with pytest.raises(InvalidInputError):
         asyncio.run(dependencies.assert_no_warehouse_bound_namespace(_bare_request(), on, [["db1", "t1"]]))
-    monkeypatch.setattr(warehouses, "warehouse_for_namespace", lambda *_a, **_k: None)  # unbound → ok
+    monkeypatch.setattr(warehouses, "binding_for_namespace", lambda *_a, **_k: None)  # unbound → ok
     asyncio.run(dependencies.assert_no_warehouse_bound_namespace(_bare_request(), on, [["db2", "t2"]]))

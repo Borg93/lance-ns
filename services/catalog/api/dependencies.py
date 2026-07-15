@@ -8,7 +8,12 @@ from typing import Annotated
 
 from fastapi import Depends, Request
 from fastapi.concurrency import run_in_threadpool
-from lance_namespace import InvalidInputError, LanceNamespace, ServiceUnavailableError
+from lance_namespace import (
+    InvalidInputError,
+    LanceNamespace,
+    PermissionDeniedError,
+    ServiceUnavailableError,
+)
 from openfga_sdk import OpenFgaClient
 
 from catalog.core.config import Settings, get_settings
@@ -31,36 +36,59 @@ async def _resolve_warehouse_root(request: Request, settings: Settings, top_ns: 
     transient S3 blip: a tenant-isolation violation caused by a hiccup. Only a clean "not found" (an
     unbound namespace) resolves to ``None`` and the default root.
 
+    DEACTIVATION GATE (P2.3): if the bound warehouse is deactivated, raises ``PermissionDeniedError`` (403) —
+    a quarantined warehouse suspends EVERY op on its bound namespaces (the tenant-offboarding step). Status is
+    read LIVE, so a deactivate/activate takes effect on the very next request.
+
     (This docstring previously asserted the opposite — "swallowed to None ... can NEVER break an existing
     flow" — describing the pre-audit behavior while the code below fail-closed. A docstring that lies about
     a fail-open/fail-closed decision is worse than none: it is the sentence a future reader trusts.)
 
     Cached in-process, POSITIVES ONLY (bindings are immutable, so a resolved root is safe forever; a
     negative must not be cached — see the comment below). Blocking S3 read runs in the threadpool."""
-    # Cache POSITIVES only: a binding is immutable, so a resolved root is safe to cache forever. A negative
+    # Cache POSITIVES only: a binding is immutable, so a resolved binding is safe to cache forever. A negative
     # (unbound) result must NOT be cached — else a namespace looked up while still unbound, then bound on
     # another replica, would keep routing to the default bucket on this one (a table meant for the tenant's
     # bucket would land in the shared one — an isolation violation). Unbound namespaces re-read the
     # authoritative binding each request; that read only happens when warehouses_enabled (default off).
-    cache: dict[str, str] = request.app.state.warehouse_binding_cache
-    cached = cache.get(top_ns)
-    if cached is not None:
-        return cached
-    try:
-        root = await run_in_threadpool(
-            warehouses.warehouse_for_namespace, settings.registry_root, settings.storage_options(), top_ns
+    # The cache holds the FULL binding record ({warehouse_id, root_uri}) so the deactivation check below has
+    # the warehouse_id without a second binding read.
+    cache: dict[str, dict[str, str]] = request.app.state.warehouse_binding_cache
+    binding = cache.get(top_ns)
+    if binding is None:
+        try:
+            binding = await run_in_threadpool(
+                warehouses.binding_for_namespace, settings.registry_root, settings.storage_options(), top_ns
+            )
+        except Exception as exc:  # noqa: BLE001
+            # FAIL CLOSED on a registry READ ERROR. A legitimately-unbound namespace returns a clean None (no
+            # exception) from binding_for_namespace, so reaching here means the read itself failed (S3 blip,
+            # timeout). Falling through to the default shared bucket would physically create/read a
+            # MAYBE-bound tenant's table in the wrong bucket — an isolation break from a transient fault. 503
+            # instead; the caller retries once the registry is reachable.
+            log.warning("warehouse_binding_lookup_failed", extra={"top_ns": top_ns, "error": str(exc)})
+            raise ServiceUnavailableError(f"warehouse binding lookup failed for {top_ns!r}") from exc
+        if binding is not None:
+            cache[top_ns] = binding
+    if binding is None:
+        return None
+    # Deactivation gate (P2.3 lifecycle): a deactivated warehouse quarantines EVERY op on its bound
+    # namespaces. Status is MUTABLE, so it is read LIVE each request (never cached, unlike the immutable
+    # root_uri) — one metadata GET, only for bound namespaces (the minority; the whole lookup is skipped when
+    # warehouses are off). Fail-closed: a registry read error propagates as 503 above, and a MISSING warehouse
+    # record for a still-bound namespace (status None) is NOT-active → refuse, never silently allow.
+    status = await run_in_threadpool(
+        warehouses.warehouse_status,
+        settings.registry_root,
+        settings.storage_options(),
+        binding["warehouse_id"],
+    )
+    if status != "active":
+        raise PermissionDeniedError(
+            f"warehouse {binding['warehouse_id']!r} is deactivated (quarantined); operations on namespace "
+            f"{top_ns!r} are suspended until it is reactivated"
         )
-    except Exception as exc:  # noqa: BLE001
-        # FAIL CLOSED on a registry READ ERROR. A legitimately-unbound namespace returns a clean None (no
-        # exception) from warehouse_for_namespace, so reaching here means the read itself failed (S3 blip,
-        # timeout). Falling through to the default shared bucket would physically create/read a MAYBE-bound
-        # tenant's table in the wrong bucket — an isolation break from a transient fault. 503 instead; the
-        # caller retries once the registry is reachable.
-        log.warning("warehouse_binding_lookup_failed", extra={"top_ns": top_ns, "error": str(exc)})
-        raise ServiceUnavailableError(f"warehouse binding lookup failed for {top_ns!r}") from exc
-    if root is not None:
-        cache[top_ns] = root
-    return root
+    return binding["root_uri"]
 
 
 def _namespace_for_root(request: Request, settings: Settings, root_uri: str) -> LanceNamespace:

@@ -98,6 +98,43 @@ def test_bound_namespace_table_lands_in_warehouse_root_not_default(
     assert not default_children, f"tenant data present in the default root: {default_children}"
 
 
+def test_deactivate_quarantines_then_activate_restores(routing: tuple[TestClient, Path, Path, Path]) -> None:
+    client, _default_root, warehouse_root, registry = routing
+    _register_warehouse(registry, warehouse_root)
+
+    def _create(name: str) -> int:
+        return client.post(
+            f"/v1/table/tenantns${name}/create?mode=overwrite",
+            content=_arrow(pa.table({"id": [1]})),
+            headers=ARROW_STREAM,
+        ).status_code
+
+    # Active → a create routes and succeeds.
+    assert _create("t_before") == 200
+
+    # Deactivate → the resolver quarantines EVERY op on the bound namespace (403), so no new table lands.
+    d = client.post("/v1/warehouses/wh-a/deactivate")
+    assert d.status_code == 200, d.text
+    assert d.json()["status"] == "deactivated"
+    blocked = client.post(
+        "/v1/table/tenantns$t_during/create?mode=overwrite",
+        content=_arrow(pa.table({"id": [1]})),
+        headers=ARROW_STREAM,
+    )
+    assert blocked.status_code == 403, blocked.text
+    assert "deactivated" in blocked.text.lower()
+
+    # Activate → routing is restored; a create succeeds again (status is read live, no stale cache).
+    a = client.post("/v1/warehouses/wh-a/activate")
+    assert a.status_code == 200 and a.json()["status"] == "active"
+    assert _create("t_after") == 200
+
+
+def test_deactivate_missing_warehouse_404(routing: tuple[TestClient, Path, Path, Path]) -> None:
+    client, *_ = routing
+    assert client.post("/v1/warehouses/ghost/deactivate").status_code == 404
+
+
 def test_binding_collides_with_existing_default_namespace_409(
     routing: tuple[TestClient, Path, Path, Path],
 ) -> None:

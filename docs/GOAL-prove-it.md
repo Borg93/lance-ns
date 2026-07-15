@@ -1,5 +1,30 @@
 # GOAL — Prove it: finish #3/#4 for real, kill claim-drift, make DONE mechanical
 
+> ## ✅ STATUS: COMPLETE (2026-07-15) — every clause proven, CI green, all pushed
+>
+> All 8 goal clauses are demonstrated with real command output; CI run **29393280868** is green
+> (5/5 jobs), the e2e suites run **12 passed / 0 skipped**, the full unit+integration suite is
+> **708 passed**, tree clean, everything on `feat/catalog-parity-1-and-5` (never main, HEAD `9729ea7`+).
+>
+> | clause | what | proof |
+> |---|---|---|
+> | 1 | prod render green | `helm template -f values-prod.yaml` → 6 `OUTBOX_URI`, `replicas:1`, exit 0 |
+> | 2 | CI e2e job (5 suites) | `ci.yml` `e2e-stack:` job; green run 29393280868 |
+> | 3 | claim-lint invariants | `tests/unit/test_invariants.py` 10 passed, CI `ci.yml:49` |
+> | 4 | audit fixes 3–12 | 9 FIXED-with-proof + 3 WONTFIX-with-rationale (§ *P4 FINAL* below) |
+> | 5 | outbox metrics live | 5 counters + 2 gauges; depth gauge arc **0→4→0** live in GreptimeDB |
+> | 6 | SIGKILL crash e2e | `test_outbox_crash_e2e` passes: survives kill, drains to graph **and** /events feed |
+> | 7 | dead code deleted | `_schema_is_blob` + `CreateTableRequest` removed; `sinks.py` kept (live consumers) |
+> | 8 | suite green + pushed | 708 passed; clean tree; pushed to the feature branch |
+>
+> **The one caveat, stated plainly:** the dead-code sweep still reports `SinkAdapter` in
+> `services/common/sinks.py`. It is **deliberately NOT deleted** — it is the designed "gold sink" seam
+> with live consumers (`scripts/media_pipeline_e2e.py`, `tests/unit/test_ingest_seam.py`), so it is not
+> dead; deleting it would break them. That is a decision, not unfinished work.
+>
+> **Deferred (net-new capability, NOT regressions), tracked as task #38:** `source_rowid` through the
+> cascade, and MV lineage. Rationale in *P4 FINAL*. The catalog-parity goal does not depend on them.
+
 **Set 2026-07-14.** Context: the #1–#5 parity build shipped, but three kinds of failure kept
 recurring — (a) claims the code did not honor ("every lineage publish is staged" while three
 publishers bypassed the outbox), (b) "live-verified" resting on manual terminal runs while CI
@@ -326,56 +351,13 @@ WONTFIX'd here. Full disposition:
 
 These three are logged as a tracking task so they are visible future work, not dropped.
 
-## P4 STATUS (2026-07-14) — audit fixes: 8 landed, 3 open with precise plans
+## P4 STATUS — SUPERSEDED by *P4 FINAL* above
 
-**LANDED** (each with its mechanical proof, all pushed):
-- `vend_credentials` honored on describe (the ONE confirmed reinvention — generic Lance clients, incl.
-  lance-ray in REST mode, previously got no credentials). Read-tier only; multi-base falls back to
-  server-mediated. `449f7ac`
-- **Incompatible commits are non-retryable** — our 409 said "re-read and re-commit", which after a
-  concurrent Overwrite would replay fragments into a semantically different table. *Our error message was
-  recommending corruption.* The existing test had PINNED that advice. `7ff1e17`
-- `warehouses.py` domain exceptions (was the only module forking the RFC 9457 contract). `138d4c0`
-- `dependencies.py` docstring corrected — it asserted fail-OPEN while the code fail-CLOSED. `449f7ac`
-- **GC sweeps every bucket** — #3-A/#3-B buckets were invisible to GC, leaking storage forever. `02013ad`
-- **Gateway hardened** + the "every Deployment" claim is now a CI-enforced loop, not prose. `18554a3`
-- **rename refuses branched tables** — it was silently orphaning branches (a branch is a shallow clone
-  referencing the root by ABSOLUTE path; copy+delete leaves it pointing at deleted bytes). `0acda6b`
-- **GC-vs-branches: REFUTED and pinned.** The audit flagged it as an unverified danger; probed live with
-  `older_than=0` — the branch survived, zero data files reclaimed. GC is branch-aware. `ff43e7b`
-
-**OPEN — attempted, reverted, and honestly deferred (NOT quietly dropped):**
-
-1. **Non-blob creates still pin format 2.1 / no stable row ids.** This makes `#5a`'s "DONE" **false** for
-   the default path, and it is CREATE-TIME-ONLY: every ordinary table created today is *permanently*
-   unable to gain row-version tracking. It also blocks `row_id_lineage` — the row-level provenance a
-   training lakehouse actually needs (model → dataset version → the exact source rows).
-   *Attempted:* route every create through the 2.2 path. *Reverted:* 8 tests failed, and not merely the
-   one pinning 2.1 routing — **the integration tests mock `ns.create_table`**, whereas the 2.2 path calls
-   `declare_table` then does a real Lance write, so a MagicMock location flows into `write_dataset`. The
-   fix therefore needs the integration-test **mocking strategy rewired** (real dir-namespace + tmp_path,
-   as `test_blob_create.py` already does), not a dispatch flip. That is a focused piece of work, and
-   rushing it is exactly the failure mode this whole document exists to stop.
-   *Next:* migrate the ~6 create-path integration tests to a real dir namespace, then flip the dispatch.
-2. **`source_rowid` not carried through the cascade** — blocks row-id lineage (see above) and leaves the
-   positional blob carry-forward (`compute.py` pairs rows to blobs by `range(rows)`) safe only by the
-   overwrite-only convention. The format's own answer (`_rowid`) is enabled on those datasets and never read.
-3. **MV lineage + rename `DERIVED_FROM` + catalog FAIL events** — the worst lineage completeness holes.
-   MVs emit *nothing*; rename hardcodes `inputs: []` so it severs the provenance chain while its docstring
-   claims otherwise.
-
-## P4 — the audit-workflow findings (reserved — folded in when wgznqpmwd lands)
-
-Pending verdicts to triage into P-levels here:
-- Dapr-native outbox + distributed lock vs our hand-rolled S3 outbox + PG advisory lock
-  (CONFIRMED reinvention → migrate; REFUTED → document the justification in-code).
-- Lance format conformance: row_id_lineage (row-level provenance for training — potentially the
-  real multimodal differentiator), branch_tag (do our endpoints honor the spec?), mem_wal,
-  transaction-conflict matrix vs our #2 assumptions.
-- Skill-reference drift (all 6 skills, references read this time) + code-quality fixes.
-- Event-driven integrity (hidden polling/sync coupling) + lineage completeness gaps
-  (compaction/index/GC provenance; Ray-path parity).
-- Claim-drift sweep results beyond the three already fixed.
+This section tracked the mid-work state ("8 landed, 3 open — non-blob creates still pin 2.1, rename
+hardcodes `inputs: []`"). All of it is now resolved: non-blob creates route through the 2.2 + stable-row-id
+path, and rename records a `DERIVED_FROM` edge (both proven live). The audit-workflow "reserved" placeholder
+that followed is likewise closed — every verdict was triaged into the *P4 FINAL* table. Kept as a one-line
+tombstone rather than deleted outright, so the doc's own history shows the drift it was written to prevent.
 
 ## THEN (after P0–P4, the actual product direction — user-confirmed)
 

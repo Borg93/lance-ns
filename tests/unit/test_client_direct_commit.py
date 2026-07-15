@@ -57,8 +57,8 @@ def test_commit_rejects_empty_fragment_set(tmp_path: Any) -> None:
 
 def test_stale_append_after_overwrite_is_a_conflict(tmp_path: Any) -> None:
     # Append auto-rebases vs Append, but an Append built at a read_version BEFORE a concurrent Overwrite is
-    # Incompatible (transaction.md) -> Lance raises OSError "Incompatible transaction" -> 409, NOT a silent
-    # success and NOT a 400. This is the concurrency-safety contract.
+    # Incompatible (transaction.md) -> Lance raises OSError "Incompatible transaction" -> a NON-retryable 400,
+    # NOT a silent success and NOT a retryable 409 (a re-commit would replay void fragments — see below).
     uri = str(tmp_path / "t")
     schema = pa.schema([pa.field("id", pa.int64())])
     lance.write_dataset(pa.table({"id": [1]}, schema=schema), uri)  # v1

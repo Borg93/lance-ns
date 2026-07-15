@@ -58,6 +58,29 @@ def test_body_id_differing_from_the_path_is_400(client: TestClient, fake_ns: Mag
     fake_ns.count_table_rows.assert_not_called()
 
 
+def test_schema_metadata_flat_map_keeps_keys_named_like_envelope_fields(
+    client: TestClient, fake_ns: MagicMock
+) -> None:
+    # CONTRACT (audit 2026-07-15): a FLAT body IS the metadata map — a user key literally named "id"
+    # (or identity/context) is data, and must reach the backend, never be eaten as an envelope field.
+    from lance_namespace import UpdateTableSchemaMetadataResponse
+
+    fake_ns.update_table_schema_metadata.return_value = UpdateTableSchemaMetadataResponse()
+    client.post("/v1/table/db1$users/schema_metadata/update", json={"id": "row-key", "owner": "alice"})
+    sent = fake_ns.update_table_schema_metadata.call_args.args[0]
+    assert sent.metadata == {"id": "row-key", "owner": "alice"}
+    assert sent.id == ["db1", "users"]
+
+
+def test_schema_metadata_envelope_with_differing_id_is_400(client: TestClient, fake_ns: MagicMock) -> None:
+    resp = client.post(
+        "/v1/table/db1$users/schema_metadata/update",
+        json={"id": ["db1", "other"], "metadata": {"owner": "alice"}},
+    )
+    assert resp.status_code == 400, resp.text
+    fake_ns.update_table_schema_metadata.assert_not_called()
+
+
 def test_root_namespace_id_is_empty_list(client: TestClient, fake_ns: MagicMock) -> None:
     fake_ns.list_namespaces.return_value = ListNamespacesResponse(namespaces=["a"])
     client.get("/v1/namespace/$/list")

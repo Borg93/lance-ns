@@ -13,6 +13,7 @@ from functools import lru_cache
 from typing import Self
 from urllib.parse import quote, urlsplit, urlunsplit
 
+from common.objectfs import lance_storage_options
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -217,11 +218,9 @@ def storage_options(settings: LineageSettings) -> dict[str, str]:
     on-disk version to cross-check the graph. Empty strings let the object-store client fall back to
     its default credential chain (e.g. real AWS) when the ``LINEAGE_S3_*`` env vars are unset.
     """
-    return {
-        "endpoint": settings.s3_endpoint or "",
-        "access_key_id": settings.s3_access_key_id or "",
-        "secret_access_key": settings.s3_secret_access_key.get_secret_value(),
-        "region": settings.s3_region,
-        "allow_http": "true",
-        "virtual_hosted_style_request": "false",
-    }
+    return lance_storage_options(
+        settings.s3_endpoint or "",
+        settings.s3_access_key_id or "",
+        settings.s3_secret_access_key.get_secret_value(),
+        settings.s3_region,
+    )

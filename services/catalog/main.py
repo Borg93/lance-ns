@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager, suppress
 import httpx
 from common import fga
 from common.audit import configure_audit
-from common.exceptions import problem_detail
+from common.exceptions import install_problem_handlers
 from common.lance_metrics import instrument_lance_if_available
 from common.obs import configure_app_logging
 from common.oidc import OIDCVerifier
@@ -22,7 +22,6 @@ from common.secrets import fetch_required_secrets
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from lance_namespace import LanceNamespaceError
 from pydantic import SecretStr
@@ -156,47 +155,7 @@ app.middleware("http")(maintenance_middleware)
 app.add_middleware(BodySizeLimitMiddleware, max_bytes=_settings.max_body_bytes)
 
 
-@app.exception_handler(LanceNamespaceError)
-async def handle_domain_error(request: Request, exc: LanceNamespaceError) -> JSONResponse:
-    status, body = problem_detail(exc)
-    if status >= 500:
-        log.exception(
-            "domain_error", extra={"method": request.method, "path": request.url.path, "status": status}
-        )
-    return JSONResponse(status_code=status, content=body, media_type=PROBLEM_JSON)
-
-
-@app.exception_handler(RequestValidationError)
-async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    return JSONResponse(
-        status_code=422,
-        content={
-            "type": "https://lance.org/problems/validation",
-            "title": "Validation Error",
-            "status": 422,
-            "errors": [
-                {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"], "type": e["type"]}
-                for e in exc.errors()
-            ],
-        },
-        media_type=PROBLEM_JSON,
-    )
-
-
-@app.exception_handler(Exception)
-async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-    # Internals (native/Arrow/S3 error text, paths) leak via logs only — never the body.
-    log.exception("unhandled_error", extra={"method": request.method, "path": request.url.path})
-    return JSONResponse(
-        status_code=500,
-        content={
-            "type": "https://lance.org/problems/internal",
-            "title": "InternalError",
-            "status": 500,
-            "detail": "Internal Server Error",
-        },
-        media_type=PROBLEM_JSON,
-    )
+install_problem_handlers(app, log)
 
 
 @app.get("/livez", tags=["health"])

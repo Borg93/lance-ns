@@ -20,6 +20,7 @@ import uuid
 
 import pyarrow.fs as pafs
 from common import dapr_publish, outbox
+from common.objectfs import s3_filesystem
 from common.sources import S3Source
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
@@ -56,17 +57,7 @@ def media_head_enabled(settings: MedallionSettings) -> bool:
 
 def _filesystem(settings: MedallionSettings) -> pafs.S3FileSystem:
     """A pyarrow S3 filesystem over the same endpoint/creds the compute writes with (path-style, http-ok)."""
-    options = settings.storage_options()
-    scheme, _, host = options["endpoint"].partition("://")
-    return pafs.S3FileSystem(
-        access_key=options["access_key_id"],
-        secret_key=options["secret_access_key"],
-        endpoint_override=host,
-        scheme=scheme,
-        region=options["region"],
-        allow_bucket_creation=True,
-        allow_bucket_deletion=False,
-    )
+    return s3_filesystem(settings.storage_options(), allow_bucket_creation=True)
 
 
 def _png(color: tuple[int, int, int]) -> bytes:

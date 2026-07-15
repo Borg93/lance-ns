@@ -29,6 +29,24 @@ SCHEMA_FACET_SCHEMA_URL = (
     "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
 )
 
+#: Standard ``DatasetVersionDatasetFacet`` schema URL — the Lance version stamped on inputs/outputs (the
+#: WROTE-edge version, training pins, reconcile cross-checks). Single-homed for the same no-drift reason.
+VERSION_FACET_SCHEMA_URL = (
+    "https://openlineage.io/spec/facets/1-0-1/DatasetVersionDatasetFacet.json"
+    "#/$defs/DatasetVersionDatasetFacet"
+)
+
+#: Standard ``DatasourceDatasetFacet`` schema URL — the physical storage URI on outputs (what lets
+#: reconcile find the on-disk dataset and back-fill lost writes).
+DATASOURCE_FACET_SCHEMA_URL = (
+    "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
+)
+
+#: Standard ``ErrorMessageRunFacet`` schema URL — the FAIL emitters' error payload (medallion + compaction).
+ERROR_MESSAGE_FACET_SCHEMA_URL = (
+    "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json#/$defs/ErrorMessageRunFacet"
+)
+
 #: Fixed namespace for lance-ns name-based run ids (``uuid5`` of the project URL under ``NAMESPACE_URL``
 #: — a constant, so the derivation is documented but not recomputed per call).
 _RUN_ID_NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "https://github.com/Borg93/lance-ns")

@@ -59,8 +59,16 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # is silently off with MEDALLION_FGA_ENABLED=true (review 2026-07-10 caught exactly that bypass).
     app.state.fga = None
     if get_settings().fga_enabled:
-        store_id, model_id = await fga.provision(get_settings().fga_api_url)
-        app.state.fga = fga.make_client(get_settings().fga_api_url, store_id, model_id)
+        settings = get_settings()
+        # Pinned-else-provision + explicit timeout — the same client-construction shape as
+        # catalog/lineage, so all four FGA consumers behave alike (audit 2026-07-15: the medallion
+        # alone re-provisioned on every boot, minting a model version per pod restart).
+        store_id, model_id = settings.fga_store_id, settings.fga_model_id
+        if not (store_id and model_id):
+            store_id, model_id = await fga.provision(settings.fga_api_url)
+        app.state.fga = fga.make_client(
+            settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
+        )
     app.state.startup_complete = True
     try:
         yield

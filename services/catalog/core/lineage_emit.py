@@ -34,7 +34,13 @@ from typing import Any, Protocol, runtime_checkable
 
 import httpx
 from common import dapr_publish, fga
-from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, schema_facet
+from common.openlineage import (
+    DATASOURCE_FACET_SCHEMA_URL,
+    RUN_EVENT_SCHEMA_URL,
+    VERSION_FACET_SCHEMA_URL,
+    custom_facet,
+    schema_facet,
+)
 from common.schema import SchemaFields
 from dapr.aio.clients import DaprClient
 from opentelemetry import metrics
@@ -100,19 +106,14 @@ _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/services/catalog/core/
 #: facet so the lineage service records the Lance version on the ``WROTE`` edge
 #: (``repository.output_version`` reads ``outputs[].facets.version.datasetVersion``) — without it a real
 #: ``create_table`` persists a versionless edge (the custom ``lance`` run facet is not read for version).
-_VERSION_FACET_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-0-1/DatasetVersionDatasetFacet.json"
-    "#/$defs/DatasetVersionDatasetFacet"
-)
+_VERSION_FACET_SCHEMA = VERSION_FACET_SCHEMA_URL
 
 #: OpenLineage standard ``DatasourceDatasetFacet`` schema URL. The output dataset carries this facet with
 #: the **physical storage URI** so the lineage service can find the real Lance file on object storage and
 #: cross-check the on-disk version (#23 reconcile — ``lineage.models.Dataset.source_uri`` reads
 #: ``facets.dataSource.uri``). Without it, reconcile has no URI to read → every real table looks
 #: ``missing_on_storage`` (the moat was broken).
-_DATASOURCE_FACET_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
-)
+_DATASOURCE_FACET_SCHEMA = DATASOURCE_FACET_SCHEMA_URL
 
 
 def build_write_event(

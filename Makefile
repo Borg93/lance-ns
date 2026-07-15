@@ -238,7 +238,7 @@ e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit
 	 kill $$S 2>/dev/null; exit $$rc
 
 e2e-web: ## LIVE frontend e2e vs the deployed web pod (rask-style: hydration + BFF round-trips; auto-forwards web)
-	@echo "port-forwarding web â¦"
+	@echo "port-forwarding web ..."
 	@kubectl port-forward svc/$(RELEASE)-web 3000:3000 >/dev/null 2>&1 & W=$$!; 	 sleep 3; 	 cd frontend/apps/web && LANCE_E2E_WEB_URL=http://localhost:3000 bunx playwright test -c playwright.live.config.ts; rc=$$?; 	 kill $$W 2>/dev/null; exit $$rc
 
 e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malformed-bearer 401, non-owner rename/overwrite 403) — needs an AUTH-ON stack

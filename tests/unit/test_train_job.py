@@ -72,6 +72,15 @@ def test_version_facet_spec_pin_matches_the_medallion_emitter() -> None:
     from medallion.schemas import events as medallion_events
 
     assert job._VERSION_FACET_SCHEMA == medallion_events._VERSION_FACET_SCHEMA
+    # The rest of the deliberate self-contained mirror, pinned the same way (audit 2026-07-15: only the
+    # version facet was pinned — the run/base/schema facet URLs could drift silently).
+    assert job._RUN_SCHEMA == common_ol.RUN_EVENT_SCHEMA_URL
+    assert job._BASE_FACET == common_ol.BASE_FACET_SCHEMA_URL
+    complete = job.build_event(
+        event_type="COMPLETE", token="pin", model="m", namespace="models",
+        features=[{"dataset": "silver$f", "version": 1}], registry_uri="s3://x/m", version=1,
+    )
+    assert complete["outputs"][0]["facets"]["schema"]["_schemaURL"] == common_ol.SCHEMA_FACET_SCHEMA_URL
 
 
 def test_start_event_carries_training_jobtype_and_input_pins() -> None:

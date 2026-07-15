@@ -196,14 +196,17 @@ async def update_table_schema_metadata(
     UPDATE_SCHEMA_METADATA event (the response omits the version, so it is read back best-effort)."""
     # REST-only: the spec sends the metadata map directly, or wrapped as {"metadata": {...}}.
     segments = parse_identifier(id, settings.delimiter)
-    # A spec-shaped envelope may restate the id (+ identity/context) beside the map — reconcile the id like
-    # every {id} route (differing → 400) and keep the envelope keys out of the metadata map itself.
-    raw_id = body.pop("id", None)
-    reconcile_body_id(segments, raw_id if isinstance(raw_id, list) else None)
-    for envelope_key in ("identity", "context"):
-        body.pop(envelope_key, None)
     nested = body.get("metadata")
-    raw = nested if isinstance(nested, dict) else body
+    if isinstance(nested, dict):
+        # Spec envelope: the id (+ identity/context) sits BESIDE the map — reconcile it like every {id}
+        # route (differing → 400). Only the envelope form is inspected: a flat body IS the metadata map,
+        # so keys literally named "id"/"identity"/"context" in it are user data, never envelope fields
+        # (audit 2026-07-15 — the first cut popped them from the flat form and silently dropped them).
+        raw_id = body.get("id")
+        reconcile_body_id(segments, raw_id if isinstance(raw_id, list) else None)
+        raw = nested
+    else:
+        raw = body
     metadata: dict[str, str] = {str(k): str(v) for k, v in raw.items()}
     req = UpdateTableSchemaMetadataRequest(id=segments, metadata=metadata)
     response: UpdateTableSchemaMetadataResponse = await run_in_threadpool(

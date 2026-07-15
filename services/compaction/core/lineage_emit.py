@@ -36,7 +36,7 @@ from datetime import UTC, datetime
 from typing import Any, Protocol, runtime_checkable
 
 from common import dapr_publish
-from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
+from common.openlineage import ERROR_MESSAGE_FACET_SCHEMA_URL, RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
 from dapr.aio.clients import DaprClient
 
 log = logging.getLogger(__name__)
@@ -52,9 +52,7 @@ _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/services/compaction/co
 
 #: Standard ``ErrorMessageRunFacet`` schema URL — the SAME one the medallion FAIL emitter stamps
 #: (``medallion/schemas/events.py``), so both failure surfaces are one spec version.
-_ERROR_FACET_SCHEMA_URL = (
-    "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json#/$defs/ErrorMessageRunFacet"
-)
+_ERROR_FACET_SCHEMA_URL = ERROR_MESSAGE_FACET_SCHEMA_URL
 
 #: Exception strings embed full s3:// URIs and Rust backtraces — cap the facet message so a failing
 #: dataset can't turn every FAIL event into a multi-KB payload (events must stay small JSON).

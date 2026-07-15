@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
+from common.objectfs import lance_storage_options
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -74,13 +75,14 @@ class CompactionSettings(BaseSettings):
 
     def storage_options(self) -> dict[str, str]:
         """The Lance ``storage_options`` for opening datasets on the (HTTP) S3 endpoint."""
-        return {
-            "endpoint": self.s3_endpoint,
-            "access_key_id": self.s3_access_key_id,
-            "secret_access_key": self.s3_secret_access_key.get_secret_value(),
-            "region": self.s3_region,
-            "allow_http": "true",
-        }
+        # Via the shared builder — which also stamps path-style addressing; the hand-rolled copy here had
+        # silently dropped it (audit 2026-07-15), leaving the sweep one object-store default away from 403s.
+        return lance_storage_options(
+            self.s3_endpoint,
+            self.s3_access_key_id,
+            self.s3_secret_access_key.get_secret_value(),
+            self.s3_region,
+        )
 
 
 @lru_cache

@@ -11,6 +11,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Self
 
+from common.objectfs import lance_storage_options
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -76,6 +77,11 @@ class MedallionSettings(BaseSettings):
     # is DENIED — the cascade then ENFORCES the model, not just describes it. Off by default. -------------
     fga_enabled: bool = Field(default=False, alias="MEDALLION_FGA_ENABLED")
     fga_api_url: str = Field(default="http://openfga:8080", alias="MEDALLION_FGA_API_URL")
+    # Pinned store/model ids (production posture, same as catalog/lineage): set → no boot-time provision,
+    # no model rewrite, read-only OpenFGA access suffices. Unset (dev/e2e) → provision-by-name as before.
+    fga_store_id: str = Field(default="", alias="MEDALLION_FGA_STORE_ID")
+    fga_model_id: str = Field(default="", alias="MEDALLION_FGA_MODEL_ID")
+    fga_timeout_seconds: float = Field(default=5.0, alias="MEDALLION_FGA_TIMEOUT_SECONDS")
     # BARE subject (no ``user:`` prefix) — ``common.fga.check`` adds ``user:`` itself, so ``user:service-*``
     # here would double-prefix (``user:user:service-*``) and the gate would always deny. Matches the
     # catalog's convention (it passes the bare OIDC sub to fga.check).
@@ -154,31 +160,33 @@ class MedallionSettings(BaseSettings):
         """Lance ``storage_options`` for the compute write — empty for a local path; S3 config otherwise."""
         if not self.s3_endpoint:
             return {}
-        return {
-            "endpoint": self.s3_endpoint,
-            "access_key_id": self.s3_access_key_id,
-            "secret_access_key": self.s3_secret_access_key.get_secret_value(),
-            "region": self.s3_region,
-            "allow_http": "true",
-            # RustFS/MinIO require PATH-style addressing; without this lance signs the request
-            # virtual-hosted-style and RustFS returns 403 SignatureDoesNotMatch (mirrors the catalog).
-            "virtual_hosted_style_request": "false",
-        }
+        return lance_storage_options(
+            self.s3_endpoint,
+            self.s3_access_key_id,
+            self.s3_secret_access_key.get_secret_value(),
+            self.s3_region,
+        )
 
     @model_validator(mode="after")
     def _compute_needs_s3_secret(self) -> Self:
         """Fail fast when compute writes to S3 but the secret is missing — else Lance 403s cryptically.
 
-        The medallion is a dummy producer (the real compute is a Ray Data job at rask), so it has no OpenBao
-        secret-fetch path like the catalog. When OpenBao is on (the chart default) the plaintext S3 secret is
-        deliberately withheld from pod env, so turning compute on there leaves no secret and every Lance
-        write fails with S3 ``SignatureDoesNotMatch``. Surface it at boot instead of at first produce.
+        Only fires when the plaintext env is the SOURCE: with ``secrets_from_dapr`` the chart deliberately
+        withholds the plaintext secret and the lifespan fetches it from OpenBao fail-closed
+        (``apply_dapr_secrets``, the same shape as catalog/lineage/compaction) — a guard here would crash
+        exactly the compute+OpenBao combo the chart renders (audit 2026-07-15). Surface a genuinely
+        credential-less deploy at boot instead of at first produce.
         """
-        if self.compute_enabled and self.s3_endpoint and not self.s3_secret_access_key.get_secret_value():
+        if (
+            self.compute_enabled
+            and self.s3_endpoint
+            and not self.secrets_from_dapr
+            and not self.s3_secret_access_key.get_secret_value()
+        ):
             raise ValueError(
-                "MEDALLION_COMPUTE_ENABLED with an S3 endpoint but no MEDALLION_S3_SECRET_ACCESS_KEY. The "
-                "medallion does not fetch S3 creds from OpenBao (unlike the catalog), so compute-on requires "
-                "OpenBao off (helm --set openbao.enabled=false). The production compute is a Ray job at rask."
+                "MEDALLION_COMPUTE_ENABLED with an S3 endpoint but no MEDALLION_S3_SECRET_ACCESS_KEY and no "
+                "MEDALLION_SECRETS_FROM_DAPR — every Lance write would 403. Provide the secret, or enable "
+                "the OpenBao store path (helm default when openbao.enabled=true)."
             )
         if self.ray_enabled and not self.compute_enabled:
             # ray submits the STAGE transform (from_uri -> to_uri); with compute off there is no data path and

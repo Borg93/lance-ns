@@ -14,7 +14,10 @@ from datetime import UTC, datetime
 from typing import Any
 
 from common.openlineage import (
+    DATASOURCE_FACET_SCHEMA_URL,
+    ERROR_MESSAGE_FACET_SCHEMA_URL,
     RUN_EVENT_SCHEMA_URL,
+    VERSION_FACET_SCHEMA_URL,
     column_lineage_facet,
     custom_facet,
     run_id_for,
@@ -28,9 +31,7 @@ _PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/medallion"
 #: OpenLineage standard ``DatasourceDatasetFacet`` schema URL — the physical Lance URI on the output,
 #: so the B4 reconcile back-fill can read the on-disk version of a dataset the CASCADE wrote (without
 #: it, every compute-written medallion dataset looks ``missing_on_storage`` and reconcile skips it).
-_DATASOURCE_FACET_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
-)
+_DATASOURCE_FACET_SCHEMA = DATASOURCE_FACET_SCHEMA_URL
 
 #: The repo the medallion services live in — the ``sourceCodeLocation`` job facet's git URL.
 _REPO_URL = "https://github.com/Borg93/lance-ns"
@@ -43,10 +44,7 @@ _SOURCE_LOCATION_FACET_SCHEMA = (
 )
 
 #: Standard ``DatasetVersionDatasetFacet`` schema URL → the lineage WROTE edge records the Lance version.
-_VERSION_FACET_SCHEMA = (
-    "https://openlineage.io/spec/facets/1-0-1/DatasetVersionDatasetFacet.json"
-    "#/$defs/DatasetVersionDatasetFacet"
-)
+_VERSION_FACET_SCHEMA = VERSION_FACET_SCHEMA_URL
 #: Standard ``OutputStatisticsOutputDatasetFacet`` schema URL → the runtime-measured rows + on-disk bytes
 #: the compute actually wrote (moves our lineage from producer-declared toward Marquez-grade). Output-only.
 _OUTPUT_STATS_FACET_SCHEMA = (
@@ -182,8 +180,7 @@ def build_run_event(
         # Standard errorMessage run facet — records WHY a FAIL run failed (its own published schema).
         run_facets["errorMessage"] = {
             "_producer": _PRODUCER,
-            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json"
-            "#/$defs/ErrorMessageRunFacet",
+            "_schemaURL": ERROR_MESSAGE_FACET_SCHEMA_URL,
             "message": error_message,
             "programmingLanguage": "PYTHON",
         }

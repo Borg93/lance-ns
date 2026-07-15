@@ -337,14 +337,29 @@ def test_raw_arrival_retries_on_publish_failure() -> None:
 
 
 def test_compute_with_s3_endpoint_but_no_secret_fails_fast() -> None:
-    # The OpenBao-on footgun: compute writes to S3 but the plaintext secret is withheld → fail at config
+    # A genuinely credential-less compute deploy (no plaintext secret AND no store path) → fail at config
     # load with a clear message, not at first write with a cryptic S3 SignatureDoesNotMatch.
     from pydantic import ValidationError
 
-    with pytest.raises(ValidationError, match="OpenBao off"):
+    with pytest.raises(ValidationError, match="no\s+MEDALLION_SECRETS_FROM_DAPR"):
         MedallionSettings.model_validate(
             {"compute_enabled": True, "s3_endpoint": "http://rustfs:9000", "s3_secret_access_key": ""}
         )
+
+
+def test_compute_with_dapr_secret_store_boots_without_plaintext_secret() -> None:
+    # CONTRACT (audit 2026-07-15): the chart's compute+OpenBao combo withholds the plaintext secret and
+    # sets MEDALLION_SECRETS_FROM_DAPR — the guard must NOT crash it; the lifespan's fail-closed
+    # apply_dapr_secrets is the enforcement point for the store path (same shape as catalog/lineage).
+    settings = MedallionSettings.model_validate(
+        {
+            "compute_enabled": True,
+            "s3_endpoint": "http://rustfs:9000",
+            "s3_secret_access_key": "",
+            "secrets_from_dapr": True,
+        }
+    )
+    assert settings.secrets_from_dapr is True
 
 
 async def _allow(*_a: Any, **_k: Any) -> bool:

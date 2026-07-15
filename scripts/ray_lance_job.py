@@ -29,6 +29,7 @@ def _storage_options() -> dict[str, str]:
         "secret_access_key": os.environ["S3_SECRET"],
         "region": os.environ.get("S3_REGION", "us-east-1"),
         "allow_http": "true",
+        "virtual_hosted_style_request": "false",  # path-style, like the sibling ray jobs (RustFS 403s else)
     }
 
 

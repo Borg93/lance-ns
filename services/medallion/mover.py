@@ -48,10 +48,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.fga = None
     settings = get_settings()
     if settings.fga_enabled:
-        # Provision by store NAME so the mover converges on the catalog's Zanzibar store (idempotent),
-        # then check authorization as its own service identity before every transition.
-        store_id, model_id = await fga.provision(settings.fga_api_url)
-        app.state.fga = fga.make_client(settings.fga_api_url, store_id, model_id)
+        # Pinned ids when set (production posture, like catalog/lineage); else provision by store NAME so
+        # the mover converges on the catalog's Zanzibar store (idempotent), then check authorization as
+        # its own service identity before every transition.
+        store_id, model_id = settings.fga_store_id, settings.fga_model_id
+        if not (store_id and model_id):
+            store_id, model_id = await fga.provision(settings.fga_api_url)
+        app.state.fga = fga.make_client(
+            settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
+        )
     app.state.startup_complete = True
     try:
         yield

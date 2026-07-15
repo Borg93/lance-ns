@@ -9,7 +9,16 @@ unsupported operations surface as a spec-correct 501.
 
 from __future__ import annotations
 
+import logging
+from typing import TYPE_CHECKING
+
 from lance_namespace import ErrorCode, LanceNamespaceError, UnsupportedOperationError
+
+if TYPE_CHECKING:
+    from fastapi import FastAPI
+
+#: The RFC 9457 media type every problem body is served with.
+PROBLEM_JSON = "application/problem+json"
 
 _STATUS: dict[ErrorCode, int] = {
     ErrorCode.UNSUPPORTED: 501,
@@ -80,3 +89,55 @@ def problem_detail(exc: LanceNamespaceError) -> tuple[int, dict[str, object]]:
         "error": detail,
     }
     return status, body
+
+
+def install_problem_handlers(app: FastAPI, log: logging.Logger) -> None:
+    """Register the three problem+json exception handlers every service app shares.
+
+    Byte-identical blocks lived in the catalog and lineage mains (audit 2026-07-15) — one home keeps the
+    RFC 9457 shapes, the 5xx-generic-detail policy, and the leak rules from drifting per service. FastAPI
+    imports stay inside the function so non-HTTP consumers of this module never pay for them.
+    """
+    from fastapi import Request
+    from fastapi.exceptions import RequestValidationError
+    from fastapi.responses import JSONResponse
+
+    @app.exception_handler(LanceNamespaceError)
+    async def handle_domain_error(request: Request, exc: LanceNamespaceError) -> JSONResponse:
+        status, body = problem_detail(exc)
+        if status >= 500:
+            log.exception(
+                "domain_error", extra={"method": request.method, "path": request.url.path, "status": status}
+            )
+        return JSONResponse(status_code=status, content=body, media_type=PROBLEM_JSON)
+
+    @app.exception_handler(RequestValidationError)
+    async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={
+                "type": "https://lance.org/problems/validation",
+                "title": "Validation Error",
+                "status": 422,
+                "errors": [
+                    {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"], "type": e["type"]}
+                    for e in exc.errors()
+                ],
+            },
+            media_type=PROBLEM_JSON,
+        )
+
+    @app.exception_handler(Exception)
+    async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
+        # Internals (native/Arrow/S3 error text, paths) leak via logs only — never the body.
+        log.exception("unhandled_error", extra={"method": request.method, "path": request.url.path})
+        return JSONResponse(
+            status_code=500,
+            content={
+                "type": "https://lance.org/problems/internal",
+                "title": "InternalError",
+                "status": 500,
+                "detail": "Internal Server Error",
+            },
+            media_type=PROBLEM_JSON,
+        )

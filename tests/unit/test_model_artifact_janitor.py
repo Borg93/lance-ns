@@ -187,3 +187,12 @@ def test_blessed_non_latest_version_artifact_survives_even_when_absent_from_late
     assert "B" in report.kept_referenced
     assert report.deleted == ["C"] and not (base / "C").exists()
     assert (base / "A" / "weights.json").exists()
+
+
+def test_blessed_tag_mirror_is_pinned_to_the_catalog_constant() -> None:
+    # The janitor is standalone (no services/ imports at runtime), so _BLESSED_TAG is an inlined mirror
+    # of catalog.services.models.BLESSED_TAG. Drift would silently stop protecting the blessed version's
+    # artifacts from the TTL sweep — pin them equal (the same guard test_train_job gives its mirrors).
+    from catalog.services.models import BLESSED_TAG
+
+    assert janitor._BLESSED_TAG == BLESSED_TAG

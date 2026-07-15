@@ -23,6 +23,7 @@ import lance
 import pyarrow as pa
 import pyarrow.fs as pafs
 from common import blobs
+from common.objectfs import s3_filesystem
 from common.schema import SchemaFields, facet_fields
 from lance_namespace import (
     AlterTableAddColumnsRequest,
@@ -512,15 +513,7 @@ def _dataset_fs(uri: str, so: StorageOptions) -> tuple[pafs.FileSystem, str]:
     with (path-style, http-ok endpoint) — mirroring the media head's filesystem so RustFS/MinIO work.
     """
     if uri.startswith("s3://") and so.get("endpoint"):
-        scheme, _, host = so["endpoint"].partition("://")
-        fs = pafs.S3FileSystem(
-            access_key=so.get("access_key_id"),
-            secret_key=so.get("secret_access_key"),
-            endpoint_override=host or so["endpoint"],
-            scheme=scheme or "http",
-            region=so.get("region", ""),
-        )
-        return fs, uri[len("s3://") :]
+        return s3_filesystem(so), uri[len("s3://") :]
     resolved, path = pafs.FileSystem.from_uri(uri)
     return resolved, path
 

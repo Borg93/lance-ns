@@ -14,16 +14,14 @@ from pathlib import Path
 
 from common import fga
 from common.dapr_auth import assert_app_token_configured
-from common.exceptions import problem_detail
+from common.exceptions import install_problem_handlers
 from common.lance_metrics import instrument_lance_if_available
 from common.obs import configure_app_logging
 from common.oidc import OIDCVerifier
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
-from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
-from lance_namespace import LanceNamespaceError
 
 from lineage.api.dapr import register_dapr
 from lineage.api.v1.endpoints import demo
@@ -121,52 +119,7 @@ register_dapr(app)
 app.include_router(api_router)
 
 
-@app.exception_handler(LanceNamespaceError)
-async def handle_domain_error(request: Request, exc: LanceNamespaceError) -> JSONResponse:
-    """Render auth/availability failures (401 / 403 / 503) as RFC 9457 problem+json."""
-    status, body = problem_detail(exc)
-    if status >= 500:
-        log.exception(
-            "domain_error",
-            extra={"method": request.method, "path": request.url.path, "status": status},
-        )
-    return JSONResponse(status_code=status, content=body, media_type=PROBLEM_JSON)
-
-
-@app.exception_handler(RequestValidationError)
-async def handle_validation_error(request: Request, exc: RequestValidationError) -> JSONResponse:
-    """A malformed POST /api/v1/lineage body renders as problem+json, like every other error here
-    (and like the catalog) — not FastAPI's default verbose 422 envelope."""
-    return JSONResponse(
-        status_code=422,
-        content={
-            "type": "https://lance.org/problems/validation",
-            "title": "Validation Error",
-            "status": 422,
-            "errors": [
-                {"field": ".".join(str(p) for p in e["loc"]), "message": e["msg"], "type": e["type"]}
-                for e in exc.errors()
-            ],
-        },
-        media_type=PROBLEM_JSON,
-    )
-
-
-@app.exception_handler(Exception)
-async def handle_unexpected_error(request: Request, exc: Exception) -> JSONResponse:
-    """Any unhandled error renders as problem+json (parity with the catalog) — internals leak via logs
-    only, never the body."""
-    log.exception("unhandled_error", extra={"method": request.method, "path": request.url.path})
-    return JSONResponse(
-        status_code=500,
-        content={
-            "type": "https://lance.org/problems/internal",
-            "title": "InternalError",
-            "status": 500,
-            "detail": "Internal Server Error",
-        },
-        media_type=PROBLEM_JSON,
-    )
+install_problem_handlers(app, log)
 
 
 @app.get("/livez", tags=["health"])

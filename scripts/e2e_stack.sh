@@ -169,8 +169,12 @@ SUB="$(ALICE="$ALICE" uv run python -c "
 import os,base64,json
 p = os.environ['ALICE'].split('.')[1]; p += '=' * (-len(p) % 4)
 print(json.loads(base64.urlsafe_b64decode(p))['sub'])")"
+# NEWEST store of that name — the same selector common.fga.provision uses (max created_at), so a boot-race
+# double-create (two catalog pods provisioning against a freshly-rolled OpenFGA) can never make the seeder
+# and the serving catalog disagree about which store the grants live in (CI flake 2026-07-15: the CLI
+# verified can_create_warehouse=allowed on stores[0] while the catalog checked its own newer store → 403).
 SID="$(fga store list --api-url http://localhost:8081 \
-  | uv run python -c "import sys,json;print([s['id'] for s in json.load(sys.stdin)['stores'] if s['name']=='lance-catalog'][0])")"
+  | uv run python -c "import sys,json;s=[x for x in json.load(sys.stdin)['stores'] if x['name']=='lance-catalog'];print(max(s,key=lambda x:x['created_at'])['id'])")"
 # project-admin => can_create_warehouse (the #3-A gate). bob gets NOTHING — he is the 403 leg.
 fga tuple write --api-url http://localhost:8081 --store-id "$SID" "user:$SUB" admin project:acme >/dev/null
 echo "   seeded user:${SUB:0:12}… admin project:acme (store ${SID:0:8}…)"

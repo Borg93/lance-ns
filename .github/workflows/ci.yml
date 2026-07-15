@@ -26,6 +26,13 @@ jobs:
       - name: Type-check (ty)
         run: uvx ty check
 
+      # The committed OpenAPI specs (docs/*-openapi.json) are the canonical, reviewable contract of every
+      # endpoint we serve — model promotion, warehouse admin, client-direct commit, MVs, and the rest. They
+      # are GENERATED from the live FastAPI apps, so this regenerates + fails on drift: a route added or
+      # changed without refreshing the spec is caught here, not discovered by a client.
+      - name: OpenAPI spec up-to-date
+        run: make openapi-check
+
       # Unit + integration tests (our logic only) + the moto-S3 round-trip.
       # No external infra needed — moto runs an in-process S3 server, and the
       # auth/authz tests fake the OIDC verifier + fga.check. The `e2e` marker is

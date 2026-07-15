@@ -30,6 +30,12 @@ from pydantic import BaseModel, Field
 from medallion.services.derivers import ARTIFACT_COLUMNS, derive_artifacts
 
 _STAGE_COLUMN = "stage"
+#: Row-level provenance: the stable ``_rowid`` of the RAW-zone row this output descends from. Minted at the
+#: cascade head from the upstream row's reserved ``_rowid`` metacolumn (durable because every stage writes
+#: ``enable_stable_row_ids=True``) and carried forward unchanged thereafter — so a gold row names the exact
+#: source row it came from in ONE join, not a hop-by-hop walk. ``_rowid`` advances on overwrite, so this is a
+#: snapshot taken at cascade-run time; a fresh cascade run over a re-seeded raw table re-captures it.
+_SOURCE_ROWID_COLUMN = "source_rowid"
 
 
 class WriteResult(BaseModel):
@@ -132,7 +138,9 @@ def transform_stage(
     """Read the upstream Lance dataset, transform, write the downstream dataset (the generic stage).
 
     Every stage stamps the ``stage`` provenance column (set, not appended twice, so re-running over an
-    already-stamped upstream replaces the value), carries blob columns of ANY media kind through intact
+    already-stamped upstream replaces the value), threads the row-level ``source_rowid`` provenance column
+    (minted at the head from the upstream ``_rowid``, carried forward thereafter — so a gold row names the
+    exact raw row it descends from), carries blob columns of ANY media kind through intact
     (``_carry_forward``), and derives whatever the blob CONTENT supports (``derive_artifacts`` — image →
     thumbnail+embedding, unrecognised → untouched, tabular → no-op). Returns the new downstream Lance
     version + the measured output statistics (rows + on-disk bytes) for the emit.
@@ -182,6 +190,11 @@ def _column_map(
     deps: list[tuple[str, str, str]] = [
         (name, name, "IDENTITY") for name in out_names if name != _STAGE_COLUMN and name in in_names
     ]
+    # source_rowid is minted at the cascade head from the upstream row's reserved ``_rowid`` metacolumn (root
+    # provenance) — declare that as its input edge. Once it exists it is carried forward like any column, so
+    # a later stage (source_rowid in BOTH schemas) is already handled as IDENTITY by the rule above.
+    if _SOURCE_ROWID_COLUMN in set(out_names) and _SOURCE_ROWID_COLUMN not in in_names:
+        deps.append((_SOURCE_ROWID_COLUMN, "_rowid", "IDENTITY"))
     if blob_cols:
         source = min(blob_cols)  # matches derivers' ``min(blob_payloads)`` dispatch — deterministic source
         deps += [
@@ -203,15 +216,18 @@ def _carry_forward(ds: lance.LanceDataset, stage: str) -> tuple[pa.Table, dict[s
     """
     blob_cols = blobs.blob_field_names(ds.schema)
     if not blob_cols:
-        return _stamp_stage(ds.to_table(), stage), {}
+        return _stamp_stage(_carry_source_rowid(ds.to_table(with_row_id=True)), stage), {}
 
     # Full-materialise each blob column into memory (read_blobs by positional indices 0..N-1) — fine for
     # this in-process fake-Ray stand-in over the cascade's small overwrite-written datasets (contiguous
     # row ids); a distributed job would stream instead. `range(rows)` aligns with `to_table()` only because
     # the cascade is overwrite-only (no soft-deleted rows to shift positions).
     rows = ds.count_rows()
+    # with_row_id so the head can mint source_rowid from the SAME scan the rows come from (positionally
+    # aligned with read_blobs(range(rows)); a carried source_rowid is a plain column already in this read).
     plain = ds.to_table(
-        columns=[f.name for f in ds.schema if f.name not in blob_cols and f.name != _STAGE_COLUMN]
+        columns=[f.name for f in ds.schema if f.name not in blob_cols and f.name != _STAGE_COLUMN],
+        with_row_id=True,
     )
     columns: dict[str, Any] = {}
     fields: list[pa.Field] = []
@@ -227,9 +243,26 @@ def _carry_forward(ds: lance.LanceDataset, stage: str) -> tuple[pa.Table, dict[s
         else:
             fields.append(plain.schema.field(f.name))
             columns[f.name] = plain.column(f.name)
+    # Root provenance: a carried source_rowid came through the loop above (a plain upstream column); at the
+    # cascade head it is minted here from the just-read _rowid (same aligned scan). _rowid is not persisted.
+    if _SOURCE_ROWID_COLUMN not in columns:
+        fields.append(pa.field(_SOURCE_ROWID_COLUMN, pa.uint64()))
+        columns[_SOURCE_ROWID_COLUMN] = plain.column("_rowid").cast(pa.uint64())
     fields.append(pa.field(_STAGE_COLUMN, pa.string()))
     columns[_STAGE_COLUMN] = pa.array([stage] * rows, pa.string())
     return pa.table(columns, schema=pa.schema(fields)), blob_payloads
+
+
+def _carry_source_rowid(table: pa.Table) -> pa.Table:
+    """Ensure ``source_rowid`` holds the stable _rowid of the RAW row this output descends from (root
+    provenance). An upstream that already carries it (a later stage) keeps it; the cascade head mints it from
+    the reserved ``_rowid`` metacolumn of the row just read. ``_rowid`` itself is never persisted (it is a
+    reserved name and would advance on the next overwrite). Input MUST be read ``with_row_id=True``.
+    """
+    if _SOURCE_ROWID_COLUMN in table.column_names:
+        return table.drop_columns(["_rowid"]) if "_rowid" in table.column_names else table
+    srid = table.column("_rowid").cast(pa.uint64())
+    return table.drop_columns(["_rowid"]).append_column(pa.field(_SOURCE_ROWID_COLUMN, pa.uint64()), srid)
 
 
 def _stamp_stage(table: pa.Table, stage: str) -> pa.Table:

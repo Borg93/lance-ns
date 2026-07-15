@@ -3,7 +3,9 @@
 A medallion mover submits this via the Ray Jobs REST API (services/medallion/services/ray_submit.py) IN
 RESPONSE TO its Dapr cascade trigger — the production-shape replacement for the in-process fake-Ray
 ``compute.transform_stage``. It reads the upstream Lance dataset, stamps a ``stage`` provenance column across
-Ray workers, and writes the downstream dataset at file format 2.2 with stable row ids (create the target with
+Ray workers, threads the row-level ``source_rowid`` provenance column (minted at the head from ``_rowid``,
+carried forward — parity with the in-process path), and writes the downstream dataset at file format 2.2 with
+stable row ids (create the target with
 stable ids, then distributed-append — lance_ray.write_lance has no stable-row-ids param). The mover then reads
 the written version + statistics for the OpenLineage WROTE edge, exactly as the in-process path does.
 
@@ -86,9 +88,34 @@ def _reset_dataset(to_uri: str, so: dict[str, str]) -> None:
         fs.delete_dir_contents(to_uri.removeprefix("s3://"), missing_dir_ok=True)
 
 
+def _reset_if_legacy(to_uri: str, so: dict[str, str]) -> None:
+    """Clear the target ONLY if a legacy dataset (created without stable ids) exists there.
+
+    ``enable_stable_row_ids`` is create-time-only, so overwrite alone won't flip it on a pre-existing no-id
+    dataset; a dataset that already has stable ids keeps them under overwrite, so the raw dir-wipe (+ its
+    concurrency hazard) is a one-time migration, skipped on the common already-stable path.
+    """
+    needs_reset = False
+    with contextlib.suppress(Exception):
+        needs_reset = not lance.dataset(to_uri, storage_options=so).has_stable_row_ids
+    if needs_reset:
+        _reset_dataset(to_uri, so)
+
+
 def _stamp_stage(table: pa.Table, stage: str) -> pa.Table:
-    """Carry every upstream column forward and (re)stamp the ``stage`` provenance column — the generic
-    per-stage transform, type-preserving via the pyarrow batch format."""
+    """Carry every upstream column forward, thread root-provenance ``source_rowid``, and (re)stamp ``stage``
+    — the generic per-stage transform, type-preserving via the pyarrow batch format.
+
+    Mirrors compute._carry_source_rowid + _stamp_stage: an upstream that already carries ``source_rowid``
+    keeps it (a later stage), the cascade head mints it from the reserved ``_rowid`` metacolumn (durable
+    under stable row ids), and ``_rowid`` itself is never persisted (reserved name; advances on overwrite).
+    """
+    if "source_rowid" not in table.column_names and "_rowid" in table.column_names:
+        table = table.append_column(
+            pa.field("source_rowid", pa.uint64()), table.column("_rowid").cast(pa.uint64())
+        )
+    if "_rowid" in table.column_names:
+        table = table.drop_columns(["_rowid"])
     if "stage" in table.column_names:
         table = table.drop_columns(["stage"])
     return table.append_column("stage", pa.array([stage] * table.num_rows, pa.string()))
@@ -146,7 +173,12 @@ def _media_transform(from_uri: str, to_uri: str, so: dict[str, str], *, stage: s
     ds = lance.dataset(from_uri, storage_options=so)
     blob_cols = _blob_field_names(ds.schema)
     rows = ds.count_rows()
-    plain = ds.to_table(columns=[f.name for f in ds.schema if f.name not in blob_cols and f.name != "stage"])
+    # with_row_id so the head can mint source_rowid from the SAME aligned scan (a carried source_rowid is a
+    # plain column already in this read); mirrors compute._carry_forward's blob path.
+    plain = ds.to_table(
+        columns=[f.name for f in ds.schema if f.name not in blob_cols and f.name != "stage"],
+        with_row_id=True,
+    )
 
     columns: dict = {}
     fields: list[pa.Field] = []
@@ -162,6 +194,11 @@ def _media_transform(from_uri: str, to_uri: str, so: dict[str, str], *, stage: s
         else:
             fields.append(plain.schema.field(f.name))
             columns[f.name] = plain.column(f.name)
+    # Root provenance (mirror compute._carry_source_rowid): carry source_rowid if the upstream has it, else
+    # mint it from the aligned _rowid at the head. _rowid is never persisted.
+    if "source_rowid" not in columns:
+        fields.append(pa.field("source_rowid", pa.uint64()))
+        columns["source_rowid"] = plain.column("_rowid").cast(pa.uint64())
     fields.append(pa.field("stage", pa.string()))
     columns["stage"] = pa.array([stage] * rows, pa.string())
     out = pa.table(columns, schema=pa.schema(fields))
@@ -204,6 +241,20 @@ def main() -> None:
     if _blob_field_names(upstream.schema):
         # MEDIA path: lance_ray strips blob typing on write, so round-trip + derive via pylance (below).
         _media_transform(from_uri, to_uri, so, stage=stage)
+    elif "source_rowid" not in upstream.schema.names:
+        # CASCADE HEAD (tabular): mint root-provenance source_rowid from the upstream _rowid. lance_ray's
+        # distributed read does not surface the reserved _rowid metacolumn, and provenance must be exact, so
+        # the head is a native pylance overwrite on the driver (the raw head is small); deeper tabular stages,
+        # which already CARRY source_rowid as a plain column, distribute below. Same 2.2 + stable-id contract.
+        _reset_if_legacy(to_uri, so)
+        lance.write_dataset(
+            _stamp_stage(upstream.to_table(with_row_id=True), stage),
+            to_uri,
+            storage_options=so,
+            mode="overwrite",
+            data_storage_version="2.2",
+            enable_stable_row_ids=True,
+        )
     else:
         base = upstream.schema
         if "stage" in base.names:
@@ -214,18 +265,13 @@ def main() -> None:
 
         # Distributed transform on Ray, then a stable-row-id write: create dst with stable ids (empty, output
         # schema) and distributed-APPEND the Ray fragments into it (the property is dataset-level, so they
-        # inherit it). concurrency>1 → fragments written in parallel + one commit.
+        # inherit it). concurrency>1 → fragments written in parallel + one commit. source_rowid is already a
+        # plain column in `base`, so it flows through map_batches + write as ordinary data (no distributed
+        # _rowid needed) — only the head, handled natively above, has to mint it.
         transformed = lr.read_lance(from_uri, storage_options=so).map_batches(
             lambda table: _stamp_stage(table, stage), batch_format="pyarrow"
         )
-        # Clear ONLY when a legacy dataset (created without stable ids) exists — enable_stable_row_ids is
-        # create-time-only, so overwrite alone won't flip it; a dataset that already has stable ids keeps
-        # them under overwrite, so the raw dir-wipe (+ its concurrency hazard) is a one-time migration.
-        needs_reset = False
-        with contextlib.suppress(Exception):
-            needs_reset = not lance.dataset(to_uri, storage_options=so).has_stable_row_ids
-        if needs_reset:
-            _reset_dataset(to_uri, so)
+        _reset_if_legacy(to_uri, so)
         lance.write_dataset(
             out_schema.empty_table(),
             to_uri,

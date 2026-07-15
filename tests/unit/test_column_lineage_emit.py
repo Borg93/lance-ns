@@ -101,7 +101,13 @@ def test_measure_stage_reconstructs_identity_edges_from_disk(tmp_path: Any) -> N
     result = measure_stage(raw, bronze, {})
 
     assert set(result.column_map) == set(declared)
-    assert set(result.column_map) == {("id", "id", "IDENTITY"), ("payload", "payload", "IDENTITY")}
+    # source_rowid is minted at the head from the raw row's reserved _rowid metacolumn (root provenance);
+    # id/payload are carried IDENTITY. measure_stage recovers the SAME head edge from the two schemas alone.
+    assert set(result.column_map) == {
+        ("id", "id", "IDENTITY"),
+        ("payload", "payload", "IDENTITY"),
+        ("source_rowid", "_rowid", "IDENTITY"),
+    }
     assert result.row_count == 3 and result.version > 0  # still a real measurement, not just edges
 
 
@@ -222,10 +228,13 @@ def test_handle_stage_emits_identity_column_edges(tmp_path: Any) -> None:
     lineage = next(p for p in dapr.published if p["topic"] == settings.lineage_topic)
     output = Dataset.model_validate(lineage["data"]["outputs"][0])
     edges = {(e["out_field"], e["name"], e["field"], e["subtype"]) for e in output.column_edges}
-    # The LIVE cascade (not seed.py) produced field-to-field identity edges pointing at the raw input.
+    # The LIVE cascade (not seed.py) produced field-to-field identity edges pointing at the raw input —
+    # including source_rowid, minted at the head from the raw row's reserved _rowid metacolumn (root
+    # provenance: the bronze row names the exact raw row it descends from).
     assert edges == {
         ("id", "raw_events", "id", "IDENTITY"),
         ("payload", "raw_events", "payload", "IDENTITY"),
+        ("source_rowid", "raw_events", "_rowid", "IDENTITY"),
     }
 
 

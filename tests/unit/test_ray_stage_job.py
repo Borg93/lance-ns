@@ -98,6 +98,7 @@ def test_media_transform_round_trips_blob_and_derives(tmp_path: Path, png_bytes:
         schema=pa.schema([pa.field("id", pa.int64()), blob_field("payload")]),
     )
     lance.write_dataset(table, src, data_storage_version="2.2", enable_stable_row_ids=True)
+    src_rowids = lance.dataset(src).to_table(with_row_id=True).column("_rowid").to_pylist()
 
     dst = str(tmp_path / "silver_media")
     job._media_transform(src, dst, {}, stage="silver-media")
@@ -108,3 +109,31 @@ def test_media_transform_round_trips_blob_and_derives(tmp_path: Path, png_bytes:
     assert "stage" in names
     assert blobs.blob_field_names(out.schema) == ["payload"]  # blob-v2 typing PRESERVED (not demoted)
     assert out.count_rows() == 2 and out.has_stable_row_ids
+    # Row-level provenance parity with compute._carry_forward: source_rowid minted from the source _rowid.
+    assert out.to_table(columns=["source_rowid"]).column("source_rowid").to_pylist() == src_rowids
+
+
+def test_stamp_stage_mints_source_rowid_at_the_head_and_carries_it_forward() -> None:
+    """The tabular map function's provenance logic (the distributed path can't run in the unit venv).
+
+    Head: a batch carrying the reserved ``_rowid`` metacolumn (no ``source_rowid`` yet) MINTS source_rowid
+    from it and never persists ``_rowid``. Carried: a batch that already has ``source_rowid`` keeps it
+    UNCHANGED (root provenance, not re-set to the parent's _rowid) and still sheds ``_rowid``. Mirrors
+    compute._carry_source_rowid + _stamp_stage.
+    """
+    head = pa.table({"id": [1, 2], "_rowid": pa.array([40, 41], pa.uint64())})
+    stamped = job._stamp_stage(head, "bronze")
+    assert "_rowid" not in stamped.column_names  # reserved metacolumn never persisted
+    assert stamped.column("source_rowid").to_pylist() == [40, 41]  # minted from _rowid
+    assert stamped.column("stage").to_pylist() == ["bronze", "bronze"]
+
+    carried = pa.table(
+        {
+            "id": [1, 2],
+            "source_rowid": pa.array([40, 41], pa.uint64()),
+            "_rowid": pa.array([7, 8], pa.uint64()),
+        }
+    )
+    stamped2 = job._stamp_stage(carried, "silver")
+    assert "_rowid" not in stamped2.column_names
+    assert stamped2.column("source_rowid").to_pylist() == [40, 41]  # ROOT id kept, NOT the parent's _rowid

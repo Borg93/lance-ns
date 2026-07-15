@@ -50,7 +50,15 @@ def test_image_blobs_derive_artifacts_through_the_generic_stage(tmp_path: Path) 
     result = transform_stage(bronze, silver, {}, stage="silver-media")
 
     ds = lance.dataset(silver)
-    assert set(ds.schema.names) == {"id", "payload", "source_uri", "stage", "thumbnail", "embedding"}
+    assert set(ds.schema.names) == {
+        "id",
+        "payload",
+        "source_uri",
+        "stage",
+        "source_rowid",  # row-level provenance minted at the head, carried through the media stage
+        "thumbnail",
+        "embedding",
+    }
     thumbs = ds.to_table(columns=["thumbnail"]).column("thumbnail").to_pylist()
     assert all(t.startswith(b"\x89PNG") for t in thumbs)  # real derived thumbnails, inline
     embeddings = ds.to_table(columns=["embedding"]).column("embedding").to_pylist()
@@ -74,7 +82,7 @@ def test_tabular_dataset_flows_untouched(tmp_path: Path) -> None:
 
     transform_stage(src, dst, {}, stage="silver")
 
-    assert set(lance.dataset(dst).schema.names) == {"id", "v", "stage"}
+    assert set(lance.dataset(dst).schema.names) == {"id", "v", "stage", "source_rowid"}
 
 
 def test_unrecognised_media_carries_through_untouched(tmp_path: Path) -> None:

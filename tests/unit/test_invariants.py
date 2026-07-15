@@ -254,3 +254,57 @@ def test_every_helm_set_key_in_our_scripts_exists_in_values() -> None:
             if not defined(base):
                 unknown.append(f"{script.name}: --set {key} (no such key in values.yaml)")
     assert not unknown, "helm --set keys that silently do nothing:\n  " + "\n  ".join(unknown)
+
+
+def test_no_warehouse_bucket_access_bypasses_the_deactivation_gate() -> None:
+    """SECURITY INVARIANT (audit #2/#6 + #35 class): reaching a warehouse's isolated bucket connection —
+    which happens only via ``_namespace_for_root`` — MUST consult the warehouse's lifecycle status, or a
+    handler can provision/read inside a QUARANTINED (deactivated) bucket, bypassing tenant offboarding.
+
+    Today two paths reach a bucket: ``get_namespace`` (through ``_resolve_warehouse_root``'s live status
+    gate) and ``create_warehouse_namespace`` (which checks ``record["status"]`` inline). This test fails the
+    moment a NEW caller of ``_namespace_for_root`` appears in a module that does not also gate on status —
+    exactly the bug the audit found in the namespace-create path.
+    """
+    # Match the cached wrapper `_namespace_for_root(` but NOT the raw builder `build_namespace_for_root(`
+    # (the wrapper's substring lives inside the builder's name) — a word boundary before the underscore.
+    caller_re = re.compile(r"(?<![A-Za-z_])_namespace_for_root\(")
+    ungated: list[str] = []
+    for path in SERVICES.rglob("*.py"):
+        text = path.read_text()
+        if not caller_re.search(text):
+            continue
+        # The definition site (dependencies.py) gates via _resolve_warehouse_root; every caller must gate on
+        # the warehouse status one way or another before it reaches the bucket.
+        gated = (
+            "_resolve_warehouse_root" in text
+            or "warehouse_status" in text
+            or re.search(r'\.get\("status"\)|\["status"\]', text) is not None
+        )
+        if not gated:
+            ungated.append(str(path.relative_to(REPO)))
+    assert not ungated, (
+        "these modules reach a warehouse bucket via _namespace_for_root WITHOUT a deactivation-status gate "
+        f"— a quarantined-warehouse bypass (audit #2/#6): {ungated}"
+    )
+
+
+def test_catalog_authz_primitive_fails_closed_on_openfga_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SECURITY INVARIANT (condition 3a): the shared catalog authz primitive ``_require`` — which EVERY
+    catalog gate (``authorize`` / ``require_*``) funnels through to ``fga.check`` — must RAISE (fail closed)
+    when OpenFGA is unreachable, never swallow the outage and allow. If it failed OPEN, every gated route
+    would too. (The lineage read gate's fail-closed is pinned in test_lineage_auth.py.)
+    """
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from catalog.api import fga_deps as cat_fga
+    from common import fga as common_fga
+    from lance_namespace import ServiceUnavailableError
+
+    async def _outage(*_a: object, **_k: object) -> bool:
+        raise ServiceUnavailableError("openfga down")
+
+    monkeypatch.setattr(common_fga, "check", _outage)
+    with pytest.raises(ServiceUnavailableError):
+        asyncio.run(cat_fga._require(MagicMock(), user="u", relation="can_read_data", obj="table:x"))

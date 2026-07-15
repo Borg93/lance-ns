@@ -102,6 +102,8 @@ spec:
             - { name: LANCE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }
             - { name: LANCE_FGA_ENABLED, value: "true" }
             - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            # #41 compliance audit trail (who/what/outcome for authn/authz/vending) — configurable.
+            - { name: LANCE_AUDIT_ENABLED, value: {{ .Values.auth.audit | default true | quote }} }
             # Lock top-level (root) namespace/table creation to holders of a warehouse-level create grant.
             # Off in dev (self-serve); ON in prod (values-prod) — else any Dex-authenticated user can squat
             # unlimited root namespaces in the shared warehouse bucket (assessment finding).

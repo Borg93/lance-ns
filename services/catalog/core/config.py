@@ -129,6 +129,11 @@ class Settings(BaseSettings):
     # in production, provision once and pin both ids.
     fga_enabled: bool = Field(default=False, alias="LANCE_FGA_ENABLED")
     fga_api_url: str = Field(default="http://openfga:8080", alias="LANCE_FGA_API_URL")
+    # Compliance audit trail (#41): emit a structured event on the dedicated `lance.audit` logger for every
+    # security-relevant action — authn success/failure, authz allow/deny, credential vending — carrying
+    # who/what/resource/outcome. Default on so a governed deployment records an audit trail out of the box;
+    # set false to silence the stream. The events only carry a real subject when OIDC is on.
+    audit_enabled: bool = Field(default=True, alias="LANCE_AUDIT_ENABLED")
     fga_store_id: str | None = Field(default=None, alias="LANCE_FGA_STORE_ID")
     fga_model_id: str | None = Field(default=None, alias="LANCE_FGA_MODEL_ID")
     # The FGA `warehouse:` root object (= the lakehouse bucket). Two roles: (1) every top-level

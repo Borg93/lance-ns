@@ -16,6 +16,12 @@ Auth: OIDC bearer (Dex) at the edge, per-route OpenFGA relations (`can_*`). Read
 writes on writer, destructive/admin ops on owner, and promotion on the separate validator rung. Fail-closed:
 an OpenFGA outage is `503`, a denial is `403`, a missing token is `401`.
 
+**Audit trail (#41, configurable via `LANCE_AUDIT_ENABLED`).** Every security-relevant action — authn
+success/failure, authz allow/deny, credential vending — emits a structured event (who / what / resource /
+outcome) on the dedicated `lance.audit` logger, exported over OTLP to GreptimeDB and queryable by
+`audit.action` / `audit.outcome` / `audit.subject`. Durable data/model-mutation provenance (who created/
+wrote/promoted what, when) additionally lives in the lineage graph.
+
 | Capability | Endpoints | Notes |
 |---|---|---|
 | **Namespaces** | `POST /v1/namespace/{id}/{create,describe,drop,exists}`, `GET /v1/namespace/{id}/{list,table/list}` | Lance-namespace core |

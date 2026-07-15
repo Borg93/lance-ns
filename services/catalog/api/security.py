@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from common.audit import FAILURE, SUCCESS, audit
 from common.oidc import IDToken, OIDCVerifier
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -33,10 +34,18 @@ def authenticate(request: Request, settings: SettingsDep, credentials: _Credenti
     verifier: OIDCVerifier | None = getattr(request.app.state, "oidc", None)
     if verifier is None:
         # OIDC is enabled but no verifier is available: fail closed, never open.
+        audit("authn", FAILURE, reason="verifier_unavailable")
         raise ServiceUnavailableError("Authentication is enabled but unavailable")
     if credentials is None or not credentials.credentials:
+        audit("authn", FAILURE, reason="missing_token")
         raise UnauthenticatedError("Missing bearer token")
-    return verifier.verify(credentials.credentials)
+    try:
+        token = verifier.verify(credentials.credentials)
+    except Exception:  # noqa: BLE001 — audit the rejection (bad signature / exp / aud), then re-raise as-is
+        audit("authn", FAILURE, reason="invalid_token")
+        raise
+    audit("authn", SUCCESS, subject=token.sub)  # #41 record the authenticated principal
+    return token
 
 
 #: Token of the authenticated caller (``None`` when OIDC is disabled). Endpoints that

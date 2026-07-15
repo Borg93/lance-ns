@@ -19,6 +19,7 @@ from typing import Annotated
 import lance
 from botocore.exceptions import BotoCoreError, ClientError
 from common import fga
+from common.audit import SUCCESS, audit
 from fastapi import APIRouter, Query
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
@@ -110,6 +111,15 @@ async def vend_credentials(
         # problem — reporting it as 401 would send an authorized caller into a futile re-login loop (audit).
         raise ServiceUnavailableError("credential vending backend unavailable") from exc
     mode = "server_mediated" if creds is None else "direct"
+    if mode == "direct":  # #41 audit the actual issuance of direct object-store credentials (who, what, tier)
+        obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+        audit(
+            "vend_credentials",
+            SUCCESS,
+            subject=token.sub if token is not None else None,
+            resource=obj,
+            tier=tier,
+        )
     return CredentialResponse(
         mode=mode, credentials=creds, location=described.location, read_version=read_version
     )

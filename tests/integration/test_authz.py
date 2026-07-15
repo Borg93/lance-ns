@@ -984,3 +984,35 @@ def test_describe_allow_and_deny(client: TestClient, fake_ns: MagicMock, monkeyp
 
     resp = client.post("/v1/table/db1$users/describe", headers={"Authorization": "Bearer t"})
     assert resp.status_code == (200 if allow else 403)
+
+
+def test_authz_decision_emits_an_audit_event(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
+    # #41: every authz decision (not just denials) lands on the dedicated audit stream with who/what/outcome.
+    import logging
+
+    from common.audit import AUDIT_LOGGER, configure_audit
+
+    fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://x")
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+
+    records: list[logging.LogRecord] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record)
+
+    handler = _Capture()
+    logging.getLogger(AUDIT_LOGGER).addHandler(handler)
+    configure_audit(enabled=True)
+    try:
+        resp = client.post("/v1/table/db1$users/describe", headers={"Authorization": "Bearer t"})
+    finally:
+        logging.getLogger(AUDIT_LOGGER).removeHandler(handler)
+
+    assert resp.status_code == 200
+    events = [r.__dict__ for r in records if r.__dict__.get("audit.action") == "can_get_metadata"]
+    assert events, "the authz gate emitted no audit event"
+    assert events[0]["audit.outcome"] == "allow"
+    assert events[0]["audit.subject"] == "alice"
+    assert events[0]["audit.resource"] == "table:db1$users"

@@ -82,7 +82,54 @@ BOTH the AGE graph and the durable /events feed. A mocked exception is not a cra
 in values-prod.yaml — the durability guarantee is dark exactly where it matters. Decide ON (and
 document the cost) or document WHY off. *Proof:* values-prod.yaml sets it explicitly + a comment.
 
-## P2 — make #3 true for the pipeline we actually run
+## P2 RESOLVED (2026-07-15) — #3 finished for the pipeline we run
+
+- **P2.2 — real routing coverage: DONE.** `tests/integration/test_warehouse_routing.py` drives the REAL
+  `get_namespace → _resolve_warehouse_root → warehouse_for_namespace` resolver (no fake) against a local-FS
+  registry: a table under a bound namespace physically lands in the warehouse root and is absent from the
+  default root (proven by reading the location + rglob, non-vacuous). Plus the collision guard:
+  `create_warehouse_namespace` returns **409** when the name already exists unbound in the default root.
+  Green in CI (`test` job).
+- **P2.3 — warehouse lifecycle: DONE.** `deactivate`/`activate` endpoints (admin-gated on the warehouse's
+  own project); a `status` field on the record; the resolver honors it (a deactivated warehouse → **403** on
+  every op on its bound namespaces, status read LIVE so it takes effect on the next request). Proven by
+  integration tests, a **live in-cluster** run (create 200 → deactivate → create **403** → activate → create
+  **200** on the digest-matched image), and a new e2e case in the CI `e2e-stack` suite.
+- **P2.1 — pipeline multi-base: WONTFIX (create-only), with evidence.** See the dedicated rationale below.
+
+### P2.1 WONTFIX — pipeline multi-base is create-only by design (not an accidental omission)
+
+**Decision:** do NOT wire `data_bases` (#3-B multi-base) through the medallion/Ray mover write path. #3-B
+stays REST-create-only. **Evidence gathered before deciding:**
+
+1. **Structural mismatch — base registration is CREATE-TIME-ONLY, the cascade is overwrite-only.** Multi-base
+   registers its bases in the manifest via `initial_bases`, which pylance accepts **only on a fresh create**
+   (`dataplane.py`: `initial_bases = ... if is_create ...`). The cascade movers (`compute.py.transform_stage`,
+   `seed_raw`) write **exclusively** in `mode="overwrite"`. The dataplane's own caveat (lines 220-227) is
+   explicit: a mutation that doesn't re-send `data_base` — which a bare overwrite cannot — "concentrates its
+   NEW fragments in the primary root." So making the cascade distribute would require threading
+   first-write-vs-overwrite base-registration state through the movers — real complexity, and getting it
+   wrong silently concentrates fragments in the primary root (the live proof would be flaky by construction).
+2. **The pipeline already distributes at the ZONE level.** The medallion writes per-zone (raw/bronze/silver/
+   gold) buckets, swept by the multi-bucket GC. Per-TABLE multi-base is the Uber petabyte-scale throughput/DR/
+   tiering pattern (`base_paths[]` across N buckets) — the cascade's stage tables are not at that scale.
+3. **No per-table distribution signal exists in the cascade.** #3-B on REST-create serves a client that
+   EXPLICITLY asks to distribute a table (passes `data_bases`). The cascade has no such signal; wiring it
+   means inventing a distribution POLICY (which stages, across which approved bases) with **no current table
+   that needs it** — a speculative half-feature, untested at the scale where it would matter.
+4. **The read path constrains bases to shared creds.** `open_dataset` passes only the top-level
+   `storage_options`, so every base must share the catalog's endpoint/creds (the `base_store_params`
+   invariant). The cascade config would have to guarantee this too.
+
+**Revisit trigger:** when a specific gold/training table demonstrably exceeds single-bucket throughput or
+needs cross-region DR, AND the real Ray distributed-write path (the rask merge) lands — wire
+`initial_bases` on that stage's first create + `target_bases` on subsequent overwrites, and validate fragment
+distribution against a REAL workload, not a demo table. The create-only scope is stated in the
+`compute.py` mover docstring so it reads as a deliberate boundary, not an omission.
+
+---
+
+## P2 (original plan) — make #3 true for the pipeline we actually run
 
 **P2.1 — pipeline multi-base.** Medallion/Ray writes and `/insert` never distribute; #3-B is
 REST-create-only, so no batch/training table is ever actually distributed. Wire `data_bases`

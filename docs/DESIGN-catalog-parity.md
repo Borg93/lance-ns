@@ -189,7 +189,7 @@ count grows, so the live proof asserts REDIRECTION (data in a data base, manifes
 fan-out read rather than literal both-bucket spread from one small write.
 
 ---
-## ALL OF #1–#5 COMPLETE (2026-07-14) — built, live-verified on kind, adversarially audited, on `feat/catalog-parity-1-and-5`
+## ALL OF #1–#5 COMPLETE — built, live-verified on kind, adversarially audited, MERGED TO `main` (2026-07-15)
 #1 columnLineage · #2 client-direct writes · #3-A per-warehouse bucket + control-plane · #3-B multi-base ·
 #4 transactional outbox+DLQ · #5a–e housekeeping. Every feature got an adversarial audit; #4 (3), #3-A (5,
 incl. a CRITICAL cross-tenant takeover), #3-B (3) findings fixed + re-verified. Parked per user: NATS HA,

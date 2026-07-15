@@ -1,10 +1,14 @@
 # GOAL — Prove it: finish #3/#4 for real, kill claim-drift, make DONE mechanical
 
-> ## ✅ STATUS: COMPLETE (2026-07-15) — every clause proven, CI green, all pushed
+> ## ✅ STATUS: COMPLETE + MERGED TO MAIN (2026-07-15)
 >
-> All 8 goal clauses are demonstrated with real command output; CI run **29393280868** is green
-> (5/5 jobs), the e2e suites run **12 passed / 0 skipped**, the full unit+integration suite is
-> **708 passed**, tree clean, everything on `feat/catalog-parity-1-and-5` (never main, HEAD `9729ea7`+).
+> Everything below shipped: catalog-parity #1–#5, #35 (#3 for the pipeline), and a full adversarial
+> auth/authz/lineage/secrets audit (§ *SEC* below — 3 confirmed findings fixed incl. a CRITICAL
+> privilege-escalation, with live fail-closed proofs). All demonstrated with real command output; CI green
+> (latest run **29405648235**, 5/5 jobs); full unit+integration suite **723 passed**. **Merged to `main`
+> (HEAD `e2edd2b`) and the feature branch deleted** — `main` is the single source of truth. (This doc is the
+> historical proof log; the branch/HEAD references in the body below are from when the work lived on the
+> now-deleted `feat/catalog-parity-1-and-5` branch.)
 >
 > | clause | what | proof |
 > |---|---|---|

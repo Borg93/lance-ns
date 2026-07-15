@@ -6,9 +6,8 @@ namespace, then perform the operation with pylance.
 
 Most functions take ``(ns, storage_options, request)`` and return the typed ``lance_namespace`` response
 model. Exceptions: ``update_field_metadata`` takes ``(ns, storage_options, table_id, updates)``; and
-``create_table`` is the one facade that receives the raw Arrow-IPC ``data`` and picks the write path by
-schema — a blob-v2 column needs file format 2.2 (the native create pins 2.1 and rejects it), so it takes
-a direct 2.2 write, while every other schema delegates to the native create.
+``create_table`` is the one facade that receives the raw Arrow-IPC ``data`` and writes it directly at file
+format 2.2 with stable row ids — the durable row identity row-id lineage needs.
 """
 
 from __future__ import annotations
@@ -36,7 +35,6 @@ from lance_namespace import (
     CreateTableBranchRequest,
     CreateTableBranchResponse,
     CreateTableIndexRequest,
-    CreateTableRequest,
     CreateTableResponse,
     CreateTableTagRequest,
     CreateTableTagResponse,
@@ -150,50 +148,30 @@ def create_table(
     external_blob_bases: list[str] | None = None,
     data_bases: list[str] | None = None,
 ) -> CreateTableResponse:
-    """Create a table from an Arrow-IPC payload, choosing the write path by schema.
+    """Create a table from an Arrow-IPC payload — a direct file-format-2.2 write with stable row ids.
 
-    A blob-v2 column requires file format 2.2, which the native create pins at 2.1 and rejects — such a
-    schema takes the direct 2.2 write; every other schema delegates to the native create. Runs off the
-    event loop (blocking pyarrow decode + Lance/S3 IO), so the endpoint stays a single delegated call.
-    ``allow_external_blobs`` permits ``Blob.from_uri`` columns pointing ANYWHERE outside the dataset root
-    (the blanket bypass); ``external_blob_bases`` is the safer allowlist — external pointers are accepted
+    Runs off the event loop (blocking pyarrow decode + Lance/S3 IO), so the endpoint stays a single delegated
+    call. ``allow_external_blobs`` permits ``Blob.from_uri`` columns pointing ANYWHERE outside the dataset
+    root (the blanket bypass); ``external_blob_bases`` is the safer allowlist — external pointers are accepted
     only under one of these registered bases, with the blanket bypass left off.
 
-    ``data_bases`` (#3-B) spreads the table's fragments across N approved buckets (Lance multi-base). It also
-    forces the direct 2.2 ``write_dataset`` path even for a NON-blob schema, since the native create can't
-    distribute — so a regular table can go multi-bucket too. Empty (the default) → unchanged behavior.
+    ``data_bases`` (#3-B) spreads the table's fragments across N approved buckets (Lance multi-base). Empty
+    (the default) → a single-base write.
     """
-    if _schema_is_blob(data) or data_bases:
-        return _create_blob_table(
-            ns,
-            so,
-            segments,
-            data,
-            mode=mode,
-            properties=properties,
-            allow_external=allow_external_blobs,
-            external_blob_bases=external_blob_bases or [],
-            data_bases=data_bases,
-        )
-    request = CreateTableRequest(id=segments, mode=mode, properties=properties)
-    response: CreateTableResponse = native.call(ns, "create_table", request, data)
-    # #88: the native create echoes the catalog's ROOT storage creds back in ``storage_options`` — strip
-    # them so a create caller never receives root credentials. Storage access is vended ONLY through the
-    # dedicated ``/credentials`` endpoint (scoped, two-tier secret model), never as a side effect of create.
-    response.storage_options = None
-    return response
-
-
-def _schema_is_blob(data: bytes) -> bool:
-    """True when the Arrow-IPC ``data``'s schema carries a blob-v2 column.
-
-    An unparseable body returns ``False`` so it falls through to the native create, which surfaces the
-    real decode error — a genuine bug in detection is NOT swallowed (only the Arrow parse failure is).
-    """
-    try:
-        return blobs.schema_has_blob(pa.ipc.open_stream(data).schema)
-    except (pa.ArrowInvalid, OSError):
-        return False
+    # 2.2 + stable row ids are CREATE-TIME-ONLY (they cannot be added later), so EVERY create must take this
+    # path — a plain table that skipped it would be permanently unable to carry the durable row identity
+    # `row_id_lineage` needs (row-level provenance: model → dataset version → the exact source rows).
+    return _create_table_direct(
+        ns,
+        so,
+        segments,
+        data,
+        mode=mode,
+        properties=properties,
+        allow_external=allow_external_blobs,
+        external_blob_bases=external_blob_bases or [],
+        data_bases=data_bases,
+    )
 
 
 def _base_name(uri: str) -> str:
@@ -214,7 +192,7 @@ def _write_blob(
     external_blob_bases: list[str],
     data_bases: list[str] | None = None,
 ) -> lance.LanceDataset:
-    """Write a table at file format 2.2 (blob-v2 columns need it; native create pins 2.1).
+    """Write a table at file format 2.2 with stable row ids.
 
     ``allow_external`` opts into ``Blob.from_uri`` columns ANYWHERE outside the dataset root (blanket bypass);
     ``external_blob_bases`` registers approved base URIs so external pointers UNDER a registered base are
@@ -263,10 +241,8 @@ def _write_blob(
             # #5a: durable row identity — ``_rowid`` stays constant across compaction (which rewrites
             # fragments and invalidates row ADDRESSES), gating the row-id index + row-version tracking
             # (``_row_*_at_version``) that field-level/temporal lineage rests on. CREATE-TIME-ONLY (silently
-            # no-ops on an existing dataset), so it's set on every blob create/overwrite here — matching the
-            # medallion cascade writes (compute.py). The NON-blob native create (``native.call``) pins format
-            # 2.1 and exposes no row-id flag through CreateTableRequest, so those tables are covered only once
-            # creates route through the client-direct write path (#2); this closes the path the catalog owns.
+            # no-ops on an existing dataset), so it's set on every create/overwrite here — matching the
+            # medallion cascade writes (compute.py).
             enable_stable_row_ids=True,
             initial_bases=initial_bases,
             target_bases=target_bases,
@@ -286,7 +262,7 @@ def _write_blob(
         raise
 
 
-def _create_blob_table(
+def _create_table_direct(
     ns: LanceNamespace,
     so: StorageOptions,
     segments: list[str],
@@ -298,7 +274,10 @@ def _create_blob_table(
     external_blob_bases: list[str],
     data_bases: list[str] | None = None,
 ) -> CreateTableResponse:
-    """Create a blob-v2 table at file format 2.2 (the native create pins 2.1 and rejects it).
+    """Create a table at file format 2.2 with stable row ids — the ONLY create path (audit 2026-07-14).
+
+    Serves EVERY create: 2.2 + stable row ids are create-time-only, so a table that skipped this path could
+    never gain the durable row identity row-id lineage needs — see ``create_table``.
 
     Honours the create ``mode`` against a *written* table (``ExistOk`` keeps it, ``Overwrite`` replaces its
     data, ``Create`` conflicts). A *declared-only* table — one that exists in the namespace but was never

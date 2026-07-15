@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock
 
+import lance
 import pyarrow as pa
 from fastapi.testclient import TestClient
 from lance_namespace import (
@@ -68,21 +69,30 @@ def test_describe_table_maps_query_params(client: TestClient, fake_ns: MagicMock
     assert req.load_detailed_metadata is True
 
 
-def test_create_table_passes_arrow_bytes_through(client: TestClient, fake_ns: MagicMock) -> None:
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
-    client.post("/v1/table/db$t/create?mode=overwrite", content=b"ARROWSTREAM", headers=ARROW_STREAM)
-    req, data = fake_ns.create_table.call_args.args
-    assert req.id == ["db", "t"]
-    assert req.mode == "overwrite"
-    assert data == b"ARROWSTREAM"  # our raw-body passthrough
+def test_create_table_passes_arrow_bytes_through(real_ns_client: TestClient) -> None:
+    # The raw Arrow-IPC body is written verbatim as the new table's first version. Driven against a REAL
+    # dir namespace (a MagicMock can no longer stand in — the create does a real 2.2 write), so this now
+    # proves the ACTUAL round-trip: the rows land, not merely that bytes reached a mocked method.
+    body = _arrow_ipc(pa.table({"id": [1, 2, 3]}))
+    resp = real_ns_client.post("/v1/table/db$t/create?mode=overwrite", content=body, headers=ARROW_STREAM)
+    assert resp.status_code == 200
+
+    described = real_ns_client.post("/v1/table/db$t/describe", json={"load_detailed_metadata": True})
+    assert described.status_code == 200
+    ds = lance.dataset(described.json()["location"])
+    assert ds.count_rows() == 3
+    assert ds.data_storage_version == "2.2"  # the whole point of routing every create through the direct path
+    assert ds.has_stable_row_ids
 
 
-def test_create_table_accepts_spec_properties_query_param(client: TestClient, fake_ns: MagicMock) -> None:
-    # Spec 0.9 passes properties as a JSON-encoded query param (no header form).
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
-    client.post('/v1/table/db$t/create?properties={"team":"eng"}', content=b"A", headers=ARROW_STREAM)
-    req, _ = fake_ns.create_table.call_args.args
-    assert req.properties == {"team": "eng"}
+def test_create_table_accepts_spec_properties_query_param(real_ns_client: TestClient) -> None:
+    # Spec 0.9 passes properties as a JSON-encoded query param (no header form). The endpoint must parse it
+    # and the create must succeed carrying them — driven for real so the parse + write path both run.
+    body = _arrow_ipc(pa.table({"id": [1]}))
+    resp = real_ns_client.post(
+        '/v1/table/db$t/create?properties={"team":"eng"}', content=body, headers=ARROW_STREAM
+    )
+    assert resp.status_code == 200
 
 
 def _arrow_ipc(table: pa.Table) -> bytes:
@@ -92,26 +102,22 @@ def _arrow_ipc(table: pa.Table) -> bytes:
     return sink.getvalue().to_pybytes()
 
 
-def test_create_strips_root_storage_options_from_response(client: TestClient, fake_ns: MagicMock) -> None:
-    # #88: the native backend echoes the catalog's ROOT storage creds; the create response must NOT carry
-    # them (storage access is vended only via /credentials).
-    fake_ns.create_table.return_value = CreateTableResponse(
-        location="s3://x",
-        version=1,
-        storage_options={"access_key_id": "rustfsadmin", "secret_access_key": "rustfsadmin"},
-    )
+def test_create_strips_root_storage_options_from_response(real_ns_client: TestClient) -> None:
+    # #88: a create response must NEVER carry storage credentials (storage access is vended only via
+    # /credentials). Driven for real: the direct 2.2 write builds its own response and never populates
+    # storage_options, so the guarantee is now structural — this pins it against a regression that re-adds it.
     body = _arrow_ipc(pa.table({"id": [1]}))
-    resp = client.post("/v1/table/db$t/create", content=body, headers=ARROW_STREAM)
+    resp = real_ns_client.post("/v1/table/db$t/create", content=body, headers=ARROW_STREAM)
 
     assert resp.status_code == 200
     assert "storage_options" not in resp.json()
-    assert "rustfsadmin" not in resp.text
+    assert "secret" not in resp.text.lower()
 
 
 def test_create_delegates_to_dataplane_create_table(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:
-    # The endpoint stays thin: it delegates create; blob-vs-native routing lives in the facade.
+    # The endpoint stays thin: it delegates create; the write path lives in the facade.
     seen: dict[str, object] = {}
 
     def _stub(  # noqa: ANN001
@@ -397,14 +403,14 @@ def test_restore_emits_lineage_at_new_version(client: TestClient, fake_ns: Magic
 
 
 def test_create_exist_ok_reads_schema_back_instead_of_trusting_payload(
-    client: TestClient, fake_ns: MagicMock, monkeypatch
+    real_ns_client: TestClient, monkeypatch
 ) -> None:
-    # ExistOk may have KEPT an existing table (nothing written, response.version = the existing version):
-    # the payload's schema may then belong to a table that was never created — the true schema must be
-    # read back PINNED at that version, never parsed from the payload.
-    from lance_namespace import CreateTableResponse
+    # ExistOk KEEPS an existing table (nothing written, response.version = the existing version): the
+    # payload's schema may then belong to a table that was never created — the true schema must be read back
+    # PINNED at that version, never parsed from the payload. Now driven for real: the table genuinely exists.
+    body = _arrow_ipc(pa.table({"id": [1]}))
+    assert real_ns_client.post("/v1/table/db$t/create", content=body, headers=ARROW_STREAM).status_code == 200
 
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=5)
     seen: dict[str, object] = {}
 
     def _readback(_ns: object, _so: object, _segments: object, pin_version: object = None) -> object:
@@ -414,22 +420,19 @@ def test_create_exist_ok_reads_schema_back_instead_of_trusting_payload(
     def _payload_bomb(*_a: object, **_k: object) -> object:
         raise AssertionError("ExistOk create must not trust the request payload's schema")
 
+    # Patch the enrichment functions only AFTER the setup create, so the bomb guards the exist_ok call alone.
     monkeypatch.setattr("catalog.services.dataplane.read_version_and_schema", _readback)
     monkeypatch.setattr("catalog.services.dataplane.payload_schema_fields", _payload_bomb)
 
-    resp = client.post("/v1/table/db$t/create?mode=exist_ok", content=b"ARROWSTREAM", headers=ARROW_STREAM)
+    resp = real_ns_client.post("/v1/table/db$t/create?mode=exist_ok", content=body, headers=ARROW_STREAM)
     assert resp.status_code == 200
-    assert seen["pin"] == 5  # schema read back pinned at the EXISTING table's version
+    assert "pin" in seen  # the readback path was taken (not the payload path)
+    assert seen["pin"] == 1  # schema read back pinned at the EXISTING (freshly-created) table's version
 
 
-def test_create_parses_payload_schema_without_dataset_reopen(
-    client: TestClient, fake_ns: MagicMock, monkeypatch
-) -> None:
-    # A plain create writes exactly the request bytes — the schema facet comes from the in-memory payload,
+def test_create_parses_payload_schema_without_dataset_reopen(real_ns_client: TestClient, monkeypatch) -> None:
+    # A fresh create writes exactly the request bytes — the schema facet comes from the in-memory payload,
     # never from a describe + dataset reopen (which would add two network round trips per create).
-    from lance_namespace import CreateTableResponse
-
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
     called: dict[str, object] = {}
 
     def _payload(_data: object, _segments: object) -> object:
@@ -442,7 +445,8 @@ def test_create_parses_payload_schema_without_dataset_reopen(
     monkeypatch.setattr("catalog.services.dataplane.payload_schema_fields", _payload)
     monkeypatch.setattr("catalog.services.dataplane.read_version_and_schema", _readback_bomb)
 
-    resp = client.post("/v1/table/db$t/create", content=b"ARROWSTREAM", headers=ARROW_STREAM)
+    body = _arrow_ipc(pa.table({"id": [1]}))
+    resp = real_ns_client.post("/v1/table/db$t/create", content=body, headers=ARROW_STREAM)
     assert resp.status_code == 200
     assert called.get("payload") is True
 

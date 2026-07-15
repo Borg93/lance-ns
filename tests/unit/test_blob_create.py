@@ -13,7 +13,7 @@ from pathlib import Path
 import lance
 import pyarrow as pa
 import pytest
-from catalog.services.dataplane import _schema_is_blob, create_table
+from catalog.services.dataplane import create_table
 from common import blobs
 from lance import Blob, blob_array, blob_field
 from lance_namespace import (
@@ -72,12 +72,6 @@ def test_schema_has_blob_and_blob_field_names() -> None:
     assert blobs.blob_field_names(plain) == []
 
 
-def test_schema_is_blob_over_ipc_and_garbage() -> None:
-    assert _schema_is_blob(_blob_ipc()) is True
-    assert _schema_is_blob(_ipc(pa.table({"id": [1]}))) is False
-    assert _schema_is_blob(b"not-an-arrow-stream") is False  # unparseable → native path, not a crash
-
-
 # --- the create_table facade (real dir namespace + real pylance) ----------- #
 
 
@@ -95,12 +89,17 @@ def test_create_table_writes_blob_at_2_2_and_roundtrips(tmp_path: Path) -> None:
     assert dataset.read_blobs("payload", indices=[0])[0][1] == b"img-1"
 
 
-def test_create_table_routes_plain_schema_to_native_2_1(tmp_path: Path) -> None:
+def test_create_table_writes_plain_schema_at_2_2_with_stable_row_ids(tmp_path: Path) -> None:
+    # A PLAIN (non-blob) table must ALSO get 2.2 + stable row ids (audit 2026-07-14). It used to fall through
+    # to the native create, which pins 2.1 and no stable row ids — both CREATE-TIME-ONLY, so every ordinary
+    # catalog table was PERMANENTLY unable to carry the durable row identity `row_id_lineage` needs. This test
+    # previously asserted the 2.1 native default; that was pinning the bug. It now pins the fix.
     ns = connect("dir", {"root": str(tmp_path)})
     create_table(ns, {}, ["plain"], _ipc(pa.table({"id": [1, 2, 3]})), mode="create")
 
     dataset = _open(ns, ["plain"])
-    assert dataset.data_storage_version == "2.1"  # native default — no blob, no 2.2
+    assert dataset.data_storage_version == "2.2"  # NOT the native 2.1 default
+    assert dataset.has_stable_row_ids  # durable row identity — the whole point of row-id lineage
     assert dataset.count_rows() == 3
 
 

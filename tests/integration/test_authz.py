@@ -92,6 +92,22 @@ def _fake_check(captured: list[dict], *, allow: bool):
     return fake_check
 
 
+def _stub_create(monkeypatch, *, response: object = None, error: BaseException | None = None) -> None:
+    """Stub the write facade ``dataplane.create_table`` so these tests isolate the endpoint's FGA
+    orchestration from the write. Every create now routes through the direct 2.2 write (declare +
+    ``lance.write_dataset``), so the old ``fake_ns.create_table.return_value`` no longer intercepts it and a
+    real write would demand real Arrow + a real FGA server. The facade is the correct seam: these tests have
+    always mocked the backend on purpose, to assert *only* that a create grants owner+parent and a failed
+    create seeds nothing."""
+
+    def _facade(*_a: object, **_k: object) -> object:
+        if error is not None:
+            raise error
+        return response
+
+    monkeypatch.setattr("catalog.services.dataplane.create_table", _facade)
+
+
 # --------------------------------------------------------------------------- #
 # Relation tiers: reader / writer / owner.
 # --------------------------------------------------------------------------- #
@@ -284,7 +300,7 @@ def test_create_table_seeds_owner_and_parent_tuples(
     ``canonical_object_id`` / ``parent_namespace_id`` helpers run, proving the grant id
     (``table:db1$users``, parent ``db1``) matches what ``authorize`` would later check.
     """
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://x", version=1)
+    _stub_create(monkeypatch, response=CreateTableResponse(location="s3://x", version=1))
     _wire(client)
     monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
     grant = AsyncMock()
@@ -312,7 +328,7 @@ def test_create_table_does_not_seed_when_backend_fails(
     """CONTRACT: no tuples are seeded if the backend create raises (no orphan grant)."""
     from lance_namespace import TableAlreadyExistsError
 
-    fake_ns.create_table.side_effect = TableAlreadyExistsError("exists")
+    _stub_create(monkeypatch, error=TableAlreadyExistsError("exists"))
     _wire(client)
     monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
     grant = AsyncMock()
@@ -481,7 +497,7 @@ def test_overwrite_by_owner_revokes_prior_grants_then_seeds(
     """CONTRACT: an Overwrite of an EXISTING table BY ITS OWNER (can_drop passes) is drop+recreate, so the
     prior grants are revoked BEFORE the overwriter is re-seeded (``table:db1$users``), revoke before grant."""
     fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://b/db1$users")  # table exists
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://b/db1$users", version=2)
+    _stub_create(monkeypatch, response=CreateTableResponse(location="s3://b/db1$users", version=2))
     _wire(client)
     monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))  # owner → can_drop passes
     order: list[str] = []
@@ -537,7 +553,7 @@ def test_overwrite_of_existing_table_by_non_owner_is_denied_and_revokes_nothing(
 
 def test_plain_create_seeds_without_revoking(client: TestClient, fake_ns: MagicMock, monkeypatch) -> None:
     """CONTRACT: a non-overwrite create only seeds — it must NOT revoke (fresh id, nothing to clean)."""
-    fake_ns.create_table.return_value = CreateTableResponse(location="s3://b/db1$new", version=1)
+    _stub_create(monkeypatch, response=CreateTableResponse(location="s3://b/db1$new", version=1))
     _wire(client)
     monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
     revoke = AsyncMock(return_value=0)

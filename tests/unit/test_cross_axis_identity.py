@@ -97,13 +97,18 @@ def test_create_handler_keeps_all_three_axes_identical_under_non_default_delimit
         stamped["run_id"] = run_id
         return {"lineage.dataset_id": table_id}
 
-    def _native_call(_ns: object, _op: str, _req: object, _data: object = None) -> Any:
+    def _facade_create(*_a: object, **_k: object) -> Any:
+        # Stub the whole write facade: this test is about the THREE-AXIS identity the endpoint derives
+        # (FGA object id, lineage Dataset name, Lance metadata id), not the write. Every create now routes
+        # through the direct 2.2 path (dataplane.create_table -> declare + write_dataset), so patching
+        # native.call no longer intercepts it — the facade is the correct seam. Returns the same fake
+        # location the old native stub did.
         return SimpleNamespace(version=1, location="s3://lakehouse/uuid_alpha.bronze.images")
 
     monkeypatch.setattr(data.fga_deps, "seed_ownership", _seed)
     monkeypatch.setattr(data, "build_lineage_metadata", _build_meta)
     monkeypatch.setattr(data, "inject_into_arrow_stream", lambda payload, _meta: payload)  # no real Arrow
-    monkeypatch.setattr(data.native, "call", _native_call)
+    monkeypatch.setattr(data.dataplane, "create_table", _facade_create)
 
     emitter = _RecordingEmitter()
     asyncio.run(

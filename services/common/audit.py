@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-#: The one well-known audit logger name (NOT a per-module logger) so audit records are a single stream.
+#: The one well-known audit logger name (not a per-module logger) so audit records are a single stream.
 AUDIT_LOGGER = "lance.audit"
 _log = logging.getLogger(AUDIT_LOGGER)
 

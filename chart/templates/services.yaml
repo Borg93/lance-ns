@@ -103,7 +103,9 @@ spec:
             - { name: LANCE_FGA_ENABLED, value: "true" }
             - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
             # #41 compliance audit trail (who/what/outcome for authn/authz/vending) — configurable.
-            - { name: LANCE_AUDIT_ENABLED, value: {{ .Values.auth.audit | default true | quote }} }
+            # No `| default`: Sprig's default() treats boolean false as empty, so it would make `false`
+            # un-settable. values.yaml supplies auth.audit=true, so a bare reference is correct + toggleable.
+            - { name: LANCE_AUDIT_ENABLED, value: {{ .Values.auth.audit | quote }} }
             # Lock top-level (root) namespace/table creation to holders of a warehouse-level create grant.
             # Off in dev (self-serve); ON in prod (values-prod) — else any Dex-authenticated user can squat
             # unlimited root namespaces in the shared warehouse bucket (assessment finding).

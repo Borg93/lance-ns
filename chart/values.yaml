@@ -15,8 +15,9 @@ auth:
   # (open self-serve); values-prod sets it true so a token alone can't squat root namespaces.
   lockRootCreate: false
   # #41 compliance audit trail: structured who/what/outcome events for authn (success+failure), authz
-  # (allow+deny), and credential vending on the dedicated `lance.audit` logger → OTLP → GreptimeDB.
-  # On by default when auth is on (there is a real subject then); set false to silence the stream.
+  # (allow+deny), and credential vending on the dedicated `lance.audit` logger → OTLP → GreptimeDB. Rendered
+  # into LANCE_AUDIT_ENABLED only when auth is on (that is where a real subject exists); set false to silence
+  # the stream even with auth on.
   audit: true
 
 # --- Data-plane credential vending (Track B). How a client gets storage_options for DIRECT object I/O. ----

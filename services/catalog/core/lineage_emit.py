@@ -77,6 +77,11 @@ RESTORE_TABLE = "restore_table"
 #: they key a ``(:User)-[:CREATED]->(:Dataset)`` edge (see ``lineage/repository.py`` ``_CREATE_OPS``).
 DECLARE_TABLE = "declare_table"
 REGISTER_TABLE = "register_table"
+#: #17 model promotion: the ``blessed`` tag on a model registry (``models$<model>``) was moved to a candidate
+#: Lance version (candidate→blessed). A metadata-only tag move mints no new data version, so the emitted
+#: ``version`` is the tag's TARGET (the promoted model version), not a fresh write — a distinct op so a
+#: blessing is never mistaken for a training run or a data write on the run board.
+PROMOTE_MODEL = "promote_model"
 
 #: OpenLineage ``producer`` URI — identifies the software that emitted the event (spec-required,
 #: and what a Marquez-style consumer records as the event source).

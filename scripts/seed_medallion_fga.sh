@@ -68,11 +68,16 @@ w user:service-silver-to-gold validator namespace:gold
 # humans' warehouse-reader rung cascades to model registry datasets; per-model table→namespace parent
 # links (namespace:models parent table:models$<name>) are written by the TRAINER CONSUMER at trigger
 # time (#115b — idempotent, before the submit ack), exactly like the pre-seeded mover links above.
-# Model PROMOTION stays behind the validator rung (not writer).
+# Model PROMOTION (#17 candidate→blessed) stays behind the validator rung (not writer): the trainer WRITES
+# candidate versions (writer namespace:models) but blessing one moves the `blessed` tag via the catalog
+# POST /v1/model/<model>/promote endpoint, gated on can_promote = validator. A writer (incl. the trainer)
+# is NOT a validator, so it is denied — exactly the silver→gold separation, reused for models. A `validator
+# namespace:models` grant cascades to table:models$<model> via the per-model parent link the trainer seeds.
 w "$WAREHOUSE" parent namespace:models
 w user:service-trainer reader namespace:silver
 w user:service-trainer reader namespace:gold
 w user:service-trainer writer namespace:models
+w user:service-blesser validator namespace:models
 
 # The web BFF reads the WHOLE lineage graph as a service (no per-user login on the auth-on stack) — READER
 # on the warehouse so its rung cascades to can_get_metadata on every dataset, exactly like a warehouse

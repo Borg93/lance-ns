@@ -428,6 +428,48 @@ async def require_can_drop_table(
     await _require(client, user=token.sub, relation="can_drop", obj=obj)
 
 
+async def require_can_promote(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    segments: list[str],
+) -> None:
+    """Raise 403 unless the caller holds the VALIDATOR-rung ``can_promote`` on the table at ``segments``.
+
+    The gate for #17 model promotion (candidate→blessed): moving the ``blessed`` tag on ``models$<model>`` is
+    a promotion, which the FGA model separates from a plain WRITER — ``can_promote`` reduces to ``validator``
+    (a writer is NOT a validator), exactly as the silver→gold stage promotion is gated. The ``/v1/model/*``
+    route is NOT covered by the router-level ``authorize`` (models is not a ``_RESOURCES`` prefix), so the
+    promote endpoint calls this EXPLICITLY. No FGA-model change is needed: ``table.can_promote: validator``
+    already exists and the trainer seeds the per-model ``namespace:models → table:models$<model>`` parent
+    link, so a ``validator namespace:models`` grant cascades. Fail-closed: 403 on deny, 503 on an OpenFGA
+    outage (via ``_require``/``fga.check``). No-op when FGA is off / unwired / unauthenticated."""
+    if not (settings.fga_enabled and client is not None and token is not None):
+        return
+    obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    await _require(client, user=token.sub, relation="can_promote", obj=obj)
+
+
+async def require_can_get_metadata(
+    client: OpenFgaClient | None,
+    settings: Settings,
+    token: IDToken | None,
+    *,
+    segments: list[str],
+) -> None:
+    """Raise 403 unless the caller holds reader-tier ``can_get_metadata`` on the table at ``segments``.
+
+    The read gate for endpoints OUTSIDE the router-level ``authorize`` coverage (``_RESOURCES``) — notably the
+    #17 model describe route (``/v1/model/*``): reading a model's blessed pointer + metrics is a metadata read
+    (reader rung), so a reader may see it while only a validator may promote. Fail-closed like every other
+    gate. No-op when FGA is off / unwired / unauthenticated."""
+    if not (settings.fga_enabled and client is not None and token is not None):
+        return
+    obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    await _require(client, user=token.sub, relation="can_get_metadata", obj=obj)
+
+
 async def require_create_on_parent(
     client: OpenFgaClient | None,
     settings: Settings,

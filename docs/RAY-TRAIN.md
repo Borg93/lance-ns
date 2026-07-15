@@ -139,10 +139,17 @@ artifact *bytes*:
    CREATE (create-time-only) — so **the base must stay stable per model** (pointers outside it are
    refused by Lance on append, loudly); and a create that loses the concurrent first-publish CAS
    race converges as an append instead of terminally failing the run.
-3. **Versioning + promotion for free**: model version N = Lance version N of the registry
-   dataset (time-travel = full model history); promotion (`staging`/`prod`) = catalog **tags**
-   on it, gated by the `validator` rung on `namespace:models` — the silver→gold promotion story,
-   reused.
+3. **Versioning + promotion for free** (SHIPPED, #17, 2026-07-15): model version N = Lance version N
+   of the registry dataset (time-travel = full model history); promotion (candidate→**blessed**) = a
+   moving catalog **tag** on it, gated by the `validator` rung (`can_promote`), reusing the silver→gold
+   promotion story. Built as the catalog `POST /v1/model/{model}/promote` (+ `GET /v1/model/{model}`):
+   it opens the registry by explicit URI (the trainer writes it outside the catalog's native namespace
+   resolution — see the `models_registry_root` setting), runs a fail-closed **metrics gate**
+   (`min_metrics`: each named `meta.metrics` key must be present + ≥ its threshold) BEFORE the
+   irreversible tag move, then emits a distinct `promote_model` RunEvent. A plain writer (incl. the
+   trainer) is NOT a validator → 403; only a `validator namespace:models` grant (or an owner) may bless.
+   `candidate` = the latest version; `blessed` = the tag. The artifact janitor treats the blessed
+   (possibly non-latest) version's tokens as live so promotion never dangles a pointer.
 4. **Consumption is registry-optional**: serving reads the registry row → gets a plain path →
    loads it directly (no Lance reader in the serving path). Training reads Lance feature tables
    at pinned versions on the input side.

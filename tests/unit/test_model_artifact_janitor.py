@@ -156,3 +156,34 @@ def test_missing_artifact_base_is_an_empty_sweep(tmp_path: Path) -> None:
         registry_uri=registry, artifact_base=str(tmp_path / "nowhere"), ttl_hours=24, now=_NOW
     )
     assert report.candidates == [] and report.deleted == []
+
+
+def test_blessed_non_latest_version_artifact_survives_even_when_absent_from_latest(tmp_path: Path) -> None:
+    # #17: a BLESSED (possibly non-latest) model version's artifacts are a first-class keep — even if that
+    # version's token is NOT in the LATEST registry version. Construct exactly that sharp case: v1 (token A)
+    # then an OVERWRITE to v2 (token B), so latest carries only B; then bless v1. Without the blessed-version
+    # union the janitor would collect A (old, unreferenced-at-latest) and corrupt the blessed model's pointer.
+    uri = str(tmp_path / "registry")
+    lance.write_dataset(
+        pa.table({"artifact": pa.array(["w"]), "meta": pa.array([json.dumps({"token": "A"})])}),
+        uri,
+        mode="overwrite",
+    )  # version 1 → token A
+    lance.write_dataset(
+        pa.table({"artifact": pa.array(["w"]), "meta": pa.array([json.dumps({"token": "B"})])}),
+        uri,
+        mode="overwrite",
+    )  # version 2 (latest) → token B, so A is absent from latest
+    lance.dataset(uri).tags.create("blessed", 1)  # bless the OLDER version
+
+    base = tmp_path / "artifacts"
+    _artifact(base, "A", old=True)  # blessed version's token, old → MUST be kept (via the blessed union)
+    _artifact(base, "B", old=True)  # latest's token, old → kept (referenced at latest)
+    _artifact(base, "C", old=True)  # a true orphan → the only deletable
+
+    report = janitor.sweep(registry_uri=uri, artifact_base=str(base), ttl_hours=24, delete=True, now=_NOW)
+
+    assert "A" in report.kept_referenced  # the blessed non-latest version is protected
+    assert "B" in report.kept_referenced
+    assert report.deleted == ["C"] and not (base / "C").exists()
+    assert (base / "A" / "weights.json").exists()

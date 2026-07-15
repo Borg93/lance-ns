@@ -211,6 +211,7 @@ _OTHER_SERVICE_PAIRS: dict[tuple[str, str], str] = {
     ("table", "can_get_metadata"): "lineage/api/fga_deps.py (LINEAGE_FGA_OBJECT_TYPE default=table)",
     ("namespace", "can_create_table"): "medallion/services/train.py + transform.py default",
     ("namespace", "can_promote"): "medallion silver->gold mover (chart requiredAction)",
+    ("table", "can_promote"): "catalog require_can_promote (#17 model promotion endpoint)",
 }
 
 

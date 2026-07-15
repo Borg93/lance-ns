@@ -49,19 +49,43 @@ class JanitorReport:
     report_only_reason: str | None = None  # set → deletion was refused regardless of the flag
 
 
+# The moving tag that names the promoted ("blessed") model version — kept byte-identical to
+# ``catalog.services.models.BLESSED_TAG`` (this script is standalone, so the constant is inlined).
+_BLESSED_TAG = "blessed"
+
+
+def _blessed_version(ds: Any) -> int | None:
+    """The Lance version the ``blessed`` tag points at, or ``None`` if no version is blessed / tags absent."""
+    try:
+        version = ds.tags.get_version(_BLESSED_TAG)
+    except Exception:  # noqa: BLE001 — no blessed tag (unset ref) → nothing extra to protect
+        return None
+    return int(version) if version is not None else None
+
+
 def referenced_tokens(registry_uri: str, storage_options: dict[str, str] | None) -> set[str] | None:
-    """Every token any registry row references, read at ONE pinned version (no torn read).
+    """Every token any registry row references, read at the latest version PLUS the blessed version.
 
     Returns ``None`` when the registry cannot be read or ANY row's meta cannot be parsed — the
     caller must then refuse to delete (an unreadable row could reference anything; fail-safe=keep).
+
+    The registry is append-only, so the latest version already carries every publish's tokens — but a
+    BLESSED (possibly non-latest) version's artifacts must be protected as a first-class invariant, robust to
+    any future retention/compaction that could drop old rows from latest. So the blessed tag's version is read
+    too and its tokens unioned in; a failure reading it is fail-safe=keep (returns ``None``), same as latest.
     """
     import lance
 
     try:
         ds = lance.dataset(registry_uri, storage_options=storage_options)
-        pinned = lance.dataset(registry_uri, version=int(ds.version), storage_options=storage_options)
+        latest = int(ds.version)
+        pinned = lance.dataset(registry_uri, version=latest, storage_options=storage_options)
         metas = pinned.to_table(columns=["meta"]).column("meta").to_pylist()
-    except Exception as exc:  # noqa: BLE001 — fail-safe: unreadable registry = no deletes
+        blessed = _blessed_version(ds)
+        if blessed is not None and blessed != latest:
+            blessed_ds = lance.dataset(registry_uri, version=blessed, storage_options=storage_options)
+            metas = metas + blessed_ds.to_table(columns=["meta"]).column("meta").to_pylist()
+    except Exception as exc:  # noqa: BLE001 — fail-safe: unreadable registry/blessed version = no deletes
         print(f"registry read failed ({exc}); refusing to delete anything", file=sys.stderr)
         return None
     tokens: set[str] = set()

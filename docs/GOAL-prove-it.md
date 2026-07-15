@@ -494,9 +494,14 @@ pass): merge_insert BTREE index, compaction FAIL-visibility (deterministic FAIL 
 majors, the #115 training lane drive, the artifact janitor. Do NOT re-do these.
 
 **Genuinely open items that survive consolidation** (beyond P0–P4 as already written):
-- **T1 (→ THEN #2, the one real training blocker): no trainer service credential** — the Ray job's
-  self-emitted lineage 401s against governed ingest, so ALL training provenance is lost in the shipped
-  auth-on stack (todo_fable 564-566).
+- **T1 — trainer service credential: CLOSED 2026-07-13 (was "the one real training blocker").** The Ray
+  job no longer 401s against governed ingest: it authenticates to the lineage HTTP ingest as
+  `service-trainer` via the shared app token + allowlisted subject (`ServicePrincipal` service door,
+  `services/lineage/api/security.py`; env injected at `services/medallion/services/ray_submit.py`; chart
+  `LINEAGE_SERVICE_SUBJECTS`). Its outputs are still FGA-checked (`can_write_data` on `models$<model>`).
+  Training provenance now lands. #17 built on top of this: **candidate→blessed model promotion** ships as
+  the catalog `POST /v1/model/{model}/promote` (validator-rung `can_promote` + metrics gate + moving
+  `blessed` Lance tag + promotion RunEvent) — see `docs/DESIGN-catalog-parity.md`/`docs/RAY-TRAIN.md`.
 - **T2 (→ P1-adjacent): create_table process-crash strand** — a crash between write and FGA grant strands
   the table; deeper fix = declare→grant→write reorder (todo_fable 210-211).
 - **T3 (→ P2.1, fold): `/insert` version-attribution race** — read-after-write, blocked upstream, reconcile

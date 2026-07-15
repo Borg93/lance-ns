@@ -70,10 +70,28 @@ class Settings(BaseSettings):
     warehouses_enabled: bool = Field(default=False, alias="LANCE_WAREHOUSES_ENABLED")
     control_root: str = Field(default="", alias="LANCE_CONTROL_ROOT")
 
+    # #17 model registry (candidate→blessed promotion). Each model's Lance registry dataset lives at
+    # ``<models_root>/<model>`` — the medallion trainer writes it DIRECTLY there (registry_uri_for), so the
+    # catalog can NOT reach it through native namespace resolution (that would drop the ``/medallion/``
+    # prefix): the promote/describe endpoints open it by EXPLICIT URI. Defaults to ``<root>/medallion/models``
+    # so a single-bucket deploy needs no extra config; override only when the registry is zoned elsewhere.
+    # INVARIANT (operator's): this root MUST share the catalog's S3 endpoint + creds — the read path vends
+    # only ``storage_options()`` (same constraint as multibase_data_bases).
+    models_registry_root: str = Field(default="", alias="LANCE_MODELS_REGISTRY_ROOT")
+
     @property
     def registry_root(self) -> str:
         """Where warehouse records + namespace bindings live (defaults to the catalog `root` bucket)."""
         return self.control_root or self.root
+
+    @property
+    def models_root(self) -> str:
+        """Root for per-model registry datasets (defaults to ``<root>/medallion/models``)."""
+        return self.models_registry_root.rstrip("/") or f"{self.root.rstrip('/')}/medallion/models"
+
+    def model_uri(self, model: str) -> str:
+        """The explicit Lance-dataset URI for one model's registry: ``<models_root>/<model>``."""
+        return f"{self.models_root}/{model}"
 
     # Object store (MinIO / S3). Credentials are required — no default — so a
     # missing secret fails loudly at startup instead of silently using a default.

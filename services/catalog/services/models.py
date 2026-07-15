@@ -14,6 +14,7 @@ so the catalog's exception handler maps them to RFC 9457 problem+json (404 missi
 from __future__ import annotations
 
 import json
+import math
 from typing import Any
 
 import lance
@@ -27,6 +28,13 @@ from lance_namespace import (
 
 #: The reserved tag that names the promoted ("blessed") model version. A move of this tag IS the promotion.
 BLESSED_TAG = "blessed"
+
+
+def _reject_nonfinite(token: str) -> float:
+    """``json.loads`` decodes the ``NaN``/``Infinity``/``-Infinity`` tokens to Python floats by default — a
+    non-finite metric must NEVER silently clear the promotion gate (``NaN < threshold`` is always False, so a
+    diverged or forged NaN metric would pass any bar), so refuse it at PARSE, fail-closed."""
+    raise ValueError(f"non-finite JSON constant {token!r} in model metadata")
 
 
 def _open(
@@ -52,13 +60,23 @@ def metrics_at(model_uri: str, storage_options: dict[str, str], version: int) ->
     if not metas:
         raise InvalidTableStateError(f"model version {version} has no rows")
     try:
-        meta = json.loads(metas[-1])  # newest publish's rows are appended last
+        # parse_constant → refuse NaN/Infinity at parse (they would silently clear the gate — see below).
+        meta = json.loads(metas[-1], parse_constant=_reject_nonfinite)  # newest publish's rows appended last
     except (ValueError, TypeError) as exc:
-        raise InvalidTableStateError(f"model version {version} metadata is unreadable") from exc
+        raise InvalidTableStateError(f"model version {version} metadata is unreadable or non-finite") from exc
     metrics = meta.get("metrics")
     if not isinstance(metrics, dict):
         raise InvalidTableStateError(f"model version {version} records no metrics to gate on")
     return metrics
+
+
+def _safe_metrics(model_uri: str, storage_options: dict[str, str], version: int) -> dict[str, Any] | None:
+    """``metrics_at`` for the describe read path: a version with no / unreadable metrics returns ``None``
+    (metrics: null) rather than failing the whole describe — describe is a report, not the gate."""
+    try:
+        return metrics_at(model_uri, storage_options, version)
+    except InvalidTableStateError:
+        return None
 
 
 def _apply_gate(metrics: dict[str, Any], min_metrics: dict[str, float] | None, *, version: int) -> None:
@@ -69,9 +87,12 @@ def _apply_gate(metrics: dict[str, Any], min_metrics: dict[str, float] | None, *
     """
     for name, threshold in (min_metrics or {}).items():
         actual = metrics.get(name)
-        if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+        # bool is an int subclass, and NaN/Inf are float — both would slip past a bare numeric check and
+        # (for NaN) clear every `<` comparison, so reject non-finite here too (defense in depth vs the parse).
+        if isinstance(actual, bool) or not isinstance(actual, (int, float)) or not math.isfinite(actual):
             raise InvalidTableStateError(
-                f"model version {version} cannot be promoted: metric {name!r} is absent or non-numeric"
+                f"model version {version} cannot be promoted: metric {name!r} is absent, non-numeric, "
+                "or non-finite"
             )
         if actual < threshold:
             raise InvalidTableStateError(
@@ -101,8 +122,8 @@ def describe(model_uri: str, storage_options: dict[str, str], *, tag: str = BLES
     return {
         "latest_version": latest,
         "blessed_version": blessed,
-        "candidate_metrics": metrics_at(model_uri, storage_options, latest),
-        "blessed_metrics": metrics_at(model_uri, storage_options, blessed) if blessed else None,
+        "candidate_metrics": _safe_metrics(model_uri, storage_options, latest),
+        "blessed_metrics": _safe_metrics(model_uri, storage_options, blessed) if blessed else None,
     }
 
 

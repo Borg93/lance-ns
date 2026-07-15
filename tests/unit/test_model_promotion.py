@@ -79,9 +79,25 @@ def test_metrics_gate_passes_when_metrics_meet_threshold(registry_uri: str) -> N
 
 def test_metrics_gate_refuses_an_absent_metric(registry_uri: str) -> None:
     # A gate keyed on a metric the run never recorded must REFUSE, never vacuously pass.
-    with pytest.raises(InvalidTableStateError, match="absent or non-numeric"):
+    with pytest.raises(InvalidTableStateError, match="absent, non-numeric"):
         registry.promote(registry_uri, {}, version=2, min_metrics={"accuracy": 0.9})
     assert registry.blessed_version(registry_uri, {}) is None
+
+
+def test_metrics_gate_refuses_a_nan_or_inf_metric(tmp_path: Any) -> None:
+    # A diverged/forged run whose metric is NaN or +Inf must NOT slip past the gate: NaN is float-typed and
+    # `nan < threshold` is always False, so a naive gate would bless a broken model. Refused, fail-closed.
+    uri = str(tmp_path / "diverged")
+    for bad in ("NaN", "Infinity"):
+        # Write the meta with a raw non-finite JSON token, exactly as a diverged trainer's json.dumps would.
+        meta = f'{{"config": {{}}, "features": [], "metrics": {{"accuracy": {bad}}}, "token": "t"}}'
+        table = pa.table({"artifact": pa.array(["weights"]), "meta": pa.array([meta])})
+        lance.write_dataset(
+            table, uri, mode="overwrite", data_storage_version="2.2", enable_stable_row_ids=True
+        )
+        with pytest.raises(InvalidTableStateError):
+            registry.promote(uri, {}, version=1, min_metrics={"accuracy": 0.8})
+        assert registry.blessed_version(uri, {}) is None  # never blessed a non-finite model
 
 
 def test_promote_unknown_version_is_404(registry_uri: str) -> None:

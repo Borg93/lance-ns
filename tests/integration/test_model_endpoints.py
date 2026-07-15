@@ -127,7 +127,7 @@ def test_promote_denied_to_a_non_validator(
 
 
 def test_promote_fails_closed_when_fga_client_is_missing(
-    models_client: tuple[TestClient, str], monkeypatch: pytest.MonkeyPatch
+    models_client: tuple[TestClient, str],
 ) -> None:
     # FGA enabled but no client wired → 503, never an open promote.
     client, _ = models_client
@@ -185,3 +185,19 @@ def test_promote_unknown_model_is_404(
     _fake_check([], allow=True, monkeypatch=monkeypatch)
     resp = client.post("/v1/model/ghost/promote", headers={"Authorization": "Bearer t"}, json={"version": 1})
     assert resp.status_code == 404
+
+
+def test_promote_rejects_an_arbitrary_tag(
+    models_client: tuple[TestClient, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # This is "promote" (a known lifecycle tag), not "create any tag" — a caller-named ref is a 400.
+    client, registry = models_client
+    _fake_check([], allow=True, monkeypatch=monkeypatch)
+    resp = client.post(
+        "/v1/model/demo/promote",
+        headers={"Authorization": "Bearer t"},
+        json={"version": 2, "tag": "pwned"},
+    )
+    assert resp.status_code == 400
+    with pytest.raises(ValueError, match="not found|Ref"):
+        lance.dataset(registry).tags.get_version("pwned")  # the arbitrary tag was never created

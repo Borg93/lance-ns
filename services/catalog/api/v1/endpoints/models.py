@@ -34,12 +34,17 @@ router = APIRouter(prefix="/v1/model", tags=["model"])
 # The FGA namespace the per-model object lives under (``table:<ns>$<model>``) — matches the medallion
 # trainer's MEDALLION_MODELS_NAMESPACE default + scripts/seed_medallion_fga.sh. A model name is a
 # table-name-shaped fragment (kept strict so it can't traverse the registry path or forge an FGA object id).
+# fullmatch (not match) so a trailing newline can't sneak past the ``$`` anchor into an S3 key.
 _MODELS_NAMESPACE = "models"
-_MODEL_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+_MODEL_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
+# Promotion moves a KNOWN lifecycle tag, never an arbitrary caller-named ref — this endpoint is "promote",
+# not "create any tag" (the owner-tier /v1/table/.../tags/* routes are the general tag API). blessed = the
+# served pointer; staging/prod are the promotion ladder (RAY-TRAIN D4.3).
+_PROMOTION_TAGS = frozenset({registry.BLESSED_TAG, "staging", "prod"})
 
 
 def _segments(model: str) -> list[str]:
-    if not _MODEL_RE.match(model):
+    if not _MODEL_RE.fullmatch(model):
         raise InvalidInputError(f"invalid model name: {model!r}")
     return [_MODELS_NAMESPACE, model]
 
@@ -65,7 +70,7 @@ class ModelDescribeResponse(BaseModel):
     model: str
     latest_version: int
     blessed_version: int | None
-    candidate_metrics: dict[str, Any]
+    candidate_metrics: dict[str, Any] | None
     blessed_metrics: dict[str, Any] | None
 
 
@@ -88,6 +93,8 @@ async def promote_model(
     RunEvent is best-effort AFTER (a lineage outage never fails a promotion).
     """
     segments = _segments(model)
+    if body.tag not in _PROMOTION_TAGS:
+        raise InvalidInputError(f"tag must be one of {sorted(_PROMOTION_TAGS)}, got {body.tag!r}")
     await fga_deps.require_can_promote(client, settings, token, segments=segments)
     blessed = await run_in_threadpool(
         registry.promote,

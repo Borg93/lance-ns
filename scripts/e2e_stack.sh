@@ -175,6 +175,20 @@ SID="$(fga store list --api-url http://localhost:8081 \
 fga tuple write --api-url http://localhost:8081 --store-id "$SID" "user:$SUB" admin project:acme >/dev/null
 echo "   seeded user:${SUB:0:12}… admin project:acme (store ${SID:0:8}…)"
 
+# WAIT until the grant is READABLE before running the suites. OpenFGA on Postgres is eventually consistent:
+# `tuple write` returns BEFORE a subsequent `check` is guaranteed to see it, so the first warehouse-admin op
+# (test_warehouses) can 403 on a fresh stack — a race that makes the job "green once, flaky forever", the
+# exact trap this whole job exists to close. Poll the ACTUAL permission the test needs (can_create_warehouse
+# on project:acme) until it reads allowed.
+for i in $(seq 1 30); do
+  allowed="$(fga query check --api-url http://localhost:8081 --store-id "$SID" \
+    "user:$SUB" can_create_warehouse project:acme 2>/dev/null \
+    | uv run python -c "import sys,json;print(json.load(sys.stdin).get('allowed', False))" 2>/dev/null || echo False)"
+  [ "$allowed" = "True" ] && { echo "   grant is readable (can_create_warehouse=allowed)"; break; }
+  [ "$i" = "30" ] && { echo "!! FGA grant never became readable — the seed did not propagate"; exit 1; }
+  sleep 1
+done
+
 # The parent namespace the multibase suite creates tables under — alice must OWN it or the create 403s
 # at the router before the allowlist check is ever reached.
 curl -s -o /dev/null -X POST "http://localhost:2333/v1/namespace/mbns/create" -H "authorization: Bearer $ALICE"

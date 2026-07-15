@@ -42,7 +42,7 @@ VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
-        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage \
+        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage e2e-web \
         e2e-governance e2e-governed-union dashboards status k9s tilt-up tilt-ci clean down openapi openapi-check
 
 help: ## Show this help
@@ -236,6 +236,10 @@ e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit
 	 LANCE_E2E_S3_SECRET_KEY=$$(kubectl get secret $(RELEASE)-infra-credentials -o jsonpath='{.data.rustfs-secret-key}' | base64 -d) \
 	   uv run pytest tests/e2e/test_object_store_cas_e2e.py -v -m cas; rc=$$?; \
 	 kill $$S 2>/dev/null; exit $$rc
+
+e2e-web: ## LIVE frontend e2e vs the deployed web pod (rask-style: hydration + BFF round-trips; auto-forwards web)
+	@echo "port-forwarding web â¦"
+	@kubectl port-forward svc/$(RELEASE)-web 3000:3000 >/dev/null 2>&1 & W=$$!; 	 sleep 3; 	 cd frontend/apps/web && LANCE_E2E_WEB_URL=http://localhost:3000 bunx playwright test -c playwright.live.config.ts; rc=$$?; 	 kill $$W 2>/dev/null; exit $$rc
 
 e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malformed-bearer 401, non-owner rename/overwrite 403) — needs an AUTH-ON stack
 	@echo "port-forwarding catalog/lineage/dex …"

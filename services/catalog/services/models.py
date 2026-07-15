@@ -2,10 +2,14 @@
 
 The registry is one Lance dataset per model at ``<models_root>/<model>`` — the medallion trainer writes it
 DIRECTLY there (``registry_uri_for``), so these ops open it by EXPLICIT URI, NOT the catalog's native
-namespace resolver (which would drop the ``/medallion/`` prefix and miss it). Model version N == Lance
-version N (the registry is APPEND-only: each training publish adds that model version's artifact rows —
-``artifact``/``payload``/``meta`` — so the rows appended LAST at version N carry version N's ``meta``).
-"Candidate" = the latest version; "blessed" = a moving Lance tag pinned to the promoted version.
+namespace resolver (which would drop the ``/medallion/`` prefix and miss it). Training publishes are
+APPEND-only (each adds that publish's ``artifact``/``payload``/``meta`` rows, so the rows appended LAST
+carry the newest publish's ``meta``) — but the compaction sweep also lands maintenance commits on the
+registry (live 2026-07-15: train → v17, compact+GC → v18/v19 with identical rows), so the Lance version
+can run AHEAD of the training count. That is safe by construction: compaction preserves rows and their
+order, so ``metrics_at`` on any post-publish version still reads the newest publish's meta, and blessing a
+maintenance version blesses identical content. "Candidate" = the latest version; "blessed" = a moving
+Lance tag pinned to the promoted version.
 
 Blocking pylance/S3 IO — callers run it in the threadpool. All errors are ``lance_namespace`` domain errors
 so the catalog's exception handler maps them to RFC 9457 problem+json (404 missing / 409 gate-failed / 400).

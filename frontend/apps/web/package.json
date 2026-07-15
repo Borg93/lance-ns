@@ -13,7 +13,8 @@
 		"gen:types": "openapi-typescript openapi.json -o src/lib/api.generated.ts",
 		"prepare": "svelte-kit sync",
 		"test:e2e": "playwright test",
-		"gen:types:catalog": "openapi-typescript ../../../docs/catalog-openapi.json -o src/lib/catalog.generated.ts"
+		"gen:types:catalog": "openapi-typescript ../../../docs/catalog-openapi.json -o src/lib/catalog.generated.ts",
+		"test:e2e:live": "playwright test -c playwright.live.config.ts"
 	},
 	"dependencies": {
 		"@lance/ui": "workspace:*",

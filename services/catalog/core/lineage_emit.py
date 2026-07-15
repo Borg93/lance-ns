@@ -113,6 +113,7 @@ def build_write_event(
     job_namespace: str,
     source_uri: str | None = None,
     schema_fields: SchemaFields | None = None,
+    inputs: list[tuple[str, str]] | None = None,
 ) -> dict[str, Any]:
     """Build the OpenLineage ``RunEvent`` (wire JSON) for any catalog write to a table.
 
@@ -123,6 +124,11 @@ def build_write_event(
     (e.g. an insert whose response carries no version) the standard version facet is omitted so the
     ``WROTE`` edge records the run without asserting a version. ``run_id`` / ``event_time`` are injected
     so the builder is pure and deterministically testable.
+
+    ``inputs`` names the ``(namespace, table_id)`` datasets this write is DERIVED FROM — a rename passes the
+    SOURCE table so the destination's provenance chain is not severed (the graph shows dest←source instead
+    of the renamed table appearing as an orphan with no history). Default ``None`` → no input edge, the
+    normal case for a fresh write.
     """
     lance_fields: dict[str, Any] = {"operation": operation}
     if version is not None:
@@ -165,7 +171,7 @@ def build_write_event(
         # to anyone who can see ANY of those tables. Per-table keeps the Job's output set — its access
         # handle — scoped to the one table it wrote.
         "job": {"namespace": job_namespace, "name": f"{operation}.{table_id}"},
-        "inputs": [],
+        "inputs": [{"namespace": ns, "name": name} for ns, name in (inputs or [])],
         "outputs": [output],
     }
 
@@ -199,6 +205,7 @@ class LineageEmitter(Protocol):
         authorization: str | None = None,
         source_uri: str | None = None,
         schema_fields: SchemaFields | None = None,
+        inputs: list[tuple[str, str]] | None = None,
     ) -> None: ...
 
 
@@ -231,6 +238,7 @@ class NoopEmitter:
         authorization: str | None = None,
         source_uri: str | None = None,
         schema_fields: SchemaFields | None = None,
+        inputs: list[tuple[str, str]] | None = None,
     ) -> None:
         return None
 
@@ -280,6 +288,7 @@ class _BaseLineageEmitter:
         authorization: str | None = None,
         source_uri: str | None = None,
         schema_fields: SchemaFields | None = None,
+        inputs: list[tuple[str, str]] | None = None,
     ) -> None:
         event = build_write_event(
             table_id=table_id,
@@ -294,6 +303,7 @@ class _BaseLineageEmitter:
             job_namespace=self._job_namespace,
             source_uri=source_uri,
             schema_fields=schema_fields,
+            inputs=inputs,
         )
         await self._send(event, operation=operation, table_id=table_id, authorization=authorization)
 
@@ -401,6 +411,7 @@ async def emit_write_event(
     authorization: str | None,
     schema_fields: SchemaFields | None = None,
     source_uri: str | None = None,
+    input_segments: list[list[str]] | None = None,
 ) -> None:
     """Publish a best-effort lineage ``WROTE`` event for a catalog mutation, awaited INLINE in the handler.
 
@@ -411,8 +422,17 @@ async def emit_write_event(
     MERGE-on-``run_id`` give the at-least-once delivery. ``version=None`` records the run without a version.
     ``source_uri`` attaches the standard dataSource facet (the physical storage URI) so #23 reconcile can
     find the on-disk file — passed by ops that (re)attach a location, e.g. ``register``/``declare``.
+    ``input_segments`` names the source table(s) this write is DERIVED FROM (a rename passes its source), so
+    the graph keeps the provenance chain instead of the destination appearing as an orphan.
     Ids come from ``fga`` so the lineage Dataset == the OpenFGA object == the catalog table id.
     """
+    inputs = [
+        (
+            fga.parent_namespace_id(src, delimiter=delimiter) or "",
+            fga.canonical_object_id(src, delimiter=delimiter),
+        )
+        for src in (input_segments or [])
+    ]
     await emitter.emit_write(
         table_id=fga.canonical_object_id(segments, delimiter=delimiter),
         namespace=fga.parent_namespace_id(segments, delimiter=delimiter) or "",
@@ -423,4 +443,5 @@ async def emit_write_event(
         authorization=authorization,
         source_uri=source_uri,
         schema_fields=schema_fields,
+        inputs=inputs or None,
     )

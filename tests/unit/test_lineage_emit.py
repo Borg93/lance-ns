@@ -275,6 +275,56 @@ def test_emit_write_event_maps_segments_to_canonical_ids_and_awaits_inline() -> 
     assert w["run_id"]  # a fresh run id is generated per emit
 
 
+def test_build_write_event_records_derived_from_inputs() -> None:
+    # A rename must record its SOURCE as an input (DERIVED_FROM) so the destination is not an orphan.
+    event = build_write_event(
+        table_id="db1$renamed",
+        namespace="db1",
+        author="alice",
+        version=None,
+        operation="register_table",
+        run_id="r1",
+        event_time="2026-07-15T00:00:00Z",
+        job_namespace="catalog",
+        inputs=[("db1", "db1$orig")],
+    )
+    assert event["inputs"] == [{"namespace": "db1", "name": "db1$orig"}]
+    assert event["outputs"][0]["name"] == "db1$renamed"
+
+
+def test_build_write_event_default_has_no_inputs() -> None:
+    event = build_write_event(
+        table_id="db1$t",
+        namespace="db1",
+        author=None,
+        version=1,
+        operation="create_table",
+        run_id="r1",
+        event_time="2026-07-15T00:00:00Z",
+        job_namespace="catalog",
+    )
+    assert event["inputs"] == []  # a fresh write is derived from nothing
+
+
+def test_emit_write_event_maps_input_segments_to_canonical_dataset_ids() -> None:
+    # The rename handler passes the SOURCE segments; emit_write_event must resolve them to the SAME canonical
+    # (namespace, id) the rest of the graph keys on, so the DERIVED_FROM edge points at the real source node.
+    em = _RecordingEmitter()
+    asyncio.run(
+        emit_write_event(
+            cast(LineageEmitter, em),
+            ["db1", "dest"],
+            delimiter="$",
+            author="alice",
+            version=None,
+            operation="register_table",
+            authorization=None,
+            input_segments=[["db1", "src"]],
+        )
+    )
+    assert em.writes[0]["inputs"] == [("db1", "db1$src")]  # (parent namespace, canonical id) of the source
+
+
 def test_emit_write_event_root_table_has_empty_namespace() -> None:
     # Boundary: a top-level (single-segment) table has no parent namespace → "".
     em = _RecordingEmitter()

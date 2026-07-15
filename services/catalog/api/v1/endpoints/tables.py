@@ -354,6 +354,11 @@ async def rename_table(
         operation=REGISTER_TABLE,
         authorization=authorization,
         source_uri=location,
+        # DERIVED_FROM: the destination is the renamed SOURCE, so record the source table as this event's
+        # input — otherwise the rename severs the provenance chain and the renamed table appears in the graph
+        # as an orphan with no history (audit 2026-07-14). The source's DROP marker above ends its own line;
+        # this input edge stitches the destination onto it.
+        input_segments=[segments],
     )
     return RenameTableResponse()
 

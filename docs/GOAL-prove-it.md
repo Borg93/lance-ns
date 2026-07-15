@@ -211,6 +211,43 @@ Proving it means taking the messaging backbone offline, which is out of proporti
 authorized. The staged-survivor path above exercises the same recovery code the crash would, and the SIGKILL
 crash e2e (P1.3) covers the crash itself.
 
+## SEC — adversarial audit of the auth/authz/lineage/secrets surface (2026-07-15)
+
+A 6-dimension adversarial multi-agent audit (auth tokens, FGA gates, resolver+vending, lineage leakage,
+secrets, idempotency-lifecycle), each finding confirm/refute-verified: **3 CONFIRMED, 3 REFUTED.** All three
+fixed, each pinned by a regression test that fails on the pre-fix code, plus standing invariants and LIVE
+fail-closed proofs. Run before pushing to main — which is exactly why the CRITICAL one didn't reach it.
+
+**CONFIRMED + FIXED:**
+- **CRITICAL — ExistOk owner-seizure** (`data.py`). `create?mode=ExistOk` on an existing table someone else
+  owns wrote nothing (kept it) but still ran `seed_ownership` unconditionally → any authenticated user
+  (top-level, lock off) or any namespace-writer could SEIZE `owner` (⇒ `can_read_data` exfil, write-cred
+  vending, drop, rename) via a no-op create. Fix: compute pre-existence; skip the owner grant when ExistOk
+  KEPT an already-existing table. *Regression:* `test_existok_on_existing_table_does_not_seize_ownership`.
+  *LIVE:* alice creates `secvictim2`, bob ExistOk-creates it → OpenFGA tuples show **alice owner=True,
+  bob owner=False**.
+- **MEDIUM — /demo/datasets ungated** (`demo.py`). Read real medallion schemas/row-counts + gold's lineage
+  JSONB from S3 with the SERVICE root creds, no auth gate. Fix: authenticate + govern each dataset on
+  `can_get_metadata`. *Regression:* `test_demo_datasets_requires_auth_when_fga_on`.
+- **MEDIUM — /events columnLineage leak** (`runs.py`). Returned the full raw payload but governed only on
+  top-level inputs/outputs; the columnLineage facet names SOURCE datasets not in inputs. Fix: union the
+  columnLineage source datasets into the governance ref-set. *Regression:*
+  `test_events_governs_on_columnlineage_source_datasets`.
+
+**REFUTED (3):** verified false positives — the code already handled them.
+
+**Standing invariants** (`test_invariants.py`, so the CLASSES can't regress silently):
+`test_no_warehouse_bucket_access_bypasses_the_deactivation_gate` (every `_namespace_for_root` caller must
+gate on status) and `test_catalog_authz_primitive_fails_closed_on_openfga_outage` (`_require` raises on
+outage) — plus the existing relation-in-model contract.
+
+**LIVE fail-closed proofs** (redeployed, digest-matched):
+```
+ExistOk seizure       → alice owner=True, bob owner=False   (no seizure)
+OpenFGA scaled to 0   → describe 503, warehouses-list 503   (fail-closed, not 500) → restored
+deactivated warehouse → namespace-create 403                (audit #2/#6 bypass closed)
+```
+
 ## P0.1 GREEN (run 29369341977) — every suite runs, nothing skips
 
 ```

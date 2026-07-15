@@ -17,7 +17,7 @@ from lance_namespace import (
 )
 
 from catalog.api.dependencies import NamespaceDep, SettingsDep, StorageOptionsDep
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import dataplane
 
 router = APIRouter(prefix="/v1/table", tags=["tag"])
@@ -37,7 +37,7 @@ def create_table_tag(
     id: str, body: CreateTableTagRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> CreateTableTagResponse:
     """Tag the given table version with a name — wraps lance_namespace CreateTableTag."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return dataplane.create_tag(ns, so, body)
 
 
@@ -46,7 +46,7 @@ def get_table_tag_version(
     id: str, body: GetTableTagVersionRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> GetTableTagVersionResponse:
     """Resolve which table version a tag points to — wraps lance_namespace GetTableTagVersion."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return dataplane.get_tag_version(ns, so, body)
 
 
@@ -55,7 +55,7 @@ def update_table_tag(
     id: str, body: UpdateTableTagRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> UpdateTableTagResponse:
     """Move an existing tag to a new table version — wraps lance_namespace UpdateTableTag."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return dataplane.update_tag(ns, so, body)
 
 
@@ -64,5 +64,5 @@ def delete_table_tag(
     id: str, body: DeleteTableTagRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> DeleteTableTagResponse:
     """Delete a tag from the table — wraps lance_namespace DeleteTableTag."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return dataplane.delete_tag(ns, so, body)

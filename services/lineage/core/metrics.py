@@ -45,6 +45,7 @@ class Outcome(StrEnum):
     INGESTED = "ingested"  # graph write committed → Dapr SUCCESS
     DROPPED = "dropped"  # malformed payload → Dapr DROP (redelivery can't fix it)
     RETRIED = "retried"  # transient failure → Dapr RETRY (sidecar redelivers)
+    DEAD_LETTERED = "dead_lettered"  # exhausted the resiliency schedule → parked (terminal loss signal)
 
 
 def record_outcome(outcome: Outcome) -> None:

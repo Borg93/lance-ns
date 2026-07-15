@@ -24,7 +24,7 @@ from lance_namespace import (
 from catalog.api import fga_deps
 from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
 from catalog.api.security import CurrentToken
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import native
 
 log = logging.getLogger(__name__)
@@ -87,7 +87,7 @@ async def create_namespace(
     """Create a namespace via ``create_namespace``, then seed its FGA owner + parent edge."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or CreateNamespaceRequest()
-    req.id = segments
+    req.id = reconcile_body_id(segments, req.id)
     response: CreateNamespaceResponse = await run_in_threadpool(native.call, ns, "create_namespace", req)
     # Owner + parent edge (parent namespace if nested, else the catalog root) so the
     # concentric cascade reaches the namespace and its tables — stops a nested-namespace
@@ -130,7 +130,7 @@ async def drop_namespace(
     dropped child's — so a reused id can't inherit stale grants."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or DropNamespaceRequest()
-    req.id = segments
+    req.id = reconcile_body_id(segments, req.id)
     # A Cascade drop (behavior=Cascade; case-insensitive per the lance spec) removes all child tables +
     # nested namespaces from storage. Their FGA grants must be revoked too, or a later object reusing a
     # child id would inherit the stale owner/reader/writer tuples (privilege bleed). Enumerate the

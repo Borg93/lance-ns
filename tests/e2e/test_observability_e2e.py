@@ -36,9 +36,43 @@ import requests
 CATALOG = os.environ.get("LANCE_E2E_CATALOG_URL", "")
 LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
 GREPTIME = os.environ.get("LANCE_E2E_GREPTIME_URL", "")
+DEX = os.environ.get("LANCE_E2E_DEX", "http://localhost:5556/dex")
+DEX_SECRET = os.environ.get("LANCE_E2E_DEX_SECRET", "lance-catalog-secret")
 ARROW = {"content-type": "application/vnd.apache.arrow.stream"}
 
 pytestmark = [pytest.mark.e2e, pytest.mark.observability]
+
+
+def _auth_headers() -> dict[str, str]:
+    """Bearer headers when the deployed stack is GOVERNED, ``{}`` when it is open.
+
+    This suite long predates auth-on stacks and drove the catalog unauthenticated; once the kind deploy
+    runs with ``auth.enabled=true`` every setup call 401'd and all four signals went unverifiable. Probe
+    the catalog: open stack → stay unauthenticated (docker-compose / CI e2e keeps working with no Dex
+    forward); 401 → password-grant a Dex user exactly like test_governance_e2e (skip if Dex unreachable).
+    """
+    try:
+        probe = requests.get(f"{CATALOG}/v1/namespace/$/list", timeout=5)
+    except Exception:  # noqa: BLE001 — reachability is the pipeline_run fixture's problem, not ours
+        return {}
+    if probe.status_code != 401:
+        return {}
+    data = {
+        "grant_type": "password",
+        "client_id": "lance-catalog",
+        "username": "alice@example.com",
+        "password": "password",
+        "scope": "openid",
+    }
+    if DEX_SECRET:
+        data["client_secret"] = DEX_SECRET
+    try:
+        body = requests.post(f"{DEX}/token", data=data, timeout=10).json()
+    except Exception:  # noqa: BLE001
+        pytest.skip(f"stack is governed (catalog 401s) but Dex is not reachable at {DEX}")
+    if "id_token" not in body:
+        pytest.skip(f"stack is governed but the Dex password grant failed: {body}")
+    return {"Authorization": f"Bearer {body['id_token']}"}
 
 
 def _eventually(fn: Callable[[], Any], *, timeout: float = 60.0, interval: float = 3.0) -> Any:
@@ -71,11 +105,12 @@ def _gt_promql_sum(query: str) -> float:
     return sum(float(s["value"][1]) for s in r.json()["data"]["result"])
 
 
-def _create_table(table_id: str, namespace: str) -> None:
+def _create_table(table_id: str, namespace: str, auth: dict[str, str]) -> None:
     """Create a namespace + table via the catalog — the action that emits a lineage event over Dapr."""
-    requests.post(f"{CATALOG}/v1/table/{table_id}/drop")
-    requests.post(f"{CATALOG}/v1/namespace/{namespace}/drop")
-    assert requests.post(f"{CATALOG}/v1/namespace/{namespace}/create", json={}).status_code == 200
+    requests.post(f"{CATALOG}/v1/table/{table_id}/drop", headers=auth)
+    requests.post(f"{CATALOG}/v1/namespace/{namespace}/drop", headers=auth)
+    created = requests.post(f"{CATALOG}/v1/namespace/{namespace}/create", json={}, headers=auth)
+    assert created.status_code == 200, created.text
     rows = pa.table({"id": pa.array([1, 2, 3], pa.int64())})
     sink = pa.BufferOutputStream()
     with pa.ipc.new_stream(sink, rows.schema) as writer:
@@ -83,7 +118,7 @@ def _create_table(table_id: str, namespace: str) -> None:
     resp = requests.post(
         f"{CATALOG}/v1/table/{table_id}/create?mode=overwrite",
         data=sink.getvalue().to_pybytes(),
-        headers=ARROW,
+        headers=ARROW | auth,
     )
     assert resp.status_code == 200, resp.text
 
@@ -105,14 +140,15 @@ def pipeline_run() -> dict[str, Any]:
         except Exception:  # noqa: BLE001
             pytest.skip(f"{name} not reachable at {url}")
 
+    auth = _auth_headers()
     token = uuid.uuid4().hex[:8]
     namespace = f"obsns{token}"
     table_id = f"{namespace}${namespace}tbl"  # catalog id == lineage Dataset == OpenFGA object id
     metric_query = 'sum(lineage_events_processed_total{lance_lineage_outcome="ingested"})'
     before = _gt_promql_sum(metric_query)
 
-    _create_table(table_id, namespace)
-    return {"table_id": table_id, "metric_query": metric_query, "ingested_before": before}
+    _create_table(table_id, namespace, auth)
+    return {"table_id": table_id, "metric_query": metric_query, "ingested_before": before, "auth": auth}
 
 
 def test_data_landed_in_age(pipeline_run: dict[str, Any]) -> None:
@@ -120,7 +156,7 @@ def test_data_landed_in_age(pipeline_run: dict[str, Any]) -> None:
     table_id = pipeline_run["table_id"]
 
     def dataset_present() -> dict[str, Any] | None:
-        r = requests.get(f"{LINEAGE}/datasets/{table_id}/creator", timeout=8)
+        r = requests.get(f"{LINEAGE}/datasets/{table_id}/creator", timeout=8, headers=pipeline_run["auth"])
         if r.status_code == 200 and r.json().get("dataset") == table_id:
             return r.json()
         return None

@@ -993,6 +993,28 @@ def test_service_door_is_shut_by_default(monkeypatch: pytest.MonkeyPatch) -> Non
         )
 
 
+def test_dapr_stamped_token_without_identity_falls_through_to_oidc(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A `dapr-api-token` WITHOUT the identity header is a sidecar-stamped invocation, not a service call.
+
+    With ``dapr.io/app-token-secret`` set, the sidecar adds `dapr-api-token` to EVERY request it delivers —
+    including a gateway-proxied human carrying a valid OIDC bearer. Gating the service door on the token
+    alone diverted those into a guaranteed 403 on the missing identity (audit 2026-07-15). The door must
+    open only on a deliberate service call (token + identity); a token-only request takes the OIDC path,
+    which here (no bearer supplied) is its usual 401 — never the door's 403, never a silent pass.
+    """
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    with pytest.raises(UnauthenticatedError, match="Missing bearer token"):
+        security.authenticate(
+            _request(oidc=SimpleNamespace(verify=lambda _t: _token())),
+            _svc_settings(),
+            None,
+            dapr_api_token="s3cret",
+            x_lance_service_identity=None,
+        )
+
+
 def test_service_principal_is_attributed_and_fga_bounded() -> None:
     """The ServicePrincipal flows through BOTH ingest gates: it is stamped as author AND FGA-checked.
 

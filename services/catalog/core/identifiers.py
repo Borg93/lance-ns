@@ -12,9 +12,23 @@ splitting it into segments. (Parent-namespace derivation lives in ``common.fga``
 
 from __future__ import annotations
 
+from lance_namespace import InvalidInputError
+
 
 def parse_identifier(id_str: str, delimiter: str) -> list[str]:
     """Split a delimited identifier into segments; empty or delimiter-only → root ``[]``."""
     if not id_str or id_str == delimiter:
         return []
     return id_str.split(delimiter)
+
+
+def reconcile_body_id(path_segments: list[str], body_id: list[str] | None) -> list[str]:
+    """The single spot where a request-body ``id`` meets the path ``{id}`` (spec: a differing pair is a 400,
+    ``operations/index.md`` — previously the body id was silently overridden). An absent/empty body id defers
+    to the path (the common case; ``[]`` also covers the root-id round-trip). The path id is what the
+    router-level authz gate parsed, so a mismatch must refuse rather than pick either one."""
+    if body_id and body_id != path_segments:
+        raise InvalidInputError(
+            f"request body id {body_id!r} does not match the path identifier {path_segments!r}"
+        )
+    return path_segments

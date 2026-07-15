@@ -20,6 +20,7 @@ from dapr.ext.fastapi import DaprApp
 from fastapi import Depends, FastAPI, Request
 
 from lineage.core.config import get_settings
+from lineage.core.metrics import Outcome, record_outcome
 from lineage.services.consumer import handle_cloud_event
 
 log = logging.getLogger(__name__)
@@ -50,6 +51,10 @@ async def on_dead_letter(
         "dapr_dead_letter_parked",
         extra={"app": "lineage", "event_id": event.get("id") if isinstance(event, dict) else None},
     )
+    # A parked delivery is TERMINAL provenance loss until a replay — without this counter the retries all
+    # counted RETRIED and the loss itself vanished from the metrics (audit 2026-07-15; a dashboardable
+    # non-zero here means the graph is missing events the ERROR log alone would let scroll away).
+    record_outcome(Outcome.DEAD_LETTERED)
     return {"status": "SUCCESS"}
 
 

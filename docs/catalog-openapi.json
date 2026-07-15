@@ -5934,6 +5934,60 @@
         "title": "ModelDescribeResponse",
         "type": "object"
       },
+      "ModelSummary": {
+        "description": "One registry entry in the list view. Versions are ``None`` only for a registry directory that is\nnot (yet) a readable Lance dataset \u2014 surfaced, not hidden, so an interrupted first publish is visible.",
+        "properties": {
+          "blessed_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blessed Version"
+          },
+          "latest_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latest Version"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "latest_version",
+          "blessed_version"
+        ],
+        "title": "ModelSummary",
+        "type": "object"
+      },
+      "ModelsListResponse": {
+        "properties": {
+          "models": {
+            "items": {
+              "$ref": "#/components/schemas/ModelSummary"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "ModelsListResponse",
+        "type": "object"
+      },
       "MultiMatchQuery": {
         "description": "MultiMatchQuery",
         "properties": {
@@ -7929,6 +7983,57 @@
         "summary": "Refresh Materialized View",
         "tags": [
           "materialized_view"
+        ]
+      }
+    },
+    "/v1/model": {
+      "get": {
+        "description": "List the model registry: every model with its candidate (latest) + blessed versions.\n\nMirrors the governed table listing: enumerate storage, then \u2014 when FGA is on \u2014 return only the models\nthe caller holds the reader rung (``can_get_metadata``) on, the same relation the per-model describe\nenforces. Name-shape filtering runs before authz so a stray directory can never reach an FGA object id.\nMetrics are deliberately absent here (see :func:`catalog.services.models.summarize`) \u2014 the per-model\ndescribe carries them. ``limit`` bounds the per-request dataset opens (one per listed model);\ntruncation is deterministic (name-sorted first ``limit``).",
+        "operationId": "list_models_v1_model_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ModelsListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Models",
+        "tags": [
+          "model"
         ]
       }
     },

@@ -44,7 +44,7 @@ from catalog.api.dependencies import (
     StorageOptionsDep,
 )
 from catalog.api.security import CurrentToken
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE
 from catalog.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
 from catalog.core.serialization import dump
@@ -431,7 +431,7 @@ async def update_table(
 ) -> UpdateTableResponse:
     """Update rows matching a predicate — ``update_table``; emits an UPDATE lineage event."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: UpdateTableResponse = await run_in_threadpool(dataplane.update_table, ns, so, body)
     await lineage_deps.emit_measured_write(
         emitter,
@@ -460,7 +460,7 @@ async def delete_from_table(
 ) -> DeleteFromTableResponse:
     """Delete rows matching a predicate — ``delete_from_table``; emits a DELETE lineage event."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: DeleteFromTableResponse = await run_in_threadpool(dataplane.delete_from_table, ns, so, body)
     # A row-delete doesn't change columns, but the WROTE edge at this new version still records the
     # (unchanged) schema so dataset_schema(version=N) is populated for every version, not just writes.
@@ -570,7 +570,7 @@ async def read_table_blob(
 @router.post("/{id}/query")
 def query_table(id: str, body: QueryTableRequest, ns: NamespaceDep, settings: SettingsDep) -> Response:
     """Run a query and return matching rows as an Arrow-IPC file — wraps ``query_table``."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     data = native.call(ns, "query_table", body)
     return Response(content=data, media_type=ARROW_FILE)
 
@@ -581,7 +581,7 @@ def count_table_rows(
 ) -> Response:
     """Count the table's rows (optionally filtered) — ``count_table_rows``; returns plain text."""
     req = body or CountTableRowsRequest()
-    req.id = parse_identifier(id, settings.delimiter)
+    req.id = reconcile_body_id(parse_identifier(id, settings.delimiter), req.id)
     count = native.call(ns, "count_table_rows", req)
     return PlainTextResponse(str(count))
 
@@ -591,7 +591,7 @@ def explain_table_query_plan(
     id: str, body: ExplainTableQueryPlanRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> Response:
     """Return the logical query plan — ``explain_table_query_plan``; plain text."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     result = native.call(ns, "explain_table_query_plan", body)
     return PlainTextResponse(result if isinstance(result, str) else json.dumps(dump(result)))
 
@@ -601,6 +601,6 @@ def analyze_table_query_plan(
     id: str, body: AnalyzeTableQueryPlanRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> Response:
     """Return the analyzed query plan with runtime metrics — ``analyze_table_query_plan``; plain text."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     result = native.call(ns, "analyze_table_query_plan", body)
     return PlainTextResponse(result if isinstance(result, str) else json.dumps(dump(result)))

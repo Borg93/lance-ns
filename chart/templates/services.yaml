@@ -103,9 +103,12 @@ spec:
             - { name: LANCE_FGA_ENABLED, value: "true" }
             - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
             # #41 compliance audit trail (who/what/outcome for authn/authz/vending) — configurable.
-            # No `| default`: Sprig's default() treats boolean false as empty, so it would make `false`
-            # un-settable. values.yaml supplies auth.audit=true, so a bare reference is correct + toggleable.
-            - { name: LANCE_AUDIT_ENABLED, value: {{ .Values.auth.audit | quote }} }
+            # hasKey+ternary, NOT `| default`: Sprig's default() treats boolean false as empty (making
+            # `false` un-settable), while a bare reference renders "" when the key is missing entirely —
+            # which `helm upgrade --reuse-values` from a pre-#41 release does (live crash 2026-07-15,
+            # pydantic bool_parsing on LANCE_AUDIT_ENABLED=""). hasKey defaults a MISSING key to true and
+            # still honors an explicit false.
+            - { name: LANCE_AUDIT_ENABLED, value: {{ hasKey .Values.auth "audit" | ternary .Values.auth.audit true | quote }} }
             # Lock top-level (root) namespace/table creation to holders of a warehouse-level create grant.
             # Off in dev (self-serve); ON in prod (values-prod) — else any Dex-authenticated user can squat
             # unlimited root namespaces in the shared warehouse bucket (assessment finding).
@@ -336,6 +339,9 @@ spec:
           {{- include "lance.preStop" . | nindent 10 }}
           env:
             - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }
+            # #42 models page: the /capi BFF proxies to the catalog. Reads/writes carry ONLY a signed-in
+            # user's bearer (the catalog has no service-token door), so no service credential is wired here.
+            - { name: CATALOG_API, value: "http://{{ include "lance.fullname" . }}-catalog:{{ .Values.services.catalog.port }}" }
             - { name: PORT, value: "3000" }
             {{- if .Values.auth.enabled }}
             # Governed READ path: when no user is signed in, the BFF proxy authenticates to lineage as a

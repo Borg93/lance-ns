@@ -11,7 +11,7 @@ from lance_namespace import (
 )
 
 from catalog.api.dependencies import NamespaceDep, SettingsDep
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import native
 
 router = APIRouter(prefix="/v1/transaction", tags=["transaction"])
@@ -29,5 +29,5 @@ def alter_transaction(
     id: str, body: AlterTransactionRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> AlterTransactionResponse:
     """Apply the requested state actions to transaction ``id`` — backend ``alter_transaction``."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return native.call(ns, "alter_transaction", body)

@@ -16,11 +16,15 @@ Auth: OIDC bearer (Dex) at the edge, per-route OpenFGA relations (`can_*`). Read
 writes on writer, destructive/admin ops on owner, and promotion on the separate validator rung. Fail-closed:
 an OpenFGA outage is `503`, a denial is `403`, a missing token is `401`.
 
-**Audit trail (#41, configurable via `LANCE_AUDIT_ENABLED`).** Every security-relevant action — authn
-success/failure, authz allow/deny, credential vending — emits a structured event (who / what / resource /
-outcome) on the dedicated `lance.audit` logger, exported over OTLP to GreptimeDB and queryable by
-`audit.action` / `audit.outcome` / `audit.subject`. Durable data/model-mutation provenance (who created/
-wrote/promoted what, when) additionally lives in the lineage graph.
+**Audit trail (#41, configurable via `LANCE_AUDIT_ENABLED`).** Every security-relevant *catalog* action —
+authn success/failure, authz allow/deny (single, batch, and warehouse gates), credential vending — emits a
+structured event (who / what / resource / outcome) on the dedicated `lance.audit` logger, exported over
+OTLP to GreptimeDB and queryable by `audit.action` / `audit.outcome` / `audit.subject`. Scope: the catalog
+service (the policy-decision point); lineage-read governance is enforced by its own FGA gates and logged
+through the standard service logs, and durable data/model-mutation provenance (who created/wrote/promoted
+what, when) additionally lives in the lineage graph. Retention: audit records currently share the
+observability store's TTL (`observability.retention`, default `14d`) — raise it for compliance deploys;
+routing `lance.audit` to an independently-retained table is a known open enhancement.
 
 | Capability | Endpoints | Notes |
 |---|---|---|
@@ -34,7 +38,7 @@ wrote/promoted what, when) additionally lives in the lineage graph.
 | **Indexes** | `POST /v1/table/{id}/{create_index,create_scalar_index,index/list,index/{name}/drop,index/{name}/stats}` | |
 | **Blobs** | `GET /v1/table/{id}/blobs` | credential-less blob read (data-reader gated) |
 | **Batch** | `POST /v1/table/{batch-commit,version/batch-create}` | |
-| ★ **Model registry & promotion (#17)** | `GET /v1/model/{model}`, `POST /v1/model/{model}/promote` | describe (candidate vs blessed + metrics); promote = validator-gated metrics-gated move of the `blessed` tag on `models$<model>` |
+| ★ **Model registry & promotion (#17/#42)** | `GET /v1/model` (list), `GET /v1/model/{model}`, `POST /v1/model/{model}/promote` | list = governed registry enumeration (reader-rung `list_objects` filter; candidate + blessed versions); describe (candidate vs blessed + metrics); promote = validator-gated metrics-gated move of the `blessed` tag on `models$<model>` |
 | ★ **Warehouse admin / physical multi-tenancy (#3-A)** | `GET,POST /v1/warehouses`, `GET /v1/warehouses/{id}`, `POST /v1/warehouses/{id}/{activate,deactivate,namespaces}` | project-admin (`can_create_warehouse`) provisions a bucket per warehouse + binds namespaces to it |
 | **Materialized views** | `POST /v1/materialized_view/{id}/{create,refresh}` | spec-defined + FGA-typed, but the `dir` backend does not implement MVs yet (returns 501); dormant until Lance adds native MV support |
 | **Transactions** | `POST /v1/transaction/{id}/{alter,describe}` | |

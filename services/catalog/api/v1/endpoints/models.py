@@ -1,13 +1,16 @@
-"""#17 model-registry endpoints: candidate→blessed promotion + a describe / serving read.
+"""#17/#42 model-registry endpoints: registry listing, candidate→blessed promotion, and a describe read.
 
 The model registry is a Lance dataset per model at ``settings.model_uri(model)`` (the medallion trainer
-writes it there directly). These routes live OUTSIDE the router-level ``authorize`` coverage (``/v1/model``
-is not an FGA ``_RESOURCES`` prefix), so OIDC is still enforced by the ``CurrentToken`` dependency, but the
-FGA gate is EXPLICIT per handler: promote → the VALIDATOR rung ``can_promote``; describe → the reader rung
-``can_get_metadata`` — both on ``table:models$<model>`` (the per-model FGA object the trainer seeds at train
-time, so the rung cascades from ``namespace:models``). Promotion moves the ``blessed`` Lance tag after a
-fail-closed metrics gate; a distinct promotion RunEvent is emitted best-effort so the blessing lands in
-lineage without being mistaken for a training run.
+writes it there directly). These routes ARE under the router-level ``authorize`` dependency — its pre-path
+checks still run here (missing token → 401; FGA enabled but unwired → 503, fail-closed) — but ``/v1/model``
+matches no ``_RESOURCES`` prefix, so ``authorize`` makes no per-object decision. The per-object FGA gate is
+therefore explicit per handler: promote → the validator rung ``can_promote``; describe → the reader rung
+``can_get_metadata``; list → the same reader rung as a ``list_objects`` filter — all on
+``table:models$<model>`` (the per-model FGA object the trainer seeds at train time, so the rung cascades
+from ``namespace:models``). That router-level fail-closed floor is what keeps the list filter's
+``fga_enabled and token and client`` guards from ever being a fail-open path. Promotion moves the
+``blessed`` Lance tag after a fail-closed metrics gate; a distinct promotion RunEvent is emitted
+best-effort so the blessing lands in lineage without being mistaken for a training run.
 """
 
 from __future__ import annotations
@@ -16,14 +19,16 @@ import logging
 import re
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Header
+from common import fga
+from fastapi import APIRouter, Header, Query
 from fastapi.concurrency import run_in_threadpool
-from lance_namespace import InvalidInputError
+from lance_namespace import InvalidInputError, TableNotFoundError
 from pydantic import BaseModel, ConfigDict, Field
 
 from catalog.api import fga_deps
 from catalog.api.dependencies import FgaClientDep, LineageEmitterDep, SettingsDep, StorageOptionsDep
 from catalog.api.security import CurrentToken
+from catalog.core.config import Settings
 from catalog.core.lineage_emit import PROMOTE_MODEL, emit_write_event
 from catalog.services import models as registry
 
@@ -72,6 +77,66 @@ class ModelDescribeResponse(BaseModel):
     blessed_version: int | None
     candidate_metrics: dict[str, Any] | None
     blessed_metrics: dict[str, Any] | None
+
+
+class ModelSummary(BaseModel):
+    """One registry entry in the list view. Versions are ``None`` only for a registry directory that is
+    not (yet) a readable Lance dataset — surfaced, not hidden, so an interrupted first publish is visible."""
+
+    model_config = ConfigDict(protected_namespaces=())
+    model: str
+    latest_version: int | None
+    blessed_version: int | None
+
+
+class ModelsListResponse(BaseModel):
+    models: list[ModelSummary]
+
+
+def _summaries(settings: Settings, so: dict[str, str], names: list[str]) -> list[ModelSummary]:
+    """Per-model list summaries, one blocking pass (callers threadpool the whole loop). A directory that is
+    not a readable Lance dataset yet (interrupted first publish) reports null versions instead of failing
+    or hiding the whole listing."""
+    out: list[ModelSummary] = []
+    for name in names:
+        try:
+            summary = registry.summarize(settings.model_uri(name), so)
+        except TableNotFoundError:
+            out.append(ModelSummary(model=name, latest_version=None, blessed_version=None))
+            continue
+        out.append(ModelSummary(model=name, **summary))
+    return out
+
+
+@router.get("")
+async def list_models(
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 100,
+) -> ModelsListResponse:
+    """List the model registry: every model with its candidate (latest) + blessed versions.
+
+    Mirrors the governed table listing: enumerate storage, then — when FGA is on — return only the models
+    the caller holds the reader rung (``can_get_metadata``) on, the same relation the per-model describe
+    enforces. Name-shape filtering runs before authz so a stray directory can never reach an FGA object id.
+    Metrics are deliberately absent here (see :func:`catalog.services.models.summarize`) — the per-model
+    describe carries them. ``limit`` bounds the per-request dataset opens (one per listed model);
+    truncation is deterministic (name-sorted first ``limit``).
+    """
+    names = await run_in_threadpool(registry.list_models, settings.models_root, so)
+    names = [name for name in names if _MODEL_RE.fullmatch(name)]
+    if settings.fga_enabled and token is not None and client is not None:
+        allowed = set(
+            await fga.list_objects(client, user=token.sub, relation="can_get_metadata", object_type="table")
+        )
+        names = [
+            name
+            for name in names
+            if f"table:{fga.canonical_object_id(_segments(name), delimiter=settings.delimiter)}" in allowed
+        ]
+    return ModelsListResponse(models=await run_in_threadpool(_summaries, settings, so, names[:limit]))
 
 
 @router.post("/{model}/promote", response_model_exclude_none=True)

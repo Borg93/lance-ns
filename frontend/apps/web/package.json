@@ -12,7 +12,8 @@
 		"gen:openapi": "cd ../../.. && LINEAGE_DEMO_DATA_ENABLED=true PYTHONPATH=services uv run --no-sync python -c \"import json; from lineage.main import app; json.dump(app.openapi(), open('frontend/apps/web/openapi.json','w'), indent=2)\"",
 		"gen:types": "openapi-typescript openapi.json -o src/lib/api.generated.ts",
 		"prepare": "svelte-kit sync",
-		"test:e2e": "playwright test"
+		"test:e2e": "playwright test",
+		"gen:types:catalog": "openapi-typescript ../../../docs/catalog-openapi.json -o src/lib/catalog.generated.ts"
 	},
 	"dependencies": {
 		"@lance/ui": "workspace:*",

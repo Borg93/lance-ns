@@ -14,7 +14,7 @@ from lance_namespace import (
 from catalog.api import fga_deps
 from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
 from catalog.api.security import CurrentToken
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import native
 
 router = APIRouter(prefix="/v1/materialized_view", tags=["materialized_view"])
@@ -40,7 +40,7 @@ async def create_materialized_view(
     field; do NOT fabricate an edge from the view's own output schema. See docs/DESIGN-catalog-parity.md #38b.
     """
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: CreateMaterializedViewResponse = await run_in_threadpool(
         native.call, ns, "create_materialized_view", body
     )
@@ -57,5 +57,5 @@ def refresh_materialized_view(
 ) -> RefreshMaterializedViewResponse:
     """Rematerialize a materialized view via the native backend's ``refresh_materialized_view``."""
     req = body or RefreshMaterializedViewRequest()
-    req.id = parse_identifier(id, settings.delimiter)
+    req.id = reconcile_body_id(parse_identifier(id, settings.delimiter), req.id)
     return native.call(ns, "refresh_materialized_view", req)

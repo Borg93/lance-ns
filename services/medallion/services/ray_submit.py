@@ -13,10 +13,13 @@ redelivers; on redelivery a terminally FAILED/STOPPED job with the same id is DE
 (so the retry runs on a healthy worker rather than re-observing the same failure), while a still-running job
 is re-attached and polled. Production KubeRay handles in-job task retry/orchestration.
 
-Known limitation (STAGE path only): ``submit_stage_job`` blocks until the job finishes, so a job that runs
-longer than maxDeliver × ackWait (~2.5 min at the defaults) exhausts redelivery — it suits bounded-duration
-stage transforms. The TRAIN path (``submit_train_job``, #115a) is exactly the async-completion redesign this
-paragraph used to call future work: submit-and-ack, the job emits its own lifecycle, and — unlike the stage
+Known limitation (STAGE path only): ``submit_stage_job`` blocks until the job finishes, so a job that
+outlives the redelivery window exhausts it — it suits bounded-duration stage transforms. The window depends
+on the deploy: with the DEFAULT ``dapr.resiliency.enabled=true`` the sidecar owns retries and the broker
+crash-recovery ackWait is 720s (ample vs the 180s job timeout); only the ``resiliency=false`` escape hatch
+reverts to the broker-only ~2.5 min (30s ackWait × maxDeliver 5) this note previously described. The
+TRAIN path (``submit_train_job``, #115a) is exactly the async-completion redesign this paragraph used to
+call future work: submit-and-ack, the job emits its own lifecycle, and — unlike the stage
 path — a terminally FAILED prior job is NEVER deleted-and-resubmitted. The two functions deliberately share
 ``_submission_id`` but keep separate submit protocols (accepted #115a deviation from "extract one core":
 their re-attach semantics differ at the terminal-failure branch; if you fix the shared POST/GET protocol in
@@ -205,6 +208,9 @@ async def submit_train_job(
                 "OTEL_EXPORTER_OTLP_PROTOCOL": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", ""),
                 "OTEL_EXPORTER_OTLP_HEADERS": os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", ""),
                 "OTEL_SERVICE_NAME": settings.trainer_identity,
+                # Same resource attrs as the submitting pod (deployment env / namespace / version), so the
+                # trainer's series carry the estate's standard resource dimensions, not a bare service name.
+                "OTEL_RESOURCE_ATTRIBUTES": os.environ.get("OTEL_RESOURCE_ATTRIBUTES", ""),
             }
         },
     }

@@ -37,8 +37,17 @@ from common import dapr_publish, fga
 from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, schema_facet
 from common.schema import SchemaFields
 from dapr.aio.clients import DaprClient
+from opentelemetry import metrics
 
 log = logging.getLogger(__name__)
+
+_meter = metrics.get_meter("lance.catalog")
+_emit_failed = _meter.create_counter(
+    "catalog.lineage_emit.failed",
+    unit="{event}",
+    description="Best-effort catalog lineage emits that failed terminally (the catalog has no outbox — "
+    "each failure is a lost event unless reconcile back-fills it), by transport.",
+)
 
 #: Operation markers carried in the OpenLineage ``lance`` run facet. The lineage service keys the
 #: ``(:User)-[:CREATED]->(:Dataset)`` edge off ``create_table`` specifically, so the two sides share
@@ -336,6 +345,7 @@ class HttpLineageEmitter(_BaseLineageEmitter):
             response = await self._client.post(self._url, json=event, headers=headers)
             response.raise_for_status()
         except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
+            _emit_failed.add(1, {"lance.catalog.transport": "http"})
             log.warning(
                 "lineage_emit_failed", extra={"operation": operation, "table": table_id, "error": str(exc)}
             )
@@ -377,6 +387,7 @@ class DaprEmitter(_BaseLineageEmitter):
                 data_content_type="application/json",
             )
         except Exception as exc:  # noqa: BLE001 — best-effort: lineage must never break a catalog write
+            _emit_failed.add(1, {"lance.catalog.transport": "dapr"})
             log.warning(
                 "lineage_publish_failed", extra={"operation": operation, "table": table_id, "error": str(exc)}
             )

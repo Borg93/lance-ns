@@ -201,3 +201,48 @@ def test_promote_rejects_an_arbitrary_tag(
     assert resp.status_code == 400
     with pytest.raises(ValueError, match="not found|Ref"):
         lance.dataset(registry).tags.get_version("pwned")  # the arbitrary tag was never created
+
+
+def _fake_list_objects(allowed: list[str], monkeypatch: pytest.MonkeyPatch) -> list[dict]:
+    captured: list[dict] = []
+
+    async def fake(_c: object, *, user: str, relation: str, object_type: str, **_kw: object) -> list[str]:
+        captured.append({"user": user, "relation": relation, "object_type": object_type})
+        return allowed
+
+    monkeypatch.setattr(fga_module, "list_objects", fake)
+    return captured
+
+
+def test_list_models_filters_to_readable_and_reports_versions(
+    models_client: tuple[TestClient, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CONTRACT (#42): the listing enumerates the registry root but returns ONLY the models the caller holds
+    # the reader rung on — `other` exists on storage yet never appears for a caller allowed just `demo`.
+    client, registry = models_client
+    other = registry.rsplit("/", 1)[0] + "/other"
+    _publish(other, {"rows_seen": 1}, "tok-other", first=True)
+    lance.dataset(registry).tags.create("blessed", 1)
+    captured = _fake_list_objects(["table:models$demo"], monkeypatch)
+
+    resp = client.get("/v1/model", headers={"Authorization": "Bearer t"})
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"models": [{"model": "demo", "latest_version": 2, "blessed_version": 1}]}
+    assert captured == [{"user": "alice", "relation": "can_get_metadata", "object_type": "table"}]
+
+
+def test_list_models_is_empty_for_a_caller_with_no_grants(
+    models_client: tuple[TestClient, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client, _ = models_client
+    _fake_list_objects([], monkeypatch)
+    resp = client.get("/v1/model", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200
+    assert resp.json() == {"models": []}
+
+
+def test_list_models_requires_authentication(models_client: tuple[TestClient, str]) -> None:
+    client, _ = models_client  # OIDC on, no bearer → 401 before storage is ever listed
+    resp = client.get("/v1/model")
+    assert resp.status_code == 401

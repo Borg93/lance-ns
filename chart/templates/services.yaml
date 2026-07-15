@@ -336,6 +336,9 @@ spec:
           {{- include "lance.preStop" . | nindent 10 }}
           env:
             - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }
+            # #42 models page: the /capi BFF proxies to the catalog. Reads/writes carry ONLY a signed-in
+            # user's bearer (the catalog has no service-token door), so no service credential is wired here.
+            - { name: CATALOG_API, value: "http://{{ include "lance.fullname" . }}-catalog:{{ .Values.services.catalog.port }}" }
             - { name: PORT, value: "3000" }
             {{- if .Values.auth.enabled }}
             # Governed READ path: when no user is signed in, the BFF proxy authenticates to lineage as a

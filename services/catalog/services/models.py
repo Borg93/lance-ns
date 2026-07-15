@@ -18,6 +18,8 @@ import math
 from typing import Any
 
 import lance
+import pyarrow.fs as pafs
+from common.objectfs import fs_and_base
 from lance_namespace import (
     InvalidInputError,
     InvalidTableStateError,
@@ -100,31 +102,53 @@ def _apply_gate(metrics: dict[str, Any], min_metrics: dict[str, float] | None, *
             )
 
 
-def blessed_version(model_uri: str, storage_options: dict[str, str], *, tag: str = BLESSED_TAG) -> int | None:
-    """The version the ``blessed`` tag points at, or ``None`` if no version is blessed yet."""
-    tags = _open(model_uri, storage_options).tags
+def _tag_version(ds: lance.LanceDataset, tag: str) -> int | None:
+    """The version ``tag`` points at, or ``None`` when unset (pylance 8 raises "Ref not found" for an unset
+    tag — it does NOT return None)."""
     try:
-        version = tags.get_version(tag)
-    except ValueError:  # pylance 8 raises ("Ref not found") for an unset tag — it does NOT return None
+        version = ds.tags.get_version(tag)
+    except ValueError:
         return None
     return int(version) if version is not None else None
+
+
+def blessed_version(model_uri: str, storage_options: dict[str, str], *, tag: str = BLESSED_TAG) -> int | None:
+    """The version the ``blessed`` tag points at, or ``None`` if no version is blessed yet."""
+    return _tag_version(_open(model_uri, storage_options), tag)
 
 
 def describe(model_uri: str, storage_options: dict[str, str], *, tag: str = BLESSED_TAG) -> dict[str, Any]:
     """Registry summary: the latest (candidate) version, the blessed version (or None), and both metrics."""
     ds = _open(model_uri, storage_options)  # proves the registry exists (404 otherwise)
     latest = int(ds.version)
-    try:
-        raw = ds.tags.get_version(tag)
-        blessed: int | None = int(raw) if raw is not None else None
-    except ValueError:
-        blessed = None
+    blessed = _tag_version(ds, tag)
     return {
         "latest_version": latest,
         "blessed_version": blessed,
         "candidate_metrics": _safe_metrics(model_uri, storage_options, latest),
         "blessed_metrics": _safe_metrics(model_uri, storage_options, blessed) if blessed else None,
     }
+
+
+def summarize(model_uri: str, storage_options: dict[str, str], *, tag: str = BLESSED_TAG) -> dict[str, Any]:
+    """The list-view summary — latest (candidate) + blessed versions only, NO metric reads.
+
+    Deliberately lighter than :func:`describe`: metrics live in each version's ``meta`` rows, so reading
+    them costs two extra versioned dataset opens per model — fine for one model, not for a listing.
+    """
+    ds = _open(model_uri, storage_options)
+    return {"latest_version": int(ds.version), "blessed_version": _tag_version(ds, tag)}
+
+
+def list_models(models_root: str, storage_options: dict[str, str]) -> list[str]:
+    """Every model name under the registry root (one Lance dataset directory per model), sorted.
+
+    A pure storage LIST (no dataset opens) — the caller filters names (shape + authz) before paying for
+    per-model summaries. An absent root (nothing trained yet) yields ``[]``.
+    """
+    fs, base = fs_and_base(models_root, storage_options)
+    infos = fs.get_file_info(pafs.FileSelector(base, allow_not_found=True))
+    return sorted(info.base_name for info in infos if info.type == pafs.FileType.Directory)
 
 
 def promote(

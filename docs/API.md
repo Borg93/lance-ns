@@ -34,7 +34,7 @@ wrote/promoted what, when) additionally lives in the lineage graph.
 | **Indexes** | `POST /v1/table/{id}/{create_index,create_scalar_index,index/list,index/{name}/drop,index/{name}/stats}` | |
 | **Blobs** | `GET /v1/table/{id}/blobs` | credential-less blob read (data-reader gated) |
 | **Batch** | `POST /v1/table/{batch-commit,version/batch-create}` | |
-| ★ **Model registry & promotion (#17)** | `GET /v1/model/{model}`, `POST /v1/model/{model}/promote` | describe (candidate vs blessed + metrics); promote = validator-gated metrics-gated move of the `blessed` tag on `models$<model>` |
+| ★ **Model registry & promotion (#17/#42)** | `GET /v1/model` (list), `GET /v1/model/{model}`, `POST /v1/model/{model}/promote` | list = governed registry enumeration (reader-rung `list_objects` filter; candidate + blessed versions); describe (candidate vs blessed + metrics); promote = validator-gated metrics-gated move of the `blessed` tag on `models$<model>` |
 | ★ **Warehouse admin / physical multi-tenancy (#3-A)** | `GET,POST /v1/warehouses`, `GET /v1/warehouses/{id}`, `POST /v1/warehouses/{id}/{activate,deactivate,namespaces}` | project-admin (`can_create_warehouse`) provisions a bucket per warehouse + binds namespaces to it |
 | **Materialized views** | `POST /v1/materialized_view/{id}/{create,refresh}` | spec-defined + FGA-typed, but the `dir` backend does not implement MVs yet (returns 501); dormant until Lance adds native MV support |
 | **Transactions** | `POST /v1/transaction/{id}/{alter,describe}` | |

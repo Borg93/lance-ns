@@ -32,7 +32,7 @@ from lance_namespace import (
 from catalog.api import lineage_deps
 from catalog.api.dependencies import LineageEmitterDep, NamespaceDep, SettingsDep, StorageOptionsDep
 from catalog.api.security import CurrentToken
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import (
     ADD_COLUMNS,
     ALTER_COLUMNS,
@@ -59,7 +59,7 @@ async def add_columns(
     """Add SQL-expression-computed columns to the table — wraps ``alter_table_add_columns``; emits an
     ADD_COLUMNS event carrying the NEW per-version schema so the graph's column inventory follows the add."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response = await run_in_threadpool(dataplane.add_columns, ns, so, body)
     await lineage_deps.emit_measured_write(
         emitter,
@@ -89,7 +89,7 @@ async def alter_columns(
     """Rename, re-type, or change nullability of existing columns — wraps ``alter_table_alter_columns``;
     emits an ALTER_COLUMNS event with the post-evolution schema (renames/re-types show in the graph)."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response = await run_in_threadpool(dataplane.alter_columns, ns, so, body)
     await lineage_deps.emit_measured_write(
         emitter,
@@ -119,7 +119,7 @@ async def drop_columns(
     """Drop the named columns from the table — wraps ``alter_table_drop_columns``; emits a DROP_COLUMNS
     event with the reduced schema so the dropped columns leave the graph's per-version inventory."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response = await run_in_threadpool(dataplane.drop_columns, ns, so, body)
     await lineage_deps.emit_measured_write(
         emitter,
@@ -145,7 +145,7 @@ def backfill_column(
     Lance version it eventually produces isn't known at request time — a synchronous emit would assert a
     version that hasn't been written. The version bump is recovered by #23 reconcile when the job lands.
     """
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return native.call(ns, "alter_table_backfill_columns", body)
 
 

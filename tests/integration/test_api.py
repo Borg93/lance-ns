@@ -42,6 +42,22 @@ def test_table_id_is_parsed_from_path(client: TestClient, fake_ns: MagicMock) ->
     assert fake_ns.describe_table.call_args.args[0].id == ["db1", "users"]
 
 
+def test_body_id_matching_the_path_passes(client: TestClient, fake_ns: MagicMock) -> None:
+    # Spec (operations/index.md): a body-level id may restate the path id — identical is fine.
+    fake_ns.count_table_rows.return_value = 7
+    resp = client.post("/v1/table/db1$users/count_rows", json={"id": ["db1", "users"]})
+    assert resp.status_code == 200, resp.text
+    assert fake_ns.count_table_rows.call_args.args[0].id == ["db1", "users"]
+
+
+def test_body_id_differing_from_the_path_is_400(client: TestClient, fake_ns: MagicMock) -> None:
+    # CONTRACT (spec, FEATURE-GAP deviation #1): a body id that CONTRADICTS the path id must refuse —
+    # the path id is what the authz gate checked, so silently picking either one is wrong.
+    resp = client.post("/v1/table/db1$users/count_rows", json={"id": ["db1", "other"]})
+    assert resp.status_code == 400, resp.text
+    fake_ns.count_table_rows.assert_not_called()
+
+
 def test_root_namespace_id_is_empty_list(client: TestClient, fake_ns: MagicMock) -> None:
     fake_ns.list_namespaces.return_value = ListNamespacesResponse(namespaces=["a"])
     client.get("/v1/namespace/$/list")

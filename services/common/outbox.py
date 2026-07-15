@@ -26,35 +26,15 @@ from contextlib import suppress
 import pyarrow.fs as pafs
 
 from common import outbox_metrics
+from common.objectfs import StorageOptions, fs_and_base
 
 log = logging.getLogger(__name__)
-
-StorageOptions = dict[str, str]
-
-
-def _fs_and_base(outbox_uri: str, storage_options: StorageOptions) -> tuple[pafs.FileSystem, str]:
-    """Resolve ``(filesystem, base_path)`` for the outbox prefix. An ``s3://`` URI builds an S3FileSystem
-    from the lance-style ``storage_options`` (endpoint/keys/region, path-style, http-ok); anything else
-    (a ``file://`` or bare local path — dev/tests) resolves via the local filesystem."""
-    if outbox_uri.startswith("s3://") and storage_options.get("endpoint"):
-        scheme, _, host = storage_options["endpoint"].partition("://")
-        fs = pafs.S3FileSystem(
-            access_key=storage_options.get("access_key_id"),
-            secret_key=storage_options.get("secret_access_key"),
-            endpoint_override=host or storage_options["endpoint"],
-            scheme=scheme or "http",
-            region=storage_options.get("region", ""),
-            allow_bucket_creation=True,
-        )
-        return fs, outbox_uri[len("s3://") :].rstrip("/")
-    resolved, path = pafs.FileSystem.from_uri(outbox_uri)
-    return resolved, path.rstrip("/")
 
 
 def stage_event(outbox_uri: str, storage_options: StorageOptions, run_id: str, event_json: str) -> None:
     """Persist the event JSON at ``<outbox_uri>/<run_id>.json`` (overwrite — a redelivery re-stages the
     same run_id). Blocking object-store IO; callers run it in a threadpool."""
-    fs, base = _fs_and_base(outbox_uri, storage_options)
+    fs, base = fs_and_base(outbox_uri, storage_options)
     fs.create_dir(base, recursive=True)  # local FS needs the parent dir; an S3 prefix marker is harmless
     with fs.open_output_stream(f"{base}/{run_id}.json") as stream:
         stream.write(event_json.encode("utf-8"))
@@ -63,7 +43,7 @@ def stage_event(outbox_uri: str, storage_options: StorageOptions, run_id: str, e
 def drop_event(outbox_uri: str, storage_options: StorageOptions, run_id: str) -> None:
     """Delete the staged event (called after a publish returns / after the relay re-ingests it). An
     already-absent object is fine (idempotent). Blocking IO; callers threadpool it."""
-    fs, base = _fs_and_base(outbox_uri, storage_options)
+    fs, base = fs_and_base(outbox_uri, storage_options)
     with suppress(FileNotFoundError):
         fs.delete_file(f"{base}/{run_id}.json")
 
@@ -76,7 +56,7 @@ def _staged_infos(outbox_uri: str, storage_options: StorageOptions) -> list[pafs
     catches up. A newest-first (or arbitrary) order would let the oldest event starve indefinitely behind a
     steady arrival rate — the backlog would "drain" while the thing you are actually alerting on never moves.
     """
-    fs, base = _fs_and_base(outbox_uri, storage_options)
+    fs, base = fs_and_base(outbox_uri, storage_options)
     infos = [
         i
         for i in fs.get_file_info(pafs.FileSelector(base, allow_not_found=True, recursive=False))
@@ -113,7 +93,7 @@ def list_events(
     makes each tick's work bounded; the remainder drains on the next tick, oldest-first, so nothing starves.
     An absent prefix yields nothing. Blocking IO; the caller threadpools the whole drain.
     """
-    fs, _ = _fs_and_base(outbox_uri, storage_options)
+    fs, _ = fs_and_base(outbox_uri, storage_options)
     infos = _staged_infos(outbox_uri, storage_options)
     if limit is not None:
         infos = infos[:limit]

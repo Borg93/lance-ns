@@ -27,7 +27,7 @@ from catalog.api.dependencies import (
     assert_no_warehouse_bound_namespace,
 )
 from catalog.api.security import CurrentToken
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import native
 
 # The native dir backend implements create / describe / batch-delete versions, but its bindings are typed
@@ -117,7 +117,7 @@ def list_table_versions(
 def create_table_version(
     id: str, body: CreateTableVersionRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> CreateTableVersionResponse:
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return native.call(ns, "create_table_version", body)
 
 
@@ -136,7 +136,7 @@ def describe_table_version(
     binding expects. A missing version raises the backend's ``TableVersionNotFoundError`` → 404.
     """
     req = body or DescribeTableVersionRequest()
-    req.id = parse_identifier(id, settings.delimiter)
+    req.id = reconcile_body_id(parse_identifier(id, settings.delimiter), req.id)
     if version is not None:
         req.version = version
     return native.call(ns, "describe_table_version", req)
@@ -146,5 +146,5 @@ def describe_table_version(
 def batch_delete_table_versions(
     id: str, body: BatchDeleteTableVersionsRequest, ns: NamespaceDep, settings: SettingsDep
 ) -> BatchDeleteTableVersionsResponse:
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return native.call(ns, "batch_delete_table_versions", body)

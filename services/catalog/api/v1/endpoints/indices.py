@@ -28,7 +28,7 @@ from lance_namespace import (
 from catalog.api import lineage_deps
 from catalog.api.dependencies import LineageEmitterDep, NamespaceDep, SettingsDep, StorageOptionsDep
 from catalog.api.security import CurrentToken
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import CREATE_INDEX, DROP_INDEX
 from catalog.services import native
 
@@ -49,7 +49,7 @@ async def create_index(
     """Build a vector index on a table's column — wraps the native ``create_table_index`` op; emits a
     CREATE_INDEX lineage event at the new version."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: CreateTableIndexResponse = await run_in_threadpool(native.call, ns, "create_table_index", body)
     await lineage_deps.emit_measured_write(
         emitter,
@@ -78,7 +78,7 @@ async def create_scalar_index(
     """Build a scalar index on a table's column — wraps the native ``create_table_scalar_index`` op; emits a
     CREATE_INDEX lineage event at the new version."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: CreateTableScalarIndexResponse = await run_in_threadpool(
         native.call, ns, "create_table_scalar_index", body
     )

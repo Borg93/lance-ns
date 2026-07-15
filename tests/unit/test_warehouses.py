@@ -1,8 +1,9 @@
 """#3-A — warehouse registry, runtime bucket provisioning, and the admin FGA gate (unit).
 
-The registry round-trips against a LOCAL filesystem root (``_fs_and_base`` falls back to the local FS for a
-non-``s3://`` uri), so no object storage is needed here. Provisioning is boto3, mocked. The gate is driven
-through the real ``require_can_create_warehouse`` resolver, and a separate test asserts the (type, relation)
+The registry round-trips against a LOCAL filesystem root (``common.objectfs.fs_and_base`` falls back to
+the local FS for a non-``s3://`` uri), so no object storage is needed here. Provisioning is boto3,
+mocked. The gate is driven through the real ``require_can_create_warehouse`` resolver, and a separate test
+asserts the (type, relation)
 it checks actually EXISTS in the compiled model (the mocked-``fga.check`` caveat: a mock pins the passed
 string, not that the relation is defined on the type).
 """

@@ -18,7 +18,7 @@ from lance_namespace import (
 )
 
 from catalog.api.dependencies import NamespaceDep, SettingsDep, StorageOptionsDep
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import dataplane
 
 router = APIRouter(prefix="/v1/table", tags=["branch"])
@@ -45,7 +45,7 @@ def create_table_branch(
     id: str, body: CreateTableBranchRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> CreateTableBranchResponse:
     """Create a branch from main (or a source branch/version) — wraps pylance ``create_branch``."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return dataplane.create_branch(ns, so, body)
 
 
@@ -54,5 +54,5 @@ def delete_table_branch(
     id: str, body: DeleteTableBranchRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
 ) -> DeleteTableBranchResponse:
     """Delete a branch from the table — wraps the pylance ``delete_branch`` data-plane op."""
-    body.id = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(parse_identifier(id, settings.delimiter), body.id)
     return dataplane.delete_branch(ns, so, body)

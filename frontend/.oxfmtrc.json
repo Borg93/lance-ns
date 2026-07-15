@@ -2,5 +2,10 @@
 	"$schema": "./node_modules/oxfmt/configuration_schema.json",
 	"useTabs": true,
 	"svelte": true,
-	"ignorePatterns": ["apps/web/src/lib/api.generated.ts", "apps/web/openapi.json", "bun.lock"]
+	"ignorePatterns": [
+		"apps/web/src/lib/api.generated.ts",
+		"apps/web/src/lib/catalog.generated.ts",
+		"apps/web/openapi.json",
+		"bun.lock"
+	]
 }

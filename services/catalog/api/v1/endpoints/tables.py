@@ -42,7 +42,7 @@ from catalog.api.dependencies import (
 )
 from catalog.api.security import CurrentToken
 from catalog.api.v1.endpoints.credentials import _has_external_bases
-from catalog.core.identifiers import parse_identifier
+from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import (
     DECLARE_TABLE,
     DEREGISTER_TABLE,
@@ -96,7 +96,7 @@ async def declare_table(
     and emit a versionless DECLARE_TABLE marker (the table's first provenance — who reserved it + where)."""
     segments = parse_identifier(id, settings.delimiter)
     req = body or DeclareTableRequest()
-    req.id = segments
+    req.id = reconcile_body_id(segments, req.id)
     response: DeclareTableResponse = await run_in_threadpool(native.call, ns, "declare_table", req)
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
     # Versionless (no data yet): records who declared it + the reserved location, and keys the CREATED edge
@@ -265,7 +265,7 @@ async def register_table(
     """Register an existing table location at ``id`` via ``register_table``, then seed the caller's FGA
     ownership and emit a REGISTER_TABLE marker (who attached it + where)."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: RegisterTableResponse = await run_in_threadpool(native.call, ns, "register_table", body)
     await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
     # Versionless + source_uri=the attached location, keying the CREATED edge (register_table ∈ _CREATE_OPS).
@@ -377,7 +377,7 @@ async def restore_table(
     """Restore the table at ``id`` to a prior version via ``restore_table``; emits a RESTORE_TABLE event at
     the NEW current version (restore mints a fresh version pointing at the restored data)."""
     segments = parse_identifier(id, settings.delimiter)
-    body.id = segments
+    body.id = reconcile_body_id(segments, body.id)
     response: RestoreTableResponse = await run_in_threadpool(native.call, ns, "restore_table", body)
     # The response carries only a transaction_id — the shared trailer reads the new current version + its
     # schema off one reopen (best-effort: a readback failure never fails the already-committed restore).

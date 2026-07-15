@@ -21,35 +21,12 @@ import logging
 from contextlib import suppress
 
 import pyarrow.fs as pafs
+from common.objectfs import StorageOptions, fs_and_base
 
 log = logging.getLogger(__name__)
 
-StorageOptions = dict[str, str]
-
 _REGISTRY_PREFIX = "_warehouses"
 _BINDINGS_PREFIX = "_warehouses/bindings"
-
-
-def _fs_and_base(root_uri: str, storage_options: StorageOptions) -> tuple[pafs.FileSystem, str]:
-    """Resolve ``(filesystem, base_path)`` for a control root, mirroring ``common.outbox._fs_and_base``.
-
-    An ``s3://`` root builds an S3FileSystem from the lance-style ``storage_options`` (endpoint/keys/
-    region, http-ok); anything else (a ``file://`` or bare local path — dev/tests) resolves via the local
-    filesystem so the registry round-trips without object storage.
-    """
-    if root_uri.startswith("s3://") and storage_options.get("endpoint"):
-        scheme, _, host = storage_options["endpoint"].partition("://")
-        fs = pafs.S3FileSystem(
-            access_key=storage_options.get("access_key_id"),
-            secret_key=storage_options.get("secret_access_key"),
-            endpoint_override=host or storage_options["endpoint"],
-            scheme=scheme or "http",
-            region=storage_options.get("region", ""),
-            allow_bucket_creation=True,
-        )
-        return fs, root_uri[len("s3://") :].rstrip("/")
-    resolved, path = pafs.FileSystem.from_uri(root_uri)
-    return resolved, path.rstrip("/")
 
 
 def provision_bucket(bucket: str, storage_options: StorageOptions) -> None:
@@ -84,7 +61,7 @@ def provision_bucket(bucket: str, storage_options: StorageOptions) -> None:
 
 
 def _write_json(root_uri: str, storage_options: StorageOptions, key: str, record: dict[str, str]) -> None:
-    fs, base = _fs_and_base(root_uri, storage_options)
+    fs, base = fs_and_base(root_uri, storage_options)
     parent = f"{base}/{key}".rsplit("/", 1)[0]
     fs.create_dir(parent, recursive=True)  # local FS needs the parent dir; an S3 prefix marker is harmless
     with fs.open_output_stream(f"{base}/{key}") as stream:
@@ -92,7 +69,7 @@ def _write_json(root_uri: str, storage_options: StorageOptions, key: str, record
 
 
 def _read_json(root_uri: str, storage_options: StorageOptions, key: str) -> dict[str, str] | None:
-    fs, base = _fs_and_base(root_uri, storage_options)
+    fs, base = fs_and_base(root_uri, storage_options)
     try:
         stream = fs.open_input_stream(f"{base}/{key}")
     except FileNotFoundError:
@@ -116,7 +93,7 @@ def get_warehouse(
 
 def list_warehouses(control_root: str, storage_options: StorageOptions) -> list[dict[str, str]]:
     """Every registered warehouse record (unordered). An absent registry prefix yields ``[]``."""
-    fs, base = _fs_and_base(control_root, storage_options)
+    fs, base = fs_and_base(control_root, storage_options)
     out: list[dict[str, str]] = []
     for info in fs.get_file_info(pafs.FileSelector(f"{base}/{_REGISTRY_PREFIX}", allow_not_found=True)):
         if info.type != pafs.FileType.File or not info.path.endswith(".json"):

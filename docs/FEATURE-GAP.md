@@ -43,12 +43,12 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 ### Minor deviations (none are correctness bugs; listed for a conscious decision)
 | # | Deviation | Spec says | Impact |
 |---|-----------|-----------|--------|
-| 1 | Path/body `id` mismatch silently overrides (uses path id) | 400 when both present **and differ** | benign; missing a validation |
+| 1 | ~~Path/body `id` mismatch silently overrides (uses path id)~~ | 400 when both present **and differ** | ✅ **fixed (#43)** — every body-carrying `{id}` route reconciles via `core/identifiers.reconcile_body_id` (29 sites); a differing body id is a 400 |
 | 2 | Unsupported → HTTP **501** | `UnsupportedOperationErrorResponse` is **406** | body `code:0` is correct; only the HTTP status diverges (501 is arguably cleaner) |
 | 3 | ~~`exists` → **204**~~ | 200 no-content | ✅ **fixed (spec 0.9)** — both `exists` endpoints now return **200** |
 | 4 | CreateTable ignores `x-lance-table-location` + `storage_options` | caller-chosen location/options | fine for single-root; completeness gap |
-| 5 | MergeInsert omits optional filters/`timeout`/`use_index`; `on` not enforced required | full param set | minor |
-| 6 | List ops omit `delimiter` / `include_declared` | those params | minor |
+| 5 | ~~MergeInsert omits optional filters/`timeout`/`use_index`; `on` not enforced required~~ | full param set | ✅ **stale — already conformant** (the pylance-8/spec-0.9 upgrade added `on`/filt/`timeout`/`use_index`/`branch`, tested); residue: the FastAPI signature keeps `on` optional so the backend's own 400 answers a missing `on` (tightening it would trade a spec-true 400 for a 422 — consciously left) |
+| 6 | List ops omit `delimiter` / `include_declared` | those params | ⚠️ **half-stale**: `include_declared` shipped on both table-list routes; per-request `delimiter` **consciously skipped** — deploy-fixed via `LANCE_NS_DELIMITER`, and honoring it per-request would have to thread through the router-level FGA gate too (endpoint-only support would let the gate authorize a differently-parsed object — an authz-drift hazard); the native backend also cannot honor the `ListAllTables` response-joining half |
 | 7 | ~~`insert` emits **versionless** lineage~~ | insert bumps a Lance version | ✅ **fixed (GOAL 3)** — `insert` now reopens the dataset and stamps the real version on the WROTE edge, like update/delete |
 
 ## 2. vs Lakekeeper (Iceberg REST catalog)

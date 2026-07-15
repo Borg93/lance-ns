@@ -122,3 +122,23 @@ def test_describe_reports_candidate_and_blessed(registry_uri: str) -> None:
     assert after["latest_version"] == 2  # candidate is still the latest
     assert after["blessed_version"] == 1  # but v1 is blessed
     assert after["blessed_metrics"] == {"rows_seen": 4, "features": 1}
+
+
+def test_summarize_reports_versions_without_metric_reads(registry_uri: str) -> None:
+    # CONTRACT (#42 list view): versions only — the shape the listing pays for per model.
+    assert registry.summarize(registry_uri, {}) == {"latest_version": 2, "blessed_version": None}
+    registry.promote(registry_uri, {}, version=2)
+    assert registry.summarize(registry_uri, {}) == {"latest_version": 2, "blessed_version": 2}
+
+
+def test_list_models_enumerates_registry_directories_only(tmp_path: Any) -> None:
+    # Two real registries + a stray file + a non-dataset dir: names come from DIRECTORY entries alone
+    # (dataset validity is the per-model summary's concern), files never appear, absent root → [].
+    root = tmp_path / "models"
+    _publish(str(root / "bravo"), {"rows_seen": 1}, "tok", first=True)
+    _publish(str(root / "alpha"), {"rows_seen": 1}, "tok", first=True)
+    (root / "not-a-dataset").mkdir()
+    (root / "stray.txt").write_text("x")
+
+    assert registry.list_models(str(root), {}) == ["alpha", "bravo", "not-a-dataset"]
+    assert registry.list_models(str(tmp_path / "never-created"), {}) == []

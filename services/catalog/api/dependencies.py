@@ -75,14 +75,24 @@ async def _resolve_warehouse_root(request: Request, settings: Settings, top_ns: 
     # Deactivation gate (P2.3 lifecycle): a deactivated warehouse quarantines EVERY op on its bound
     # namespaces. Status is MUTABLE, so it is read LIVE each request (never cached, unlike the immutable
     # root_uri) — one metadata GET, only for bound namespaces (the minority; the whole lookup is skipped when
-    # warehouses are off). Fail-closed: a registry read error propagates as 503 above, and a MISSING warehouse
-    # record for a still-bound namespace (status None) is NOT-active → refuse, never silently allow.
-    status = await run_in_threadpool(
-        warehouses.warehouse_status,
-        settings.registry_root,
-        settings.storage_options(),
-        binding["warehouse_id"],
-    )
+    # warehouses are off). FAIL-CLOSED on BOTH failure kinds (audit #3/#5): a transient registry read error is
+    # wrapped as 503 (NOT an unhandled 500) — symmetric with the binding read above; and a MISSING warehouse
+    # record for a still-bound namespace (a clean status None) is NOT-active → 403, never silently allowed.
+    try:
+        status = await run_in_threadpool(
+            warehouses.warehouse_status,
+            settings.registry_root,
+            settings.storage_options(),
+            binding["warehouse_id"],
+        )
+    except Exception as exc:  # noqa: BLE001 — a status read fault must 503, not fall through / 500
+        log.warning(
+            "warehouse_status_lookup_failed",
+            extra={"top_ns": top_ns, "warehouse_id": binding["warehouse_id"], "error": str(exc)},
+        )
+        raise ServiceUnavailableError(
+            f"warehouse status lookup failed for {binding['warehouse_id']!r}"
+        ) from exc
     if status != "active":
         raise PermissionDeniedError(
             f"warehouse {binding['warehouse_id']!r} is deactivated (quarantined); operations on namespace "

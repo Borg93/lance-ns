@@ -215,6 +215,36 @@ def test_binding_lookup_fails_closed_on_read_error(monkeypatch: pytest.MonkeyPat
         asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1"))
 
 
+def test_resolver_refuses_when_warehouse_record_is_missing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # AUDIT #7: the fail-closed "missing warehouse record (status None) → refuse" branch had NO test. A bound
+    # namespace whose warehouse record has vanished must 403, NOT silently route to the (now orphaned) bucket.
+    monkeypatch.setattr(
+        warehouses,
+        "binding_for_namespace",
+        lambda *_a, **_k: {"warehouse_id": "wh-a", "root_uri": "s3://bkt-a"},
+    )
+    monkeypatch.setattr(warehouses, "warehouse_status", lambda *_a, **_k: None)  # record gone
+    with pytest.raises(PermissionDeniedError):
+        asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1"))
+
+
+def test_resolver_fails_closed_503_on_status_read_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    # AUDIT #3/#5: a TRANSIENT registry error during the LIVE status read must 503 (fail-closed), symmetric
+    # with the binding read — NOT propagate as an unhandled 500 (or, worse, fall through to routing).
+    monkeypatch.setattr(
+        warehouses,
+        "binding_for_namespace",
+        lambda *_a, **_k: {"warehouse_id": "wh-a", "root_uri": "s3://bkt-a"},
+    )
+
+    def boom(*_a: object, **_k: object) -> str | None:
+        raise OSError("registry blip")
+
+    monkeypatch.setattr(warehouses, "warehouse_status", boom)
+    with pytest.raises(ServiceUnavailableError):
+        asyncio.run(dependencies._resolve_warehouse_root(_bare_request(), _fga_settings(), "db1"))
+
+
 def test_binding_lookup_unbound_routes_to_default(monkeypatch: pytest.MonkeyPatch) -> None:
     # ...but a clean None (unbound) is NOT an error — it routes to the default root.
     monkeypatch.setattr(warehouses, "binding_for_namespace", lambda *_a, **_k: None)

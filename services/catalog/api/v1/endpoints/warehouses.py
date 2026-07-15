@@ -138,8 +138,13 @@ async def create_warehouse(
         "bucket": bucket,
         "root_uri": root_uri,
         "project": project,
-        "status": "active",  # P2.3 lifecycle: a fresh warehouse is live; deactivate quarantines it
-        "created_at": datetime.now(UTC).isoformat(),
+        # Idempotent re-create must NOT resurrect a DEACTIVATED warehouse nor reset created_at (audit #1): a
+        # GitOps reconcile / partial-failure retry re-POSTing an existing id would otherwise silently lift a
+        # quarantine with no /activate call and no audit signal. Carry the MUTABLE lifecycle fields forward
+        # from the existing record; reactivation goes ONLY through the explicit /activate endpoint.
+        "status": existing.get("status", "active") if existing is not None else "active",
+        "created_at": (existing.get("created_at") if existing is not None else None)
+        or datetime.now(UTC).isoformat(),
     }
     await run_in_threadpool(warehouses.put_warehouse, settings.registry_root, so, record)
     await fga_deps.seed_warehouse(client, settings, token, warehouse_id=warehouse_id, project=project)
@@ -200,15 +205,22 @@ async def _set_warehouse_status(
     """Shared deactivate/activate: admin-gate on the warehouse's OWN project, flip ``status``, persist.
 
     Lifecycle is a platform-admin op (same rung as create): a project admin may quarantine or restore a
-    warehouse they own. Fail-closed: the record is read first (404 if absent) so the gate checks the REAL
-    owning project, not a caller-supplied one. Status is read LIVE by the resolver, so no cache invalidation
-    is needed — the very next routed request sees the new status."""
+    warehouse they own. Fail-closed: the record is read first (needed to gate on the REAL owning project, not
+    a caller-supplied one). NO EXISTENCE ORACLE (audit #4): a caller who is not the warehouse's project admin
+    gets the SAME 404 as a missing warehouse — the not-found and permission-denied outcomes are made
+    indistinguishable so an unauthorized user cannot probe which warehouse ids exist. Status is read LIVE by
+    the resolver, so no cache invalidation is needed — the very next routed request sees the new status."""
     _require_enabled(settings)
     so = settings.storage_options()
     record = await run_in_threadpool(warehouses.get_warehouse, settings.registry_root, so, warehouse_id)
     if record is None:
         raise TableNotFoundError(f"warehouse not found: {warehouse_id}")
-    await fga_deps.require_can_create_warehouse(client, settings, token, project=record["project"])
+    try:
+        await fga_deps.require_can_create_warehouse(client, settings, token, project=record["project"])
+    except PermissionDeniedError as exc:
+        # Collapse denied → not-found so existence is not disclosed to a non-admin (audit #4). A legitimate
+        # admin of the warehouse's own project still passes; anyone else sees exactly a missing-warehouse 404.
+        raise TableNotFoundError(f"warehouse not found: {warehouse_id}") from exc
     updated = await run_in_threadpool(
         warehouses.set_warehouse_status, settings.registry_root, so, warehouse_id, status
     )
@@ -268,6 +280,15 @@ async def create_warehouse_namespace(
     )
     if record is None:
         raise TableNotFoundError(f"warehouse not found: {warehouse_id}")
+    # Deactivation gate (audit #2/#6): this handler resolves the bucket connection DIRECTLY from
+    # record["root_uri"] via _namespace_for_root — it never routes through get_namespace, so the resolver's
+    # deactivation quarantine does NOT cover it. Without this check a principal still holding
+    # can_create_namespace could provision a namespace + seed fresh FGA grants inside a QUARANTINED bucket (a
+    # persistence foothold that survives a naive offboarding). Mirror the resolver's gate here.
+    if (record.get("status") or "active") != "active":
+        raise PermissionDeniedError(
+            f"warehouse {warehouse_id!r} is deactivated (quarantined); cannot create namespaces in it"
+        )
     root_uri = record["root_uri"]
 
     # Binding is WRITE-ONCE: reject re-binding a top-level namespace already bound to a DIFFERENT warehouse.

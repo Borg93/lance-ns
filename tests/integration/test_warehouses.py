@@ -117,6 +117,81 @@ def test_disabled_returns_501(client: TestClient, tmp_path: Any, monkeypatch: py
     assert client.post("/v1/warehouses", json={"id": "wh-x", "project": "acme"}).status_code == 501
 
 
+def test_recreate_does_not_reactivate_a_deactivated_warehouse(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AUDIT #1: an idempotent re-create (GitOps reconcile / retry) must NOT silently lift a quarantine. The
+    # mutable lifecycle fields (status, created_at) are carried forward on a same-project re-create;
+    # reactivation goes ONLY through /activate.
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    s = _settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    created = client.post("/v1/warehouses", json={"id": "wh-a", "project": "acme"})
+    assert created.status_code == 200
+    created_at = created.json()["created_at"]
+    assert client.post("/v1/warehouses/wh-a/deactivate").json()["status"] == "deactivated"
+
+    re = client.post("/v1/warehouses", json={"id": "wh-a", "project": "acme"})  # idempotent re-create
+    assert re.status_code == 200
+    assert re.json()["status"] == "deactivated", "re-create silently REACTIVATED a quarantined warehouse"
+    assert re.json()["created_at"] == created_at, "re-create reset created_at"
+
+
+def test_namespace_create_refused_on_deactivated_warehouse(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AUDIT #2/#6: create_warehouse_namespace resolves the bucket DIRECTLY (bypassing the resolver's
+    # deactivation gate), so it must gate on status itself — else a namespace + fresh FGA grants could be
+    # provisioned inside a QUARANTINED bucket (a persistence foothold surviving a naive offboarding).
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    s = _settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    client.post("/v1/warehouses", json={"id": "wh-a", "project": "acme"})
+    client.post("/v1/warehouses/wh-a/deactivate")
+    r = client.post("/v1/warehouses/wh-a/namespaces", json={"namespace": "newns"})
+    assert r.status_code == 403, r.text
+    assert "deactivated" in r.text.lower()
+
+
+def test_deactivate_missing_warehouse_404(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    client.app.dependency_overrides[get_settings] = lambda: _settings(tmp_path)
+    assert client.post("/v1/warehouses/ghost/deactivate").status_code == 404
+
+
+def test_deactivate_hides_existence_from_non_admin_404(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # AUDIT #4: deactivate/activate read the record BEFORE the admin gate (they need its project). A missing
+    # warehouse 404s; a present-but-unauthorized one must ALSO 404 (not 403) so a non-admin cannot probe which
+    # warehouse ids exist. The fix collapses denied → not-found.
+    s = _settings(tmp_path, fga=True)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    wh_svc.put_warehouse(
+        s.registry_root,
+        s.storage_options(),
+        {
+            "id": "wh-real",
+            "bucket": "wh-real",
+            "root_uri": "s3://wh-real",
+            "project": "acme",
+            "status": "active",
+        },
+    )
+    verifier = MagicMock()
+    verifier.verify.return_value = IDToken(iss="i", sub="mallory", aud="lance", exp=1, iat=1)
+    client.app.state.oidc = verifier
+    client.app.state.fga = MagicMock()
+
+    async def deny(_c: object, *, user: str, relation: str, obj: str, **_kw: object) -> bool:
+        return False
+
+    monkeypatch.setattr(fga_module, "check", deny)
+    r = client.post("/v1/warehouses/wh-real/deactivate", headers={"authorization": "Bearer t"})
+    assert r.status_code == 404, r.text  # NOT 403 — a non-admin cannot learn wh-real exists
+
+
 def test_create_denied_for_non_admin_403(
     client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:

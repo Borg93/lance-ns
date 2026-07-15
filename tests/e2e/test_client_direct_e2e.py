@@ -258,8 +258,8 @@ def test_concurrent_commits_are_acid_no_lost_update(catalog: str) -> None:
         data=stale_body,
         timeout=30,
     )
-    assert r.status_code == 409, (
-        f"stale-append-after-overwrite must be a retryable 409, got {r.status_code}: {r.text}"
+    assert r.status_code == 400, (
+        f"stale-append-after-overwrite must be a NON-retryable 400 (P4 fix), got {r.status_code}: {r.text}"
     )
 
 

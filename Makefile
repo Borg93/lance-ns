@@ -182,12 +182,13 @@ e2e-obs: ## Run the e2e observability test against the deployed stack (auto-forw
 	@echo "port-forwarding catalog/lineage/greptime …"
 	@kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & C=$$!; \
 	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & L=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & X=$$!; \
 	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 >/dev/null 2>&1 & G=$$!; \
 	 sleep 4; \
 	 LANCE_E2E_CATALOG_URL=http://localhost:2333 LANCE_E2E_LINEAGE_URL=http://localhost:8000 \
 	   LANCE_E2E_GREPTIME_URL=http://localhost:4000 \
 	   uv run pytest tests/e2e/test_observability_e2e.py -v -m observability; rc=$$?; \
-	 kill $$C $$L $$G 2>/dev/null; exit $$rc
+	 kill $$C $$L $$X $$G 2>/dev/null; exit $$rc
 
 e2e-medallion: ## Run the e2e medallion-cascade test against the deployed stack (auto-forwards lance-ray/lineage)
 	@echo "port-forwarding lance-ray/lineage …"

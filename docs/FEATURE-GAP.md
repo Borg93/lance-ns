@@ -54,8 +54,9 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 ## 2. vs Lakekeeper (Iceberg REST catalog)
 
 > 🔄 **Currency check 2026-07-12** (cloned v0.13.1 + main@2026-07-11, CHANGELOG v0.12.0→HEAD read):
-> the two genuinely-missing verdicts below (multi-warehouse, views/MVs) and "no lineage at all"
-> REMAIN accurate — but the framing changed materially: **Lakekeeper 0.13.0 (2026-06-30) now
+> the views/MVs genuinely-missing verdict below and "no lineage at all" REMAIN accurate; the
+> multi-warehouse verdict is now STALE — it shipped 2026-07-15 (#3-A + #35). Framing changed
+> materially: **Lakekeeper 0.13.0 (2026-06-30) now
 > catalogs LANCE tables directly** via its Generic Table API (#1673): per-table credential vending,
 > soft-delete/undrop, a dedicated OpenFGA object type with 16 per-action permissions, Console UI,
 > and a pylakekeeper client. It is however **metadata-pointer-only by its own docs**
@@ -75,7 +76,7 @@ governance itself no longer is.
 
 | Capability | Us | Verdict |
 |-----------|-----|---------|
-| Multi-warehouse data plane | FGA **models** team→project→warehouse→namespace→table, but the runtime binds ONE `LANCE_REST_ROOT` bucket | **Genuinely missing** — valuable only for multi-tenant SaaS (needs a per-warehouse namespace-backend router). N/A for single-org. |
+| Multi-warehouse data plane | ✅ **SHIPPED (#3-A + #35, 2026-07-15):** admin API provisions a warehouse = one physically isolated bucket at runtime; `get_namespace` routes a bound namespace to its bucket; deactivate/activate lifecycle quarantines a tenant; real-resolver + live e2e coverage. | **Closed.** (Multi-tenant SaaS gap that this row previously called "genuinely missing" is now built. Remaining sub-item: multiple *storage profiles* per warehouse — still only matters at SaaS scale.) |
 | Control-plane management API | Declarative config (env + Helm + FGA at boot); Lakekeeper-style **read-only maintenance mode** built | Missing but low-value given GitOps |
 | Soft-delete / undrop | `DeregisterTable` (`.lance-deregistered` marker) + `RestoreTable` + version time-travel | **Have — arguably stronger**; only a timed-expiration queue is N/A-by-design |
 | User/role admin API | External OIDC (Dex) + OpenFGA tuples seeded on create + `.localbin/fga` | Missing *API*, not *capability* (our ReBAC is finer-grained IN THE DATA PATH; their OSS now has nested roles + admission gates, Cedar in the paid tier — 2026-07-12) |
@@ -86,7 +87,10 @@ governance itself no longer is.
 
 | **Lance table support** (NEW row, 2026-07-12) | full data plane (§1): Arrow-IPC write/query, versions/tags/branches, schema evolution, blob-v2, commit-level lineage + storage reconcile | **Lakekeeper 0.13 governs Lance as METADATA POINTERS only** (vending + soft-delete + FGA + UI; explicitly no commit coordination / schema enforcement / data plane). Complementary more than competitive today — and a possible future interop: registering our tables as their generic pointers would give a shared org catalog without ceding the data plane. |
 
-**Net (re-affirmed 2026-07-12 against v0.13.1):** genuinely-missing-and-valuable = multi-warehouse/multi-storage-profile (multi-tenant only) + working views/MVs (blocked on native Lance). Everything else is present-or-better or N/A-by-design. Lakekeeper still has **no lineage at all** — and its new Lance support is governance-of-pointers, not operation-of-a-lakehouse.
+**Net (updated 2026-07-15):** multi-warehouse is now **SHIPPED** (#3-A + #35). The only remaining
+genuinely-missing-and-valuable catalog item is **working views/MVs (blocked on native Lance)**; multi-storage-profile
+matters only at multi-tenant-SaaS scale. Everything else is present-or-better or N/A-by-design. Lakekeeper still has
+**no lineage at all** — and its Lance support is governance-of-pointers, not operation-of-a-lakehouse.
 
 ## 3. vs Marquez (OpenLineage reference server)
 
@@ -133,4 +137,5 @@ Remaining, by value:
 2. **`dataQualityMetrics`** — column null/distinct/min-max; costly on Lance (stats live outside the file). Low.
 3. **Job-context auto-instrumentation** — the *real* `sourceCodeLocation` + run `parent` facets, emitted from
    rask's runner when lance-ray OpenLineage lands (GOAL 3-real). Supersedes the here-dummy.
-4. Multi-warehouse routing + working views — **only when** multi-tenant SaaS / native Lance views arrive.
+4. ✅ **Multi-warehouse routing — SHIPPED (#3-A + #35).** Working views/MVs remain **only when** native Lance
+   view deps (`base_objects`) arrive.

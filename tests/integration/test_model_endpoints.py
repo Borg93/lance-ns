@@ -246,3 +246,22 @@ def test_list_models_requires_authentication(models_client: tuple[TestClient, st
     client, _ = models_client  # OIDC on, no bearer → 401 before storage is ever listed
     resp = client.get("/v1/model")
     assert resp.status_code == 401
+
+
+def test_list_models_serializes_null_versions_for_an_unreadable_registry(
+    models_client: tuple[TestClient, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # CONTRACT: an interrupted first publish (a registry dir that is not a readable dataset) is surfaced
+    # with explicit nulls on the wire — the list route must NOT exclude_none them away (audit 2026-07-15;
+    # the OpenAPI marks both version fields required-nullable, so a spec client relies on their presence).
+    import pathlib
+
+    client, registry = models_client
+    pathlib.Path(registry).parent.joinpath("halfborn").mkdir()
+    _fake_list_objects(["table:models$demo", "table:models$halfborn"], monkeypatch)
+
+    resp = client.get("/v1/model", headers={"Authorization": "Bearer t"})
+
+    assert resp.status_code == 200, resp.text
+    rows = {m["model"]: m for m in resp.json()["models"]}
+    assert rows["halfborn"] == {"model": "halfborn", "latest_version": None, "blessed_version": None}

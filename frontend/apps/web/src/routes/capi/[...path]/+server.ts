@@ -2,12 +2,19 @@ import { env } from "$env/dynamic/private";
 import type { RequestHandler } from "./$types";
 
 // Same-origin proxy to the CATALOG service (the /api proxy covers lineage). The catalog is OIDC-only —
-// it has NO service-token door (unlike the lineage ingest) — so the only credential ever attached is the
+// it has no service-token door (unlike the lineage ingest) — so the only credential ever attached is the
 // signed-in user's bearer. No session → no header: the auth-off dev stack answers openly; a governed
 // stack answers 401 and the models page renders its sign-in state instead of data.
 const CATALOG_API = env.CATALOG_API ?? "http://localhost:2333";
 
 const proxy: RequestHandler = async ({ url, fetch, locals }) => {
+	// API routes only — never the catalog's open /docs//openapi.json surface through the public BFF.
+	if (!url.pathname.startsWith("/capi/v1/")) {
+		return new Response(JSON.stringify({ detail: "not found" }), {
+			status: 404,
+			headers: { "content-type": "application/json" },
+		});
+	}
 	const target = CATALOG_API + url.pathname.replace(/^\/capi/, "") + url.search;
 	const headers: Record<string, string> = {};
 	if (locals.session) {
@@ -20,6 +27,7 @@ const proxy: RequestHandler = async ({ url, fetch, locals }) => {
 			headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
 		});
 	} catch (err) {
+		console.error(`capi proxy upstream failure: ${String(err)}`);
 		return new Response(JSON.stringify({ detail: String(err) }), {
 			status: 502,
 			headers: { "content-type": "application/json" },

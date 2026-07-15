@@ -311,6 +311,7 @@ async def rename_table(
     so the destination appears in the graph with its provenance (#23 reconcile back-fills its on-disk
     version). Source missing → 404 ``TableNotFound``; destination name taken → 409 ``TableAlreadyExists``."""
     segments = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(segments, body.id)  # a contradictory body id is a 400, like every {id} route
     # Rename mints a new table identifier under ``new_namespace_id`` (defaulting to the source's parent
     # namespace, i.e. all source segments but the last) + ``new_table_name``.
     dest_parent = list(body.new_namespace_id) if body.new_namespace_id else segments[:-1]

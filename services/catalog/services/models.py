@@ -131,7 +131,7 @@ def describe(model_uri: str, storage_options: dict[str, str], *, tag: str = BLES
 
 
 def summarize(model_uri: str, storage_options: dict[str, str], *, tag: str = BLESSED_TAG) -> dict[str, Any]:
-    """The list-view summary — latest (candidate) + blessed versions only, NO metric reads.
+    """The list-view summary — latest (candidate) + blessed versions only, no metric reads.
 
     Deliberately lighter than :func:`describe`: metrics live in each version's ``meta`` rows, so reading
     them costs two extra versioned dataset opens per model — fine for one model, not for a listing.

@@ -99,9 +99,13 @@ def authenticate(
     """
     if not settings.oidc_enabled:
         return None
-    # The service door is only consulted when a service token is actually presented, so a human request
-    # with a bad/absent bearer keeps its existing 401 — no behaviour change for any existing caller.
-    if dapr_api_token is not None:
+    # The service door opens only on a DELIBERATE service call: both the token and the identity header.
+    # Gating on the token alone breaks gateway-proxied humans — with dapr.io/app-token-secret set, the
+    # SIDECAR stamps `dapr-api-token` on every request it delivers (its app-authentication feature), so a
+    # service-invoked request carrying a valid user bearer would be diverted into the service door and
+    # 403 on the missing identity (audit 2026-07-15). A token-only request now falls through to OIDC,
+    # which still requires a valid bearer — the door itself stays exactly as strict (app token + allowlist).
+    if dapr_api_token is not None and x_lance_service_identity is not None:
         return _service_principal(settings, dapr_api_token, x_lance_service_identity)
     verifier: OIDCVerifier | None = getattr(request.app.state, "oidc", None)
     if verifier is None:

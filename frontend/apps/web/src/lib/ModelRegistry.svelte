@@ -39,9 +39,11 @@
 			} else {
 				lastStatus = res.status;
 			}
-			if (selected) {
-				const one = await fetchModel(selected);
-				detail = one.ok ? one.data : detail;
+			const current = selected;
+			if (current) {
+				const one = await fetchModel(current);
+				// Latest-wins: drop the response if the user clicked away while it was in flight.
+				if (one.ok && selected === current) detail = one.data;
 			}
 		} finally {
 			polling = false;

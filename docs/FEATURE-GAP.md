@@ -43,7 +43,7 @@ native `DirectoryNamespace`, with the pylance data plane filling ops the backend
 ### Minor deviations (none are correctness bugs; listed for a conscious decision)
 | # | Deviation | Spec says | Impact |
 |---|-----------|-----------|--------|
-| 1 | ~~Path/body `id` mismatch silently overrides (uses path id)~~ | 400 when both present **and differ** | ✅ **fixed (#43)** — every body-carrying `{id}` route reconciles via `core/identifiers.reconcile_body_id` (29 sites); a differing body id is a 400 |
+| 1 | ~~Path/body `id` mismatch silently overrides (uses path id)~~ | 400 when both present **and differ** | ✅ **fixed (#43)** — every body-carrying `{id}` route reconciles via `core/identifiers.reconcile_body_id` (the 29 override sites + rename/field-metadata/schema-metadata); a differing body id is a 400 |
 | 2 | Unsupported → HTTP **501** | `UnsupportedOperationErrorResponse` is **406** | body `code:0` is correct; only the HTTP status diverges (501 is arguably cleaner) |
 | 3 | ~~`exists` → **204**~~ | 200 no-content | ✅ **fixed (spec 0.9)** — both `exists` endpoints now return **200** |
 | 4 | CreateTable ignores `x-lance-table-location` + `storage_options` | caller-chosen location/options | fine for single-root; completeness gap |

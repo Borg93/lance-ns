@@ -2,9 +2,10 @@
 
 The Dapr async SDK already bounds every unary RPC (incl. ``PublishEvent``) with a client-side gRPC
 deadline: ``DaprClientTimeoutInterceptorAsync`` applies ``DAPR_API_TIMEOUT_SECONDS`` on every call, and our
-chart sets that to 30s on every app pod as the global backstop. But that knob is GLOBAL — a 5s value would
-also throttle the same apps' ~80s retrying secret-store fetch — and ``publish_event`` exposes no per-call
-timeout arg. So we wrap each publish in a deliberately tighter ``asyncio.timeout`` (default 5s) that fires
+chart sets that to 30s on every app pod as the global backstop. But that knob is a blunt GLOBAL deadline for
+every SDK gRPC call, and ``publish_event`` exposes no per-call timeout arg (the secret-store fetch is plain
+HTTP with its own 5s-per-attempt bound — unaffected either way). So we wrap each publish in a deliberately
+tighter ``asyncio.timeout`` (default 5s) that fires
 well before the 30s gRPC deadline, turning a wedged sidecar / NATS stall into a ``TimeoutError`` the existing
 failure path already handles (mover → RETRY / redeliver; catalog+compaction emit → best-effort swallow)
 without a coroutine sitting stalled for 30s. One helper so the tighter bound is applied at every publish site.

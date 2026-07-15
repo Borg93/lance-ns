@@ -1,7 +1,7 @@
 // Typed client for the CATALOG service via the /capi BFF proxy (the /api proxy covers lineage).
 // Types are generated from docs/catalog-openapi.json (`bun run gen:types:catalog`) — never hand-mirrored.
-// NOTE the backend serializes with response_model_exclude_none, so a null field arrives ABSENT — read
-// version fields with `?? null` rather than trusting the generated required-nullable shape.
+// The describe route serializes with response_model_exclude_none, so its null fields arrive absent —
+// read optional fields with `?? null` rather than trusting the generated required-nullable shape.
 import type { components } from "./catalog.generated";
 import { FETCH_TIMEOUT_MS, timeoutSignal } from "./http";
 

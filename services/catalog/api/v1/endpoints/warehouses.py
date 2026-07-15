@@ -178,15 +178,9 @@ async def get_warehouse(
 ) -> WarehouseResponse:
     """One warehouse record — reader-gated on ``warehouse:<id>`` (fail-closed on an OpenFGA outage)."""
     _require_enabled(settings)
-    if (
-        settings.fga_enabled
-        and client is not None
-        and token is not None
-        and not await fga.check(
-            client, user=token.sub, relation="can_get_metadata", obj=f"warehouse:{warehouse_id}"
-        )
-    ):
-        raise PermissionDeniedError(f"can_get_metadata required on warehouse:{warehouse_id}")
+    await fga_deps.require_relation(
+        client, settings, token, relation="can_get_metadata", obj=f"warehouse:{warehouse_id}"
+    )
     record = await run_in_threadpool(
         warehouses.get_warehouse, settings.registry_root, settings.storage_options(), warehouse_id
     )
@@ -266,15 +260,9 @@ async def create_warehouse_namespace(
     namespace's ``parent`` edge pointing at the warehouse — so the owner's grant cascades into the tables."""
     _require_enabled(settings)
     ns_name = _validate_id(body.namespace, what="namespace name")
-    if (
-        settings.fga_enabled
-        and client is not None
-        and token is not None
-        and not await fga.check(
-            client, user=token.sub, relation="can_create_namespace", obj=f"warehouse:{warehouse_id}"
-        )
-    ):
-        raise PermissionDeniedError(f"can_create_namespace required on warehouse:{warehouse_id}")
+    await fga_deps.require_relation(
+        client, settings, token, relation="can_create_namespace", obj=f"warehouse:{warehouse_id}"
+    )
     record = await run_in_threadpool(
         warehouses.get_warehouse, settings.registry_root, settings.storage_options(), warehouse_id
     )

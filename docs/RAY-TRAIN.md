@@ -50,7 +50,7 @@ authz model, and ONE storage substrate.
 ## D2 — The trainer consumer: SUBMIT-AND-ACK, never block-and-poll
 
 `services/medallion/services/ray_submit.py` documents its own limitation: the mover blocks until
-the job finishes, so anything longer than `maxDeliver × ackWait` (~2.5 min) exhausts redelivery.
+the job finishes, so anything outliving the redelivery window exhausts it (default resiliency-ON deploy: sidecar-owned retries + a 720s broker crash-recovery ackWait; the `resiliency=false` escape hatch reverts to the broker-only ~2.5 min).
 That pattern is CORRECT for bounded stage transforms and WRONG for training. The trainer handler
 therefore:
 
@@ -90,7 +90,10 @@ run is terminal until a human (or future automation) POSTs `/train` again with a
   sweep can never repair it).
 - **Emission transport**: Ray pods carry no Dapr sidecar, so the job POSTs to the lineage HTTP
   ingest (`LINEAGE_URL`, default the in-cluster service) — best-effort, two attempts, never crashes
-  training. **Governed deployments — the SERVICE-DOOR credential (closed 2026-07-13).** With
+  training. **Accepted trace break (audit 2026-07-15)**: distributed traces end at the Ray Jobs API —
+  the job propagates no `traceparent`, so the trainer is trace-dark by design; job-level visibility is
+  the Ray dashboard + its OpenLineage RunEvents + the `lance.training.*` metrics. Revisit at the
+  KubeRay merge alongside the runtime_env secret tightening. **Governed deployments — the SERVICE-DOOR credential (closed 2026-07-13).** With
   `auth.enabled` the ingest requires a verified caller, and until this fix every training RunEvent
   401'd → **all training provenance was silently lost** (the job logs `HTTP 401` per attempt,
   distinguishable from an outage). The fix follows the trust model already in the code: the Dapr

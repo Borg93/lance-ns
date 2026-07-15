@@ -7988,8 +7988,22 @@
     },
     "/v1/model": {
       "get": {
-        "description": "List the model registry: every model with its candidate (latest) + blessed versions.\n\nMirrors the governed table listing: enumerate storage, then \u2014 when FGA is on \u2014 return only the models\nthe caller holds the reader rung (``can_get_metadata``) on, the same relation the per-model describe\nenforces. Name-shape filtering runs BEFORE authz so a stray directory can never reach an FGA object id.\nMetrics are deliberately absent here (see :func:`catalog.services.models.summarize`) \u2014 the per-model\ndescribe carries them.",
+        "description": "List the model registry: every model with its candidate (latest) + blessed versions.\n\nMirrors the governed table listing: enumerate storage, then \u2014 when FGA is on \u2014 return only the models\nthe caller holds the reader rung (``can_get_metadata``) on, the same relation the per-model describe\nenforces. Name-shape filtering runs before authz so a stray directory can never reach an FGA object id.\nMetrics are deliberately absent here (see :func:`catalog.services.models.summarize`) \u2014 the per-model\ndescribe carries them. ``limit`` bounds the per-request dataset opens (one per listed model);\ntruncation is deterministic (name-sorted first ``limit``).",
         "operationId": "list_models_v1_model_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -8000,6 +8014,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

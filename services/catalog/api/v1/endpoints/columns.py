@@ -164,6 +164,7 @@ async def update_field_metadata(
     emits an UPDATE_FIELD_METADATA event at the new version (columns unchanged, but the WROTE edge keeps
     the per-version schema populated for every version)."""
     segments = parse_identifier(id, settings.delimiter)
+    body.id = reconcile_body_id(segments, body.id)
     updates = [u.model_dump() for u in (body.updates or [])]
     response = await run_in_threadpool(dataplane.update_field_metadata, ns, so, segments, updates)
     await lineage_deps.emit_measured_write(
@@ -195,6 +196,12 @@ async def update_table_schema_metadata(
     UPDATE_SCHEMA_METADATA event (the response omits the version, so it is read back best-effort)."""
     # REST-only: the spec sends the metadata map directly, or wrapped as {"metadata": {...}}.
     segments = parse_identifier(id, settings.delimiter)
+    # A spec-shaped envelope may restate the id (+ identity/context) beside the map — reconcile the id like
+    # every {id} route (differing → 400) and keep the envelope keys out of the metadata map itself.
+    raw_id = body.pop("id", None)
+    reconcile_body_id(segments, raw_id if isinstance(raw_id, list) else None)
+    for envelope_key in ("identity", "context"):
+        body.pop(envelope_key, None)
     nested = body.get("metadata")
     raw = nested if isinstance(nested, dict) else body
     metadata: dict[str, str] = {str(k): str(v) for k, v in raw.items()}

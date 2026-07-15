@@ -320,6 +320,17 @@ def test_authz_decisions_are_audited() -> None:
     assert "audit(" in body, "_require must emit an audit event for every authz decision (#41 compliance)"
 
 
+def test_batch_authz_and_credential_vending_are_audited() -> None:
+    """Compliance invariant (#41 follow-up): the two authz surfaces that do NOT funnel through ``_require``
+    — the batch gate and the credential vend — must emit their own audit events, or their decisions fall
+    off the trail exactly the way the pre-#41 code's did. Grep-provable like the ``_require`` guard."""
+    fga_src = (SERVICES / "catalog" / "api" / "fga_deps.py").read_text()
+    batch = fga_src.split("async def _authorize_batch(", 1)[1].split("\nasync def ", 1)[0]
+    assert batch.count("audit(") >= 3, "_authorize_batch must audit table/parent/owner decisions (#41)"
+    vend = (SERVICES / "catalog" / "api" / "v1" / "endpoints" / "credentials.py").read_text()
+    assert vend.count("audit(") >= 2, "credential vending must audit the write-tier gate + issuance (#41)"
+
+
 def test_authentication_outcomes_are_audited() -> None:
     """Compliance invariant (#41): ``authenticate`` must audit both the success (who logged in) and the
     failure (rejected token) paths — authn was entirely unlogged before #41, so brute-force / forged-token

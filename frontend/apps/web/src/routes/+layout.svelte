@@ -1,14 +1,14 @@
 <script lang="ts">
 	import "../app.css";
-	import { page } from "$app/stores";
+	import { page } from "$app/state";
 	import type { LayoutServerData } from "./$types";
 
 	let { children, data }: { children: import("svelte").Snippet; data: LayoutServerData } = $props();
 </script>
 
 <nav class="navbar">
-	<a href="/" class:active={$page.url.pathname !== "/models"}>Lineage</a>
-	<a href="/models" class:active={$page.url.pathname === "/models"}>Models</a>
+	<a href="/" class:active={page.url.pathname !== "/models"}>Lineage</a>
+	<a href="/models" class:active={page.url.pathname === "/models"}>Models</a>
 </nav>
 
 {#if data.authEnabled}

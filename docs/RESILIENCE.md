@@ -41,7 +41,9 @@ Two properties make it safe:
 | **Idempotency** (replays re-deliver old events) | fixed `run_id`s re-MERGE | `gaptest1` has **exactly 1** producer run — no duplication |
 
 So: **a service going down delays the pipeline; it does not lose or corrupt data.** Transient dependency
-failures recover via Dapr `RETRY` (ackWait 30s, maxDeliver 5, backOff `30s,60s,120s,300s` — the first
+failures recover via Dapr `RETRY` (with the DEFAULT `dapr.resiliency.enabled=true` the sidecar's Resiliency
+policy owns the retry schedule and the broker ackWait is 720s crash-recovery only; the numbers below
+describe the `resiliency=false` escape hatch: ackWait 30s, maxDeliver 5, backOff `30s,60s,120s,300s` — the first
 backOff step IS the effective ack window per NATS consumer semantics, so it must not undercut the slowest
 handler; the ~8.5 min total window covers a realistic dependency blip).
 

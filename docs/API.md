@@ -30,7 +30,7 @@ an OpenFGA outage is `503`, a denial is `403`, a missing token is `401`.
 | **Batch** | `POST /v1/table/{batch-commit,version/batch-create}` | |
 | ★ **Model registry & promotion (#17)** | `GET /v1/model/{model}`, `POST /v1/model/{model}/promote` | describe (candidate vs blessed + metrics); promote = validator-gated metrics-gated move of the `blessed` tag on `models$<model>` |
 | ★ **Warehouse admin / physical multi-tenancy (#3-A)** | `GET,POST /v1/warehouses`, `GET /v1/warehouses/{id}`, `POST /v1/warehouses/{id}/{activate,deactivate,namespaces}` | project-admin (`can_create_warehouse`) provisions a bucket per warehouse + binds namespaces to it |
-| **Materialized views** | `POST /v1/materialized_view/{id}/{create,refresh}` | native-backed; create emits a lineage event capturing `source_query` |
+| **Materialized views** | `POST /v1/materialized_view/{id}/{create,refresh}` | spec-defined + FGA-typed, but the `dir` backend does not implement MVs yet (returns 501); dormant until Lance adds native MV support |
 | **Transactions** | `POST /v1/transaction/{id}/{alter,describe}` | |
 | **Health** | `GET /livez`, `GET /readyz` | |
 

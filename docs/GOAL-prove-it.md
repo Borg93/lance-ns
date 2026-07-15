@@ -280,6 +280,52 @@ it — its consumers are its own unit test and `scripts/media_pipeline_e2e.py`. 
 seam from the data-zone architecture. Deleting a designed seam is an architecture decision, not a cleanup,
 so it is left visible in the sweep rather than quietly whitelisted.
 
+## P4 FINAL (2026-07-15) — every wgznqpmwd ranked fix: FIXED-with-proof or WONTFIX-with-rationale
+
+The clause requires each ranked fix to be *either* fixed with mechanical proof shown *or* explicitly
+WONTFIX'd here. Full disposition:
+
+| # | audit fix | status | mechanical proof |
+|---|-----------|--------|------------------|
+| 1 | non-blob creates → 2.2 + stable-row-ids path | **FIXED** | `create_table` routes ALL creates to `_create_table_direct`; unit `test_create_table_writes_plain_schema_at_2_2_with_stable_row_ids` + integration `test_api` real-namespace creates + **live** (governed catalog, Dex-auth, opened back `data_storage_version=2.2 has_stable_row_ids=True`) + CI `test_plain_catalog_create_is_2_2_with_stable_row_ids` |
+| 2 | warehouses.py → domain exceptions | **FIXED** | `grep -c "raise HTTPException" warehouses.py` = 0; raises `InvalidInputError`/`PermissionDeniedError`/… ; suite green |
+| 3 | dependencies.py fail-closed docstring | **FIXED** | `catalog/api/dependencies.py:35-54` docstring now states fail-CLOSED, matching the code |
+| 4 | incompatible commit → non-retryable | **FIXED** | `_COMMIT_INCOMPATIBLE_MARKERS` → 400 in `_classify_commit_error`; `test_client_direct_commit` pins it (was pinning the corrupting 409-recommit advice) |
+| 5 | spec `vend_credentials` on describe | **FIXED** | `tables.py:169` honours `vend_credentials`→`storage_options`, read-tier only, multi-base → server-mediated |
+| 6 | `source_rowid` through the cascade | **WONTFIX (this branch)** | see below |
+| 7 | rename branch-guard + live GC-vs-branches probe | **FIXED** | `_refuse_rename_with_branches` via `.branches.list()`; GC-vs-branches REFUTED live (`older_than=0`, branch survived, 0 files reclaimed) |
+| 8a | rename `DERIVED_FROM` edge | **FIXED** | `inputs` threaded through the emitter chain; rename passes source; consumer materializes `(dest)-[:DERIVED_FROM]->(src)`; 3 unit tests |
+| 8b | MV lineage | **WONTFIX (this branch)** | see below |
+| 8c | catalog FAIL events | **WONTFIX (design)** | see below |
+| 9 | GC sweep covers per-warehouse + multibase buckets | **FIXED** | `sweep_buckets` union; `run_sweep` iterates all; chart wires the union; live GC proof earlier |
+| 10 | gateway probes/preStop/securityContext | **FIXED** | `gateway.yaml` has all three; `test_every_first_party_deployment_is_hardened` enforces it in CI |
+
+**WONTFIX rationales (explicit, not silent omissions):**
+
+- **8c catalog FAIL events — WONTFIX (design decision, not a gap).** The medallion/compaction workers emit
+  FAIL because they are data-processing JOBS that attempt in-flight work and can fail mid-stream. A catalog
+  metadata op that fails is a *rejected request* (client 4xx: TableAlreadyExists, schema mismatch) or a store
+  outage (503) — there is no partially-completed dataset work to record a FAIL run against, and emitting FAIL
+  runs for rejected requests would pollute the graph with non-events that `producers()` would surface as if
+  real. The one genuinely relevant case — a write that COMMITTED data but failed after — is already covered
+  by #23 reconcile (storage-ahead back-fill). Emitting more would be wrong, not merely more work.
+
+- **6 source_rowid through the cascade — WONTFIX (this branch); net-new capability, tracked.** Not a
+  regression: nothing that worked stopped working. The FOUNDATION is now complete — stable row ids are on for
+  BOTH catalog creates (this session) and cascade writes (compute.py), so the datasets can carry `_rowid`.
+  Propagating a source `_rowid` column through each medallion transform (and replacing the positional
+  `range(rows)` blob carry-forward) is a feature-scale change to the compute layer with its own live e2e,
+  belonging with the model/experiment-lineage work (tasks #17/#18), not bundled into a catalog-parity branch.
+
+- **8b MV lineage — WONTFIX (this branch); depends on native MV maturity.** The governance-critical half is
+  DONE: `create_materialized_view` seeds FGA ownership on the `materialized_view` type (creator keeps
+  refresh/read; namespace writers inherit). Emitting `MV DERIVED_FROM <source base tables>` requires
+  extracting the source tables from the MV's query definition — a query-parse step whose shape depends on how
+  far the native MV feature matures, which the user has explicitly deferred (query engine is out of scope for
+  batch+training now). Recording a guessed or empty input set would be worse than recording none.
+
+These three are logged as a tracking task so they are visible future work, not dropped.
+
 ## P4 STATUS (2026-07-14) — audit fixes: 8 landed, 3 open with precise plans
 
 **LANDED** (each with its mechanical proof, all pushed):

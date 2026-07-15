@@ -25,7 +25,10 @@ from lance_namespace import (
     CreateNamespaceRequest,
     CreateNamespaceResponse,
     InvalidInputError,
+    LanceNamespace,
     NamespaceAlreadyExistsError,
+    NamespaceExistsRequest,
+    NamespaceNotFoundError,
     PermissionDeniedError,
     TableNotFoundError,
     UnsupportedOperationError,
@@ -78,6 +81,19 @@ def _validate_id(value: str, *, what: str) -> str:
     if not _ID_RE.match(value):
         raise InvalidInputError(f"invalid {what} {value!r}: must match {_ID_RE.pattern}")
     return value
+
+
+def _namespace_exists_in_default(ns: LanceNamespace, segments: list[str]) -> bool:
+    """True if the top-level namespace already exists in ``ns``'s root (the default/shared root).
+
+    Uses the native ``namespace_exists``: a clean return means it exists; ``NamespaceNotFoundError`` means it
+    does not. Any OTHER error PROPAGATES — a registry/backend fault must not be read as 'absent' and let a
+    hijacking bind through. Blocking IO; callers threadpool it."""
+    try:
+        native.call(ns, "namespace_exists", NamespaceExistsRequest(id=segments))
+        return True
+    except NamespaceNotFoundError:
+        return False
 
 
 @router.post("", response_model_exclude_none=True)
@@ -213,8 +229,20 @@ async def create_warehouse_namespace(
     if existing_binding is not None and existing_binding != root_uri:
         raise NamespaceAlreadyExistsError(f"namespace {ns_name!r} is already bound to another warehouse")
 
-    ns_conn = _namespace_for_root(request, settings, root_uri)
     segments = parse_identifier(ns_name, settings.delimiter)
+    # Collision guard (#3-A): a top-level namespace NAME that already exists UNBOUND in the DEFAULT root must
+    # not be bound to a warehouse. Binding routes every future <name>$* op to this warehouse's bucket, so the
+    # default-root namespace's tables become unreachable via the API (orphaned) — and the positive routing
+    # cache makes it permanent. The write-once guard above only catches names bound to ANOTHER warehouse;
+    # this is the other half of the same hazard. The operator must pick a fresh name or migrate first.
+    default_ns: LanceNamespace = request.app.state.namespace
+    if await run_in_threadpool(_namespace_exists_in_default, default_ns, segments):
+        raise NamespaceAlreadyExistsError(
+            f"namespace {ns_name!r} already exists in the default root; binding it to a warehouse would "
+            "orphan its tables — choose a fresh name or migrate the tables first"
+        )
+
+    ns_conn = _namespace_for_root(request, settings, root_uri)
     req = CreateNamespaceRequest(id=segments)
     response: CreateNamespaceResponse = await run_in_threadpool(native.call, ns_conn, "create_namespace", req)
     # Persist + cache the binding BEFORE returning, so the very next table-create routes to this bucket.

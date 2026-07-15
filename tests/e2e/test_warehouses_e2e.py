@@ -107,6 +107,41 @@ def test_per_warehouse_physical_isolation(catalog: str) -> None:
     assert not any("e2etbl" in o for o in b_objs), b_objs
 
 
+def test_deactivate_quarantines_then_activate_restores(catalog: str) -> None:
+    """#3-A lifecycle (P2.3), live: deactivating a warehouse quarantines its bound namespaces (create → 403);
+    activating restores routing (create → 200). Its own warehouse + namespace so a re-run is repeatable and
+    it never strands the isolation test's tenant."""
+    wid, ns = "e2e-wh-life", "e2elifens"
+    assert (
+        requests.post(
+            f"{catalog}/v1/warehouses", json={"id": wid, "project": PROJECT}, headers=_auth(), timeout=30
+        ).status_code
+        == 200
+    )
+    r = requests.post(
+        f"{catalog}/v1/warehouses/{wid}/namespaces", json={"namespace": ns}, headers=_auth(), timeout=30
+    )
+    assert r.status_code in (200, 409), r.text  # 409 = already bound on a re-run (same warehouse) — fine
+
+    def _create(name: str) -> int:
+        return requests.post(
+            f"{catalog}/v1/table/{ns}{DELIM}{name}/create?mode=overwrite",
+            data=_arrow_ipc(),
+            headers={**_auth(), "content-type": ARROW_STREAM},
+            timeout=60,
+        ).status_code
+
+    assert _create("t_before") == 200  # active → routes + succeeds
+
+    d = requests.post(f"{catalog}/v1/warehouses/{wid}/deactivate", headers=_auth(), timeout=30)
+    assert d.status_code == 200 and d.json()["status"] == "deactivated", d.text
+    assert _create("t_during") == 403  # quarantined → the resolver refuses
+
+    a = requests.post(f"{catalog}/v1/warehouses/{wid}/activate", headers=_auth(), timeout=30)
+    assert a.status_code == 200 and a.json()["status"] == "active", a.text
+    assert _create("t_after") == 200  # restored
+
+
 def test_create_warehouse_denied_for_non_admin(catalog: str) -> None:
     if not NONADMIN:
         pytest.skip("set LANCE_E2E_NONADMIN_TOKEN to exercise the 403 admin-gate leg")

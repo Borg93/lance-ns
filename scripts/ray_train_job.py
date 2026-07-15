@@ -198,6 +198,50 @@ def emit(event: dict[str, Any]) -> None:
             print(f"lineage emit attempt {attempt} failed: {exc}", file=sys.stderr)
 
 
+def emit_metrics(model: str, metrics: dict[str, Any], *, reader: Any = None) -> None:
+    """Best-effort export of a run's numeric metrics to OTLP → GreptimeDB (→ Perses; #18, not MLflow).
+
+    The run's params live in the registry meta and the OpenLineage event; the numeric metrics ALSO flow here
+    as telemetry so a Perses dashboard can chart them over time. No-op when no OTLP endpoint is configured
+    (dev / auth-off). The Ray job is short-lived, so it builds a MeterProvider, records, force-flushes, and
+    shuts down inline — a periodic reader alone would drop the final export before the process exits. A
+    telemetry failure never fails the training run. Labels are bounded to ``{model}`` (per-run ids stay in
+    lineage, not in metric cardinality). ``reader`` is injectable so a test can capture without a real export.
+    """
+    own_reader = reader is None
+    if own_reader and not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        return
+    try:
+        from opentelemetry.sdk.metrics import MeterProvider
+        from opentelemetry.sdk.resources import Resource
+
+        if own_reader:
+            from opentelemetry.exporter.otlp.proto.http.metric_exporter import OTLPMetricExporter
+            from opentelemetry.sdk.metrics.export import PeriodicExportingMetricReader
+
+            reader = PeriodicExportingMetricReader(OTLPMetricExporter())
+        resource = Resource.create({"service.name": os.environ.get("OTEL_SERVICE_NAME", "service-trainer")})
+        provider = MeterProvider(metric_readers=[reader], resource=resource)
+        meter = provider.get_meter("lance.training")
+        labels = {"lance.model": model}
+        meter.create_counter("lance.training.runs", description="Completed training runs, by model.").add(
+            1, labels
+        )
+        for name, value in metrics.items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue  # only real numeric scalars become gauges (a bool/str metric is not chartable)
+            meter.create_gauge(
+                f"lance.training.{name}", description=f"Latest training metric {name!r}, by model."
+            ).set(value, labels)
+        # Only flush + close the reader we own (the real OTLP export); an injected reader is the caller's
+        # to collect (a second collect here would consume the gauges' last-value before the caller reads).
+        if own_reader:
+            provider.force_flush()
+            provider.shutdown()
+    except Exception as exc:  # noqa: BLE001 — telemetry is best-effort; it must never fail a training run
+        print(f"OTLP metrics export failed: {exc}", file=sys.stderr)
+
+
 def train_demo_model(tables: list[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Demo-tier CPU 'training': per-numeric-column means over all pinned features → 'weights', plus
     row-count metrics. Deterministic and dependency-free — the seam a TorchTrainer drops into (D6)."""
@@ -356,6 +400,7 @@ def main() -> None:
         meta = {"config": config, "features": features, "metrics": metrics, "token": token}
         version = publish_registry(registry_uri, artifact_base, artifact_uris, meta, so)
         emit(event(event_type="COMPLETE", version=version))
+        emit_metrics(model, metrics)  # telemetry → OTLP → GreptimeDB → Perses (best-effort)
         print(f"model {namespace}${model} published at registry version {version}")
     except Exception as exc:
         emit(event(event_type="FAIL", error=f"train: {exc}"))

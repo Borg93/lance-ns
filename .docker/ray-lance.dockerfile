@@ -17,6 +17,10 @@ FROM rayproject/ray:2.56.0-py312-cpu@sha256:2951c07de396a8b746f9c678b52c6e2282e6
 # in-process. Drop this + the round-trip when lance-ray gains inline-blob-preserving read/write.
 RUN pip install --no-cache-dir "lance-ray==0.4.2" "pylance==8.0.0" "pyarrow==19.0.1" "pillow==11.3.0"
 
+# OTel SDK + OTLP/HTTP exporter so the train job (ray_train_job.py) can export its run metrics to
+# GreptimeDB (#18 experiment tracking → Perses). Pinned to the services' opentelemetry version for parity.
+RUN pip install --no-cache-dir "opentelemetry-sdk==1.43.0" "opentelemetry-exporter-otlp-proto-http==1.43.0"
+
 # Bake the jobs so `ray job submit -- python /home/ray/jobs/<job>.py` needs no working-dir upload:
 #   ray_lance_job.py  — the standalone write/index/evolve/compact demo (make ray-demo)
 #   ray_stage_job.py  — the per-stage cascade transform a mover submits (MEDALLION_RAY_ENABLED)

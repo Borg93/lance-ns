@@ -287,3 +287,35 @@ def test_main_emits_an_attributable_fail_on_misconfiguration(
     fail = RunEvent.model_validate(events[0])
     assert fail.run.run_id == common_ol.run_id_for("train-tok1")  # attributable to the run
     assert "train config" in fail.run.facets["errorMessage"]["message"]
+
+
+def test_emit_metrics_exports_numeric_metrics_as_otlp() -> None:
+    # #18: a completed run's numeric metrics export to OTLP (→ GreptimeDB → Perses). An injected in-memory
+    # reader captures without a real export; non-numeric metrics are skipped; a runs counter is emitted; the
+    # only label is {model} (bounded cardinality).
+    from opentelemetry.sdk.metrics.export import InMemoryMetricReader
+
+    reader = InMemoryMetricReader()
+    job.emit_metrics("demo", {"rows_seen": 8, "features": 2, "note": "skip-me"}, reader=reader)
+
+    data = reader.get_metrics_data()
+    assert data is not None
+    values: dict[str, float] = {}
+    labels: dict[str, dict[str, object]] = {}
+    for rm in data.resource_metrics:
+        for sm in rm.scope_metrics:
+            for m in sm.metrics:
+                for point in m.data.data_points:  # NumberDataPoint (counter/gauge) — value via getattr
+                    values[m.name] = getattr(point, "value", 0)
+                    labels[m.name] = dict((point.attributes or {}).items())
+
+    assert values.keys() >= {"lance.training.rows_seen", "lance.training.features", "lance.training.runs"}
+    assert "lance.training.note" not in values  # non-numeric metric is not chartable → skipped
+    assert values["lance.training.rows_seen"] == 8
+    assert labels["lance.training.rows_seen"] == {"lance.model": "demo"}  # bounded cardinality
+
+
+def test_emit_metrics_is_a_noop_without_an_otlp_endpoint(monkeypatch: pytest.MonkeyPatch) -> None:
+    # No endpoint configured (dev / auth-off) and no injected reader → a silent no-op, never raises.
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    job.emit_metrics("demo", {"rows_seen": 8})

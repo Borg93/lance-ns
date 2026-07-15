@@ -149,5 +149,59 @@ data:
         ]
       }
     }
+  training.json: |
+    {
+      "kind": "Dashboard",
+      "metadata": { "name": "training", "project": "lance-ns" },
+      "spec": {
+        "display": { "name": "Model Training — experiment metrics", "description": "Per-model training run metrics emitted by the Ray train job over OTLP → GreptimeDB (#18, not MLflow): completed runs and the latest run metrics (rows seen, feature count), by model." },
+        "duration": "6h",
+        "panels": {
+          "runsByModel": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "Training runs /s by model" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "sum by (lance_model) (rate(lance_training_runs_total[5m]))",
+                "seriesNameFormat": {{ "{{lance_model}}" | quote }} } } } } ]
+            }
+          },
+          "rowsSeen": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "Rows seen (latest run) by model" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "max by (lance_model) (lance_training_rows_seen)",
+                "seriesNameFormat": {{ "{{lance_model}}" | quote }} } } } } ]
+            }
+          },
+          "featuresUsed": {
+            "kind": "Panel",
+            "spec": {
+              "display": { "name": "Feature datasets used (latest run) by model" },
+              "plugin": { "kind": "TimeSeriesChart", "spec": { "legend": { "position": "bottom" } } },
+              "queries": [ { "kind": "TimeSeriesQuery", "spec": { "plugin": { "kind": "PrometheusTimeSeriesQuery", "spec": {
+                "query": "max by (lance_model) (lance_training_features)",
+                "seriesNameFormat": {{ "{{lance_model}}" | quote }} } } } } ]
+            }
+          }
+        },
+        "layouts": [
+          {
+            "kind": "Grid",
+            "spec": {
+              "display": { "title": "Model training" },
+              "items": [
+                { "x": 0, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/runsByModel" } },
+                { "x": 12, "y": 0, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/rowsSeen" } },
+                { "x": 0, "y": 8, "width": 12, "height": 8, "content": { "$ref": "#/spec/panels/featuresUsed" } }
+              ]
+            }
+          }
+        ]
+      }
+    }
 {{- end }}
 {{- end }}

@@ -77,8 +77,13 @@ def test_version_facet_spec_pin_matches_the_medallion_emitter() -> None:
     assert job._RUN_SCHEMA == common_ol.RUN_EVENT_SCHEMA_URL
     assert job._BASE_FACET == common_ol.BASE_FACET_SCHEMA_URL
     complete = job.build_event(
-        event_type="COMPLETE", token="pin", model="m", namespace="models",
-        features=[{"dataset": "silver$f", "version": 1}], registry_uri="s3://x/m", version=1,
+        event_type="COMPLETE",
+        token="pin",
+        model="m",
+        namespace="models",
+        features=[{"dataset": "silver$f", "version": 1}],
+        registry_uri="s3://x/m",
+        version=1,
     )
     assert complete["outputs"][0]["facets"]["schema"]["_schemaURL"] == common_ol.SCHEMA_FACET_SCHEMA_URL
 

@@ -258,6 +258,12 @@ def _carry_source_rowid(table: pa.Table) -> pa.Table:
     provenance). An upstream that already carries it (a later stage) keeps it; the cascade head mints it from
     the reserved ``_rowid`` metacolumn of the row just read. ``_rowid`` itself is never persisted (it is a
     reserved name and would advance on the next overwrite). Input MUST be read ``with_row_id=True``.
+
+    HEAD DETECTION IS HEURISTIC (absence of ``source_rowid``), not positional. In the steady state only the
+    raw head lacks it, so this is exact. During a MIXED-VERSION ROLLOUT a mid-cascade dataset written by
+    pre-#38a code also lacks it; a stage reading such an upstream mints from the IMMEDIATE parent's _rowid
+    (parent, not root) for that one cycle — the best available id when the root was never captured — and
+    self-heals on the next full run from raw. Acceptable because the cascade is overwrite-only and re-runs.
     """
     if _SOURCE_ROWID_COLUMN in table.column_names:
         return table.drop_columns(["_rowid"]) if "_rowid" in table.column_names else table

@@ -205,6 +205,32 @@ KubeRay+Kueue, query engine, rask merge, the secrets operator (docs/OPERATORS.md
 
 ---
 
+## Lineage completeness (#38) — deferred follow-up
+
+Two halves; the first shipped, the second is a documented decision-gate.
+
+- **#38a — `source_rowid` through the cascade (DONE, 2026-07-15, live-verified).** Every medallion
+  transform threads a `source_rowid` column = the stable Lance `_rowid` of the RAW-zone row the output
+  descends from (ROOT provenance: minted at the head from the upstream row's reserved `_rowid` metacolumn,
+  carried forward unchanged, so a gold row names its exact source in ONE join). Both writers do it — the
+  in-process `compute._carry_forward` (always-on default) and the distributed `scripts/ray_stage_job.py`
+  (media path + tabular carry-forward + native-head mint, since lance_ray's distributed read does not
+  surface `_rowid`). The live `columnLineage` facet declares the edge (`source_rowid ← raw_events._rowid`
+  at the head, `source_rowid ← source_rowid` when carried). **Verified live** against RustFS S3: seed raw →
+  bronze → silver → gold, `gold.source_rowid == raw._rowid` per row.
+- **#38b — MV lineage (WONTFIX with current code; unblock condition below).** The materialized-view path
+  (`views.py` → native `create_materialized_view`) emits no OpenLineage and, more fundamentally, receives
+  its source only as an **opaque `source_query`** blob that the namespace server "stores without
+  interpreting" (`CreateMaterializedViewRequest.source_query`). There is no structured list of source
+  tables to name in a lineage event — unlike the cascade, where the source dataset is known from mover
+  settings. Emitting MV lineage therefore requires EITHER (a) a SQL/plan parser to extract source tables
+  from the opaque query (the repo has none), OR (b) an API/contract change: a structured
+  `source_tables: list[str]` field alongside `source_query` on the MV request. Parked until an MV consumer
+  needs it; **do not fabricate** an MV lineage edge from the view's own id/output_schema (that names the
+  OUTPUT, not its sources — a false provenance claim).
+
+---
+
 ### #4 — Transactional outbox + DLQ for lineage
 - **State.** DLQ **already exists** (Dapr-native parking, default-on) + a reconcile back-fill
   (`reconcile.py`, #23) that recovers version+schema (not inputs/author/columnLineage). No transactional

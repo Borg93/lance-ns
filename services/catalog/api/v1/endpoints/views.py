@@ -32,6 +32,12 @@ async def create_materialized_view(
     """Create a materialized view via the native backend's ``create_materialized_view``.
 
     Then seeds FGA ownership on the ``materialized_view`` type so the creator keeps refresh/read rights.
+
+    No OpenLineage is emitted here (unlike the cascade): the MV's source arrives ONLY as an opaque
+    ``source_query`` blob the namespace server stores without interpreting, so there is no structured list
+    of source tables to name in a lineage event. Emitting MV lineage is a decision-gate (WONTFIX until an
+    MV consumer needs it) — it requires either a query parser or a structured ``source_tables`` request
+    field; do NOT fabricate an edge from the view's own output schema. See docs/DESIGN-catalog-parity.md #38b.
     """
     segments = parse_identifier(id, settings.delimiter)
     body.id = segments

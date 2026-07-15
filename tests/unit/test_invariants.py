@@ -311,8 +311,8 @@ def test_catalog_authz_primitive_fails_closed_on_openfga_outage(monkeypatch: pyt
 
 
 def test_authz_decisions_are_audited() -> None:
-    """COMPLIANCE INVARIANT (#41): the single authz choke point ``fga_deps._require`` MUST emit an audit
-    event, so every governed access decision — allow AND deny — lands on the dedicated audit trail. Before
+    """Compliance invariant (#41): the single authz choke point ``fga_deps._require`` must emit an audit
+    event, so every governed access decision — allow and deny — lands on the dedicated audit trail. Before
     #41 only denials were logged (to the general logger). Grep-provable so it can never silently regress:
     the moment ``_require`` stops calling ``audit(``, a governed deployment's audit trail goes half-blind."""
     src = (SERVICES / "catalog" / "api" / "fga_deps.py").read_text()
@@ -321,8 +321,8 @@ def test_authz_decisions_are_audited() -> None:
 
 
 def test_authentication_outcomes_are_audited() -> None:
-    """COMPLIANCE INVARIANT (#41): ``authenticate`` MUST audit both the SUCCESS (who logged in) and the
-    FAILURE (rejected token) paths — authn was entirely unlogged before #41, so brute-force / forged-token
+    """Compliance invariant (#41): ``authenticate`` must audit both the success (who logged in) and the
+    failure (rejected token) paths — authn was entirely unlogged before #41, so brute-force / forged-token
     attempts were invisible. Grep-provable: the failure + success audit calls must both remain."""
     src = (SERVICES / "catalog" / "api" / "security.py").read_text()
     assert src.count("audit(") >= 2, "authenticate must audit both success and failure (#41 compliance)"

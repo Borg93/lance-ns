@@ -19,7 +19,7 @@ from typing import Annotated
 import lance
 from botocore.exceptions import BotoCoreError, ClientError
 from common import fga
-from common.audit import SUCCESS, audit
+from common.audit import ALLOW, DENY, SUCCESS, audit
 from fastapi import APIRouter, Query
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
@@ -74,7 +74,10 @@ async def vend_credentials(
     # A write-tier vend needs the writer rung on top of the reader rung the router guard enforced.
     if tier == "write" and settings.fga_enabled and token is not None and client is not None:
         obj = f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
-        if not await fga.check(client, user=token.sub, relation="can_write_data", obj=obj):
+        ok = await fga.check(client, user=token.sub, relation="can_write_data", obj=obj)
+        # #41 audit the write-tier authz decision — a denied attempt to obtain WRITE creds is high-value.
+        audit("can_write_data", ALLOW if ok else DENY, subject=token.sub, resource=obj, tier="write")
+        if not ok:
             raise PermissionDeniedError(f"can_write_data required on {obj} for a write-tier credential")
     described: DescribeTableResponse = await run_in_threadpool(
         native.call, ns, "describe_table", DescribeTableRequest(id=segments)

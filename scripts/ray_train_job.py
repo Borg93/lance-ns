@@ -201,7 +201,7 @@ def emit(event: dict[str, Any]) -> None:
 def emit_metrics(model: str, metrics: dict[str, Any], *, reader: Any = None) -> None:
     """Best-effort export of a run's numeric metrics to OTLP → GreptimeDB (→ Perses; #18, not MLflow).
 
-    The run's params live in the registry meta and the OpenLineage event; the numeric metrics ALSO flow here
+    The run's params live in the registry meta and the OpenLineage event; the numeric metrics also flow here
     as telemetry so a Perses dashboard can chart them over time. No-op when no OTLP endpoint is configured
     (dev / auth-off). The Ray job is short-lived, so it builds a MeterProvider, records, force-flushes, and
     shuts down inline — a periodic reader alone would drop the final export before the process exits. A

@@ -26,7 +26,7 @@ from __future__ import annotations
 import logging
 
 from common import fga
-from common.audit import ALLOW, DENY, audit
+from common.audit import ALLOW, DENY, FAILURE, audit
 from common.oidc import IDToken
 from fastapi import Request
 from lance_namespace import (
@@ -183,7 +183,11 @@ def _create_parent_check(
 
 async def _require(client: OpenFgaClient, *, user: str, relation: str, obj: str) -> None:
     """Check one ``relation`` on ``obj``, audit the decision, and raise 403 on denial."""
-    allowed = await fga.check(client, user=user, relation=relation, obj=obj)
+    try:
+        allowed = await fga.check(client, user=user, relation=relation, obj=obj)
+    except ServiceUnavailableError:  # authz layer down during an access attempt — audit, then fail closed
+        audit(relation, FAILURE, subject=user, resource=obj, reason="authz_unavailable")
+        raise
     audit(relation, ALLOW if allowed else DENY, subject=user, resource=obj)  # #41 audit every authz decision
     if not allowed:
         log.info("access_denied", extra={"sub": user, "relation": relation, "object": obj})
@@ -282,13 +286,19 @@ async def _authorize_batch(request: Request, client: OpenFgaClient, settings: Se
     if table_objs:
         objs = sorted(table_objs)
         allowed = await fga.batch_check(client, user=user, relation="can_write_data", objects=objs)
+        for obj in objs:  # #41 audit every batch authz decision (allow AND deny), like the single-route gate
+            audit("can_write_data", ALLOW if allowed.get(obj) else DENY, subject=user, resource=obj)
         denied += [o for o in objs if not allowed.get(o)]
     if parent_objs:
         objs = sorted(parent_objs)
         allowed = await fga.batch_check(client, user=user, relation="can_create_table", objects=objs)
+        for obj in objs:
+            audit("can_create_table", ALLOW if allowed.get(obj) else DENY, subject=user, resource=obj)
         denied += [o for o in objs if not allowed.get(o)]
     for obj, relation in owner_checks:  # rare; per-object keeps the per-op relation exact
-        if not await fga.check(client, user=user, relation=relation, obj=obj):
+        ok = await fga.check(client, user=user, relation=relation, obj=obj)
+        audit(relation, ALLOW if ok else DENY, subject=user, resource=obj)
+        if not ok:
             denied.append(obj)
     if denied:
         log.info("access_denied", extra={"sub": user, "objects": sorted(denied)})

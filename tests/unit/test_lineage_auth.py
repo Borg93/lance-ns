@@ -1037,3 +1037,37 @@ def test_service_principal_is_attributed_and_fga_bounded() -> None:
     assert checked["user"] == "service-trainer"  # NOT an opaque Dex sub
     assert checked["relation"] == "can_write_data"
     assert checked["objects"] == ["table:models$churn"]
+
+
+def test_demo_datasets_requires_auth_when_fga_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    # AUDIT: /demo/datasets read real medallion schemas/row-counts + gold's lineage JSONB from S3 with the
+    # SERVICE root creds and had NO auth gate — any in-cluster caller could exfiltrate them unauthenticated.
+    # It now authenticates + governs; with FGA on an unauthenticated request must 401 BEFORE any S3 read.
+    from lineage.api.v1.endpoints import demo
+
+    monkeypatch.setattr(demo, "_storage_options", lambda: {})  # isolate the gate from S3
+    with pytest.raises(UnauthenticatedError):
+        asyncio.run(demo.demo_datasets(_request(fga=object()), _settings(**_FULL_AUTH), None))
+
+
+def test_events_governs_on_columnlineage_source_datasets() -> None:
+    # AUDIT: /events returned the full raw payload but governed only on top-level inputs/outputs. The
+    # columnLineage facet names SOURCE datasets NOT in inputs, so a caller who can see the output would get
+    # input datasets' column schemas. The ref-extractor now unions those in (event hidden unless the caller
+    # can read every dataset the payload discloses).
+    from lineage.api.v1.endpoints.runs import _column_lineage_datasets
+
+    event = {
+        "outputs": [
+            {
+                "name": "gold$t",
+                "facets": {
+                    "columnLineage": {
+                        "fields": {"col": {"inputFields": [{"namespace": "bronze", "name": "bronze$secret"}]}}
+                    }
+                },
+            }
+        ]
+    }
+    assert _column_lineage_datasets(event) == {"bronze$secret"}
+    assert _column_lineage_datasets({}) == set()  # summary=True → no payload → no extra refs, nothing hidden

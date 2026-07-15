@@ -27,6 +27,28 @@ _EVENTS_FETCH = 2000
 _EVENTS_RETURN = 500
 
 
+def _column_lineage_datasets(event: dict) -> set[str]:
+    """Every SOURCE dataset named inside an event's columnLineage facets — the datasets that field-to-field
+    lineage discloses beyond the top-level inputs. In the raw OpenLineage payload these live at
+    ``outputs[].facets.columnLineage.fields[<col>].inputFields[].name``. /events must govern on them too, or a
+    caller who can see the OUTPUT would receive input datasets' column schemas they cannot read. Best-effort
+    over untrusted JSONB shape; ``{}`` (summary=True, no payload) yields the empty set."""
+    out: set[str] = set()
+    for o in event.get("outputs") or []:
+        if not isinstance(o, dict):
+            continue
+        fields = (((o.get("facets") or {}).get("columnLineage") or {}).get("fields")) or {}
+        if not isinstance(fields, dict):
+            continue
+        for field in fields.values():
+            input_fields = (field.get("inputFields") if isinstance(field, dict) else None) or []
+            for inf in input_fields:
+                name = inf.get("name") if isinstance(inf, dict) else None
+                if name:
+                    out.add(name)
+    return out
+
+
 @router.get("/runs")
 async def get_runs(repository: RepositoryDep, datasets: FilterDep, settings: SettingsDep) -> Runs:
     """Live run-status board — each run's current state folded onto its ``(:Run)`` node in Apache AGE.
@@ -86,8 +108,16 @@ async def get_events(
     # `limit` rows. Auth on → keep the wide window so dropped rows don't starve the page.
     fetch = _EVENTS_FETCH if settings.fga_enabled else limit
     records = await repository.list_events(limit=fetch, after=after, summary=summary)
+    # Govern on EVERY dataset the returned payload discloses — not just top-level inputs/outputs. The full
+    # raw ``event`` JSONB (present when summary=False) carries columnLineage facets that name SOURCE datasets
+    # + column schemas NOT in the top-level inputs; without unioning them in, a caller who can see the output
+    # would receive column schemas of input datasets they cannot read (audit: cross-tenant facet leak). When
+    # summary=True the payload is dropped, so the extra set is empty and nothing is over-restricted.
     visible = await governed(
-        datasets, settings.fga_enabled, records, lambda r: set(r.inputs) | set(r.outputs)
+        datasets,
+        settings.fga_enabled,
+        records,
+        lambda r: set(r.inputs) | set(r.outputs) | _column_lineage_datasets(r.event),
     )
     returned = visible[:limit]
     if len(returned) == limit and returned:

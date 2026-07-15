@@ -290,6 +290,32 @@ def test_create_table_checks_writer_on_parent_namespace(
     assert captured[-1] == {"user": "alice", "relation": "can_create_table", "obj": "namespace:db1"}
 
 
+def test_existok_on_existing_table_does_not_seize_ownership(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    """SECURITY (audit CRITICAL): an ExistOk create that KEEPS an already-existing table wrote nothing, so it
+    must NOT grant the caller ``owner`` — else any authenticated user (top-level, lock off) or any
+    namespace-writer could SEIZE ownership of another user's table via a no-op create (owner ⇒ can_read_data,
+    write-cred vending, drop, rename). This test FAILS on the pre-fix code, which seeded ownership
+    unconditionally."""
+    # The table PRE-EXISTS (describe succeeds → _table_exists True) and the facade returns its existing
+    # version (ExistOk kept it, wrote nothing).
+    fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://x")
+    _stub_create(monkeypatch, response=CreateTableResponse(location="s3://x", version=7))
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))  # caller passes create-on-parent
+    grant = AsyncMock()
+    monkeypatch.setattr(fga_module, "grant_on_create", grant)
+
+    resp = client.post(
+        "/v1/table/db1$users/create?mode=exist_ok",
+        content=b"ARROW",
+        headers={"Authorization": "Bearer t", **ARROW_STREAM},
+    )
+    assert resp.status_code == 200, resp.text
+    grant.assert_not_awaited()  # NO ownership seizure — the existing owner keeps it
+
+
 def test_create_table_seeds_owner_and_parent_tuples(
     client: TestClient, fake_ns: MagicMock, monkeypatch
 ) -> None:

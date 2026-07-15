@@ -16,8 +16,12 @@ from typing import Any
 
 import lance
 from common import schema
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
+from lance_namespace import PermissionDeniedError
 
+from lineage.api.dependencies import SettingsDep
+from lineage.api.fga_deps import require_metadata_access
+from lineage.api.security import CurrentToken
 from lineage.core.config import get_settings, storage_options
 from lineage.schemas import DemoDataset, DemoDatasets, DemoField, DemoVersion
 
@@ -126,14 +130,21 @@ def _read_dataset(name: str, uri: str, opts: dict[str, str], max_versions: int) 
 
 
 @router.get("/datasets", response_model=DemoDatasets)
-def demo_datasets() -> DemoDatasets:
-    """The medallion datasets as they currently exist on S3 — schema per Lance version + rows."""
-    settings = get_settings()
+async def demo_datasets(request: Request, settings: SettingsDep, token: CurrentToken) -> DemoDatasets:
+    """The medallion datasets as they currently exist on S3 — schema per Lance version + rows.
+
+    GOVERNED (audit: this endpoint reads real medallion schemas/row-counts + gold's lineage JSONB from S3
+    with the SERVICE root credentials, so it must not disclose a dataset the caller cannot see). Every
+    other lineage read gates on ``can_get_metadata``; this now does the same — authenticate (401 unauth /
+    503 if FGA unwired, via ``require_metadata_access``) and filter to the datasets the caller may read.
+    FGA off → pass-through (the dev demo)."""
     opts = _storage_options()
     bucket = settings.s3_bucket
-    return DemoDatasets(
-        datasets=[
-            _read_dataset(name, f"s3://{bucket}/{path}", opts, settings.demo_max_versions)
-            for name, path in _LAYOUT
-        ]
-    )
+    out: list[DemoDataset] = []
+    for name, path in _LAYOUT:
+        try:
+            await require_metadata_access(name, request, settings, token)  # 401/503 propagate; 403 → skip
+        except PermissionDeniedError:
+            continue
+        out.append(_read_dataset(name, f"s3://{bucket}/{path}", opts, settings.demo_max_versions))
+    return DemoDatasets(datasets=out)

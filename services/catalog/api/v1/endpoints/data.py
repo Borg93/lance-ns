@@ -151,13 +151,23 @@ async def create_table(
     # owner-tier on it FIRST (before the irreversible write) — else a mere namespace writer could overwrite
     # and, via the ownership reset below, seize another user's table. Fresh-id Overwrite creates nothing to
     # gate. FGA-off skips it (no ACL to protect).
-    # Short-circuits: the describe (_table_exists) only runs on an Overwrite with FGA on.
-    overwrote_existing = (
-        (mode or "").lower() == "overwrite"
+    # Pre-existence (declared-only counts — it already holds an owner grant), computed BEFORE the write and
+    # only when FGA is on (the ACLs it protects exist only then). It feeds TWO owner-tier guards:
+    #   · Overwrite of an EXISTING table is a DROP → needs owner-tier can_drop first, else a namespace writer
+    #     could overwrite and, via the ownership reset below, SEIZE another user's table.
+    #   · ExistOk that KEEPS an existing table wrote NOTHING — so seeding the caller `owner` would let ANY
+    #     authenticated user (or namespace-writer) SEIZE ownership of an already-owned table via a no-op
+    #     create (audit: CRITICAL). We must never grant owner on a table this request did not create.
+    # The describe (_table_exists) runs only for Overwrite/ExistOk with FGA on.
+    _mode = (mode or "").lower()
+    pre_existed = (
+        _mode in ("overwrite", "existok", "exist_ok")
         and settings.fga_enabled
         and client is not None
         and await run_in_threadpool(_table_exists, ns, segments)
     )
+    overwrote_existing = pre_existed and _mode == "overwrite"
+    existok_kept_existing = pre_existed and _mode in ("existok", "exist_ok")
     if overwrote_existing:
         await fga_deps.require_can_drop_table(client, settings, token, segments=segments)
     # ``dataplane.create_table`` picks the write path by schema off the event loop: a blob-v2 column needs
@@ -193,17 +203,24 @@ async def create_table(
     # — the reused-id privilege bleed the real drop path also guards).
     # Residual (documented): a process CRASH between the write and the grant still strands the table
     # (no in-process compensation can cover it); the deeper fix is a declare→grant→write reorder.
-    try:
-        await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
-    except Exception:
-        if _compensation_allowed(mode, overwrote_existing):
-            try:  # compensation is best-effort; the GRANT error below stays the response either way
-                await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
-                await run_in_threadpool(native.call, ns, "drop_table", DropTableRequest(id=segments))
-                log.warning("create_compensated", extra={"table": table_id, "reason": "grant_failed"})
-            except Exception as drop_exc:  # noqa: BLE001 — a failed compensation must still be visible
-                log.warning("create_compensation_failed", extra={"table": table_id, "error": str(drop_exc)})
-        raise
+    # Seed ownership ONLY for a table THIS request actually created. An ExistOk that KEPT an already-existing
+    # table wrote nothing, so granting the caller `owner` would seize another user's table (audit: CRITICAL) —
+    # the existing owner (or the /declare-r of a declared-only table) keeps ownership. Skipping the seed also
+    # skips the compensation (there is nothing this request wrote to compensate).
+    if not existok_kept_existing:
+        try:
+            await fga_deps.seed_ownership(client, settings, token, resource="table", segments=segments)
+        except Exception:
+            if _compensation_allowed(mode, overwrote_existing):
+                try:  # compensation is best-effort; the GRANT error below stays the response either way
+                    await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+                    await run_in_threadpool(native.call, ns, "drop_table", DropTableRequest(id=segments))
+                    log.warning("create_compensated", extra={"table": table_id, "reason": "grant_failed"})
+                except Exception as drop_exc:  # noqa: BLE001 — a failed compensation must still be visible
+                    log.warning(
+                        "create_compensation_failed", extra={"table": table_id, "error": str(drop_exc)}
+                    )
+            raise
     # Record provenance authoritatively: the catalog knows the verified principal. Fire-and-forget
     # (after the response, best-effort) so the lineage service can never block/fail a create. The
     # canonical id keeps the lineage Dataset == the OpenFGA object id == the catalog table id; the

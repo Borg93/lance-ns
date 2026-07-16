@@ -124,10 +124,13 @@ ray-demo: ray-image ## Real Ray cluster + `ray job submit`: distributed Lance wr
 	@# staleness fix (memory: kind-same-tag-image-gotcha). Then assert the running pod serves the built digest.
 	@kubectl delete pods -l app=ray-lance-head --ignore-not-found >/dev/null 2>&1 || true
 	@kubectl rollout status deploy/ray-lance-head --timeout=180s
-	@RAY_DIGEST="$$(docker image inspect --format '{{.Id}}' $(RAY_IMG))"; \
-	 RUNNING="$$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"; \
-	 case "$$RUNNING" in *"$${RAY_DIGEST#sha256:}"*) echo "ray head serves the freshly-built digest" ;; \
-	   *) echo "!! ray head imageID ($$RUNNING) != built digest ($$RAY_DIGEST) — stale, aborting"; exit 1 ;; esac
+	@# A pod's imageID is the containerd MANIFEST digest; `docker inspect .Id` is the CONFIG digest — so
+	@# match the pod's digest against the FULL set crictl holds for the tag (kind load replaces it → fresh).
+	@RUNNING="$$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"; \
+	 POD_SHA="$${RUNNING##*:}"; \
+	 NODE_SHAS="$$(docker exec $(CLUSTER)-control-plane crictl images -o json | python3 -c "import sys,json; print(' '.join(s for i in json.load(sys.stdin).get('images',[]) if any('$(RAY_IMG)' in t for t in (i.get('repoTags') or [])) for s in ([i['id'].split(':')[-1]] + [r.split(':')[-1] for r in (i.get('repoDigests') or [])])))")"; \
+	 case " $$NODE_SHAS " in *" $$POD_SHA "*) echo "ray head serves the freshly-loaded image ($$POD_SHA)" ;; \
+	   *) echo "!! ray head imageID ($$RUNNING) not a digest the node holds for $(RAY_IMG) — stale, aborting"; exit 1 ;; esac
 	@echo "ray job submit → distributed write + index + evolve + compact (baked scripts/ray_lance_job.py) …"
 	@kubectl exec deploy/ray-lance-head -- \
 	  ray job submit --address http://localhost:8265 \

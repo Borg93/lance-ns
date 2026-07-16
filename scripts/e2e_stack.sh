@@ -134,13 +134,26 @@ kubectl rollout status deploy/"$RELEASE"-catalog --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-lineage --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-lance-ray --timeout=300s
 
-# The pod that actually came up must be running the digest we just built — the definitive proof that the
-# whole suite tests fresh code, not a stale same-tag image (the failure mode this guard exists for).
+# The pod that actually came up must be running the image we just loaded — the definitive proof the whole
+# suite tests fresh code, not a stale same-tag image (the failure mode this guard exists for). NOTE: a
+# pod's `.status imageID` is the containerd MANIFEST digest, while `docker image inspect .Id` is the CONFIG
+# digest — different hashes for the SAME image. So we match the pod's digest against the FULL set crictl
+# associates with the tag (id + repoDigests); since `kind load` replaces the tag, any of them == fresh.
+NODE_SHAS="$(docker exec "${CLUSTER}-control-plane" crictl images -o json 2>/dev/null | python3 -c "
+import sys, json
+shas = []
+for img in json.load(sys.stdin).get('images', []):
+    if any('$CATALOG_IMG' in t for t in (img.get('repoTags') or [])):
+        if img.get('id'): shas.append(img['id'].split(':')[-1])
+        for rd in (img.get('repoDigests') or []): shas.append(rd.split(':')[-1])
+print(' '.join(shas))
+")"
 RUNNING_ID="$(kubectl get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=catalog" \
   -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="catalog")].imageID}')"
-case "$RUNNING_ID" in
-  *"${CATALOG_DIGEST#sha256:}"*) echo "   running catalog pod serves the freshly-built digest" ;;
-  *) echo "!! running catalog pod imageID ($RUNNING_ID) != built digest ($CATALOG_DIGEST) — stale image, aborting" >&2
+POD_SHA="${RUNNING_ID##*:}"
+case " $NODE_SHAS " in
+  *" $POD_SHA "*) echo "   running catalog pod serves the freshly-loaded image ($POD_SHA)" ;;
+  *) echo "!! running catalog pod imageID ($RUNNING_ID) is not a digest the node holds for $CATALOG_IMG ($NODE_SHAS) — stale, aborting" >&2
      exit 1 ;;
 esac
 
@@ -281,15 +294,25 @@ step "9/9 the two Ray-path suites (#53) — real KubeRay: batch (write/index/evo
 # image with the same digest guard as the app image, deploy the head, and pod-DELETE it onto the fresh image.
 RAY_IMG="${RAY_IMG:-ray-lance:dev}"
 docker build -f .docker/ray-lance.dockerfile -t "$RAY_IMG" . >/dev/null
-RAY_DIGEST="$(docker image inspect --format '{{.Id}}' "$RAY_IMG")"
 kind load docker-image "$RAY_IMG" --name "$CLUSTER"
 kubectl apply -f deploy/ray-lance-demo.yaml
 kubectl delete pods -l app=ray-lance-head --ignore-not-found >/dev/null 2>&1 || true
 kubectl rollout status deploy/ray-lance-head --timeout=240s
+# Same digest-type match as the catalog check above: pod imageID (manifest) vs the node's crictl set.
+RAY_NODE_SHAS="$(docker exec "${CLUSTER}-control-plane" crictl images -o json 2>/dev/null | python3 -c "
+import sys, json
+shas = []
+for img in json.load(sys.stdin).get('images', []):
+    if any('$RAY_IMG' in t for t in (img.get('repoTags') or [])):
+        if img.get('id'): shas.append(img['id'].split(':')[-1])
+        for rd in (img.get('repoDigests') or []): shas.append(rd.split(':')[-1])
+print(' '.join(shas))
+")"
 RAY_RUNNING="$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"
-case "$RAY_RUNNING" in
-  *"${RAY_DIGEST#sha256:}"*) echo "   ray head serves the freshly-built digest" ;;
-  *) echo "!! ray head imageID ($RAY_RUNNING) != built digest ($RAY_DIGEST) — stale, aborting" >&2; exit 1 ;;
+RAY_POD_SHA="${RAY_RUNNING##*:}"
+case " $RAY_NODE_SHAS " in
+  *" $RAY_POD_SHA "*) echo "   ray head serves the freshly-loaded image ($RAY_POD_SHA)" ;;
+  *) echo "!! ray head imageID ($RAY_RUNNING) not a digest the node holds for $RAY_IMG — stale, aborting" >&2; exit 1 ;;
 esac
 # Enable the train head (MEDALLION_RAY_ENABLED, points the movers/train at the ray head) via a targeted
 # upgrade, then recreate lance-ray so it picks the flag up.

@@ -76,6 +76,8 @@ markers = [
     "cas: object-store conditional-write (compare-and-swap) validation against the deployed store — set LANCE_E2E_S3_*",
     "media: e2e tests for the MEDIA lane of the cascade (ingest-media → derived silver) — set LANCE_E2E_*_URL",
     "governed_union: e2e for the FULL governed union (auth+FGA+compute+quality ON): allow path, FGA-deny→DROP, quality-block, media — make e2e-governed-union",
+    "ray_train: e2e for the Ray TRAIN path — governed train→candidate→blessed + reproducibility capture (pinned versions, OTLP metrics, validator gate) — make e2e-ray-train",
+    "ray_batch: e2e for the Ray BATCH path — distributed Lance write/index/evolve/compact on a real KubeRay cluster — make e2e-ray-batch",
 ]
 
 [tool.ty.environment]

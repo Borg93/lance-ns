@@ -7,10 +7,13 @@
 </script>
 
 <nav class="navbar">
-	<a href="/" class:active={!/^\/(models|tables|warehouses)/.test(page.url.pathname)}>Lineage</a>
+	<a href="/" class:active={!/^\/(models|tables|warehouses|experiments)/.test(page.url.pathname)}
+		>Lineage</a
+	>
 	<a href="/models" class:active={page.url.pathname === "/models"}>Models</a>
 	<a href="/tables" class:active={page.url.pathname.startsWith("/tables")}>Tables</a>
 	<a href="/warehouses" class:active={page.url.pathname === "/warehouses"}>Warehouses</a>
+	<a href="/experiments" class:active={page.url.pathname === "/experiments"}>Experiments</a>
 </nav>
 
 {#if data.authEnabled}

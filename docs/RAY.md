@@ -24,6 +24,15 @@ kind + `ray job submit`, proving Lance's distributed capabilities against RustFS
 via `--runtime-env-json` (exec-level env is NOT propagated to a Ray job). The job reads/writes
 `s3://lance-catalog/ray-<run>/…` on the in-cluster RustFS. Tear down with `make ray-demo-clean`.
 
+> **Lineage boundary (verified 2026-07-16).** `ray_lance_job.py` is a distributed-Lance *capability*
+> proof — it writes throwaway `ray-<run>/` demo datasets and emits **no** OpenLineage by design (there
+> is no governed dataset to attribute, and lineage on scratch data would be noise). Governed batch
+> provenance lives in the medallion cascade's Ray stage path (`ray_stage_job.py`), which threads
+> `source_rowid` and emits the `WROTE` edge exactly as the in-process compute does; that lineage was
+> verified end-to-end (raw→bronze→silver→gold connected, `source_rowid` present, `/reconcile` in_sync).
+> The redeploy loop this target uses is the digest-verified pod-delete (not `rollout restart`) — a
+> rebuilt same-tag image is asserted onto the running head before the job submits.
+
 ## What it proves (live, one job, four capabilities)
 
 ```

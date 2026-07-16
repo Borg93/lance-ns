@@ -201,6 +201,19 @@ authz shapes survive.
   The full seam-ownership decision (lance-ns = the agnostic Jobs-REST side; rask = the CR
   transport; deterministic submission id → CR name) lives in [`OPERATORS.md`](OPERATORS.md) §3.
 
+## Experiment tracking, verified live (2026-07-16)
+
+The tracking UX MLflow would provide is covered without it: the Ray train job exports its run metrics
+(`lance_training_runs_total`, `lance_training_rows_seen`, `lance_training_features`, labelled by
+`lance_model`) over OTLP to GreptimeDB (#18), the Perses "Model Training — experiment metrics"
+dashboard renders them, and the web app embeds that dashboard at **`/experiments`** — a same-origin
+BFF (`/api/experiments`) runs the dashboard's exact PromQL queries against GreptimeDB server-side, so
+the browser never sees a credential. Reproducibility is captured across three stores and was verified
+live on kind: the input feature versions are **pinned** in the OpenLineage run (`silver$features` at an
+exact version), the model node is attributed to `service-trainer` and connected raw→…→model in the AGE
+graph, the metrics land in GreptimeDB, and the Lance registry holds the versioned artifact
+(model-version N == Lance-version N). No MLflow anywhere in the code (grep-clean).
+
 ## MLflow (or any registry product) — optional by design, three integration shapes
 
 MLflow is not blocked; it was made **unnecessary for the governed loop**. If it's wanted later:

@@ -342,6 +342,11 @@ spec:
             # #42 models page: the /capi BFF proxies to the catalog. Reads/writes carry ONLY a signed-in
             # user's bearer (the catalog has no service-token door), so no service credential is wired here.
             - { name: CATALOG_API, value: "http://{{ include "lance.fullname" . }}-catalog:{{ .Values.services.catalog.port }}" }
+            # #53 embedded experiment tracking: the BFF queries GreptimeDB's Prometheus-compatible endpoint
+            # server-side for the deployed Perses "Model Training" dashboard's metrics. In-cluster ClusterIP,
+            # so the §5e edge auth (nginx auth_basic on the gateway's /greptime/, /perses/ locations) is not
+            # in the path — the credential is never exposed to the browser. Empty on auth-off/dev.
+            - { name: GREPTIME_API, value: "http://{{ include "lance.fullname" . }}-greptimedb-standalone:4000" }
             - { name: PORT, value: "3000" }
             {{- if .Values.auth.enabled }}
             # Governed READ path: when no user is signed in, the BFF proxy authenticates to lineage as a

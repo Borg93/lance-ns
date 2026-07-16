@@ -68,9 +68,14 @@ step "1/6 cluster + chart deps + images"
 # No --config: deploy/kind/kind-config.yaml pins `name: lance`, which conflicts with our own $CLUSTER
 # name (and it only declares a single control-plane node — kind's default anyway).
 kind get clusters 2>/dev/null | grep -qx "$CLUSTER" || kind create cluster --name "$CLUSTER" --wait 180s
-helm repo add dapr https://dapr.github.io/helm-charts/ >/dev/null 2>&1 || true
-helm repo add nats https://nats-io.github.io/k8s/helm/charts/ >/dev/null 2>&1 || true
-helm repo add openfga https://openfga.github.io/helm-charts >/dev/null 2>&1 || true
+# ALL declared chart dependencies' repos — `helm dependency build` needs every one even when the
+# component is disabled (greptime/vector/perses are dependencies regardless of observability.enabled).
+helm repo add dapr    https://dapr.github.io/helm-charts/          >/dev/null 2>&1 || true
+helm repo add nats    https://nats-io.github.io/k8s/helm/charts/   >/dev/null 2>&1 || true
+helm repo add openfga https://openfga.github.io/helm-charts        >/dev/null 2>&1 || true
+helm repo add greptime https://greptimeteam.github.io/helm-charts/ >/dev/null 2>&1 || true
+helm repo add vector  https://helm.vector.dev                      >/dev/null 2>&1 || true
+helm repo add perses  https://perses.github.io/helm-charts         >/dev/null 2>&1 || true
 helm repo update >/dev/null && helm dependency build ./chart >/dev/null
 docker build -f .docker/rest-catalog.dockerfile -t "$CATALOG_IMG" . >/dev/null
 docker build -f .docker/ray-lance.dockerfile -t "$RAY_IMG" . >/dev/null

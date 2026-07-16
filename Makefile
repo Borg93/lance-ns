@@ -119,8 +119,15 @@ ray-image: ## Build + side-load the CPU Ray + lance-ray demo image into kind
 
 ray-demo: ray-image ## Real Ray cluster + `ray job submit`: distributed Lance write/index/evolve/compact vs RustFS
 	@kubectl apply -f deploy/ray-lance-demo.yaml
-	@kubectl rollout restart deploy/ray-lance-head  # pick up a reloaded same-tag image (IfNotPresent)
+	@# Pod DELETE, not rollout restart: a rebuilt same-tag :dev image only lands on a freshly-scheduled pod,
+	@# and delete forces that reschedule to pull the just-loaded digest (IfNotPresent) — the kind same-tag
+	@# staleness fix (memory: kind-same-tag-image-gotcha). Then assert the running pod serves the built digest.
+	@kubectl delete pods -l app=ray-lance-head --ignore-not-found >/dev/null 2>&1 || true
 	@kubectl rollout status deploy/ray-lance-head --timeout=180s
+	@RAY_DIGEST="$$(docker image inspect --format '{{.Id}}' $(RAY_IMG))"; \
+	 RUNNING="$$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"; \
+	 case "$$RUNNING" in *"$${RAY_DIGEST#sha256:}"*) echo "ray head serves the freshly-built digest" ;; \
+	   *) echo "!! ray head imageID ($$RUNNING) != built digest ($$RAY_DIGEST) — stale, aborting"; exit 1 ;; esac
 	@echo "ray job submit → distributed write + index + evolve + compact (baked scripts/ray_lance_job.py) …"
 	@kubectl exec deploy/ray-lance-head -- \
 	  ray job submit --address http://localhost:8265 \
@@ -326,6 +333,33 @@ e2e-governed-union: ## FULL governed-union e2e (deploy first: auth+fga+compute+q
 	   uv run pytest tests/e2e/test_governed_union_e2e.py -v -m governed_union; rc=$$?; \
 	 OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh || true; \
 	 kill $$PIDS 2>/dev/null; exit $$rc
+
+e2e-ray-train: ## #53 Ray TRAIN path e2e: governed train→candidate→blessed + reproducibility capture (pins, OTLP metrics, validator gate)
+	@echo "port-forwarding lance-ray/catalog/lineage/dex/openfga/greptimedb …"
+	@kubectl port-forward svc/$(RELEASE)-lance-ray 8002:8000 >/dev/null 2>&1 & PIDS=$$!; \
+	 kubectl port-forward svc/$(RELEASE)-catalog 2333:2333 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-lineage 8000:8000 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-dex 5556:5556 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-openfga 8081:8080 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 kubectl port-forward svc/$(RELEASE)-greptimedb-standalone 4000:4000 >/dev/null 2>&1 & PIDS="$$PIDS $$!"; \
+	 ready=0; for i in $$(seq 1 30); do \
+	   curl -fsS -m 2 -o /dev/null http://localhost:8002/livez 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:2333/readyz 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:8000/livez 2>/dev/null \
+	     && curl -fsS -m 2 -o /dev/null http://localhost:8081/healthz 2>/dev/null \
+	     && { ready=1; break; }; sleep 1; done; \
+	 [ $$ready -eq 1 ] || { echo "!! port-forwards never became ready"; kill $$PIDS 2>/dev/null; exit 1; }; \
+	 OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh || true; \
+	 TOKEN=$$(kubectl exec deploy/$(RELEASE)-lance-ray -c lance-ray -- printenv APP_API_TOKEN 2>/dev/null || true); \
+	 GT=$$(curl -fsS -m 2 -o /dev/null http://localhost:4000/health 2>/dev/null && echo http://localhost:4000 || echo ""); \
+	 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_CATALOG_URL=http://localhost:2333 \
+	 LANCE_E2E_LINEAGE_URL=http://localhost:8000 LANCE_E2E_DEX=http://localhost:5556/dex \
+	 LANCE_E2E_FGA=http://localhost:8081 LANCE_E2E_DAPR_TOKEN=$$TOKEN LANCE_E2E_GREPTIME_URL=$$GT \
+	   uv run pytest tests/e2e/test_ray_train_e2e.py -v -m ray_train; rc=$$?; \
+	 kill $$PIDS 2>/dev/null; exit $$rc
+
+e2e-ray-batch: ## #53 Ray BATCH path e2e: distributed Lance write/index/evolve/compact on the real KubeRay demo cluster (run `make ray-demo` deploy first)
+	uv run pytest tests/e2e/test_ray_batch_e2e.py -v -m ray_batch
 
 e2e: ## Run the core e2e suite in sequence against the deployed stack (auth-agnostic: obs, medallion, media, gateway, compaction, cas)
 	@echo "▶ full core e2e suite against the deployed $(RELEASE) stack (each suite self-forwards + self-skips if unreachable)"; \

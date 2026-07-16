@@ -78,8 +78,17 @@ helm repo update >/dev/null && helm dependency build ./chart >/dev/null
 step "2/8 build + side-load the app image"
 docker build -f .docker/rest-catalog.dockerfile -t "$CATALOG_IMG" . >/dev/null
 # EXPLICIT load + digest check: the same-":dev"-tag gotcha (a rebuilt tag does NOT update a running pod
-# under IfNotPresent) has bitten this repo repeatedly. Load, then verify the node really has the digest.
+# under IfNotPresent) has bitten this repo repeatedly. Capture the freshly-built image id, load it, and
+# verify the kind node's containerd actually holds that digest — a silent no-op load would otherwise
+# serve a stale image and every "verified live" claim below would be against old code.
+CATALOG_DIGEST="$(docker image inspect --format '{{.Id}}' "$CATALOG_IMG")"
 kind load docker-image "$CATALOG_IMG" --name "$CLUSTER"
+if ! docker exec "${CLUSTER}-control-plane" crictl images -o json 2>/dev/null \
+  | grep -q "${CATALOG_DIGEST#sha256:}"; then
+  echo "!! kind node does not hold the freshly-built catalog digest ${CATALOG_DIGEST} after load — aborting" >&2
+  exit 1
+fi
+echo "   node holds catalog digest ${CATALOG_DIGEST}"
 
 step "3/8 deploy the governed stack (auth ON, #3-A/#3-B/#4 flags ON, heavy extras OFF)"
 # NO `--wait` — it DEADLOCKS on a fresh cluster, which is why this job never once passed in CI.
@@ -107,9 +116,14 @@ helm upgrade --install "$RELEASE" ./chart --timeout 600s \
 # On a long-lived local cluster Dapr was already installed and Ready, so the race never armed — the third
 # fresh-cluster ordering bug in this script, and the reason "works locally" kept meaning nothing.
 kubectl rollout status deploy/dapr-sidecar-injector --timeout=300s
-# Recreate the app pods THROUGH the now-ready webhook so they actually receive their sidecar.
+# Recreate the app pods THROUGH the now-ready webhook so they actually receive their sidecar. Pod DELETE,
+# not `rollout restart`: on a re-run against an existing cluster a rebuilt same-tag image only lands on a
+# freshly-scheduled pod, and delete forces that reschedule to pull the just-loaded digest from the node
+# cache (IfNotPresent) — the kind same-tag staleness fix (memory: kind-same-tag-image-gotcha). On a fresh
+# cluster this is simply the sidecar-injection recreate.
 for d in catalog lineage lance-ray raw-to-bronze bronze-to-silver silver-to-gold media-to-silver gateway; do
-  kubectl rollout restart deploy/"$RELEASE-$d" >/dev/null 2>&1 || true
+  kubectl delete pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=$d" \
+    --ignore-not-found >/dev/null 2>&1 || true
 done
 
 # Explicit readiness, in dependency order. OpenFGA FIRST: its post-install migration must land before the
@@ -119,6 +133,16 @@ kubectl rollout status deploy/"$RELEASE"-openfga --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-catalog --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-lineage --timeout=300s
 kubectl rollout status deploy/"$RELEASE"-lance-ray --timeout=300s
+
+# The pod that actually came up must be running the digest we just built — the definitive proof that the
+# whole suite tests fresh code, not a stale same-tag image (the failure mode this guard exists for).
+RUNNING_ID="$(kubectl get pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=catalog" \
+  -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="catalog")].imageID}')"
+case "$RUNNING_ID" in
+  *"${CATALOG_DIGEST#sha256:}"*) echo "   running catalog pod serves the freshly-built digest" ;;
+  *) echo "!! running catalog pod imageID ($RUNNING_ID) != built digest ($CATALOG_DIGEST) — stale image, aborting" >&2
+     exit 1 ;;
+esac
 
 step "4/8 port-forward the services the suites talk to"
 kubectl port-forward "svc/$RELEASE-catalog" 2333:2333 >/tmp/pf-cat.log 2>&1 & PF_PIDS+=($!)
@@ -248,6 +272,49 @@ if grep -qE "[1-9][0-9]* skipped" /tmp/e2e-stack.log; then
   echo
   echo "!! FAIL: e2e suites SKIPPED against a LIVE stack — that is a misconfiguration, not 'not applicable':"
   grep -E "^SKIPPED|skipped" /tmp/e2e-stack.log || true
+  exit 1
+fi
+
+step "9/9 the two Ray-path suites (#53) — real KubeRay: batch (write/index/evolve/compact) + governed train"
+# Kept AFTER the core suites and behind its own helm flip so the ray-on concern (movers + train head submit
+# stage/train jobs to a real cluster) never destabilises the ray-off core suites above. Build + load the ray
+# image with the same digest guard as the app image, deploy the head, and pod-DELETE it onto the fresh image.
+RAY_IMG="${RAY_IMG:-ray-lance:dev}"
+docker build -f .docker/ray-lance.dockerfile -t "$RAY_IMG" . >/dev/null
+RAY_DIGEST="$(docker image inspect --format '{{.Id}}' "$RAY_IMG")"
+kind load docker-image "$RAY_IMG" --name "$CLUSTER"
+kubectl apply -f deploy/ray-lance-demo.yaml
+kubectl delete pods -l app=ray-lance-head --ignore-not-found >/dev/null 2>&1 || true
+kubectl rollout status deploy/ray-lance-head --timeout=240s
+RAY_RUNNING="$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"
+case "$RAY_RUNNING" in
+  *"${RAY_DIGEST#sha256:}"*) echo "   ray head serves the freshly-built digest" ;;
+  *) echo "!! ray head imageID ($RAY_RUNNING) != built digest ($RAY_DIGEST) — stale, aborting" >&2; exit 1 ;;
+esac
+# Enable the train head (MEDALLION_RAY_ENABLED, points the movers/train at the ray head) via a targeted
+# upgrade, then recreate lance-ray so it picks the flag up.
+helm upgrade "$RELEASE" ./chart --reuse-values --timeout 300s \
+  --set medallion.ray=true --set medallion.compute=true >/dev/null
+kubectl delete pods -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=lance-ray" \
+  --ignore-not-found >/dev/null 2>&1 || true
+kubectl rollout status deploy/"$RELEASE"-lance-ray --timeout=300s
+# The train head submits as service-trainer + FGA-checks on namespace:models — seed the medallion grants
+# (idempotent) so the governed train run is authorized, and forward the lance-ray train head.
+OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh >/dev/null 2>&1 || true
+kubectl port-forward "svc/$RELEASE-lance-ray" 8002:8000 >/tmp/pf-ray.log 2>&1 & PF_PIDS+=($!)
+for i in $(seq 1 30); do curl -fsS -m2 -o /dev/null http://localhost:8002/livez 2>/dev/null && break; sleep 2; done
+# GREPTIME_URL left empty on purpose: observability is off in this stack, so the train suite's metrics
+# leg self-skips INSIDE the test (no pytest skip) while the pins + lineage + validator gates still run.
+LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_CATALOG_URL=http://localhost:2333 \
+LANCE_E2E_LINEAGE_URL=http://localhost:18000 LANCE_E2E_DEX=http://localhost:5556/dex \
+LANCE_E2E_FGA=http://localhost:8081 LANCE_E2E_DAPR_TOKEN="$DAPR_TOKEN" LANCE_E2E_GREPTIME_URL="" \
+PYTHONPATH=services uv run pytest \
+  tests/e2e/test_ray_train_e2e.py \
+  tests/e2e/test_ray_batch_e2e.py \
+  -v -rs -p no:cacheprovider | tee /tmp/e2e-ray.log
+if grep -qE "[1-9][0-9]* skipped" /tmp/e2e-ray.log; then
+  echo; echo "!! FAIL: a Ray-path suite SKIPPED against the live ray cluster — misconfiguration, not N/A:"
+  grep -E "^SKIPPED|skipped" /tmp/e2e-ray.log || true
   exit 1
 fi
 

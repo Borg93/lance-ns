@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
 // Stack-mode aware — a governed deploy (auth on, no browser session) renders the sign-in states;
 // an open deploy renders data. Both are asserted as the CORRECT behavior for that mode.
 
-const ROUTES = ["/", "/lineage", "/models", "/tables", "/warehouses"];
+const ROUTES = ["/", "/lineage", "/models", "/tables", "/warehouses", "/experiments"];
 
 for (const route of ROUTES) {
 	test(`hydrates: ${route}`, async ({ page }) => {
@@ -176,6 +176,28 @@ test("table-detail page renders per stack mode; policy + warehouse writes are se
 	// The warehouse action route's allowlist: an unknown action is a 404, never a forwarded call.
 	const bad = await request.post("/capi/v1/warehouses/x/drop-everything", { maxRedirects: 0 });
 	expect(bad.status()).toBe(404);
+});
+
+test("experiments page renders the embedded training dashboard from real metrics (#53)", async ({
+	page,
+	request,
+}) => {
+	// The /api/experiments BFF runs the deployed Perses "Model Training" dashboard's PromQL queries
+	// against GreptimeDB server-side. On a stack with observability it returns the panels; without it,
+	// a 501. Either way the page renders its correct state — never a crash or a leaked credential.
+	const probe = await request.get("/api/experiments", { maxRedirects: 0 });
+	expect([200, 501, 502], `unexpected /api/experiments status ${probe.status()}`).toContain(
+		probe.status(),
+	);
+	if (probe.status() === 200) {
+		const body = (await probe.json()) as { panels?: { title?: string }[]; source?: string };
+		expect(Array.isArray(body.panels), "dashboard panels shape").toBe(true);
+		expect(body.source, "metrics sourced from GreptimeDB").toContain("GreptimeDB");
+	}
+	await page.goto("/experiments", { waitUntil: "networkidle" });
+	await expect(page.getByRole("heading", { name: "Experiments" })).toBeVisible();
+	// The page never exposes a raw credential or a stack trace to the browser.
+	await expect(page.locator(".page")).not.toContainText("password");
 });
 
 test("browse search uses the server-side FGA-filtered /search (#52)", async ({ request }) => {

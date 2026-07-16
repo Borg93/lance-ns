@@ -23,6 +23,7 @@
 	import { Tabs } from "bits-ui";
 	import { Radio, Boxes, Cpu, Columns3, ShieldAlert } from "@lucide/svelte";
 	import FlowAutoFit from "$lib/FlowAutoFit.svelte";
+	import GovernancePanel from "$lib/GovernancePanel.svelte";
 	import { LineageState } from "$lib/store.svelte";
 	import { SearchBar, StatusBoard, enter, stagger, countUp } from "@lance/ui";
 	import { fetchSearch } from "$lib/api";
@@ -633,6 +634,7 @@
 						<p class="hint">Click a dataset node in the graph to see the runs that produced it.</p>
 					{:else}
 						<h2 class="mono">{store.selected}</h2>
+						<GovernancePanel dataset={store.selected} />
 						{#if upstream.length || downstream.length}
 							<div class="rel">
 								{#if upstream.length}

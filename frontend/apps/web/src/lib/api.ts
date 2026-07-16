@@ -1,5 +1,6 @@
 import type {
 	ColumnGraph,
+	DatasetGovernance,
 	ColumnNeighbors,
 	Datasets,
 	DemoDatasets,
@@ -12,7 +13,7 @@ import type {
 	SearchResults,
 } from "./types";
 
-import { FETCH_TIMEOUT_MS, timeoutSignal } from "./http";
+import { FETCH_TIMEOUT_MS, requestJSON, timeoutSignal } from "./http";
 
 async function getJSON<T>(path: string): Promise<T | null> {
 	try {
@@ -59,3 +60,20 @@ export const fetchColumnUpstream = (name: string, field: string) =>
 	getJSON<ColumnNeighbors>(`datasets/${enc(name)}/columns/${enc(field)}/upstream`);
 export const fetchColumnDownstream = (name: string, field: string) =>
 	getJSON<ColumnNeighbors>(`datasets/${enc(name)}/columns/${enc(field)}/downstream`);
+
+// Governance metadata (#49) — the writes need the status (401 sign-in vs 403 rung-denial vs offline),
+// so they use the shared status-aware helper instead of getJSON's null-on-error.
+const writeJSON = <T>(path: string, init: RequestInit) => requestJSON<T>("/api", path, init);
+
+export const fetchGovernance = (name: string) =>
+	getJSON<DatasetGovernance>(`datasets/${enc(name)}/governance`);
+export const addDatasetTag = (name: string, tag: string) =>
+	writeJSON<DatasetGovernance>(`datasets/${enc(name)}/tags/${enc(tag)}`, { method: "PUT" });
+export const removeDatasetTag = (name: string, tag: string) =>
+	writeJSON<DatasetGovernance>(`datasets/${enc(name)}/tags/${enc(tag)}`, { method: "DELETE" });
+export const setDatasetDescription = (name: string, description: string) =>
+	writeJSON<DatasetGovernance>(`datasets/${enc(name)}/description`, {
+		method: "PUT",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ description }),
+	});

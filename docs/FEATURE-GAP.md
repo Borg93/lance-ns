@@ -118,8 +118,10 @@ filtering + read-audit), **verified creator** (OIDC `sub` stamped, not self-asse
 at-least-once ingest** (Dapr/JetStream + MERGE-on-run_id + natural-key dedup).
 
 **Net:** genuinely-missing-and-valuable = (a) job-context facets + job versioning, (b) a search/list/namespaces
-discovery API + tag management, (c) run `parent` facet, (d) `dataQualityMetrics`, (e) a production graph UI,
-(f) the versioned-insert lineage gap (§1 #7). N/A-by-design: SQL-parse lineage, partition-backfill.
+discovery API (✅ list + tier-1 search shipped) + tag management (✅ **shipped #49, 2026-07-16** — governed
+tag/description writes with attribution; producer facet tags union with curated ones), (c) run `parent`
+facet, (d) `dataQualityMetrics`, (e) a production graph UI, (f) the versioned-insert lineage gap (§1 #7).
+N/A-by-design: SQL-parse lineage, partition-backfill.
 
 ## Recommended next (by value)
 **Shipped since this was written (GOAL 3):** ✅ versioned-insert lineage (§1 #7 — `insert` now stamps the

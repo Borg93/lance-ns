@@ -882,6 +882,352 @@
         }
       }
     },
+    "/datasets/{name}/governance": {
+      "get": {
+        "tags": [
+          "governance"
+        ],
+        "summary": "Get Governance",
+        "description": "The dataset's curated tags + description with last-writer attribution (who/when per field).",
+        "operationId": "get_governance_datasets__name__governance_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetGovernance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/tags/{tag}": {
+      "put": {
+        "tags": [
+          "governance"
+        ],
+        "summary": "Add Tag",
+        "description": "Add one governance tag (idempotent \u2014 re-adding an existing tag is a no-op re-stamp).",
+        "operationId": "add_tag_datasets__name__tags__tag__put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetGovernance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "tags": [
+          "governance"
+        ],
+        "summary": "Remove Tag",
+        "description": "Remove one governance tag (idempotent \u2014 removing an absent tag is a no-op re-stamp).\n\nDeliberately unvalidated: removal only filters an existing element out of storage, so any string is\nsafe \u2014 and it lets a curator purge a non-conforming tag (e.g. an old producer label) that the add\npath would refuse.",
+        "operationId": "remove_tag_datasets__name__tags__tag__delete",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "tag",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Tag"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetGovernance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/datasets/{name}/description": {
+      "put": {
+        "tags": [
+          "governance"
+        ],
+        "summary": "Set Description",
+        "description": "Set the dataset's description (an empty string clears it).",
+        "operationId": "set_description_datasets__name__description_put",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DescriptionUpdate"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DatasetGovernance"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{name}/columns/{field}/upstream": {
       "get": {
         "tags": [
@@ -1617,8 +1963,47 @@
           "demo"
         ],
         "summary": "Demo Datasets",
-        "description": "The medallion datasets as they currently exist on S3 \u2014 schema per Lance version + rows.",
+        "description": "The medallion datasets as they currently exist on S3 \u2014 schema per Lance version + rows.\n\nGOVERNED (audit: this endpoint reads real medallion schemas/row-counts + gold's lineage JSONB from S3\nwith the SERVICE root credentials, so it must not disclose a dataset the caller cannot see). Every\nother lineage read gates on ``can_get_metadata``; this now does the same \u2014 authenticate (401 unauth /\n503 if FGA unwired, via ``require_metadata_access``) and filter to the datasets the caller may read.\nFGA off \u2192 pass-through (the dev demo).",
         "operationId": "demo_datasets_demo_datasets_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -1626,6 +2011,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DemoDatasets"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -1864,6 +2259,82 @@
         ],
         "title": "Dataset",
         "description": "An OpenLineage dataset (a Lance table / source); ``name`` is the catalog id.\n\n``facets`` carries the standard OpenLineage dataset facets; we read several:\n``version`` (which Lance version a run produced), ``dataSource`` (where the table\nphysically lives \u2014 the S3-compatible location), and ``tags`` (governance labels)."
+      },
+      "DatasetGovernance": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Tags"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "tags_updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags Updated By"
+          },
+          "tags_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tags Updated At"
+          },
+          "description_updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Updated By"
+          },
+          "description_updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description Updated At"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DatasetGovernance",
+        "description": "A dataset's human-curated governance metadata (#49): tags + description, with last-writer\nattribution per field family (who/when persisted on the node \u2014 the auditable trail for curation)."
       },
       "DatasetRef": {
         "properties": {
@@ -2119,6 +2590,21 @@
         ],
         "title": "DemoVersion",
         "description": "One Lance version of a dataset \u2014 its number, time, and schema at that version."
+      },
+      "DescriptionUpdate": {
+        "properties": {
+          "description": {
+            "type": "string",
+            "maxLength": 2000,
+            "title": "Description"
+          }
+        },
+        "type": "object",
+        "required": [
+          "description"
+        ],
+        "title": "DescriptionUpdate",
+        "description": "The ``PUT /datasets/{name}/description`` body. An empty string clears the description."
       },
       "EventRecord": {
         "properties": {

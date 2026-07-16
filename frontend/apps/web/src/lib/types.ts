@@ -5,6 +5,7 @@ import type { components } from "./api.generated";
 
 type S = components["schemas"];
 
+export type DatasetGovernance = S["DatasetGovernance"];
 export type GraphNode = S["GraphNode"];
 export type GraphEdge = S["GraphEdge"];
 export type LineageGraph = S["LineageGraph"];

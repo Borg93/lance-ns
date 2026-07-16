@@ -6,6 +6,10 @@ Lakekeeper/Marquez bench); this file adds the wider-catalog bench and the two fo
 
 ## 1. Feature bench vs Polaris / Unity Catalog OSS / Gravitino / Nessie / Lakekeeper
 
+> Update 2026-07-16: bench item #1 (business-metadata/tag write API + description) SHIPPED as #49 —
+> governed writes on the lineage service + browse-UI editing; the ranked list below starts at item #2.
+
+
 # Bench: lance-ns vs Polaris / Unity Catalog OSS / Gravitino / Nessie / Lakekeeper (2026-07-15)
 
 **Ground truth**: `/home/blackwell/Desktop/lance-ns/docs/FEATURE-GAP.md` (Lakekeeper + Marquez bench, currency-checked 2026-07-12) and `/home/blackwell/Desktop/lance-ns/docs/API.md` (66 catalog + 21 lineage paths). Claims verified in `services/catalog` and `services/lineage` where noted.

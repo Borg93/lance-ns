@@ -260,6 +260,7 @@ def test_read_routes_wire_the_metadata_gate() -> None:
         "/datasets/{name}/columns/{field}/upstream",
         "/datasets/{name}/columns/{field}/downstream",
         "/datasets/{name}/columns",
+        "/datasets/{name}/governance",
     }
     seen = set()
     for route in _api_routes(app):
@@ -269,6 +270,28 @@ def test_read_routes_wire_the_metadata_gate() -> None:
             assert fga_deps.audit_read in calls, route.path  # #6: every gated read is also audited
             seen.add(route.path)
     assert seen == gated  # every per-dataset read is present and gated
+
+
+def test_governance_write_routes_wire_the_writer_gate() -> None:
+    """The #49 write routes must carry require_write_access as a route dependency — the handler tests
+    drive the gate separately, so without this pin deleting the router-level dependency would un-gate
+    governance writes while every test stays green (the false-confidence-authz class this file exists
+    to close)."""
+    from lineage.main import app
+
+    write_gated = {
+        ("PUT", "/datasets/{name}/tags/{tag}"),
+        ("DELETE", "/datasets/{name}/tags/{tag}"),
+        ("PUT", "/datasets/{name}/description"),
+    }
+    seen = set()
+    for route in _api_routes(app):
+        for method in getattr(route, "methods", set()) or set():
+            if (method, route.path) in write_gated:
+                calls = [d.call for d in route.dependant.dependencies]
+                assert fga_deps.require_write_access in calls, (method, route.path)
+                seen.add((method, route.path))
+    assert seen == write_gated, f"write routes missing from the app: {write_gated - seen}"
 
 
 def test_ingest_route_requires_authentication() -> None:

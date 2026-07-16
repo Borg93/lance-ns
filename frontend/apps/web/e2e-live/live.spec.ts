@@ -79,3 +79,20 @@ test("models page renders the correct state for the stack mode (sign-in vs data)
 		await expect(page.locator(".empty")).not.toContainText("unreachable");
 	}
 });
+
+test("governance writes through the BFF are session-gated per stack mode (#49 confused-deputy leg)", async ({
+	request,
+}) => {
+	// Anonymous PUT via the web BFF: a governed stack must answer 401 (either the BFF's own short-circuit
+	// when OIDC is configured, or the lineage writer gate's) — never a write executed under any service
+	// credential. An open stack answers 200/404 from the open lineage service (404 = unknown dataset).
+	const probe = await request.get("/capi/v1/model");
+	const res = await request.put("/api/datasets/no-such-dataset/tags/e2e-live-probe", {
+		maxRedirects: 0,
+	});
+	if (probe.status() === 401) {
+		expect(res.status(), "governed stack: anonymous governance write must be 401").toBe(401);
+	} else {
+		expect([200, 404], `open stack: got ${res.status()}`).toContain(res.status());
+	}
+});

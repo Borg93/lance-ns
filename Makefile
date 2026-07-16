@@ -406,6 +406,9 @@ down: ## Delete the kind cluster
 e2e-ci: ## THE guarded live proof (P0.1): governed kind stack + the 5 e2e suites (CAS/#2/#3-A/#3-B/#4) — identical to the CI `e2e-stack` job
 	@bash scripts/e2e_stack.sh
 
+e2e-ray-ci: ## #53 guarded Ray-path proof: governed ray-ON kind stack + real KubeRay + both Ray suites — identical to the CI `ray-e2e` job
+	@bash scripts/ray_e2e_stack.sh
+
 deadcode: ## Dead-code sweep (vulture). Decorator-invoked symbols are IGNORED and reviewed knowns are whitelisted, so output ~0 == a REAL dead symbol surfaces instead of drowning in noise.
 	@uvx vulture services scripts tests .vulture-whitelist.py --min-confidence 60 \
 		--ignore-decorators "$(DEADCODE_IGNORE_DECORATORS)" || true

@@ -33,6 +33,7 @@ from __future__ import annotations
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from catalog.api.v1.endpoints.access import _can_relations as _model_can_relations
 from catalog.core.config import Settings, get_settings
 from common import fga as fga_module
 from common.oidc import IDToken
@@ -47,6 +48,7 @@ from lance_namespace import (
     DropTableResponse,
     ListNamespacesResponse,
     ListTablesResponse,
+    ServiceUnavailableError,
 )
 
 ARROW_STREAM = {"content-type": "application/vnd.apache.arrow.stream"}
@@ -1058,3 +1060,74 @@ def test_table_policy_describe_is_reader_tier(client: TestClient, monkeypatch) -
     resp = client.post("/v1/table/db1$users/policy/describe", headers={"Authorization": "Bearer t"})
     assert resp.status_code == 404  # gate passed; no policy stored in this fixture
     assert captured[-1] == {"user": "alice", "relation": "can_get_metadata", "obj": "table:db1$users"}
+
+
+def test_table_access_list_requires_owner_via_can_drop(client: TestClient, monkeypatch) -> None:
+    """CONTRACT (#51): enumerating who holds access reveals principals — owner tier via ``can_drop``;
+    403 for a non-owner, and no ListUsers query is ever issued on a deny."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+    queried: list[str] = []
+
+    async def fake_list_users(_c: object, *, relation: str, obj: str) -> list[str]:
+        queried.append(f"{obj}#{relation}")
+        return []
+
+    monkeypatch.setattr(fga_module, "list_users", fake_list_users)
+
+    resp = client.post("/v1/table/db1$users/access/list", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_drop", "obj": "table:db1$users"}
+    assert queried == []  # the enumeration never ran for a denied reviewer
+
+
+def test_namespace_access_list_requires_owner_via_can_delete(client: TestClient, monkeypatch) -> None:
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.post("/v1/namespace/silver/access/list", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_delete", "obj": "namespace:silver"}
+
+
+def test_access_list_enumerates_grants_for_an_owner(client: TestClient, monkeypatch) -> None:
+    """The allow leg: an owner's review asks ListUsers once per ``can_*`` relation on the type and
+    returns the expanded subjects per relation."""
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+
+    async def fake_list_users(_c: object, *, relation: str, obj: str) -> list[str]:
+        del obj
+        return ["alice", "bob"] if relation == "can_get_metadata" else ["alice"]
+
+    monkeypatch.setattr(fga_module, "list_users", fake_list_users)
+
+    resp = client.post("/v1/table/db1$users/access/list", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["object"] == "table:db1$users"
+    grants = {g["relation"]: g["users"] for g in body["grants"]}
+    assert grants["can_get_metadata"] == ["alice", "bob"]
+    assert grants["can_drop"] == ["alice"]
+    # The enumerated set is exactly the model's can_* actions for the type (pinned in the
+    # model-contract test; spot-checked here through the real route).
+    assert set(grants) == set(_model_can_relations("table"))
+
+
+def test_access_list_fails_closed_when_enumeration_hits_an_fga_outage(
+    client: TestClient, monkeypatch
+) -> None:
+    """CONTRACT (#51): an OpenFGA outage during the ListUsers fan-out is a 503 at the endpoint —
+    never a partial or empty grant list that reads as "nobody has access"."""
+    _wire(client)
+    monkeypatch.setattr(fga_module, "check", _fake_check([], allow=True))
+
+    async def down(_c: object, *, relation: str, obj: str) -> list[str]:
+        raise ServiceUnavailableError("authorization service unavailable")
+
+    monkeypatch.setattr(fga_module, "list_users", down)
+
+    resp = client.post("/v1/table/db1$users/access/list", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 503

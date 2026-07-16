@@ -161,6 +161,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/namespace/{id}/access/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Namespace Access
+         * @description Effective access on the namespace, per ``can_*`` action — owner-gated by the router
+         *     (``can_delete``).
+         */
+        post: operations["list_namespace_access_v1_namespace__id__access_list_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/namespace/{id}/create": {
         parameters: {
             query?: never;
@@ -414,6 +435,26 @@ export interface paths {
          *     that names a warehouse-bound namespace rather than writing its version metadata to the wrong bucket.
          */
         post: operations["batch_create_table_versions_v1_table_version_batch_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/access/list": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * List Table Access
+         * @description Effective access on the table, per ``can_*`` action — owner-gated by the router (``can_drop``).
+         */
+        post: operations["list_table_access_v1_table__id__access_list_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1619,6 +1660,13 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AccessListResponse */
+        AccessListResponse: {
+            /** Grants */
+            grants: components["schemas"]["RelationGrants"][];
+            /** Object */
+            object: string;
+        };
         /**
          * AddColumnsEntry
          * @description AddColumnsEntry
@@ -4627,6 +4675,16 @@ export interface components {
             transaction_id?: string | null;
         };
         /**
+         * RelationGrants
+         * @description One ``can_*`` action and every user subject holding it (``"*"`` = a public wildcard grant).
+         */
+        RelationGrants: {
+            /** Relation */
+            relation: string;
+            /** Users */
+            users: string[];
+        };
+        /**
          * RenameTableRequest
          * @description RenameTableRequest
          */
@@ -5318,6 +5376,37 @@ export interface operations {
             };
         };
     };
+    list_namespace_access_v1_namespace__id__access_list_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_namespace_v1_namespace__id__create_post: {
         parameters: {
             query?: never;
@@ -5702,6 +5791,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BatchCreateTableVersionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_table_access_v1_table__id__access_list_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessListResponse"];
                 };
             };
             /** @description Validation Error */

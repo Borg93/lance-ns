@@ -97,11 +97,15 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         # the reader tier via its trailing segment.
         "policy/set": "can_drop",
         "policy/delete": "can_drop",
+        # #51 access review: enumerating who holds access reveals principals, so it clears the
+        # owner bar — a reader must not be able to map the ACL they are inside of.
+        "access/list": "can_drop",
     },
     "namespace": {
         "drop": "can_delete",
         "policy/set": "can_delete",
         "policy/delete": "can_delete",
+        "access/list": "can_delete",
     },
 }
 

@@ -96,3 +96,50 @@ test("governance writes through the BFF are session-gated per stack mode (#49 co
 		expect([200, 404], `open stack: got ${res.status()}`).toContain(res.status());
 	}
 });
+
+test("access review through the BFF is session-gated per stack mode (#51 confused-deputy leg)", async ({
+	request,
+}) => {
+	// Anonymous POST via the narrow access route: a governed stack must answer 401 (the BFF's own
+	// short-circuit, or the catalog's) — an ACL enumeration must never run under any service credential.
+	// An open (auth-off) stack answers the catalog's honest 501 ("no grants to review without FGA").
+	const probe = await request.get("/capi/v1/model");
+	const res = await request.post("/capi/v1/table/no-such-table/access/list", { maxRedirects: 0 });
+	if (probe.status() === 401) {
+		expect(res.status(), "governed stack: anonymous access review must be 401").toBe(401);
+	} else {
+		expect(res.status(), "open stack: access review answers the catalog's 501").toBe(501);
+	}
+	// The generic /capi catch-all stays GET-only — the narrow route must be the only POST door.
+	const other = await request.post("/capi/v1/table/no-such-table/describe", { maxRedirects: 0 });
+	expect([404, 405], `generic /capi POST must stay closed, got ${other.status()}`).toContain(
+		other.status(),
+	);
+});
+
+test("grants panel renders the correct access-review state for the stack mode (#51)", async ({
+	page,
+	request,
+}) => {
+	// Select a dataset from the browse list (served via the lineage service door even anonymously),
+	// open its details, expand the access review — a governed stack without a browser session renders
+	// the sign-in state; an auth-off stack renders the honest no-grants message. Both are the CORRECT
+	// render for the mode; a broken panel (crash, offline text, raw error) fails either way.
+	const probe = await request.get("/capi/v1/model");
+	await page.goto("/", { waitUntil: "networkidle" });
+	const firstRow = page.locator(".browse-row").first();
+	await expect(firstRow, "browse list should have datasets on the deployed stack").toBeVisible();
+	await firstRow.click();
+	await page.locator(".tab", { hasText: "Details" }).click();
+	const head = page.locator(".grants .head");
+	await expect(head, "the access-review toggle renders in the details panel").toBeVisible();
+	await head.click();
+	const state = page.locator(".grants .mut, .grants .acl").first();
+	await expect(state).toBeVisible();
+	if (probe.status() === 401) {
+		await expect(page.locator(".grants")).toContainText("Sign in to review access.");
+	} else {
+		// Open stack: the catalog's 501 message, a denial, or a real ACL table — never a crash.
+		await expect(page.locator(".grants")).not.toContainText("undefined");
+	}
+});

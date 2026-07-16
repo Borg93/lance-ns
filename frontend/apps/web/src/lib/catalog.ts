@@ -9,6 +9,7 @@ export type ModelSummary = components["schemas"]["ModelSummary"];
 export type ModelsList = components["schemas"]["ModelsListResponse"];
 export type ModelDescribe = components["schemas"]["ModelDescribeResponse"];
 export type PromoteResponse = components["schemas"]["PromoteResponse"];
+export type AccessList = components["schemas"]["AccessListResponse"];
 
 /** Compatibility alias — the status-aware Result shape now lives in http.ts, shared with the lineage client. */
 export type CatalogResult<T> = ApiResult<T>;
@@ -28,3 +29,8 @@ export const promoteModel = (model: string, version: number) =>
 		headers: { "content-type": "application/json" },
 		body: JSON.stringify({ version }),
 	});
+
+/** Access review (#51): who holds which can_* action on the table. Owner-gated by the catalog
+ * (403 for non-owners); the BFF forwards only the signed-in user's session. */
+export const fetchTableAccess = (table: string) =>
+	requestJSON<AccessList>(`v1/table/${enc(table)}/access/list`, { method: "POST" });

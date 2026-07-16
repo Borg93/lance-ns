@@ -33,9 +33,47 @@ const json = (route: Route, body: unknown) =>
 	route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
 
 // Stub every lineage-API call the UI makes through the SvelteKit proxy — no live backend needed.
+// Mutable per-test governance state (#49) so the write tests can assert the round-trip.
+let governance: { tags: string[]; description: string | null };
+
 test.beforeEach(async ({ page }) => {
+	governance = { tags: ["layer=silver"], description: null };
 	await page.route("**/api/**", (route) => {
-		const path = new URL(route.request().url()).pathname.replace(/^\/api/, "");
+		const req = route.request();
+		const path = new URL(req.url()).pathname.replace(/^\/api/, "");
+		const gov = path.match(/^\/datasets\/([^/]+)\/governance$/);
+		if (gov)
+			return json(route, {
+				name: decodeURIComponent(gov[1]),
+				tags: governance.tags,
+				description: governance.description,
+				tags_updated_by: "alice",
+				tags_updated_at: "2026-07-16T00:00:00+00:00",
+			});
+		const tagWrite = path.match(/^\/datasets\/([^/]+)\/tags\/([^/]+)$/);
+		if (tagWrite) {
+			const tag = decodeURIComponent(tagWrite[2]);
+			if (req.method() === "PUT" && !governance.tags.includes(tag)) governance.tags.push(tag);
+			if (req.method() === "DELETE") governance.tags = governance.tags.filter((t) => t !== tag);
+			return json(route, {
+				name: decodeURIComponent(tagWrite[1]),
+				tags: governance.tags,
+				description: governance.description,
+				tags_updated_by: "alice",
+				tags_updated_at: "2026-07-16T00:00:00+00:00",
+			});
+		}
+		const desc = path.match(/^\/datasets\/([^/]+)\/description$/);
+		if (desc && req.method() === "PUT") {
+			governance.description = (req.postDataJSON() as { description: string }).description;
+			return json(route, {
+				name: decodeURIComponent(desc[1]),
+				tags: governance.tags,
+				description: governance.description,
+				description_updated_by: "alice",
+				description_updated_at: "2026-07-16T00:00:00+00:00",
+			});
+		}
 		const m = path.match(/^\/datasets\/([^/]+)\/(producers|graph|columns)/);
 		if (m) {
 			const id = decodeURIComponent(m[1]);
@@ -275,4 +313,31 @@ test("status board renders live runs from the workspace lib (@lance/ui StatusBoa
 	await expect(page.getByText("FAIL", { exact: true })).toBeVisible();
 	await expect(page.getByText("quality gate: row_count below floor")).toBeVisible();
 	await expect(page.getByText("→ silver$features")).toBeVisible();
+});
+
+test("governance: tag add/remove and description edit round-trip in the details panel", async ({
+	page,
+}) => {
+	await page.goto("/lineage");
+	await expect(page.locator(".svelte-flow__node")).toHaveCount(4, { timeout: 15_000 });
+	await page.locator(".svelte-flow__node").filter({ hasText: "silver$features" }).click();
+	await page.getByRole("tab", { name: "Details" }).click();
+	const panel = page.locator(".governance");
+	await expect(panel.locator(".tag", { hasText: "layer=silver" })).toBeVisible();
+
+	// Add a governance tag — the chip appears from the write response.
+	await panel.getByLabel("Add governance tag").fill("pii");
+	await panel.locator(".tag-add button").click();
+	await expect(panel.locator(".tag", { hasText: "pii" })).toBeVisible();
+	await expect(panel.locator(".attribution")).toContainText("alice");
+
+	// Remove it again — the chip disappears.
+	await panel.locator(".tag", { hasText: "pii" }).locator(".tag-x").click();
+	await expect(panel.locator(".tag", { hasText: "pii" })).toHaveCount(0);
+
+	// Description: placeholder → edit → saved text renders.
+	await panel.locator(".desc").click();
+	await panel.locator("textarea").fill("Daily silver feature table");
+	await panel.getByRole("button", { name: "Save" }).click();
+	await expect(panel.locator(".desc")).toContainText("Daily silver feature table");
 });

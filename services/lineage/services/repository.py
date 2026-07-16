@@ -54,6 +54,7 @@ from lineage.schemas import (
     ColumnNode,
     ColumnRef,
     Creator,
+    DatasetGovernance,
     DatasetRef,
     DatasetSchema,
     DatasetSummary,
@@ -236,8 +237,8 @@ _LINK_RUN_JOB: Final = (
     "MATCH (r:Run {run_id:$rid}), (j:Job {namespace:$ns, name:$nm}) MERGE (r)-[:OF_JOB]->(j) RETURN 1"
 )
 _MERGE_DATASET: Final = "MERGE (d:Dataset {name:$name}) SET d.namespace=$ns RETURN 1"
-# Storage location + governance tags are SET only when the event carries them, so a later run
-# that omits the dataSource/tags facet never clobbers what an earlier run recorded.
+# Storage location is SET only when the event carries it; tags are UNIONed into the node's set (#49 —
+# the property also holds human-curated governance tags, which a producer's facet must never clobber).
 _SET_DATASET_SRC: Final = "MATCH (d:Dataset {name:$name}) SET d.source_uri=$src RETURN 1"
 # Terminal lifecycle (2026-07-11): dropped-ness is DERIVED AT READ TIME from run history — the most
 # recent SUCCESSFUL run that wrote the dataset being a drop_table means "deliberately dropped", so
@@ -253,6 +254,20 @@ _DATASET_LAST_SUCCESS_OP: Final = (
     "RETURN r.operation, r.event_time ORDER BY r.event_time DESC LIMIT 1"
 )
 _SET_DATASET_TAGS: Final = "MATCH (d:Dataset {name:$name}) SET d.tags=$tags RETURN 1"
+# Governance metadata (#49) — human-curated tags + description on the Dataset node, with last-writer
+# attribution per field family. Standalone MATCH…SET statements bind params fine on AGE 1.5.0 (only a
+# post-MERGE SET drops them); tags stay the same comma-joined string the ingest path writes.
+_GET_DATASET_GOVERNANCE: Final = (
+    "MATCH (d:Dataset {name:$name}) RETURN d.tags, d.description, d.tags_updated_by, "
+    "d.tags_updated_at, d.description_updated_by, d.description_updated_at"
+)
+_SET_GOVERNED_TAGS: Final = (
+    "MATCH (d:Dataset {name:$name}) SET d.tags=$tags, d.tags_updated_by=$by, d.tags_updated_at=$at RETURN 1"
+)
+_SET_DESCRIPTION: Final = (
+    "MATCH (d:Dataset {name:$name}) SET d.description=$desc, d.description_updated_by=$by, "
+    "d.description_updated_at=$at RETURN 1"
+)
 _LINK_READ: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERGE (r)-[:READ]->(d) RETURN 1"
 # The READ edge carries the Lance version this run CONSUMED, when the producer pinned it (the Ray TRAIN
 # job pins every feature — #115 D1). Same own-statement rule as _SET_WROTE_VERSION below (AGE drops a
@@ -650,8 +665,20 @@ class LineageRepository:
         if ds.source_uri:
             await run_cypher(conn, self._graph, _SET_DATASET_SRC, {"name": ds.name, "src": ds.source_uri})
         if ds.tags:
+            # Union into the existing set, never overwrite (#49): the node also carries human-curated
+            # governance tags now, and a producer refreshing its facet must not wipe them. A user-removed
+            # producer tag therefore returns on that producer's next tagged run — honest behavior (the
+            # producer keeps asserting it). Curated tags survive any SINGLE ingest; a concurrent
+            # curation and ingest remain last-writer-wins (millisecond window, human edits are rare).
+            # Facet labels are unvalidated producer strings: one containing the comma JOIN separator
+            # would splinter on read and then re-append on every run (unbounded growth — audit
+            # 2026-07-16), so commas are stripped here and the merge dedupes order-preservingly.
+            rows = await run_cypher(conn, self._graph, _GET_DATASET_GOVERNANCE, {"name": ds.name}, columns=6)
+            existing = _tags_from(rows[0][0]) if rows else []
+            sanitized = [tag.replace(",", "_") for tag in ds.tags]
+            merged = list(dict.fromkeys(existing + sanitized))
             await run_cypher(
-                conn, self._graph, _SET_DATASET_TAGS, {"name": ds.name, "tags": ",".join(ds.tags)}
+                conn, self._graph, _SET_DATASET_TAGS, {"name": ds.name, "tags": ",".join(merged)}
             )
 
     async def _ingest_columns(self, conn, event: RunEvent) -> None:
@@ -954,6 +981,93 @@ class LineageRepository:
             out.append(DatasetSummary(name=name, namespace=(ns or None), tags=tags))
         out.sort(key=lambda d: d.name)
         return out
+
+    async def governance(self, name: str) -> DatasetGovernance | None:
+        """The dataset's governance metadata (tags + description + attribution), or ``None`` if unknown."""
+        rows = await fetch(self._pool, self._graph, _GET_DATASET_GOVERNANCE, {"name": name}, columns=6)
+        if not rows:
+            return None
+        tags, description, tags_by, tags_at, desc_by, desc_at = rows[0]
+        return DatasetGovernance(
+            name=name,
+            tags=_tags_from(tags),
+            description=description or None,
+            tags_updated_by=tags_by or None,
+            tags_updated_at=tags_at or None,
+            description_updated_by=desc_by or None,
+            description_updated_at=desc_at or None,
+        )
+
+    async def set_tag(
+        self, name: str, tag: str, *, present: bool, updated_by: str
+    ) -> DatasetGovernance | None:
+        """Add (``present=True``) or remove a governance tag; returns the updated metadata, ``None`` if the
+        dataset is unknown.
+
+        Read-modify-write inside one transaction: the comma-joined ``tags`` string has no in-place list
+        ops (the AGE array hazard), so concurrent curations are last-writer-wins per commit — the same
+        semantics the ingest path's tag SET already has, acceptable for low-frequency human edits.
+        Producer-set order is preserved; an added tag appends.
+        """
+        stamp = datetime.now(UTC).isoformat()
+        async with self._pool.connection() as conn, conn.transaction():
+            rows = await run_cypher(conn, self._graph, _GET_DATASET_GOVERNANCE, {"name": name}, columns=6)
+            if not rows:
+                return None
+            tags = _tags_from(rows[0][0])
+            if present and tag not in tags:
+                tags.append(tag)
+            elif not present and tag in tags:
+                tags.remove(tag)
+            await run_cypher(
+                conn,
+                self._graph,
+                _SET_GOVERNED_TAGS,
+                {"name": name, "tags": ",".join(tags), "by": updated_by, "at": stamp},
+            )
+            _, description, _, _, desc_by, desc_at = rows[0]
+        log.info(
+            "governance_tags_updated",
+            extra={"dataset": name, "tag": tag, "present": present, "by": updated_by},
+        )
+        # The response is built from the values THIS transaction wrote — a post-commit re-read could
+        # reflect a concurrent writer's state and make a successful PUT look like it did nothing.
+        return DatasetGovernance(
+            name=name,
+            tags=tags,
+            description=description or None,
+            tags_updated_by=updated_by,
+            tags_updated_at=stamp,
+            description_updated_by=desc_by or None,
+            description_updated_at=desc_at or None,
+        )
+
+    async def set_description(
+        self, name: str, description: str, *, updated_by: str
+    ) -> DatasetGovernance | None:
+        """Set (or clear, with ``""``) the dataset's description; ``None`` if the dataset is unknown."""
+        stamp = datetime.now(UTC).isoformat()
+        async with self._pool.connection() as conn, conn.transaction():
+            rows = await run_cypher(conn, self._graph, _GET_DATASET_GOVERNANCE, {"name": name}, columns=6)
+            if not rows:
+                return None
+            await run_cypher(
+                conn,
+                self._graph,
+                _SET_DESCRIPTION,
+                {"name": name, "desc": description, "by": updated_by, "at": stamp},
+            )
+            tags, _, tags_by, tags_at, _, _ = rows[0]
+        log.info("governance_description_updated", extra={"dataset": name, "by": updated_by})
+        return DatasetGovernance(
+            name=name,
+            tags=_tags_from(tags),
+            description=description or None,
+            tags_updated_by=tags_by or None,
+            tags_updated_at=tags_at or None,
+            description_updated_by=updated_by,
+            description_updated_at=stamp,
+        )
 
     async def list_jobs(self) -> list[JobSummary]:
         """Every job node with the set of datasets it wrote (its governance handle), name-sorted.

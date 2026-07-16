@@ -4,7 +4,7 @@ The canonical, machine-readable contract lives in two generated OpenAPI files, r
 FastAPI apps by `make openapi` and drift-guarded in CI (`make openapi-check`):
 
 - [`catalog-openapi.json`](./catalog-openapi.json) — the catalog service (66 paths)
-- [`lineage-openapi.json`](./lineage-openapi.json) — the lineage service (21 paths)
+- [`lineage-openapi.json`](./lineage-openapi.json) — the lineage service (24 paths)
 
 This page is the human index: which capability each endpoint group serves, and which parts are **net-new to
 this project** (★) versus the upstream Lance-namespace REST contract. Regenerate both specs and this page's
@@ -55,6 +55,7 @@ service-door principal (app token + allowlisted subject — how the Ray trainer'
 | **Dataset graph** | `GET /datasets`, `GET /datasets/{name}/{upstream,downstream,graph,creator,producers,schema,reconcile}` | dataset-level DERIVED_FROM lineage |
 | **Column lineage** | `GET /datasets/{name}/columns`, `.../columns/{field}/{upstream,downstream}` | field-to-field `columnLineage` (incl. `source_rowid ← _rowid` at the cascade head) |
 | **Runs & events** | `GET /runs`, `GET /runs/{run_id}/inputs`, `GET /events`, `GET /jobs`, `GET /namespaces` | a run's pinned input dataset versions (which feature versions trained a model) |
+| ★ **Governance metadata (#49)** | `GET /datasets/{name}/governance`, `PUT,DELETE /datasets/{name}/tags/{tag}`, `PUT /datasets/{name}/description` | human-curated tags + description; reads on the reader rung, writes on `can_write_data` (fail-closed), every change attributable (who/when on the node); producer facet tags UNION with curated ones |
 | **Search** | `GET /search` | |
 | **Health** | `GET /livez`, `GET /readyz` | |
 

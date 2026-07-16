@@ -3,31 +3,17 @@
 // The describe route serializes with response_model_exclude_none, so its null fields arrive absent —
 // read optional fields with `?? null` rather than trusting the generated required-nullable shape.
 import type { components } from "./catalog.generated";
-import { FETCH_TIMEOUT_MS, timeoutSignal } from "./http";
+import { type ApiResult, requestJSON as request } from "./http";
 
 export type ModelSummary = components["schemas"]["ModelSummary"];
 export type ModelsList = components["schemas"]["ModelsListResponse"];
 export type ModelDescribe = components["schemas"]["ModelDescribeResponse"];
 export type PromoteResponse = components["schemas"]["PromoteResponse"];
 
-/** A fetch outcome that keeps the status: the models page needs 401 ("sign in") ≠ 502 ("offline"). */
-export type CatalogResult<T> =
-	| { ok: true; data: T }
-	| { ok: false; status: number; detail: string };
+/** Compatibility alias — the status-aware Result shape now lives in http.ts, shared with the lineage client. */
+export type CatalogResult<T> = ApiResult<T>;
 
-async function requestJSON<T>(path: string, init?: RequestInit): Promise<CatalogResult<T>> {
-	try {
-		const res = await fetch(`/capi/${path}`, { ...init, signal: timeoutSignal(FETCH_TIMEOUT_MS) });
-		const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
-		if (!res.ok) {
-			const detail = typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
-			return { ok: false, status: res.status, detail };
-		}
-		return { ok: true, data: body as T };
-	} catch (err) {
-		return { ok: false, status: 0, detail: String(err) };
-	}
-}
+const requestJSON = <T>(path: string, init?: RequestInit) => request<T>("/capi", path, init);
 
 const enc = encodeURIComponent;
 

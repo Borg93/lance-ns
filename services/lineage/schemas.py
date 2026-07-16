@@ -335,6 +335,25 @@ class DatasetSummary(BaseModel):
     tags: list[str] = Field(default_factory=list)
 
 
+class DatasetGovernance(BaseModel):
+    """A dataset's human-curated governance metadata (#49): tags + description, with last-writer
+    attribution per field family (who/when persisted on the node — the auditable trail for curation)."""
+
+    name: str
+    tags: list[str] = Field(default_factory=list)
+    description: str | None = None
+    tags_updated_by: str | None = None
+    tags_updated_at: str | None = None
+    description_updated_by: str | None = None
+    description_updated_at: str | None = None
+
+
+class DescriptionUpdate(BaseModel):
+    """The ``PUT /datasets/{name}/description`` body. An empty string clears the description."""
+
+    description: str = Field(max_length=2000)
+
+
 class SearchHit(BaseModel):
     """One /search result: the dataset + WHY it matched (name / namespace / tag:* / column:*)."""
 

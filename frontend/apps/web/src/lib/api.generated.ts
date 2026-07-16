@@ -248,6 +248,74 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/datasets/{name}/governance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Governance
+         * @description The dataset's curated tags + description with last-writer attribution (who/when per field).
+         */
+        get: operations["get_governance_datasets__name__governance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/tags/{tag}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Add Tag
+         * @description Add one governance tag (idempotent — re-adding an existing tag is a no-op re-stamp).
+         */
+        put: operations["add_tag_datasets__name__tags__tag__put"];
+        post?: never;
+        /**
+         * Remove Tag
+         * @description Remove one governance tag (idempotent — removing an absent tag is a no-op re-stamp).
+         *
+         *     Deliberately unvalidated: removal only filters an existing element out of storage, so any string is
+         *     safe — and it lets a curator purge a non-conforming tag (e.g. an old producer label) that the add
+         *     path would refuse.
+         */
+        delete: operations["remove_tag_datasets__name__tags__tag__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Description
+         * @description Set the dataset's description (an empty string clears it).
+         */
+        put: operations["set_description_datasets__name__description_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/datasets/{name}/columns/{field}/upstream": {
         parameters: {
             query?: never;
@@ -507,6 +575,12 @@ export interface paths {
         /**
          * Demo Datasets
          * @description The medallion datasets as they currently exist on S3 — schema per Lance version + rows.
+         *
+         *     GOVERNED (audit: this endpoint reads real medallion schemas/row-counts + gold's lineage JSONB from S3
+         *     with the SERVICE root credentials, so it must not disclose a dataset the caller cannot see). Every
+         *     other lineage read gates on ``can_get_metadata``; this now does the same — authenticate (401 unauth /
+         *     503 if FGA unwired, via ``require_metadata_access``) and filter to the datasets the caller may read.
+         *     FGA off → pass-through (the dev demo).
          */
         get: operations["demo_datasets_demo_datasets_get"];
         put?: never;
@@ -646,6 +720,27 @@ export interface components {
             [key: string]: unknown;
         };
         /**
+         * DatasetGovernance
+         * @description A dataset's human-curated governance metadata (#49): tags + description, with last-writer
+         *     attribution per field family (who/when persisted on the node — the auditable trail for curation).
+         */
+        DatasetGovernance: {
+            /** Name */
+            name: string;
+            /** Tags */
+            tags?: string[];
+            /** Description */
+            description?: string | null;
+            /** Tags Updated By */
+            tags_updated_by?: string | null;
+            /** Tags Updated At */
+            tags_updated_at?: string | null;
+            /** Description Updated By */
+            description_updated_by?: string | null;
+            /** Description Updated At */
+            description_updated_at?: string | null;
+        };
+        /**
          * DatasetRef
          * @description A dataset node returned from a graph traversal.
          */
@@ -747,6 +842,14 @@ export interface components {
             timestamp?: string | null;
             /** Fields */
             fields?: components["schemas"]["DemoField"][];
+        };
+        /**
+         * DescriptionUpdate
+         * @description The ``PUT /datasets/{name}/description`` body. An empty string clears the description.
+         */
+        DescriptionUpdate: {
+            /** Description */
+            description: string;
         };
         /**
          * EventRecord
@@ -1528,6 +1631,148 @@ export interface operations {
             };
         };
     };
+    get_governance_datasets__name__governance_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetGovernance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_tag_datasets__name__tags__tag__put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetGovernance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_tag_datasets__name__tags__tag__delete: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+                tag: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetGovernance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_description_datasets__name__description_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DescriptionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetGovernance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_column_upstream_datasets__name__columns__field__upstream_get: {
         parameters: {
             query?: never;
@@ -1851,7 +2096,10 @@ export interface operations {
     demo_datasets_demo_datasets_get: {
         parameters: {
             query?: never;
-            header?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1864,6 +2112,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DemoDatasets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

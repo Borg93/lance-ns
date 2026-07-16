@@ -270,8 +270,12 @@ def _capture_ingest(monkeypatch: pytest.MonkeyPatch, event_index: int) -> list[t
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+    async def _capture(
+        _conn: object, _graph: str, query: str, params: dict[str, object], *, columns: int = 1
+    ) -> list[list[object]]:
+        del columns  # signature parity with the real helper (#49 reads governance during ingest)
         calls.append((query, params))
+        return []  # a read (the tag-union governance lookup) sees "no node yet" → union starts empty
 
     monkeypatch.setattr(repo_mod, "run_cypher", _capture)
     repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
@@ -300,7 +304,7 @@ def test_ingest_records_version_and_skips_self_derived_from(monkeypatch: pytest.
     assert [p for q, p in calls if "[:DERIVED_FROM]" in q] == []
     # the standard dataSource + tags facets are persisted onto the dataset node.
     assert any("source_uri" in q for q, _ in calls)
-    assert any("d.tags" in q for q, _ in calls)
+    assert any("SET d.tags" in q for q, _ in calls)  # the WRITE, not the #49 governance read
 
 
 def test_ingest_records_job_source_location(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -309,8 +313,12 @@ def test_ingest_records_job_source_location(monkeypatch: pytest.MonkeyPatch) -> 
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+    async def _capture(
+        _conn: object, _graph: str, query: str, params: dict[str, object], *, columns: int = 1
+    ) -> list[list[object]]:
+        del columns  # signature parity with the real helper (#49 reads governance during ingest)
         calls.append((query, params))
+        return []  # a read (the tag-union governance lookup) sees "no node yet" → union starts empty
 
     monkeypatch.setattr(repo_mod, "run_cypher", _capture)
     event = RunEvent.model_validate(
@@ -347,8 +355,12 @@ def test_ingest_records_output_statistics_on_wrote_edge(monkeypatch: pytest.Monk
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+    async def _capture(
+        _conn: object, _graph: str, query: str, params: dict[str, object], *, columns: int = 1
+    ) -> list[list[object]]:
+        del columns  # signature parity with the real helper (#49 reads governance during ingest)
         calls.append((query, params))
+        return []  # a read (the tag-union governance lookup) sees "no node yet" → union starts empty
 
     monkeypatch.setattr(repo_mod, "run_cypher", _capture)
     event = RunEvent.model_validate(
@@ -384,8 +396,12 @@ def test_ingest_records_quality_on_wrote_edge(monkeypatch: pytest.MonkeyPatch) -
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+    async def _capture(
+        _conn: object, _graph: str, query: str, params: dict[str, object], *, columns: int = 1
+    ) -> list[list[object]]:
+        del columns  # signature parity with the real helper (#49 reads governance during ingest)
         calls.append((query, params))
+        return []  # a read (the tag-union governance lookup) sees "no node yet" → union starts empty
 
     monkeypatch.setattr(repo_mod, "run_cypher", _capture)
     event = RunEvent.model_validate(
@@ -537,8 +553,12 @@ def test_ingest_persists_masking_bit(monkeypatch: pytest.MonkeyPatch) -> None:
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+    async def _capture(
+        _conn: object, _graph: str, query: str, params: dict[str, object], *, columns: int = 1
+    ) -> list[list[object]]:
+        del columns  # signature parity with the real helper (#49 reads governance during ingest)
         calls.append((query, params))
+        return []  # a read (the tag-union governance lookup) sees "no node yet" → union starts empty
 
     monkeypatch.setattr(repo_mod, "run_cypher", _capture)
     repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")
@@ -652,8 +672,12 @@ def test_ingest_sets_run_progress_only_when_the_facet_rides(monkeypatch: pytest.
 
     calls: list[tuple[str, dict[str, object]]] = []
 
-    async def _capture(_conn: object, _graph: str, query: str, params: dict[str, object]) -> None:
+    async def _capture(
+        _conn: object, _graph: str, query: str, params: dict[str, object], *, columns: int = 1
+    ) -> list[list[object]]:
+        del columns  # signature parity with the real helper (#49 reads governance during ingest)
         calls.append((query, params))
+        return []  # a read (the tag-union governance lookup) sees "no node yet" → union starts empty
 
     monkeypatch.setattr(repo_mod, "run_cypher", _capture)
     repo = repo_mod.LineageRepository(cast(Any, _FakePool()), "g")

@@ -173,7 +173,7 @@ consumer — can ingest them unchanged at the same `/api/v1/lineage` path. Our i
 | `outputStatistics` | dataset (output) | runtime-**measured** rows + on-disk bytes the compute wrote | `WROTE.{row_count,size_bytes}` |
 | `dataQualityAssertions` | dataset (output) | the validator gate's checks (`row_count_positive`, `not_null`) | `WROTE.{quality_passed,quality_assertions}` |
 | `dataSource` | dataset | where the table physically lives (S3-compatible URI) | `Dataset.source_uri` |
-| `tags` | dataset | governance labels (`layer`, `pii`, …) | `Dataset.tags` |
+| `tags` | dataset | governance labels (`layer`, `pii`, …) — UNIONed into the node's set at ingest (#49: the property also holds human-curated tags, which a producer facet never clobbers; comma-bearing labels are sanitized) | `Dataset.tags` |
 | `errorMessage` | run | failure message on a `FAIL`/`ABORT` run | `Run.error_message` |
 
 **Ray is the compute, Lance is the data.** Each `Job` is a Ray job; each `Dataset` is a Lance
@@ -246,7 +246,7 @@ Layered like the catalog (`api/` · `core/` · `services/` + a thin entrypoint),
 - `services/lineage/schemas.py` — typed response models (`Neighbors`, `Producers`, `LineageGraph`).
 - `services/lineage/core/age.py` — thin Apache AGE client over `psycopg`; safe SQL via `psycopg.sql` composition.
 - `services/lineage/services/repository.py` — `LineageRepository` (the only place Cypher lives) returning the schemas above.
-- `services/lineage/api/v1/endpoints/{datasets,columns,runs,reconcile,ingest,demo}.py` — the ~15 routes, thin (call the repository; every route has a typed `response_model`); auth/filter deps live in `services/lineage/api/{security,fga_deps}.py`.
+- `services/lineage/api/v1/endpoints/{datasets,columns,runs,reconcile,ingest,governance,demo}.py` — the ~20 routes, thin (call the repository; every route has a typed `response_model`); auth/filter deps live in `services/lineage/api/{security,fga_deps}.py`. `governance.py` (#49) adds the human-curation writes: `GET /datasets/{name}/governance`, `PUT/DELETE /datasets/{name}/tags/{tag}`, `PUT /datasets/{name}/description` — reads on the reader rung, writes on `can_write_data`, attribution (who/when) persisted on the node.
 - `services/lineage/main.py` — FastAPI app; lifespan builds the pool + repository onto `app.state`, injected via an `Annotated` dep, and includes the `api/v1` router.
 - `services/lineage/seed.py` — **producer-side** OpenLineage emitter (see below); the service never imports it.
 

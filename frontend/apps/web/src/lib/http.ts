@@ -10,3 +10,29 @@ export function timeoutSignal(ms: number): AbortSignal {
 	setTimeout(() => controller.abort(), ms);
 	return controller.signal;
 }
+
+/** A fetch outcome that keeps the HTTP status — writes need 401 ("sign in") ≠ 403 (rung denial) ≠ 0
+ * (offline), which getJSON-style null-on-error cannot express. Shared by the lineage + catalog clients. */
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; detail: string };
+
+/** One status-aware JSON request against a same-origin BFF base ("/api" or "/capi"). */
+export async function requestJSON<T>(
+	base: string,
+	path: string,
+	init?: RequestInit,
+): Promise<ApiResult<T>> {
+	try {
+		const res = await fetch(`${base}/${path}`, {
+			...init,
+			signal: timeoutSignal(FETCH_TIMEOUT_MS),
+		});
+		const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+		if (!res.ok) {
+			const detail = typeof body.detail === "string" ? body.detail : `HTTP ${res.status}`;
+			return { ok: false, status: res.status, detail };
+		}
+		return { ok: true, data: body as T };
+	} catch (err) {
+		return { ok: false, status: 0, detail: String(err) };
+	}
+}

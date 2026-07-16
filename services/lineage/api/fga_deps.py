@@ -46,16 +46,12 @@ from lineage.models import RunEvent
 log = logging.getLogger(__name__)
 
 
-async def require_metadata_access(
-    name: str, request: Request, settings: SettingsDep, token: CurrentToken
+async def _require_relation(
+    relation: str, name: str, request: Request, settings: LineageSettings, token: Principal | None
 ) -> None:
-    """Gate a dataset read on OpenFGA ``can_get_metadata`` for ``<type>:<name>``.
-
-    No-op when FGA is off. When on: fail closed if the client is unwired (503) or the
-    request is unauthenticated (401), then deny (403) unless the caller has the same
-    metadata-read permission the catalog requires to describe that table. ``fga.check``
-    itself fails closed (503) on an OpenFGA outage rather than allowing.
-    """
+    """The one fail-closed authz ladder every per-``{name}`` gate shares (audit 2026-07-16: it had
+    grown four near-copies). No-op when FGA is off; unwired client → 503; unauthenticated → 401;
+    deny → 403; an OpenFGA outage inside ``fga.check`` → 503, never allow."""
     if not settings.fga_enabled:
         return
     client = getattr(request.app.state, "fga", None)
@@ -64,9 +60,26 @@ async def require_metadata_access(
     if token is None:
         raise UnauthenticatedError("authentication required")
     obj = f"{settings.fga_object_type}:{name}"
-    if not await fga.check(client, user=token.sub, relation="can_get_metadata", obj=obj):
-        log.info("access_denied", extra={"sub": token.sub, "relation": "can_get_metadata", "object": obj})
-        raise PermissionDeniedError(f"can_get_metadata required on {obj}")
+    if not await fga.check(client, user=token.sub, relation=relation, obj=obj):
+        log.info("access_denied", extra={"sub": token.sub, "relation": relation, "object": obj})
+        raise PermissionDeniedError(f"{relation} required on {obj}")
+
+
+async def require_metadata_access(
+    name: str, request: Request, settings: SettingsDep, token: CurrentToken
+) -> None:
+    """Gate a dataset read on OpenFGA ``can_get_metadata`` for ``<type>:<name>`` — the same metadata-read
+    permission the catalog requires to describe that table."""
+    await _require_relation("can_get_metadata", name, request, settings, token)
+
+
+async def require_write_access(
+    name: str, request: Request, settings: SettingsDep, token: CurrentToken
+) -> None:
+    """Gate a governance write (tags/description, #49) on OpenFGA ``can_write_data`` for ``<type>:<name>``
+    — the same writer rung :func:`enforce_output_authz` requires of a producer recording provenance:
+    curating a dataset's governance metadata is a write on that dataset."""
+    await _require_relation("can_write_data", name, request, settings, token)
 
 
 async def audit_read(

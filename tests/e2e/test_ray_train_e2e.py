@@ -91,7 +91,9 @@ def standing_features(stack: tuple[str, str, str]) -> None:
         return
     resp = requests.post(f"{lance_ray}/produce", headers={"dapr-api-token": DAPR_TOKEN}, timeout=30)
     assert resp.status_code == 202, f"/produce to seed silver$features failed: {resp.status_code} {resp.text}"
-    _poll(lambda: _silver_exists() or None, timeout=240.0, label="silver$features written by the cascade")
+    # Generous window: on a FRESH kind cluster the cascade is raw→bronze→silver via sequential Ray jobs,
+    # and the first Ray job cold-starts its runtime env (~2 min) before any stage completes.
+    _poll(lambda: _silver_exists() or None, timeout=480.0, label="silver$features written by the cascade")
 
 
 @pytest.mark.usefixtures("standing_features")
@@ -119,7 +121,7 @@ def test_train_to_blessed_with_full_reproducibility_capture(stack: tuple[str, st
         lambda: (lambda rr: rr.json() if rr.status_code == 200 and rr.json().get("latest_version") else None)(
             requests.get(f"{catalog}/v1/model/{model}", headers=alice, timeout=15)
         ),
-        timeout=240.0,
+        timeout=300.0,
         label=f"candidate version for {model}",
     )
     candidate = detail["latest_version"]

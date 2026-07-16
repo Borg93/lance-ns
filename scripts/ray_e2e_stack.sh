@@ -139,9 +139,11 @@ step "6/6 run the two Ray-path suites against the live ray-on stack"
 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_CATALOG_URL=http://localhost:2333 \
 LANCE_E2E_LINEAGE_URL=http://localhost:8000 LANCE_E2E_DEX=http://localhost:5556/dex \
 LANCE_E2E_FGA=http://localhost:8081 LANCE_E2E_DAPR_TOKEN="$DAPR_TOKEN" LANCE_E2E_GREPTIME_URL="" \
+# Batch FIRST: its ray_lance_job submit cold-starts the Ray runtime env, so the ray cluster is warm
+# when the train suite's raw→bronze→silver cascade (also Ray jobs) runs — avoids stacking cold-starts.
 PYTHONPATH=services uv run pytest \
-  tests/e2e/test_ray_train_e2e.py \
   tests/e2e/test_ray_batch_e2e.py \
+  tests/e2e/test_ray_train_e2e.py \
   -v -rs -p no:cacheprovider | tee /tmp/e2e-ray.log
 # No silent skips: the stack IS up, so a skip means a misconfigured env var, not "not applicable".
 if grep -qE "[1-9][0-9]* skipped" /tmp/e2e-ray.log; then

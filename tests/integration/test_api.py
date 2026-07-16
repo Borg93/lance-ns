@@ -695,6 +695,14 @@ def test_maintenance_policy_crud_round_trips(client: TestClient, fake_ns: MagicM
     assert client.post("/v1/table/db1$users/policy/describe").status_code == 404
 
 
+def test_access_list_is_unsupported_without_fga(client: TestClient) -> None:
+    # CONTRACT (#51): an auth-off stack has no grants to review — answer 501 honestly instead of an
+    # empty grant list that would read as "nobody has access".
+    resp = client.post("/v1/table/db1$users/access/list")
+    # The problem handler masks 5xx details, so only the status is visible to the client.
+    assert resp.status_code == 501
+
+
 def test_maintenance_policy_rejects_an_empty_policy(client: TestClient, fake_ns: MagicMock) -> None:
     resp = client.post("/v1/table/db1$users/policy/set", json={})
     assert resp.status_code == 422  # a body that sets nothing changes nothing — the validator refuses

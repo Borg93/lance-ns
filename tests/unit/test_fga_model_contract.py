@@ -31,6 +31,7 @@ from typing import Any, cast
 
 import pytest
 from catalog.api import fga_deps
+from catalog.api.v1.endpoints import access
 from catalog.core.config import Settings
 from common import fga as fga_module
 from common.oidc import IDToken
@@ -285,6 +286,22 @@ def test_transaction_alter_checks_a_real_namespace_writer_relation(
     assert obj == "namespace:db1"  # parent-scoped, not a per-txn object nothing seeds
     assert relation in _model_relations()["namespace"], f"namespace#{relation} does not exist"
     assert relation == "can_update_properties"  # the namespace WRITER rung (can_write_data is table-only)
+
+
+def test_access_review_enumerates_exactly_the_models_can_relations() -> None:
+    """CONTRACT (#51): the access-review endpoints ask ListUsers for exactly the ``can_*`` set the
+    compiled model defines on the type — never a hand-kept list (which would drift into phantom
+    relations: OpenFGA 400 → fail-closed 503 for every reviewer) and never a filtered subset (which
+    would silently hide grants from the review)."""
+    model = _model_relations()
+    for fga_type in ("table", "namespace"):
+        enumerated = set(access._can_relations(fga_type))
+        expected = {r for r in model[fga_type] if r.startswith("can_")}
+        assert enumerated, f"access review enumerates no relations for {fga_type}"
+        assert enumerated == expected, (
+            f"access review's {fga_type} relation set drifted from model.json: "
+            f"missing={sorted(expected - enumerated)} phantom={sorted(enumerated - expected)}"
+        )
 
 
 def test_all_three_model_copies_agree() -> None:

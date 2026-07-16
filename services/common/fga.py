@@ -42,10 +42,13 @@ from openfga_sdk.client.models import (
     ClientTuple,
     ClientWriteRequest,
 )
+from openfga_sdk.client.models.list_users_request import ClientListUsersRequest
 from openfga_sdk.configuration import RetryParams
 from openfga_sdk.exceptions import ApiException
 from openfga_sdk.models.create_store_request import CreateStoreRequest
+from openfga_sdk.models.fga_object import FgaObject
 from openfga_sdk.models.read_request_tuple_key import ReadRequestTupleKey
+from openfga_sdk.models.user_type_filter import UserTypeFilter
 from openfga_sdk.models.write_authorization_model_request import WriteAuthorizationModelRequest
 from tenacity import (
     RetryCallState,
@@ -373,6 +376,67 @@ async def list_objects(
             "openfga_list_objects_unavailable",
             extra={"relation": relation, "object_type": object_type},
             exc_info=True,
+        )
+        raise ServiceUnavailableError("authorization service unavailable") from exc
+
+
+#: OpenFGA's default ``listUsersMaxResults`` — ListUsers has no pagination, so a result this large
+#: is likely the server's silent truncation point, not the true grantee count.
+_LIST_USERS_SERVER_CAP = 1000
+
+
+async def list_users(
+    client: OpenFgaClient,
+    *,
+    relation: str,
+    obj: str,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    retry_max_backoff_seconds: float = DEFAULT_RETRY_MAX_BACKOFF_SECONDS,
+) -> list[str]:
+    """The ``user:`` subjects holding ``relation`` on ``obj`` (e.g. every reader of ``table:db1$t``),
+    sorted — the access-review primitive (#51), the inverse of :func:`list_objects`.
+
+    ListUsers *expands* the model (role assignees, team members, the parent cascade), so the answer is
+    effective access, not just direct tuples — exactly what a reviewer needs. A public ``user:*``
+    wildcard surfaces as ``"*"`` (the model doesn't write one today, but a review must never hide it).
+    Read-only/idempotent, so it gets the same bounded retry + fail-closed treatment as :func:`check`
+    (outage → ``ServiceUnavailableError`` → 503 — never an empty list that reads as "nobody").
+
+    Caveat: the ListUsers API has no pagination, and the server truncates silently at its
+    ``listUsersMaxResults`` / ``listUsersDeadline`` limits (OpenFGA defaults: 1000 subjects / 3s) —
+    so a result at or past the cap is logged as possibly truncated; an under-reported review must
+    never pass unnoticed.
+    """
+    obj_type, _, obj_id = obj.partition(":")
+
+    @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
+    async def _do_list_users() -> list[str]:
+        response = await client.list_users(
+            ClientListUsersRequest(
+                object=FgaObject(type=obj_type, id=obj_id),
+                relation=relation,
+                user_filters=[UserTypeFilter(type="user")],
+            )
+        )
+        subjects: list[str] = []
+        for user in response.users or []:
+            if getattr(user, "object", None) is not None:
+                subjects.append(user.object.id)
+            elif getattr(user, "wildcard", None) is not None:
+                subjects.append("*")
+        if len(subjects) >= _LIST_USERS_SERVER_CAP:
+            log.warning(
+                "openfga_list_users_possibly_truncated",
+                extra={"relation": relation, "object": obj, "subjects": len(subjects)},
+            )
+        return sorted(subjects)
+
+    try:
+        return await _do_list_users()
+    except _FAIL_CLOSED as exc:
+        log.error(
+            "openfga_list_users_unavailable", extra={"relation": relation, "object": obj}, exc_info=True
         )
         raise ServiceUnavailableError("authorization service unavailable") from exc
 

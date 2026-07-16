@@ -14,6 +14,7 @@ Uses stdlib ``asyncio.run`` so no pytest-asyncio dependency is needed.
 from __future__ import annotations
 
 import asyncio
+from types import SimpleNamespace
 from typing import cast
 
 import aiohttp
@@ -43,6 +44,9 @@ class _DownClient:
 
     async def list_objects(self, *_a: object, **_k: object) -> object:
         raise TimeoutError
+
+    async def list_users(self, *_a: object, **_k: object) -> object:
+        raise aiohttp.ClientConnectionError("connection refused")
 
     async def write(self, *_a: object, **_k: object) -> object:
         raise ConnectionRefusedError
@@ -98,6 +102,40 @@ def test_list_objects_fails_closed_on_network_error() -> None:
                 retry_max_backoff_seconds=0.0,
             )
         )
+
+
+def test_list_users_fails_closed_on_network_error() -> None:
+    # CONTRACT (#51): an access review must never answer "nobody" because OpenFGA was down — the
+    # outage is a 503, exactly like every other read path.
+    with pytest.raises(ServiceUnavailableError):
+        asyncio.run(
+            fga.list_users(
+                _down(),
+                relation="can_read_data",
+                obj="table:t",
+                retry_attempts=1,
+                retry_backoff_seconds=0.0,
+                retry_max_backoff_seconds=0.0,
+            )
+        )
+
+
+def test_list_users_extracts_subjects_and_wildcard() -> None:
+    # The wrapper returns sorted bare subjects; a `user:*` public wildcard surfaces as "*" — an
+    # access review must never hide a public grant.
+    class _Client:
+        async def list_users(self, body: object) -> object:
+            del body
+            return SimpleNamespace(
+                users=[
+                    SimpleNamespace(object=SimpleNamespace(type="user", id="bob"), wildcard=None),
+                    SimpleNamespace(object=SimpleNamespace(type="user", id="alice"), wildcard=None),
+                    SimpleNamespace(object=None, wildcard=SimpleNamespace(type="user")),
+                ]
+            )
+
+    result = asyncio.run(fga.list_users(cast(OpenFgaClient, _Client()), relation="reader", obj="table:t"))
+    assert result == ["*", "alice", "bob"]
 
 
 def test_write_tuples_fails_closed_on_network_error() -> None:

@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends
 
 from catalog.api.fga_deps import authorize
 from catalog.api.v1.endpoints import (
+    access,
     branches,
     columns,
     credentials,
@@ -40,5 +41,6 @@ for _module in (
     warehouses,
     models,
     policies,
+    access,
 ):
     api_router.include_router(_module.router)

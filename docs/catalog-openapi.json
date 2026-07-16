@@ -1,6 +1,27 @@
 {
   "components": {
     "schemas": {
+      "AccessListResponse": {
+        "properties": {
+          "grants": {
+            "items": {
+              "$ref": "#/components/schemas/RelationGrants"
+            },
+            "title": "Grants",
+            "type": "array"
+          },
+          "object": {
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "grants"
+        ],
+        "title": "AccessListResponse",
+        "type": "object"
+      },
       "AddColumnsEntry": {
         "description": "AddColumnsEntry",
         "properties": {
@@ -6935,6 +6956,28 @@
         "title": "RegisterTableResponse",
         "type": "object"
       },
+      "RelationGrants": {
+        "description": "One ``can_*`` action and every user subject holding it (``\"*\"`` = a public wildcard grant).",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "users": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Users",
+            "type": "array"
+          }
+        },
+        "required": [
+          "relation",
+          "users"
+        ],
+        "title": "RelationGrants",
+        "type": "object"
+      },
       "RenameTableRequest": {
         "description": "RenameTableRequest",
         "properties": {
@@ -8294,6 +8337,54 @@
         ]
       }
     },
+    "/v1/namespace/{id}/access/list": {
+      "post": {
+        "description": "Effective access on the namespace, per ``can_*`` action \u2014 owner-gated by the router\n(``can_delete``).",
+        "operationId": "list_namespace_access_v1_namespace__id__access_list_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Namespace Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/namespace/{id}/create": {
       "post": {
         "description": "Create a namespace via ``create_namespace``, then seed its FGA owner + parent edge.",
@@ -9014,6 +9105,54 @@
         "summary": "Batch Create Table Versions",
         "tags": [
           "version"
+        ]
+      }
+    },
+    "/v1/table/{id}/access/list": {
+      "post": {
+        "description": "Effective access on the table, per ``can_*`` action \u2014 owner-gated by the router (``can_drop``).",
+        "operationId": "list_table_access_v1_table__id__access_list_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Table Access",
+        "tags": [
+          "access"
         ]
       }
     },

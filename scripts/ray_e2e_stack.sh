@@ -33,6 +33,17 @@ cleanup() {
       echo "--- NOT READY: $p"; kubectl describe pod "$p" 2>/dev/null | sed -n '/Events:/,$p' | head -15 || true
       kubectl logs "$p" --all-containers --tail=40 2>/dev/null | head -40 || true
     done
+    # Cascade state: on a fixture timeout the movers stay Running (so the loop above misses them), yet the
+    # cascade may have stalled at a Ray stage job. Dump the ignition + stage-submit trail + head job list.
+    echo "--- cascade trail (lance-ray ignition + movers' ray stage jobs) ---"
+    for c in lance-ray raw-to-bronze bronze-to-silver silver-to-gold; do
+      echo "  [$c]"
+      kubectl logs -l "app.kubernetes.io/instance=$RELEASE,app.kubernetes.io/component=$c" \
+        --all-containers --tail=60 2>/dev/null \
+        | grep -iE "cascade|raw_arrival|ray_stage_job|RETRY|quality|error|traceback|timeout" | tail -20 || true
+    done
+    echo "--- ray-lance-head job list (SUCCEEDED/RUNNING/FAILED per stage) ---"
+    kubectl exec deploy/ray-lance-head -- ray job list 2>/dev/null | tail -25 || true
     echo "::endgroup::"
   fi
   if [ "${KEEP_STACK:-0}" != "1" ] && [ "${CI:-}" = "true" ]; then
@@ -136,11 +147,14 @@ DAPR_TOKEN="$(kubectl get secret "$RELEASE-dapr-app-token" -o jsonpath='{.data.t
 [ -n "$DAPR_TOKEN" ] || { echo "!! no dapr app token"; exit 1; }
 
 step "6/6 run the two Ray-path suites against the live ray-on stack"
+# Batch FIRST: its ray_lance_job submit cold-starts the Ray runtime env, so the ray cluster is warm
+# when the train suite's raw→bronze→silver cascade (also Ray jobs) runs — avoids stacking cold-starts.
+# The env vars MUST stay a contiguous command-prefix to `uv run pytest` (no comment splitting the `\`
+# continuation) — a comment there ends the line, demoting them to non-exported shell vars the child
+# pytest never sees, and every suite would skip "set LANCE_E2E_...".
 LANCE_E2E_LANCERAY_URL=http://localhost:8002 LANCE_E2E_CATALOG_URL=http://localhost:2333 \
 LANCE_E2E_LINEAGE_URL=http://localhost:8000 LANCE_E2E_DEX=http://localhost:5556/dex \
 LANCE_E2E_FGA=http://localhost:8081 LANCE_E2E_DAPR_TOKEN="$DAPR_TOKEN" LANCE_E2E_GREPTIME_URL="" \
-# Batch FIRST: its ray_lance_job submit cold-starts the Ray runtime env, so the ray cluster is warm
-# when the train suite's raw→bronze→silver cascade (also Ray jobs) runs — avoids stacking cold-starts.
 PYTHONPATH=services uv run pytest \
   tests/e2e/test_ray_batch_e2e.py \
   tests/e2e/test_ray_train_e2e.py \

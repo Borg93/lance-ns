@@ -21,6 +21,9 @@ class DatasetResult(BaseModel):
     """What one dataset's maintenance pass did (or why it was skipped)."""
 
     uri: str
+    #: Why the policy layer skipped this dataset this tick (``policy_disabled`` / ``policy_interval``);
+    #: ``None`` when maintenance ran.
+    skipped: str | None = None
     fragments_removed: int = 0
     fragments_added: int = 0
     indices_optimized: int = 0
@@ -35,7 +38,9 @@ class DatasetResult(BaseModel):
 def discover_dataset_uris(fs: pafs.FileSystem, bucket: str, *, max_depth: int = 3) -> list[str]:
     """Lance datasets under ``bucket`` — a directory IS a dataset iff it has a ``_versions/`` child
     (the Lance table-layout marker); any other directory is a namespace prefix and is recursed into
-    (bounded by ``max_depth``). Skips ``__`` bookkeeping dirs (the catalog's ``__manifest``).
+    (bounded by ``max_depth``). Skips ``__`` bookkeeping dirs (the catalog's ``__manifest``) and the
+    control-plane registries (``_warehouses``, ``_policies``) — no dataset ever lives under them, and
+    probing them is wasted S3 round-trips on the hot discovery path.
 
     The catalog lays top-level tables out as ``<uuid>_<table_id>/``, but the medallion cascade nests
     its datasets one level down (``medallion/raw`` …) — without the marker probe the sweep both
@@ -48,7 +53,7 @@ def discover_dataset_uris(fs: pafs.FileSystem, bucket: str, *, max_depth: int = 
             if info.type != pafs.FileType.Directory:
                 continue
             name = info.path.rstrip("/").split("/")[-1]
-            if name.startswith("__"):
+            if name.startswith("__") or name in ("_warehouses", "_policies"):
                 continue
             marker = fs.get_file_info(f"{info.path}/_versions")
             if marker.type == pafs.FileType.Directory:
@@ -60,7 +65,12 @@ def discover_dataset_uris(fs: pafs.FileSystem, bucket: str, *, max_depth: int = 
     return uris
 
 
-def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta) -> DatasetResult:
+def compact_one(
+    uri: str,
+    storage_options: dict[str, str],
+    older_than: timedelta | None,
+    retain_versions: int | None = None,
+) -> DatasetResult:
     """Compact small fragments + GC old versions for one dataset. Never raises — a per-dataset failure is
     captured in ``error`` so one bad dataset can't abort the whole maintenance pass."""
     try:
@@ -107,7 +117,12 @@ def compact_one(uri: str, storage_options: dict[str, str], older_than: timedelta
         # is deleted). The default (True) RAISES once any tag ages past older_than — which, since the catalog
         # creates long-lived promotion tags, would permanently stall GC for that dataset (the raise is caught
         # and recorded as error, reclaiming nothing). We want GC to skip tagged versions and reclaim the rest.
-        stats: Any = ds.cleanup_old_versions(older_than=older_than, error_if_tagged_old_versions=False)
+        # retain_versions (#50 policy override): with ``older_than=None`` it is pure count-based
+        # retention ("keep exactly the last N"); when both are set, a version must clear *both* bounds
+        # to be removed. Never pass both as None — pylance then substitutes a 14-day default.
+        stats: Any = ds.cleanup_old_versions(
+            older_than=older_than, retain_versions=retain_versions, error_if_tagged_old_versions=False
+        )
         result.old_versions_removed = int(getattr(stats, "old_versions", 0))
         result.bytes_removed = int(getattr(stats, "bytes_removed", 0))
     except Exception as exc:  # noqa: BLE001 — maintenance is best-effort per dataset

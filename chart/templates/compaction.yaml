@@ -95,6 +95,10 @@ spec:
             - { name: COMPACTION_SECRETS_FROM_DAPR, value: "true" }
             {{- end }}
             - { name: COMPACTION_S3_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
+            {{- /* The #50 policy registry root defaults to this bucket, matching the catalog's
+                   LANCE_REST_ROOT (also .Values.rustfs.bucket, services.yaml). If LANCE_CONTROL_ROOT ever
+                   moves the catalog's registry, set COMPACTION_POLICY_ROOT to the same value — a wrong root
+                   lists cleanly as "no policies" (the sweep logs compaction_policies_loaded per tick). */}}
             {{- /* EVERY bucket that can hold Lance data must be swept, or its tables accumulate superseded
                    versions + small fragments FOREVER (audit 2026-07-14: the sweep saw exactly ONE bucket,
                    so the medallion zone buckets and every #3-B multi-base data bucket leaked storage

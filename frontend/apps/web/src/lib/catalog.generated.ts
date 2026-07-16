@@ -99,9 +99,10 @@ export interface paths {
          *
          *     Mirrors the governed table listing: enumerate storage, then — when FGA is on — return only the models
          *     the caller holds the reader rung (``can_get_metadata``) on, the same relation the per-model describe
-         *     enforces. Name-shape filtering runs BEFORE authz so a stray directory can never reach an FGA object id.
+         *     enforces. Name-shape filtering runs before authz so a stray directory can never reach an FGA object id.
          *     Metrics are deliberately absent here (see :func:`catalog.services.models.summarize`) — the per-model
-         *     describe carries them.
+         *     describe carries them. ``limit`` bounds the per-request dataset opens (one per listed model);
+         *     truncation is deterministic (name-sorted first ``limit``).
          */
         get: operations["list_models_v1_model_get"];
         put?: never;
@@ -255,6 +256,67 @@ export interface paths {
         get: operations["list_namespaces_v1_namespace__id__list_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/namespace/{id}/policy/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Namespace Policy
+         * @description Remove the namespace's maintenance policy (idempotent) — owner-gated by the router.
+         */
+        post: operations["delete_namespace_policy_v1_namespace__id__policy_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/namespace/{id}/policy/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe Namespace Policy
+         * @description The namespace's maintenance policy (reader-gated); 404 when none is set.
+         */
+        post: operations["describe_namespace_policy_v1_namespace__id__policy_describe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/namespace/{id}/policy/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Namespace Policy
+         * @description Set (or replace) a namespace-level policy — applies to every dataset under the namespace's
+         *     directory prefix unless a table policy overrides it. Owner-gated by the router (``can_delete``).
+         */
+        post: operations["set_namespace_policy_v1_namespace__id__policy_set_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -973,6 +1035,66 @@ export interface paths {
          *     version gap, not a lost write.
          */
         post: operations["merge_insert_into_table_v1_table__id__merge_insert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/policy/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Table Policy
+         * @description Remove the table's maintenance policy (idempotent) — owner-gated by the router.
+         */
+        post: operations["delete_table_policy_v1_table__id__policy_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/policy/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe Table Policy
+         * @description The table's maintenance policy (reader-gated); 404 when none is set.
+         */
+        post: operations["describe_table_policy_v1_table__id__policy_describe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/policy/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Table Policy
+         * @description Set (or replace) the table's maintenance policy — owner-gated by the router (``can_drop``).
+         */
+        post: operations["set_table_policy_v1_table__id__policy_set_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4113,8 +4235,8 @@ export interface components {
         };
         /**
          * ModelSummary
-         * @description One registry entry in the list view. Versions are ``None`` only for a registry directory that is not
-         *     (yet) a readable Lance dataset — surfaced rather than hidden so an interrupted first publish is visible.
+         * @description One registry entry in the list view. Versions are ``None`` only for a registry directory that is
+         *     not (yet) a readable Lance dataset — surfaced, not hidden, so an interrupted first publish is visible.
          */
         ModelSummary: {
             /** Blessed Version */
@@ -4151,6 +4273,56 @@ export interface components {
             slop?: number | null;
             /** Terms */
             terms: string;
+        };
+        /** PolicyDeleteResponse */
+        PolicyDeleteResponse: {
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * PolicyRequest
+         * @description The maintenance policy for one table or namespace — every field optional-with-defaults.
+         *
+         *     ``retention_days`` / ``retain_versions`` override the sweep's global old-version cleanup (Lance
+         *     keeps tag-pinned versions regardless); ``compact_enabled=False`` opts the target out of maintenance
+         *     entirely; ``compact_interval_hours`` bounds how often the sweep maintains it.
+         */
+        PolicyRequest: {
+            /**
+             * Compact Enabled
+             * @default true
+             */
+            compact_enabled: boolean;
+            /** Compact Interval Hours */
+            compact_interval_hours?: number | null;
+            /** Retain Versions */
+            retain_versions?: number | null;
+            /** Retention Days */
+            retention_days?: number | null;
+        };
+        /** PolicyResponse */
+        PolicyResponse: {
+            /**
+             * Compact Enabled
+             * @default true
+             */
+            compact_enabled: boolean;
+            /** Compact Interval Hours */
+            compact_interval_hours?: number | null;
+            /** Id */
+            id: string;
+            /** Kind */
+            kind: string;
+            /** Path */
+            path: string;
+            /** Retain Versions */
+            retain_versions?: number | null;
+            /** Retention Days */
+            retention_days?: number | null;
         };
         /**
          * PromoteRequest
@@ -5049,7 +5221,9 @@ export interface operations {
     };
     list_models_v1_model_get: {
         parameters: {
-            query?: never;
+            query?: {
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -5063,6 +5237,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ModelsListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5288,6 +5471,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListNamespacesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_namespace_policy_v1_namespace__id__policy_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    describe_namespace_policy_v1_namespace__id__policy_describe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_namespace_policy_v1_namespace__id__policy_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
                 };
             };
             /** @description Validation Error */
@@ -6396,6 +6676,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["MergeInsertIntoTableResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_table_policy_v1_table__id__policy_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    describe_table_policy_v1_table__id__policy_describe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_table_policy_v1_table__id__policy_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
                 };
             };
             /** @description Validation Error */

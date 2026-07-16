@@ -1016,3 +1016,45 @@ def test_authz_decision_emits_an_audit_event(client: TestClient, fake_ns: MagicM
     assert events[0]["audit.outcome"] == "allow"
     assert events[0]["audit.subject"] == "alice"
     assert events[0]["audit.resource"] == "table:db1$users"
+
+
+def test_table_policy_set_requires_owner_via_can_drop(client: TestClient, monkeypatch) -> None:
+    """CONTRACT (#50): a retention policy authorizes destroying version history — owner tier via
+    ``can_drop``, like drop/rename; 403 for a non-owner, and the native describe is never reached."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.post(
+        "/v1/table/db1$users/policy/set",
+        headers={"Authorization": "Bearer t"},
+        json={"retention_days": 7},
+    )
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_drop", "obj": "table:db1$users"}
+
+
+def test_namespace_policy_set_requires_owner_via_can_delete(client: TestClient, monkeypatch) -> None:
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+
+    resp = client.post(
+        "/v1/namespace/silver/policy/set",
+        headers={"Authorization": "Bearer t"},
+        json={"retain_versions": 5},
+    )
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_delete", "obj": "namespace:silver"}
+
+
+def test_table_policy_describe_is_reader_tier(client: TestClient, monkeypatch) -> None:
+    """CONTRACT (#50): reading a policy is a metadata read (``can_get_metadata``) — 404 when unset is
+    only reachable after the reader gate passes."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=True))
+
+    resp = client.post("/v1/table/db1$users/policy/describe", headers={"Authorization": "Bearer t"})
+    assert resp.status_code == 404  # gate passed; no policy stored in this fixture
+    assert captured[-1] == {"user": "alice", "relation": "can_get_metadata", "obj": "table:db1$users"}

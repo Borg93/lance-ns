@@ -3,7 +3,7 @@
 The canonical, machine-readable contract lives in two generated OpenAPI files, refreshed from the live
 FastAPI apps by `make openapi` and drift-guarded in CI (`make openapi-check`):
 
-- [`catalog-openapi.json`](./catalog-openapi.json) — the catalog service (66 paths)
+- [`catalog-openapi.json`](./catalog-openapi.json) — the catalog service (73 paths)
 - [`lineage-openapi.json`](./lineage-openapi.json) — the lineage service (24 paths)
 
 This page is the human index: which capability each endpoint group serves, and which parts are **net-new to
@@ -40,6 +40,7 @@ routing `lance.audit` to an independently-retained table is a known open enhance
 | **Batch** | `POST /v1/table/{batch-commit,version/batch-create}` | |
 | ★ **Model registry & promotion (#17/#42)** | `GET /v1/model` (list), `GET /v1/model/{model}`, `POST /v1/model/{model}/promote` | list = governed registry enumeration (reader-rung `list_objects` filter; candidate + blessed versions); describe (candidate vs blessed + metrics); promote = validator-gated metrics-gated move of the `blessed` tag on `models$<model>` |
 | ★ **Warehouse admin / physical multi-tenancy (#3-A)** | `GET,POST /v1/warehouses`, `GET /v1/warehouses/{id}`, `POST /v1/warehouses/{id}/{activate,deactivate,namespaces}` | project-admin (`can_create_warehouse`) provisions a bucket per warehouse + binds namespaces to it |
+| ★ **Maintenance policies (#50)** | `POST /v1/table/{id}/policy/{set,describe,delete}`, `POST /v1/namespace/{id}/policy/{set,describe,delete}` | per-target compaction cadence/opt-out + old-version retention (`retention_days`/`retain_versions`), enforced by the compaction sweep; set/delete are owner-tier (`can_drop`/`can_delete`, audited), describe is reader-tier; tag-pinned versions (e.g. `blessed`) are exempt from cleanup by Lance itself |
 | **Materialized views** | `POST /v1/materialized_view/{id}/{create,refresh}` | spec-defined + FGA-typed, but the `dir` backend does not implement MVs yet (returns 501); dormant until Lance adds native MV support |
 | **Transactions** | `POST /v1/transaction/{id}/{alter,describe}` | |
 | **Health** | `GET /livez`, `GET /readyz` | |

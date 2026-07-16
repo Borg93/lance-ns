@@ -13,6 +13,7 @@ from catalog.api.v1.endpoints import (
     indices,
     models,
     namespaces,
+    policies,
     tables,
     tags,
     transactions,
@@ -38,5 +39,6 @@ for _module in (
     credentials,
     warehouses,
     models,
+    policies,
 ):
     api_router.include_router(_module.router)

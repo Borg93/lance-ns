@@ -1,7 +1,9 @@
 """The maintenance sweep: discover every dataset in the bucket, compact + GC each, aggregate the result.
 
-Keeps the blocking S3/Lance orchestration out of the route so the cron handler stays a thin shell and the
-aggregation (:func:`summarize`) stays unit-testable without S3.
+Since #50, a per-table/namespace maintenance policy (from the catalog's ``_policies/`` registry) can skip
+a dataset (``policy_disabled`` / ``policy_interval``) or override its old-version retention; a policy-less
+dataset keeps the global defaults. Keeps the blocking S3/Lance orchestration out of the route so the cron
+handler stays a thin shell and the aggregation (:func:`summarize`) stays unit-testable without S3.
 """
 
 from __future__ import annotations
@@ -9,11 +11,11 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pyarrow.fs as pafs
-from common import fga
+from common import fga, maintenance_policies
 from common.objectfs import s3_filesystem
 from opentelemetry import trace
 from opentelemetry.trace import StatusCode
@@ -44,8 +46,52 @@ def _s3fs(settings: CompactionSettings) -> pafs.S3FileSystem:
     return s3_filesystem(settings.storage_options())
 
 
+def _policy_skip_reason(
+    policy: dict[str, object],
+    settings: CompactionSettings,
+    options: dict[str, str],
+    now: datetime,
+    uri: str,
+) -> str | None:
+    """Why the policy says to skip this dataset this tick, or ``None`` to maintain it.
+
+    ``compact_enabled=False`` opts the target out entirely; ``compact_interval_hours`` skips until the
+    interval has elapsed since the sweep's own per-dataset ``last_maintained_at`` stamp (an unreadable,
+    absent, or malformed stamp maintains — never the other way, or a lost stamp would silence maintenance
+    forever — and is logged, so a persistently broken state prefix is visible, not just ineffective).
+    """
+    if not policy.get("compact_enabled", True):
+        return "policy_disabled"
+    interval = policy.get("compact_interval_hours")
+    if interval:
+        try:
+            stamped = maintenance_policies.read_state(settings.resolved_policy_root, options, policy, uri)
+        except Exception as exc:  # noqa: BLE001 — an unreadable stamp must fail toward maintaining
+            log.warning(
+                "compaction_policy_state_unreadable",
+                extra={"policy": policy.get("id"), "uri": uri, "error": str(exc)},
+            )
+            stamped = None
+        if stamped is not None:
+            # TypeError covers a naive stamp: `now` is aware, and aware-minus-naive raises.
+            try:
+                last = datetime.fromisoformat(stamped)
+                if now - last < timedelta(hours=int(str(interval))):
+                    return "policy_interval"
+            except (ValueError, TypeError):
+                log.warning(
+                    "compaction_policy_state_malformed",
+                    extra={"policy": policy.get("id"), "uri": uri, "stamp": stamped},
+                )
+    return None
+
+
 def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
     """Discover every dataset in EVERY swept bucket and compact + GC each; record what was reclaimed.
+
+    #50 policies: a per-table/namespace record from the catalog's ``_policies/`` registry can disable a
+    dataset's maintenance, re-pace it (cadence stamp per dataset), or override its old-version retention;
+    everything else keeps the global defaults.
 
     MULTI-BUCKET (audit 2026-07-14). This used to sweep exactly ONE bucket, so every #3-A per-warehouse
     bucket and #3-B multi-base data bucket was invisible to GC — their tables accumulated superseded
@@ -56,6 +102,19 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
     older_than = timedelta(days=settings.older_than_days)
     options = settings.storage_options()
     fs = _s3fs(settings)
+    # #50 maintenance policies — loaded once per tick; a policy-less dataset keeps the global defaults.
+    # A registry we cannot read at all ABORTS the tick (fail toward not deleting, audit 2026-07-16):
+    # policies are the protective surface (retention extensions, opt-outs), so sweeping without them
+    # would GC version history an owner explicitly kept. The next cron fire retries; one bad record
+    # inside a readable registry is skipped-with-warning by list_policies, not fatal.
+    try:
+        policy_records = maintenance_policies.list_policies(settings.resolved_policy_root, options)
+    except Exception:
+        log.error("compaction_policies_unreadable_tick_aborted")
+        raise
+    # The count distinguishes "no policies set" from "policies invisible" (e.g. the catalog's control
+    # root moved without COMPACTION_POLICY_ROOT following — a wrong root lists cleanly as empty).
+    log.info("compaction_policies_loaded", extra={"policies": len(policy_records)})
     uris: list[str] = []
     for bucket in settings.sweep_buckets:
         try:
@@ -66,10 +125,47 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
         log.info("compaction_bucket_discovered", extra={"bucket": bucket, "datasets": len(found)})
         uris.extend(found)
     results: list[DatasetResult] = []
+    now = datetime.now(UTC)
     for uri in uris:
         with tracer.start_as_current_span("compaction.compact") as span:
             span.set_attribute("lance.dataset_uri", uri)
-            result = compact_one(uri, options, older_than)
+            effective_older_than: timedelta | None = older_than
+            retain_versions: int | None = None
+            policy: dict[str, Any] | None
+            try:
+                policy = maintenance_policies.resolve_policy(
+                    policy_records, uri, logical_id=table_id_from_uri(uri), delimiter=settings.delimiter
+                )
+                skipped = _policy_skip_reason(policy, settings, options, now, uri) if policy else None
+                if skipped:
+                    span.set_attribute("lance.policy_skipped", skipped)
+                    results.append(DatasetResult(uri=uri, skipped=skipped))
+                    continue
+                if policy is not None:
+                    if policy.get("retain_versions"):
+                        retain_versions = int(str(policy["retain_versions"]))
+                    if policy.get("retention_days"):
+                        effective_older_than = timedelta(days=int(str(policy["retention_days"])))
+                    elif retain_versions is not None:
+                        # "retain_versions: N" alone means exactly keep-last-N — an age bound on top would
+                        # silently keep everything younger than the global default and make the policy a
+                        # no-op on fresh datasets. Tag-pinned versions stay exempt either way.
+                        effective_older_than = None
+            except Exception as exc:  # noqa: BLE001 — a forged/malformed record must not halt the sweep
+                log.warning("compaction_policy_ignored", extra={"uri": uri, "error": str(exc)})
+                effective_older_than, retain_versions, policy = older_than, None, None
+            result = compact_one(uri, options, effective_older_than, retain_versions=retain_versions)
+            if policy is not None and policy.get("compact_interval_hours") and result.error is None:
+                # Stamp cadence state only after a successful pass, so a failed tick retries next tick.
+                try:
+                    maintenance_policies.write_state(
+                        settings.resolved_policy_root, options, policy, uri, now.isoformat()
+                    )
+                except Exception as exc:  # noqa: BLE001 — a failed stamp maintains again next tick
+                    log.warning(
+                        "compaction_policy_stamp_failed",
+                        extra={"policy": policy.get("id"), "uri": uri, "error": str(exc)},
+                    )
             results.append(result)
             # compact_one never raises (it captures the per-dataset error), so reflect a failure on the
             # span explicitly — else a failed dataset looks identical to a clean one in the trace.
@@ -162,6 +258,7 @@ def summarize(results: list[DatasetResult]) -> dict[str, Any]:
     (not just the URI) — a cron sweep has no human watching, so the *why* is the only debugging signal."""
     return {
         "datasets": len(results),
+        "skipped": sum(1 for r in results if r.skipped),
         "fragments_removed": sum(r.fragments_removed for r in results),
         "indices_optimized": sum(r.indices_optimized for r in results),
         "versions_removed": sum(r.old_versions_removed for r in results),

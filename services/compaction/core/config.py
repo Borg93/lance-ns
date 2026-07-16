@@ -51,6 +51,10 @@ class CompactionSettings(BaseSettings):
     # SecretStr so it's redacted in repr/model_dump (parity with the catalog) — .get_secret_value() to read.
     s3_secret_access_key: SecretStr = Field(default=SecretStr(""), alias="COMPACTION_S3_SECRET_ACCESS_KEY")
     s3_bucket: str = Field(default="lance-catalog", alias="COMPACTION_S3_BUCKET")
+    # #50 maintenance policies: where the catalog's policy registry lives (`<root>/_policies/`). Defaults
+    # to the primary bucket, which matches the catalog's LANCE_REST_ROOT default — override only when the
+    # catalog's control root is moved.
+    policy_root: str = Field(default="", alias="COMPACTION_POLICY_ROOT")
     # ADDITIONAL buckets to sweep, comma-separated (audit 2026-07-14). The sweep discovered exactly ONE
     # bucket, so every #3-A per-warehouse bucket and #3-B multi-base data bucket was INVISIBLE to GC: their
     # tables accumulated superseded manifest versions and small fragments FOREVER. A storage leak introduced
@@ -72,6 +76,11 @@ class CompactionSettings(BaseSettings):
     dapr_secret_store: str = Field(default="lance-secrets", alias="COMPACTION_DAPR_SECRET_STORE")
     dapr_secret_key: str = Field(default="lance", alias="COMPACTION_DAPR_SECRET_KEY")
     dapr_secret_s3_field: str = Field(default="rustfs-secret-key", alias="COMPACTION_DAPR_SECRET_S3_FIELD")
+
+    @property
+    def resolved_policy_root(self) -> str:
+        """The policy-registry root — `COMPACTION_POLICY_ROOT` or the primary bucket."""
+        return self.policy_root or f"s3://{self.s3_bucket}"
 
     def storage_options(self) -> dict[str, str]:
         """The Lance ``storage_options`` for opening datasets on the (HTTP) S3 endpoint."""

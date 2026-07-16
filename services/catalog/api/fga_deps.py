@@ -92,8 +92,17 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         "branches/create": "can_create_branch",
         "tags/create": "can_create_tag",
         "tags/update": "can_update_tag",
+        # #50 maintenance policies: a retention policy authorizes destroying this table's version
+        # history over time — the drop rung, not a plain write. `policy/describe` falls through to
+        # the reader tier via its trailing segment.
+        "policy/set": "can_drop",
+        "policy/delete": "can_drop",
     },
-    "namespace": {"drop": "can_delete"},
+    "namespace": {
+        "drop": "can_delete",
+        "policy/set": "can_delete",
+        "policy/delete": "can_delete",
+    },
 }
 
 # Body-keyed batch routes (no ``{id}`` path param); the tables are named in the body.

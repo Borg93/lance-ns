@@ -6044,6 +6044,141 @@
         "title": "PhraseQuery",
         "type": "object"
       },
+      "PolicyDeleteResponse": {
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "kind",
+          "id"
+        ],
+        "title": "PolicyDeleteResponse",
+        "type": "object"
+      },
+      "PolicyRequest": {
+        "description": "The maintenance policy for one table or namespace \u2014 every field optional-with-defaults.\n\n``retention_days`` / ``retain_versions`` override the sweep's global old-version cleanup (Lance\nkeeps tag-pinned versions regardless); ``compact_enabled=False`` opts the target out of maintenance\nentirely; ``compact_interval_hours`` bounds how often the sweep maintains it.",
+        "properties": {
+          "compact_enabled": {
+            "default": true,
+            "title": "Compact Enabled",
+            "type": "boolean"
+          },
+          "compact_interval_hours": {
+            "anyOf": [
+              {
+                "maximum": 8760.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compact Interval Hours"
+          },
+          "retain_versions": {
+            "anyOf": [
+              {
+                "maximum": 100000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Versions"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          }
+        },
+        "title": "PolicyRequest",
+        "type": "object"
+      },
+      "PolicyResponse": {
+        "properties": {
+          "compact_enabled": {
+            "default": true,
+            "title": "Compact Enabled",
+            "type": "boolean"
+          },
+          "compact_interval_hours": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Compact Interval Hours"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "retain_versions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Versions"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          }
+        },
+        "required": [
+          "kind",
+          "id",
+          "path"
+        ],
+        "title": "PolicyResponse",
+        "type": "object"
+      },
       "PromoteRequest": {
         "description": "Bless a candidate model version (candidate\u2192blessed). ``version`` is the model/Lance version to bless;\n``min_metrics`` is the fail-closed gate \u2014 each named metric must be present AND >= its threshold.",
         "properties": {
@@ -8460,6 +8595,160 @@
         "summary": "List Namespaces",
         "tags": [
           "namespace"
+        ]
+      }
+    },
+    "/v1/namespace/{id}/policy/delete": {
+      "post": {
+        "description": "Remove the namespace's maintenance policy (idempotent) \u2014 owner-gated by the router.",
+        "operationId": "delete_namespace_policy_v1_namespace__id__policy_delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Namespace Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/v1/namespace/{id}/policy/describe": {
+      "post": {
+        "description": "The namespace's maintenance policy (reader-gated); 404 when none is set.",
+        "operationId": "describe_namespace_policy_v1_namespace__id__policy_describe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Describe Namespace Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/v1/namespace/{id}/policy/set": {
+      "post": {
+        "description": "Set (or replace) a namespace-level policy \u2014 applies to every dataset under the namespace's\ndirectory prefix unless a table policy overrides it. Owner-gated by the router (``can_delete``).",
+        "operationId": "set_namespace_policy_v1_namespace__id__policy_set_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Namespace Policy",
+        "tags": [
+          "policy"
         ]
       }
     },
@@ -10907,6 +11196,160 @@
         "summary": "Merge Insert Into Table",
         "tags": [
           "data"
+        ]
+      }
+    },
+    "/v1/table/{id}/policy/delete": {
+      "post": {
+        "description": "Remove the table's maintenance policy (idempotent) \u2014 owner-gated by the router.",
+        "operationId": "delete_table_policy_v1_table__id__policy_delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Table Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/v1/table/{id}/policy/describe": {
+      "post": {
+        "description": "The table's maintenance policy (reader-gated); 404 when none is set.",
+        "operationId": "describe_table_policy_v1_table__id__policy_describe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Describe Table Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/v1/table/{id}/policy/set": {
+      "post": {
+        "description": "Set (or replace) the table's maintenance policy \u2014 owner-gated by the router (``can_drop``).",
+        "operationId": "set_table_policy_v1_table__id__policy_set_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Table Policy",
+        "tags": [
+          "policy"
         ]
       }
     },

@@ -6,6 +6,8 @@ Lakekeeper/Marquez bench); this file adds the wider-catalog bench and the two fo
 
 ## 1. Feature bench vs Polaris / Unity Catalog OSS / Gravitino / Nessie / Lakekeeper
 
+> Update 2026-07-16 (later): bench item #2 (table-maintenance policy store) SHIPPED as #50 — REST
+> policy CRUD (owner-gated, audited) + sweep enforcement with native tag-pin protection.
 > Update 2026-07-16: bench item #1 (business-metadata/tag write API + description) SHIPPED as #49 —
 > governed writes on the lineage service + browse-UI editing; the ranked list below starts at item #2.
 

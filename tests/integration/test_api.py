@@ -675,3 +675,34 @@ def test_update_with_empty_updates_is_400(client: TestClient, monkeypatch) -> No
     resp = client.post("/v1/table/db$t/update", json={"updates": []})
     assert resp.status_code == 400
     assert resp.json()["code"] == 13  # InvalidInput
+
+
+def test_maintenance_policy_crud_round_trips(client: TestClient, fake_ns: MagicMock) -> None:
+    # CONTRACT (#50): set resolves the physical path from describe_table and persists it; describe
+    # returns the record; delete is idempotent and describe 404s afterwards.
+    fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://lance-test-root/u1_db1$users")
+    set_resp = client.post(
+        "/v1/table/db1$users/policy/set", json={"retention_days": 7, "compact_interval_hours": 12}
+    )
+    assert set_resp.status_code == 200, set_resp.text
+    body = set_resp.json()
+    assert body["path"] == "lance-test-root/u1_db1$users" and body["retention_days"] == 7
+
+    desc = client.post("/v1/table/db1$users/policy/describe")
+    assert desc.status_code == 200 and desc.json()["compact_interval_hours"] == 12
+
+    assert client.post("/v1/table/db1$users/policy/delete").status_code == 200
+    assert client.post("/v1/table/db1$users/policy/describe").status_code == 404
+
+
+def test_maintenance_policy_rejects_an_empty_policy(client: TestClient, fake_ns: MagicMock) -> None:
+    resp = client.post("/v1/table/db1$users/policy/set", json={})
+    assert resp.status_code == 422  # a body that sets nothing changes nothing — the validator refuses
+    fake_ns.describe_table.assert_not_called()
+    # But an EXPLICIT compact_enabled=true is meaningful (a table-level re-enable under a disabled
+    # namespace policy — the exact-table match shadows the namespace record), so it must be accepted.
+    fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://lance-test-root/u1_db1$users")
+    resp = client.post("/v1/table/db1$users/policy/set", json={"compact_enabled": True})
+    assert resp.status_code == 200, resp.text
+    # The client fixture's registry root is a fixed local path — delete so no record leaks across tests.
+    assert client.post("/v1/table/db1$users/policy/delete").status_code == 200

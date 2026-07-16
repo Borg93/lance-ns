@@ -5,7 +5,7 @@ import { test, expect } from "@playwright/test";
 // Stack-mode aware — a governed deploy (auth on, no browser session) renders the sign-in states;
 // an open deploy renders data. Both are asserted as the CORRECT behavior for that mode.
 
-const ROUTES = ["/", "/lineage", "/models"];
+const ROUTES = ["/", "/lineage", "/models", "/tables", "/warehouses"];
 
 for (const route of ROUTES) {
 	test(`hydrates: ${route}`, async ({ page }) => {
@@ -115,6 +115,75 @@ test("access review through the BFF is session-gated per stack mode (#51 confuse
 	expect([404, 405], `generic /capi POST must stay closed, got ${other.status()}`).toContain(
 		other.status(),
 	);
+});
+
+test("tables + warehouses pages render the correct state for the stack mode (#52)", async ({
+	page,
+	request,
+}) => {
+	// Governed without a browser session ⇒ both pages render their sign-in state; open stack ⇒ data
+	// or the honest empty state. Either is the CORRECT render for the mode — a crash or the offline
+	// banner fails both ways.
+	const probe = await request.get("/capi/v1/model");
+	await page.goto("/tables", { waitUntil: "networkidle" });
+	await expect(page.getByRole("heading", { name: "Tables" })).toBeVisible();
+	if (probe.status() === 401) {
+		await expect(page.locator(".empty")).toContainText("sign in");
+	} else {
+		await expect(page.locator(".empty, .list li").first()).toBeVisible();
+		await expect(page.locator(".empty")).not.toContainText("unreachable");
+	}
+	await page.goto("/warehouses", { waitUntil: "networkidle" });
+	await expect(page.getByRole("heading", { name: "Warehouses" })).toBeVisible();
+	if (probe.status() === 401) {
+		await expect(page.locator(".empty")).toContainText("sign in");
+	}
+});
+
+test("table-detail page renders per stack mode; policy + warehouse writes are session-gated (#52 confused-deputy legs)", async ({
+	page,
+	request,
+}) => {
+	const probe = await request.get("/capi/v1/model");
+	await page.goto("/tables/no-such%24table", { waitUntil: "networkidle" });
+	if (probe.status() === 401) {
+		await expect(page.locator(".empty")).toContainText("sign in");
+	} else {
+		// Open stack: an unknown table renders the honest not-in-catalog state.
+		await expect(page.locator(".empty")).toContainText("Not a catalog-registered table");
+	}
+	// Anonymous writes through the narrow BFF routes: governed ⇒ 401 without leaving the BFF; open ⇒
+	// the catalog's own answer. Both probes are side-effect-free — the policy write targets a missing
+	// table (404/422), and the warehouse create sends a deliberately invalid body (missing project →
+	// 422) so an open stack is never actually mutated by the test.
+	const policy = await request.put("/capi/v1/table/no-such%24table/policy", {
+		maxRedirects: 0,
+		headers: { "content-type": "application/json" },
+		data: { retention_days: 1 },
+	});
+	const wh = await request.post("/capi/v1/warehouses", {
+		maxRedirects: 0,
+		headers: { "content-type": "application/json" },
+		data: { bucket: "no-id-no-project" }, // invalid: id + project are required → 422, no provisioning
+	});
+	if (probe.status() === 401) {
+		expect(policy.status(), "governed: anonymous policy write must be 401").toBe(401);
+		expect(wh.status(), "governed: anonymous warehouse create must be 401").toBe(401);
+	} else {
+		expect([404, 422], `open: policy write got ${policy.status()}`).toContain(policy.status());
+		expect(wh.status(), "open: invalid warehouse create is rejected, not provisioned").toBe(422);
+	}
+	// The warehouse action route's allowlist: an unknown action is a 404, never a forwarded call.
+	const bad = await request.post("/capi/v1/warehouses/x/drop-everything", { maxRedirects: 0 });
+	expect(bad.status()).toBe(404);
+});
+
+test("browse search uses the server-side FGA-filtered /search (#52)", async ({ request }) => {
+	// The BFF /api/search round-trips (service door on governed stacks — same posture as /api/datasets).
+	const res = await request.get("/api/search?q=gold", { maxRedirects: 0 });
+	expect(res.status(), "/api/search should answer").toBeLessThan(300);
+	const body = (await res.json()) as { results?: unknown[] };
+	expect(Array.isArray(body.results), "search results shape").toBe(true);
 });
 
 test("grants panel renders the correct access-review state for the stack mode (#51)", async ({

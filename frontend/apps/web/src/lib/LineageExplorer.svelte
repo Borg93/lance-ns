@@ -42,16 +42,41 @@
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
 	const eventCount = $derived(store.events.length);
+
+	// Server-side search (#52): the lineage /search endpoint matches names, namespaces, tags, and
+	// COLUMNS with FGA filtering — authoritative over the local filter, which only sees the loaded
+	// catalog's names/tags. Debounced; while the server answer is pending (or on a failed fetch) the
+	// local filter keeps answering, so typing never blanks the list.
+	let serverHits = $state<{ q: string; names: Set<string> } | null>(null);
+	$effect(() => {
+		const q = browseQuery.trim();
+		if (q.length < 2) {
+			serverHits = null;
+			return;
+		}
+		const timer = setTimeout(async () => {
+			const res = await fetchSearch(q, 100);
+			// Latest-wins: only publish the answer for what is still in the box.
+			if (res && browseQuery.trim() === q) {
+				serverHits = { q, names: new Set(res.results.map((r) => r.name)) };
+			}
+		}, 250);
+		return () => clearTimeout(timer);
+	});
+
 	const browseResults = $derived.by(() => {
 		const scoped = nsFilter ? store.catalog.filter((d) => d.namespace === nsFilter) : store.catalog;
 		const q = browseQuery.trim().toLowerCase();
 		if (!q) return scoped;
-		return scoped.filter(
-			(d) =>
-				d.name.toLowerCase().includes(q) ||
-				(d.namespace ?? "").toLowerCase().includes(q) ||
-				(d.tags ?? []).some((t) => t.toLowerCase().includes(q)),
-		);
+		const hits = serverHits && serverHits.q.toLowerCase() === q ? serverHits.names : null;
+		const localMatch = (d: (typeof scoped)[number]): boolean =>
+			d.name.toLowerCase().includes(q) ||
+			(d.namespace ?? "").toLowerCase().includes(q) ||
+			(d.tags ?? []).some((t) => t.toLowerCase().includes(q));
+		// The server hit UNIONs with the local match — it can only add rows the local filter misses
+		// (column / deep matches), never hide a locally-visible one that a capped/paged server answer
+		// dropped (the server /search truncates at its limit; audit 2026-07-16).
+		return scoped.filter((d) => (hits?.has(d.name) ?? false) || localMatch(d));
 	});
 
 	let nodes = $state.raw<FlowNode[]>([]);
@@ -562,7 +587,7 @@
 					/>
 					<ul class="browse-list">
 						{#each browseResults as d (d.name)}
-							<li>
+							<li class="browse-item">
 								<button
 									class="browse-row"
 									class:on={store.selected === d.name}
@@ -572,6 +597,13 @@
 									{#if d.namespace}<span class="browse-ns">{d.namespace}</span>{/if}
 									{#each d.tags ?? [] as t (t)}<span class="browse-tag">{t}</span>{/each}
 								</button>
+								<a
+									class="browse-detail mono"
+									href={`/tables/${encodeURIComponent(d.name)}`}
+									title="Catalog table detail (schema, versions, policy, access)"
+								>
+									detail
+								</a>
 							</li>
 						{:else}
 							<p class="hint">No datasets match “{browseQuery}”.</p>
@@ -1342,6 +1374,25 @@
 		display: flex;
 		flex-direction: column;
 		gap: 4px;
+	}
+	.browse-item {
+		display: flex;
+		align-items: stretch;
+		gap: 4px;
+	}
+	.browse-detail {
+		display: flex;
+		align-items: center;
+		padding: 0 8px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--faint);
+		font-size: 10px;
+		text-decoration: none;
+	}
+	.browse-detail:hover {
+		color: var(--ink);
+		background: var(--panel-2);
 	}
 	.browse-row {
 		display: flex;

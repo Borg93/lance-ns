@@ -74,6 +74,32 @@ test.beforeEach(async ({ page }) => {
 				description_updated_at: "2026-07-16T00:00:00+00:00",
 			});
 		}
+		const creator = path.match(/^\/datasets\/([^/]+)\/creator$/);
+		if (creator)
+			return json(route, { dataset: decodeURIComponent(creator[1]), creator: "user:founder" });
+		const schema = path.match(/^\/datasets\/([^/]+)\/schema$/);
+		if (schema) {
+			const v = new URL(req.url()).searchParams.get("version");
+			// Time-travel: v1 had only `id`; the latest (v2) added `embedding` — distinct per version.
+			const fields =
+				v === "1"
+					? [{ name: "id", type: "int64" }]
+					: [
+							{ name: "id", type: "int64" },
+							{ name: "embedding", type: "list<float>" },
+						];
+			return json(route, {
+				dataset: decodeURIComponent(schema[1]),
+				version: v ? Number(v) : 2,
+				fields,
+			});
+		}
+		const runInputs = path.match(/^\/runs\/([^/]+)\/inputs$/);
+		if (runInputs)
+			return json(route, {
+				run_id: decodeURIComponent(runInputs[1]),
+				inputs: [{ name: "bronze$events", version: "1" }],
+			});
 		const readers = path.match(/^\/datasets\/([^/]+)\/readers$/);
 		if (readers)
 			return json(route, {
@@ -200,6 +226,44 @@ test("the Read by panel lazily loads the read-audit log for the selected dataset
 	// The mocked read-audit log renders: the principal + its aggregated read count.
 	await expect(page.getByText("user:alice")).toBeVisible();
 	await expect(page.getByText("3 reads")).toBeVisible();
+});
+
+test("a producing run reveals its pinned input versions on demand — reproducibility (#115)", async ({
+	page,
+}) => {
+	await page.goto("/lineage");
+	await expect(page.locator(".svelte-flow__node")).toHaveCount(4, { timeout: 15_000 });
+
+	await page.locator(".svelte-flow__node").filter({ hasText: "silver$features" }).click();
+	await page.getByRole("tab", { name: "Details" }).click();
+	await expect(page.getByRole("heading", { name: "silver$features" })).toBeVisible();
+
+	// Lazy: the pin is not shown until the run's "reads" toggle is opened (kept off the hot board).
+	await expect(page.getByText("bronze$events@1")).toBeHidden();
+	await page.getByRole("button", { name: "reads" }).click();
+	// The pinned READ version the run consumed — "which feature version produced this output".
+	await expect(page.getByText("bronze$events@1")).toBeVisible();
+});
+
+test("the detail panel shows the creator and steps schema through Lance versions (#24)", async ({
+	page,
+}) => {
+	await page.goto("/lineage");
+	await expect(page.locator(".svelte-flow__node")).toHaveCount(4, { timeout: 15_000 });
+
+	await page.locator(".svelte-flow__node").filter({ hasText: "silver$features" }).click();
+	await page.getByRole("tab", { name: "Details" }).click();
+	await expect(page.getByRole("heading", { name: "silver$features" })).toBeVisible();
+
+	// Creator: who ORIGINATED the table (verified catalog principal), loaded eagerly.
+	await expect(page.getByText("user:founder")).toBeVisible();
+
+	// Schema time-travel: latest (v2) carries the embedding column; stepping back to v1 drops it.
+	await page.getByRole("button", { name: "Schema", exact: false }).click();
+	await expect(page.locator(".fname", { hasText: "embedding" })).toBeVisible();
+	await page.getByRole("button", { name: "v1", exact: true }).click();
+	await expect(page.locator(".fname", { hasText: "embedding" })).toHaveCount(0);
+	await expect(page.locator(".fname")).toHaveText("id");
 });
 
 test("browse landing lists datasets from /datasets, filters, and focuses on click", async ({

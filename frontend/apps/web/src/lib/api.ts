@@ -1,6 +1,8 @@
 import type {
 	ColumnGraph,
+	Creator,
 	DatasetGovernance,
+	DatasetSchema,
 	ColumnNeighbors,
 	Datasets,
 	DemoDatasets,
@@ -10,6 +12,7 @@ import type {
 	Namespaces,
 	Producers,
 	Readers,
+	RunInputs,
 	Runs,
 	SearchResults,
 } from "./types";
@@ -45,6 +48,10 @@ export const fetchEvents = (opts: { after?: number; limit?: number; summary?: bo
 };
 export const fetchDemo = () => getJSON<DemoDatasets>("demo/datasets");
 export const fetchRuns = () => getJSON<Runs>("runs");
+// The inputs a run consumed, each with the version it PINNED (#115 D1 reproducibility) — "which exact
+// feature versions produced this output". Fetched per-run on demand (kept off the hot /runs board to
+// avoid N+1), so it's a plain read: null on any error, an empty list when the run pinned nothing.
+export const fetchRunInputs = (runId: string) => getJSON<RunInputs>(`runs/${enc(runId)}/inputs`);
 export const fetchDatasets = (opts: { namespace?: string; tag?: string; limit?: number } = {}) => {
 	const p = new URLSearchParams();
 	if (opts.namespace) p.set("namespace", opts.namespace);
@@ -59,6 +66,16 @@ export const fetchJobs = () => getJSON<Jobs>("jobs");
 export const fetchNamespaces = () => getJSON<Namespaces>("namespaces");
 export const fetchColumnGraph = (name: string) =>
 	getJSON<ColumnGraph>(`datasets/${enc(name)}/columns`);
+// Who ORIGINATED a dataset — the verified catalog principal recorded at create time (provenance, not
+// "who wrote the latest version"). Reader-gated like the rest of the dataset reads.
+export const fetchCreator = (name: string) => getJSON<Creator>(`datasets/${enc(name)}/creator`);
+// The persisted column schema for a dataset AT a given Lance version — time-travel (#24). Omit version
+// for the latest. Reader-gated. The per-version schema rides the WROTE edge, so this answers "what did
+// this dataset's columns look like at version N".
+export const fetchSchema = (name: string, version?: number) =>
+	getJSON<DatasetSchema>(
+		`datasets/${enc(name)}/schema${version === undefined ? "" : `?version=${version}`}`,
+	);
 // Per-FIELD provenance (upstream) / impact (downstream) — the field-level analogue of the dataset
 // graph's neighbors, gated by require_metadata_access (a GET read → served through the read-only proxy).
 export const fetchColumnUpstream = (name: string, field: string) =>

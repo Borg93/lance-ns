@@ -82,6 +82,62 @@ def test_medallion_ingest_and_lineage_queries(dsn: str) -> None:
     assert ("silver$features", "silver$features") not in edges
 
 
+def test_run_inputs_pin_versions_against_age(dsn: str) -> None:
+    """Reproducibility (#115 D1): a run's PINNED input versions round-trip through real AGE — the READ-edge
+    ``version`` the ingest sets on ``(:Run)-[:READ {version}]->(:Dataset)``, read back by ``run_inputs``.
+
+    Only unit-proven before (the endpoint test uses a fake repo); this drives the real Cypher
+    (_LINK_READ + _SET_READ_VERSION on ingest, _RUN_INPUTS on read) so a graph quirk that dropped the pin
+    — as the live graph once did (280 READ edges, zero versions) — fails HERE, not silently in prod."""
+    from lineage.core.age import make_pool
+    from lineage.models import RunEvent
+    from lineage.services.repository import LineageRepository
+
+    rid = "22222222-2222-5222-8222-222222222222"
+    event = RunEvent.model_validate(
+        {
+            "eventType": "COMPLETE",
+            "eventTime": "2026-07-13T09:00:00+00:00",
+            "producer": "https://github.com/Borg93/lance-ns",
+            "run": {"runId": rid, "facets": {}},
+            "job": {"namespace": "ray-jobs", "name": "train.e2e_pins"},
+            # one PINNED read (silver@28) + one floating read (gold, no pin) — the pin must survive, the
+            # floating read must stay versionless (a fabricated pin would be worse than none).
+            "inputs": [
+                {
+                    "namespace": "silver",
+                    "name": "silver$features",
+                    "facets": {"version": {"datasetVersion": "28"}},
+                },
+                {"namespace": "gold", "name": "gold$catalog", "facets": {}},
+            ],
+            "outputs": [
+                {
+                    "namespace": "models",
+                    "name": "models$e2e_pins",
+                    "facets": {"version": {"datasetVersion": "3"}},
+                }
+            ],
+        }
+    )
+
+    async def run() -> list:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, "lineage")
+            await repo.ingest_event(event)
+            return (await repo.run_inputs(rid)).inputs
+        finally:
+            await pool.close()
+
+    inputs = {i.name: i.version for i in asyncio.run(run())}
+    assert inputs.get("silver$features") == "28", f"pinned READ version lost through AGE: {inputs}"
+    assert "gold$catalog" in inputs and inputs["gold$catalog"] is None, (
+        f"a floating read must stay versionless (no fabricated pin): {inputs}"
+    )
+
+
 def test_discovery_lists_against_age(dsn: str) -> None:
     """GOAL 4 A1/A2: the browse lists run their REAL Cypher against AGE (not a mocked ``run_cypher``).
 

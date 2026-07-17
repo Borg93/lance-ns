@@ -25,7 +25,9 @@
 	import FlowAutoFit from "$lib/FlowAutoFit.svelte";
 	import GovernancePanel from "$lib/GovernancePanel.svelte";
 	import GrantsPanel from "$lib/GrantsPanel.svelte";
+	import DatasetProvenance from "$lib/DatasetProvenance.svelte";
 	import ReadersPanel from "$lib/ReadersPanel.svelte";
+	import RunInputs from "$lib/RunInputs.svelte";
 	import { LineageState } from "$lib/store.svelte";
 	import { SearchBar, StatusBoard, enter, stagger, countUp } from "@lance/ui";
 	import { fetchSearch } from "$lib/api";
@@ -328,6 +330,11 @@
 		/FAIL|ABORT/i.test(s ?? "") ? "var(--fail)" : s === "COMPLETE" ? "var(--ok)" : "var(--mut)";
 
 	const selectedRuns = $derived(store.selected ? (store.producers[store.selected] ?? []) : []);
+	// The distinct Lance versions this dataset was written at (newest-first, from its producing runs) —
+	// the version options the schema-time-travel viewer steps through.
+	const selectedVersions = $derived([
+		...new Set(selectedRuns.map((r) => r.dataset_version).filter((v): v is string => !!v)),
+	]);
 
 	// Upstream / downstream for the selected dataset, from the DERIVED_FROM edges (source derived from
 	// target): upstream = what it was derived from; downstream = what derives from it.
@@ -668,6 +675,7 @@
 						<p class="hint">Click a dataset node in the graph to see the runs that produced it.</p>
 					{:else}
 						<h2 class="mono">{store.selected}</h2>
+						<DatasetProvenance dataset={store.selected} versions={selectedVersions} />
 						<GovernancePanel dataset={store.selected} />
 						<GrantsPanel dataset={store.selected} />
 						<ReadersPanel dataset={store.selected} />
@@ -711,6 +719,7 @@
 								</div>
 								<div class="who">{r.event_time}</div>
 								{#if r.error_message}<div class="err">{r.error_message}</div>{/if}
+								<RunInputs runId={r.run_id} />
 							</div>
 						{/each}
 					{/if}

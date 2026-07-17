@@ -51,6 +51,25 @@ podDisruptionBudget:
   enabled: true
   minAvailable: 1
 
+# OpenFGA is the authz chokepoint — every governed catalog write, every lineage read, and all four movers'
+# WRITE path fail CLOSED through it, so a single drained/OOMed replica 503s the whole estate until it
+# reschedules. Run the subchart's supported 3 replicas (kind pinned it to 1) + size its resources. Its PDB
+# + pod anti-affinity are P2 (they need the subchart's own label selector). (prod-readiness P1)
+openfga:
+  replicaCount: 3
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 512Mi }
+
+# Network isolation: default-deny + DNS egress + the EXCLUSIVE OpenBao-ingress lock (only secret-consuming
+# app pods may reach openbao:8200). The chart ships the full, correct impl (templates/network-policy.yaml);
+# it was simply never enabled on the documented prod overlay — the security audit's headline gap. REQUIRES a
+# policy-enforcing CNI (Calico/Cilium): kind's default kindnet SILENTLY ignores NetworkPolicy, so this can't
+# be proven on the demo — verify with the negative-isolation probe (docs/KIND-RUNBOOK.md) on the real
+# cluster as a prod acceptance step. (prod-readiness P1)
+networkPolicy:
+  enabled: true
+
 # --- Backups (P4): ON for the SELF-CONTAINED in-cluster-prod path (in-cluster AGE + RustFS PVC). If you
 # externalize to CloudNativePG / rustfs-operator (the rask path), set BOTH back to false — the operators do
 # PITR/scheduled backups + snapshots better. (snapshotClassName must be a real CSI VolumeSnapshotClass.) ----
@@ -73,6 +92,12 @@ openbao:
 # --set dapr.appToken=... (or your values pipeline) — never commit it to this file.
 dapr:
   appToken: "REPLACE-ME-with-a-real-secret" # source from OpenBao / an external secret, not this file
+  # Dapr control-plane HA: multi-replica operator / placement / scheduler + Sentry (the mTLS CA that sits in
+  # the sidecar cert-renewal path). kind ran single-node; in prod a Sentry node-drain/OOM eventually breaks
+  # sidecar identity renewal → all service-invocation + pub/sub across the mesh stops. (prod-readiness P1)
+  global:
+    ha:
+      enabled: true
   dashboard:
     enabled: false # don't expose the Dapr control-plane UI in prod
 

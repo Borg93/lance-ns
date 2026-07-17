@@ -32,33 +32,29 @@ to main. Never weaken auth/secrets posture.
 
 ## P1 — Fail-closed correctness + the headline security flip (S-effort, high value, low risk)
 
-- [ ] **`/readyz` asserts graph health** (HIGH·code) — lineage `/readyz` only does `SELECT 1`
-  (main.py:139-146); `ensure_graph_constraints` is best-effort non-fatal, so a pod with an absent/broken
-  graph reports Ready and silently discards events. Add a `cypher('lineage','RETURN 1')` liveness of the
-  graph so a bootstrap/restore failure fails the pod loudly. *Done: unit + a live "break the graph → pod
-  goes NotReady" check.*
-- [ ] **Medallion cascade DLQ metric** (HIGH·code) — `dapr_dead_letter_parked` (medallion/api/dlq.py:34)
-  only logs; lineage's DLQ records `Outcome.DEAD_LETTERED`. Add a bounded-cardinality `dlq_parked` counter
-  (labelled app/stage) so a permanently-stalled cascade item is dashboardable + alertable. *Done: unit +
-  metric visible in GreptimeDB after a forced park.*
-- [ ] **Enable NetworkPolicy in `values-prod.yaml`** (HIGH·chart) — the chart ships a complete default-deny
-  + exclusive-openbao-ingress impl (network-policy.yaml) but `values-prod.yaml` never sets
-  `networkPolicy.enabled=true`, so the headline isolation stays OFF on the documented prod overlay. Flip it
-  + document the Calico/Cilium CNI requirement (kind's CNI ignores NetworkPolicy). *Done: `helm template -f
-  values-prod.yaml` renders the policies; note the negative-isolation probe as a prod acceptance step.*
-- [ ] **OpenFGA HA in prod** (HIGH·chart) — single replica, no limits, PDB-less (values.yaml:228,
-  ha.yaml excludes it), yet every governed call fans in here fail-closed. values-prod: `replicaCount: 3` +
-  resources + a PDB (extend ha.yaml). *Done: prod render shows 3 replicas + PDB + limits.*
-- [ ] **startupProbe on the FastAPI apps** (MED·chart) — no startupProbe anywhere; liveness arms ~70s after
-  boot while lineage's boot can take ~80s (Dapr secret fetch + AGE pool + DDL), so a slow dep blip
-  CrashLoops a still-booting pod. Add a generous startupProbe to `lance.appProbes`. *Done: render + kind
-  redeploy still healthy.*
+- [x] **`/readyz` asserts graph health** (HIGH·code) — DONE (aed8014): `/readyz` now runs
+  `run_cypher(graph,'RETURN 1')` after `SELECT 1`. Proven live — lineage became Ready in all three e2e jobs
+  (the readiness probe runs the graph check).
+- [x] **Medallion cascade DLQ metric** (HIGH·code) — DONE (aed8014): `record_dead_letter(app)` increments
+  `medallion.dlq.parked` on a parked delivery; unit-tested via a metric spy.
+- [x] **startupProbe on the FastAPI apps** (MED·chart) — DONE (aed8014): 300s startup budget on
+  `lance.appProbes`; default render clean, all e2e rollouts healthy.
+- [x] **Enable NetworkPolicy in `values-prod.yaml`** (HIGH·chart) — DONE (P1b): `networkPolicy.enabled=true`
+  in the prod overlay. Render-verified (10 policies incl. default-deny + openbao lock). Live negative-
+  isolation probe stays a prod acceptance step (needs a Calico/Cilium cluster; kind's CNI ignores policies).
+- [x] **OpenFGA HA in prod** (HIGH·chart) — DONE-partial (P1b): `replicaCount: 3` + resources in
+  values-prod (render-verified). Its **PDB + anti-affinity → P2** (need the subchart's own label selector).
+- [x] **Dapr control-plane HA in prod** (MED·chart) — DONE (P1b): `dapr.global.ha.enabled=true`; render
+  shows operator/sentry/placement/scheduler at 3 replicas + PDBs (vs 1 on default).
+- [x] **CI prod-overlay render guard** (NEW·ci) — DONE (P1b): `make prod-render-check` /
+  `scripts/prod_render_check.sh`, wired into the `test` job — asserts NetworkPolicy + OpenFGA-3 + Dapr-HA +
+  app-PDBs render. Nothing rendered the prod overlay in CI before, so a switch silently reverting to the dev
+  posture would have passed green.
 - [ ] **GreptimeDB probes + limits** (MED·chart) — 0 probes, unbounded resources; unready store still
-  gets OTLP/Perses traffic. Add `/health` readiness/liveness + CPU/mem limits.
-- [ ] **Dapr control-plane HA in prod** (MED·chart) — `dapr.global.ha.enabled:false` and values-prod never
-  flips it, leaving Sentry (mTLS CA, in the sidecar-cert path) single-replica. Set it true in values-prod.
+  gets OTLP/Perses traffic. Add `/health` readiness/liveness + CPU/mem limits. → folded into **P2**.
 - [ ] **Catalog memory sizing** (MED·chart) — 512Mi default limit vs its own 256MiB in-memory Arrow-IPC
-  body buffer. Give catalog a dedicated higher limit (or lower the body cap).
+  body buffer. Give catalog a dedicated higher limit (or lower the body cap). → folded into **P2** (per-
+  workload resource tiers).
 
 ## P2 — Resilience topology (M-effort chart)
 

@@ -133,6 +133,13 @@ jobs:
           [ "$offdlq" = "0" ] || { echo "escape hatch must render zero DLQ envs, got $offdlq"; exit 1; }
           grep -q '30s,60s,120s,300s' /tmp/legacy.yaml      # chaos-verified schedule restored
 
+      # Render-and-grep the PRODUCTION overlay (values-prod.yaml). Nothing else in CI renders it — the e2e
+      # jobs deploy the DEFAULT kind values — so a regression that ships the dev posture in prod (NetworkPolicy
+      # off, OpenFGA/Dapr single-replica) would otherwise pass green. Asserts the HA + security switches are ON
+      # and that the render-FAILS-CLOSED prod-secret guards don't block a legitimate render. (prod-readiness)
+      - name: Helm render prod overlay + HA/security invariants
+        run: make prod-render-check
+
       # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
       # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.
       - name: OpenFGA model test

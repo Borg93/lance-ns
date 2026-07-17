@@ -74,6 +74,12 @@ test.beforeEach(async ({ page }) => {
 				description_updated_at: "2026-07-16T00:00:00+00:00",
 			});
 		}
+		const readers = path.match(/^\/datasets\/([^/]+)\/readers$/);
+		if (readers)
+			return json(route, {
+				dataset: decodeURIComponent(readers[1]),
+				readers: [{ reader: "user:alice", reads: 3, last_read: "2026-07-16T09:00:00+00:00" }],
+			});
 		const m = path.match(/^\/datasets\/([^/]+)\/(producers|graph|columns)/);
 		if (m) {
 			const id = decodeURIComponent(m[1]);
@@ -176,6 +182,24 @@ test("clicking a dataset node shows its upstream + downstream in the detail pane
 	// The upstream chip reselects that dataset — the panel follows.
 	await page.getByRole("button", { name: "bronze$events" }).click();
 	await expect(page.getByRole("heading", { name: "bronze$events" })).toBeVisible();
+});
+
+test("the Read by panel lazily loads the read-audit log for the selected dataset (#41)", async ({
+	page,
+}) => {
+	await page.goto("/lineage");
+	await expect(page.locator(".svelte-flow__node")).toHaveCount(4, { timeout: 15_000 });
+
+	await page.locator(".svelte-flow__node").filter({ hasText: "silver$features" }).click();
+	await page.getByRole("tab", { name: "Details" }).click();
+	await expect(page.getByRole("heading", { name: "silver$features" })).toBeVisible();
+
+	// Collapsed + lazy: the reader is not fetched/shown until the section is opened.
+	await expect(page.getByText("user:alice")).toBeHidden();
+	await page.getByRole("button", { name: "Read by" }).click();
+	// The mocked read-audit log renders: the principal + its aggregated read count.
+	await expect(page.getByText("user:alice")).toBeVisible();
+	await expect(page.getByText("3 reads")).toBeVisible();
 });
 
 test("browse landing lists datasets from /datasets, filters, and focuses on click", async ({

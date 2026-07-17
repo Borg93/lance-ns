@@ -66,6 +66,8 @@ from lineage.schemas import (
     Neighbors,
     ProducerInfo,
     Producers,
+    ReaderInfo,
+    Readers,
     RunInput,
     RunInputs,
     Runs,
@@ -208,6 +210,12 @@ _CREATE_READS_TABLE: Final = (
     "read_at timestamptz NOT NULL DEFAULT now())"
 )
 _INSERT_READ: Final = "INSERT INTO public.lineage_reads (reader, dataset) VALUES (%s, %s)"
+# The read-audit QUERY (the #41 log was capture-only): who read a dataset, aggregated per principal with
+# their last-read time + count, most-recent first. GROUP BY collapses the append log's repeat rows.
+_READERS: Final = (
+    "SELECT reader, MAX(read_at) AS last_read, COUNT(*) AS reads "
+    "FROM public.lineage_reads WHERE dataset = %s GROUP BY reader ORDER BY last_read DESC LIMIT %s"
+)
 
 # Reconcile single-flight (B4 hardening) — a fixed session-level advisory-lock id. The cron reconcile fires
 # on EVERY lineage replica's sidecar independently, and a sweep back-fills the graph; two overlapping sweeps
@@ -1284,6 +1292,24 @@ class LineageRepository:
         """Append one read-audit row — who (``reader``) read which ``dataset`` (#6)."""
         async with self._pool.connection() as conn:
             await conn.execute(_INSERT_READ, (reader, dataset))
+
+    async def readers(self, name: str, limit: int = 200) -> Readers:
+        """Who READ ``name`` — aggregated per principal (last read + count), newest first (#41).
+
+        The query surface for the read-audit log that :meth:`record_read` appends to; the log was
+        capture-only until now. Safe when auditing is/was off: the table is created at startup, so this
+        just returns an empty list rather than erroring.
+        """
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_READERS, (name, limit))
+            rows = await cur.fetchall()
+        return Readers(
+            dataset=name,
+            readers=[
+                ReaderInfo(reader=r[0], last_read=r[1].isoformat() if r[1] else None, reads=r[2])
+                for r in rows
+            ],
+        )
 
     async def list_events(
         self, limit: int = 500, *, after: int | None = None, summary: bool = False

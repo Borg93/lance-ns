@@ -25,6 +25,7 @@
 	import FlowAutoFit from "$lib/FlowAutoFit.svelte";
 	import GovernancePanel from "$lib/GovernancePanel.svelte";
 	import GrantsPanel from "$lib/GrantsPanel.svelte";
+	import ReadersPanel from "$lib/ReadersPanel.svelte";
 	import { LineageState } from "$lib/store.svelte";
 	import { SearchBar, StatusBoard, enter, stagger, countUp } from "@lance/ui";
 	import { fetchSearch } from "$lib/api";
@@ -669,6 +670,7 @@
 						<h2 class="mono">{store.selected}</h2>
 						<GovernancePanel dataset={store.selected} />
 						<GrantsPanel dataset={store.selected} />
+						<ReadersPanel dataset={store.selected} />
 						{#if upstream.length || downstream.length}
 							<div class="rel">
 								{#if upstream.length}

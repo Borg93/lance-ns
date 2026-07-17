@@ -264,6 +264,98 @@
         }
       }
     },
+    "/datasets/{name}/readers": {
+      "get": {
+        "tags": [
+          "query"
+        ],
+        "summary": "Get Readers",
+        "description": "Who has READ ``name`` \u2014 the read-audit log's query surface (#41 was capture-only until now).\n\nOwner/writer-gated (``require_write_access``, on TOP of the router's ``can_get_metadata``): an access\nlog reveals *who* touched a dataset, so only a data owner may audit it \u2014 a casual reader can trace the\ndataset's provenance but not enumerate who else viewed it. Aggregated per principal (last read + count,\nnewest first). Empty when read-auditing is/was off (the log table exists but has no rows).",
+        "operationId": "get_readers_datasets__name__readers_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Name"
+            }
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 1000,
+              "minimum": 1,
+              "default": 200,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Readers"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/datasets/{name}/creator": {
       "get": {
         "tags": [
@@ -3098,6 +3190,57 @@
         ],
         "title": "Producers",
         "description": "The runs that produced ``dataset``."
+      },
+      "ReaderInfo": {
+        "properties": {
+          "reader": {
+            "type": "string",
+            "title": "Reader"
+          },
+          "last_read": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Read"
+          },
+          "reads": {
+            "type": "integer",
+            "title": "Reads",
+            "default": 0
+          }
+        },
+        "type": "object",
+        "required": [
+          "reader"
+        ],
+        "title": "ReaderInfo",
+        "description": "One principal who READ ``dataset`` \u2014 the access-audit twin of :class:`ProducerInfo` (who WROTE it).\n\nAggregated per reader: the verified subject, when they last read it, and how many times. Sourced from\nthe append-only ``lineage_reads`` audit log (#6/#41), not the AGE graph \u2014 reads are access events, not\nprovenance edges, so they never mint a graph vertex."
+      },
+      "Readers": {
+        "properties": {
+          "dataset": {
+            "type": "string",
+            "title": "Dataset"
+          },
+          "readers": {
+            "items": {
+              "$ref": "#/components/schemas/ReaderInfo"
+            },
+            "type": "array",
+            "title": "Readers"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset"
+        ],
+        "title": "Readers",
+        "description": "Who has READ ``dataset`` \u2014 the access-audit surface that turns the #41 read log (capture-only until\nnow) into a query. Owner/writer-gated (stricter than reader-gated ``/producers``): an access log\nreveals who touched a dataset, so only a data owner may audit it, not any casual reader."
       },
       "ReconcileState": {
         "type": "string",

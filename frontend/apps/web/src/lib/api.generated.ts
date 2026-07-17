@@ -84,6 +84,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/datasets/{name}/readers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Readers
+         * @description Who has READ ``name`` — the read-audit log's query surface (#41 was capture-only until now).
+         *
+         *     Owner/writer-gated (``require_write_access``, on TOP of the router's ``can_get_metadata``): an access
+         *     log reveals *who* touched a dataset, so only a data owner may audit it — a casual reader can trace the
+         *     dataset's provenance but not enumerate who else viewed it. Aggregated per principal (last read + count,
+         *     newest first). Empty when read-auditing is/was off (the log table exists but has no rows).
+         */
+        get: operations["get_readers_datasets__name__readers_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/datasets/{name}/creator": {
         parameters: {
             query?: never;
@@ -1060,6 +1085,37 @@ export interface components {
             producers: components["schemas"]["ProducerInfo"][];
         };
         /**
+         * ReaderInfo
+         * @description One principal who READ ``dataset`` — the access-audit twin of :class:`ProducerInfo` (who WROTE it).
+         *
+         *     Aggregated per reader: the verified subject, when they last read it, and how many times. Sourced from
+         *     the append-only ``lineage_reads`` audit log (#6/#41), not the AGE graph — reads are access events, not
+         *     provenance edges, so they never mint a graph vertex.
+         */
+        ReaderInfo: {
+            /** Reader */
+            reader: string;
+            /** Last Read */
+            last_read?: string | null;
+            /**
+             * Reads
+             * @default 0
+             */
+            reads: number;
+        };
+        /**
+         * Readers
+         * @description Who has READ ``dataset`` — the access-audit surface that turns the #41 read log (capture-only until
+         *     now) into a query. Owner/writer-gated (stricter than reader-gated ``/producers``): an access log
+         *     reveals who touched a dataset, so only a data owner may audit it, not any casual reader.
+         */
+        Readers: {
+            /** Dataset */
+            dataset: string;
+            /** Readers */
+            readers?: components["schemas"]["ReaderInfo"][];
+        };
+        /**
          * ReconcileState
          * @description Result of reconciling the lineage graph's recorded version against the on-disk Lance version.
          * @enum {string}
@@ -1378,6 +1434,42 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Producers"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_readers_datasets__name__readers_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Readers"];
                 };
             };
             /** @description Validation Error */

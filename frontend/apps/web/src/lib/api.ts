@@ -9,6 +9,7 @@ import type {
 	LineageGraph,
 	Namespaces,
 	Producers,
+	Readers,
 	Runs,
 	SearchResults,
 } from "./types";
@@ -30,6 +31,10 @@ const enc = encodeURIComponent;
 export const fetchGraph = (name: string) => getJSON<LineageGraph>(`datasets/${enc(name)}/graph`);
 export const fetchProducers = (name: string) =>
 	getJSON<Producers>(`datasets/${enc(name)}/producers`);
+// The read-audit query (#41): who READ this dataset. Owner-gated (stricter than /producers), so it's
+// status-aware — a 403 ("owner access required") must read differently from offline or an empty log.
+export const fetchReaders = (name: string) =>
+	requestJSON<Readers>("/api", `datasets/${enc(name)}/readers`);
 export const fetchEvents = (opts: { after?: number; limit?: number; summary?: boolean } = {}) => {
 	const p = new URLSearchParams();
 	if (opts.after) p.set("after", String(opts.after));

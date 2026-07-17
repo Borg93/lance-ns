@@ -97,6 +97,29 @@ class Producers(BaseModel):
     producers: list[ProducerInfo]
 
 
+class ReaderInfo(BaseModel):
+    """One principal who READ ``dataset`` — the access-audit twin of :class:`ProducerInfo` (who WROTE it).
+
+    Aggregated per reader: the verified subject, when they last read it, and how many times. Sourced from
+    the append-only ``lineage_reads`` audit log (#6/#41), not the AGE graph — reads are access events, not
+    provenance edges, so they never mint a graph vertex.
+    """
+
+    reader: str
+    last_read: str | None = None
+    reads: int = 0
+
+
+class Readers(BaseModel):
+    """Who has READ ``dataset`` — the access-audit surface that turns the #41 read log (capture-only until
+    now) into a query. Owner/writer-gated (stricter than reader-gated ``/producers``): an access log
+    reveals who touched a dataset, so only a data owner may audit it, not any casual reader.
+    """
+
+    dataset: str
+    readers: list[ReaderInfo] = Field(default_factory=list)
+
+
 class Creator(BaseModel):
     """Who created ``dataset`` — the verified catalog principal at create time (or ``None``)."""
 

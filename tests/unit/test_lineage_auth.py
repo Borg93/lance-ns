@@ -294,6 +294,23 @@ def test_governance_write_routes_wire_the_writer_gate() -> None:
     assert seen == write_gated, f"write routes missing from the app: {write_gated - seen}"
 
 
+def test_readers_route_wires_the_owner_gate() -> None:
+    """The read-audit query ``GET /datasets/{name}/readers`` exposes WHO accessed a dataset — an access
+    log more sensitive than the dataset's own schema — so it must carry ``require_write_access``
+    (owner/writer) ON TOP of the router-level ``can_get_metadata`` gate. Pin the structure: a casual
+    reader must not be able to enumerate who else viewed a dataset, and dropping this route dependency
+    would silently un-gate that while every handler test stays green (the false-confidence-authz class)."""
+    from lineage.main import app
+
+    route = next(
+        r
+        for r in _api_routes(app)
+        if r.path == "/datasets/{name}/readers" and "GET" in (getattr(r, "methods", set()) or set())
+    )
+    calls = [d.call for d in route.dependant.dependencies]
+    assert fga_deps.require_write_access in calls
+
+
 def test_ingest_route_requires_authentication() -> None:
     from lineage.main import app
 

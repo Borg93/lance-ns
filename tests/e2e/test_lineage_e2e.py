@@ -13,8 +13,12 @@ import asyncio
 import json
 import os
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from lineage.schemas import Readers
 
 DSN = os.environ.get("LINEAGE_DATABASE_URL", "")
 _SAMPLE = Path(__file__).resolve().parents[2] / "services" / "lineage" / "sample_events.json"
@@ -389,7 +393,7 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
     rid, rid2 = str(uuid.uuid4()), str(uuid.uuid4())
     reader = f"user:analyst-{uuid.uuid4().hex[:8]}"  # unique per run — the audit log is a plain INSERT
 
-    async def run() -> tuple[list, list, list, list]:
+    async def run() -> tuple[list, list, list, list, Readers]:
         pool = make_pool(dsn)
         await pool.open()
         try:
@@ -430,6 +434,7 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
 
             await repo.ensure_reads_table()
             await repo.record_read(reader=reader, dataset="silver$features")
+            await repo.record_read(reader=reader, dataset="silver$features")  # 2nd read → count aggregates
             async with pool.connection() as conn:
                 cur = await conn.execute(
                     "SELECT reader, dataset FROM public.lineage_reads "
@@ -437,11 +442,13 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
                     (reader,),
                 )
                 reads = await cur.fetchall()
-            return records, after_ddl, survivors, reads
+            # The QUERY surface (#41 was capture-only): who READ silver$features, aggregated per principal.
+            audited = await repo.readers("silver$features")
+            return records, after_ddl, survivors, reads, audited
         finally:
             await pool.close()
 
-    records, after_ddl, survivors, reads = asyncio.run(run())
+    records, after_ddl, survivors, reads, audited = asyncio.run(run())
 
     # 5 record_event calls → 3 rows AT INSERT TIME: both redeliveries (exact + fresh-time terminal) were
     # dropped by ON CONFLICT, the first COMPLETE won, and the RUNNING trail kept both distinct times.
@@ -458,7 +465,13 @@ def test_events_feed_and_read_audit_against_postgres(dsn: str) -> None:
     assert after_ddl == records
     # the prune kept only the newest seq window: rid2's row survives, every older row is gone.
     assert [r.event.get("run", {}).get("runId") for r in survivors] == [rid2]
-    assert reads == [(reader, "silver$features")]  # the read-audit row landed (unique reader → re-runnable)
+    assert reads == [
+        (reader, "silver$features"),
+        (reader, "silver$features"),
+    ]  # both read-audit rows landed (unique reader → re-runnable)
+    # the /readers QUERY aggregates the append log per principal: our unique reader, 2 reads, a last_read.
+    mine = next((r for r in audited.readers if r.reader == reader), None)
+    assert mine is not None and mine.reads == 2 and mine.last_read, audited
 
 
 def test_terminal_lifecycle_and_column_gc_against_age(dsn: str) -> None:

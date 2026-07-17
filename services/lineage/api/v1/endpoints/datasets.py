@@ -7,11 +7,13 @@ per-request :class:`~lineage.api.fga_deps.DatasetFilter`.
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, Query
 
 from lineage.api.dependencies import RepositoryDep
-from lineage.api.fga_deps import FilterDep, audit_read, require_metadata_access
-from lineage.schemas import Creator, DatasetSchema, LineageGraph, Neighbors, Producers
+from lineage.api.fga_deps import FilterDep, audit_read, require_metadata_access, require_write_access
+from lineage.schemas import Creator, DatasetSchema, LineageGraph, Neighbors, Producers, Readers
 
 # require_metadata_access gates the read (must run first); audit_read then logs the now-authorized
 # access (#6). Router-level deps run in declaration order, so the gate precedes the log.
@@ -48,6 +50,22 @@ async def get_downstream(name: str, repository: RepositoryDep, datasets: FilterD
 async def get_producers(name: str, repository: RepositoryDep) -> Producers:
     """The runs that wrote ``name`` — who / when / how. Gated on ``can_get_metadata``."""
     return await repository.producers(name)
+
+
+@router.get("/{name}/readers", dependencies=[Depends(require_write_access)])
+async def get_readers(
+    name: str,
+    repository: RepositoryDep,
+    limit: Annotated[int, Query(ge=1, le=1000)] = 200,
+) -> Readers:
+    """Who has READ ``name`` — the read-audit log's query surface (#41 was capture-only until now).
+
+    Owner/writer-gated (``require_write_access``, on TOP of the router's ``can_get_metadata``): an access
+    log reveals *who* touched a dataset, so only a data owner may audit it — a casual reader can trace the
+    dataset's provenance but not enumerate who else viewed it. Aggregated per principal (last read + count,
+    newest first). Empty when read-auditing is/was off (the log table exists but has no rows).
+    """
+    return await repository.readers(name, limit)
 
 
 @router.get("/{name}/creator")

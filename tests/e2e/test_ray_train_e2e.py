@@ -14,9 +14,11 @@ without it, so CI can keep observability off without silently dropping the linea
 
 from __future__ import annotations
 
+import base64
 import json
 import os
 import time
+from collections.abc import Iterator
 
 import pytest
 import requests
@@ -29,6 +31,7 @@ DEX = os.environ.get("LANCE_E2E_DEX", "http://localhost:5556/dex")
 DEX_SECRET = os.environ.get("LANCE_E2E_DEX_SECRET", "lance-catalog-secret")
 FGA = os.environ.get("LANCE_E2E_FGA", "")
 DAPR_TOKEN = os.environ.get("LANCE_E2E_DAPR_TOKEN", "")
+WAREHOUSE = "warehouse:lance_catalog"
 
 pytestmark = [pytest.mark.e2e, pytest.mark.ray_train]
 
@@ -43,6 +46,33 @@ def _token(user: str) -> str:
         "client_secret": DEX_SECRET,
     }
     return requests.post(f"{DEX}/token", data=data, timeout=10).json()["id_token"]
+
+
+def _sub(token: str) -> str:
+    """The token's FGA subject (its ``sub`` claim) — the identity the services key authz on, NOT the email."""
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload))["sub"]
+
+
+def _tuples(
+    store_model: tuple[str, str], *, writes: list[dict] | None = None, deletes: list[dict] | None = None
+) -> None:
+    """Write/delete OpenFGA tuples idempotently (dup-write / delete-of-absent tolerated; any other 400 fails
+    HERE with the real error, not 8 min later as a poll timeout). Mirrors the governed-union suite."""
+    store, model = store_model
+    body: dict = {"authorization_model_id": model}
+    if writes:
+        body["writes"] = {"tuple_keys": writes}
+    if deletes:
+        body["deletes"] = {"tuple_keys": deletes}
+    resp = requests.post(f"{FGA}/stores/{store}/write", json=body, timeout=10)
+    if resp.status_code == 200:
+        return
+    message = resp.json().get("message", "") if resp.status_code == 400 else ""
+    assert "already exists" in message or "did not exist" in message or "does not exist" in message, (
+        f"OpenFGA write failed ({resp.status_code}): {resp.text}"
+    )
 
 
 @pytest.fixture(scope="module")
@@ -60,6 +90,32 @@ def stack() -> tuple[str, str, str]:
     return LANCERAY.rstrip("/"), CATALOG.rstrip("/"), LINEAGE.rstrip("/")
 
 
+@pytest.fixture(scope="module")
+def fga_store() -> tuple[str, str]:
+    """The lance-catalog OpenFGA store id + latest authorization-model id (raw HTTP, like the services)."""
+    stores = requests.get(f"{FGA}/stores", timeout=10).json()["stores"]
+    store = next(s["id"] for s in stores if s["name"] == "lance-catalog")
+    models = requests.get(f"{FGA}/stores/{store}/authorization-models", timeout=10).json()
+    return store, models["authorization_models"][0]["id"]
+
+
+@pytest.fixture(scope="module")
+def alice(stack: tuple[str, str, str], fga_store: tuple[str, str]) -> Iterator[dict[str, str]]:
+    """An authenticated READER over the estate: warehouse `reader` + the seed's table→namespace parent links
+    give alice can_get_metadata on every cascade dataset AND the model registry (namespace:models parents
+    the warehouse). This is what an authorized human analyst (or the service-web BFF) holds; the seed grants
+    only SERVICE identities, so without this every alice read 403s on a fresh cluster and the reproducibility
+    checks below can never observe the graph. Teardown deletes the grant — it's a durable BROAD read grant in
+    the SHARED store, and leaving it behind would quietly widen alice's access for anything run afterwards."""
+    _ = stack  # depend on the stack fixture: gate the shared-store grant-write behind its reachability +
+    #            auth-on skip, so a suite that should SKIP never mutates OpenFGA. Not otherwise used here.
+    token = _token("alice@example.com")
+    grant = {"user": f"user:{_sub(token)}", "relation": "reader", "object": WAREHOUSE}
+    _tuples(fga_store, writes=[grant])
+    yield {"Authorization": f"Bearer {token}"}
+    _tuples(fga_store, deletes=[grant])
+
+
 def _poll(fn, timeout: float, label: str):
     deadline = time.time() + timeout
     last = None
@@ -72,13 +128,13 @@ def _poll(fn, timeout: float, label: str):
 
 
 @pytest.fixture(scope="module")
-def standing_features(stack: tuple[str, str, str]) -> None:
+def standing_features(stack: tuple[str, str, str], alice: dict[str, str]) -> None:
     """Ensure ``silver$features`` exists before any train — the head resolves the feature at its LATEST
     version by opening the Lance dataset, so on a FRESH cluster (nothing lingering) a train would 422
     (resolve_failed), not skip. Drive one ``/produce`` and wait for the cascade to write silver. Idempotent:
-    returns immediately when silver already exists (the long-lived local cluster)."""
+    returns immediately when silver already exists (the long-lived local cluster). Reads as ``alice`` (a
+    granted warehouse reader) — an ungranted human 403s here, so the grant is the fixture's whole point."""
     lance_ray, _catalog, lineage = stack
-    alice = {"Authorization": f"Bearer {_token('alice@example.com')}"}
 
     # A dataset "exists" in the graph iff its /upstream resolves 200 (there is no bare /datasets/{name}).
     def _silver_exists() -> bool:
@@ -97,10 +153,10 @@ def standing_features(stack: tuple[str, str, str]) -> None:
 
 
 @pytest.mark.usefixtures("standing_features")
-def test_train_to_blessed_with_full_reproducibility_capture(stack: tuple[str, str, str]) -> None:
+def test_train_to_blessed_with_full_reproducibility_capture(
+    stack: tuple[str, str, str], alice: dict[str, str]
+) -> None:
     lance_ray, catalog, lineage = stack
-    alice_tok = _token("alice@example.com")
-    alice = {"Authorization": f"Bearer {alice_tok}"}
     bob = {"Authorization": f"Bearer {_token('bob@example.com')}"}
     model = f"e2etrain{int(time.time()) % 100000}"
 

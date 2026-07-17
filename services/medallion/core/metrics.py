@@ -30,6 +30,11 @@ _stage_quality_blocked = _meter.create_counter(
     unit="{transition}",
     description="Stage transitions BLOCKED by the quality gate (a data-quality assertion failed).",
 )
+_dlq_parked = _meter.create_counter(
+    "medallion.dlq.parked",
+    unit="{delivery}",
+    description="Cascade deliveries DEAD-LETTERED — parked after the Dapr retry schedule was exhausted.",
+)
 
 
 def record_transition(transition: str) -> None:
@@ -45,3 +50,11 @@ def record_denied(transition: str) -> None:
 def record_quality_blocked(transition: str) -> None:
     """Increment the quality-blocked counter (the produced data failed a quality assertion → not promoted)."""
     _stage_quality_blocked.add(1, {"lance.medallion.transition": transition})
+
+
+def record_dead_letter(app_label: str) -> None:
+    """Count one dead-lettered cascade delivery, by the app that parked it (bounded — one per mover/producer).
+
+    The cascade's DEAD_LETTERED signal, mirroring the lineage DLQ's ``record_outcome`` so a permanently
+    stalled item is dashboardable + alertable, not only in scrollback."""
+    _dlq_parked.add(1, {"lance.medallion.app": app_label})

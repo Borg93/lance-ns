@@ -183,6 +183,15 @@ draining) so k8s only routes traffic to a truly-ready pod; liveness (/livez) is 
 checks a backend — a slow dependency must NOT trigger a restart loop). Liveness runs slower + more tolerant
 (failureThreshold 3 × 20s) so a busy-but-alive worker is never SIGKILLed. One helper = every app agrees. */}}
 {{- define "lance.appProbes" -}}
+{{/* startupProbe gates liveness+readiness until boot completes: the FastAPI lifespan (Dapr secret fetch
+     ~80s worst case + AGE pool + DDL + FGA provision) runs BEFORE uvicorn accepts connections, so nothing
+     answers /livez during boot. Without this, liveness (armed ~70s in) SIGKILLs a still-initializing pod
+     into CrashLoopBackOff exactly when a dependency is already slow. 30×10s = 300s boot budget, then the
+     fast liveness/readiness cadence takes over. (prod-readiness P1) */}}
+startupProbe:
+  httpGet: { path: /livez, port: http }
+  periodSeconds: 10
+  failureThreshold: 30
 readinessProbe:
   httpGet: { path: /readyz, port: http }
   initialDelaySeconds: 5

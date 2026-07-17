@@ -18,6 +18,8 @@ from common.dapr_auth import require_dapr_token
 from dapr.ext.fastapi import DaprApp
 from fastapi import Depends
 
+from medallion.core.metrics import record_dead_letter
+
 log = logging.getLogger(__name__)
 
 
@@ -31,6 +33,10 @@ def register_dlq_route(dapr_app: DaprApp, *, pubsub: str, dlq_topic: str, app_la
     ) -> dict[str, str]:
         """Park one dead-lettered delivery. ``event`` is the original CloudEvent Dapr re-published."""
         data = event.get("data") if isinstance(event, dict) else None
+        # Count it (bounded by app_label) BEFORE the log so a permanently-stalled cascade item is a
+        # dashboardable + alertable signal, not only ERROR scrollback — the cascade twin of the lineage
+        # DLQ's record_outcome(DEAD_LETTERED). (prod-readiness P1)
+        record_dead_letter(app_label)
         log.error(
             "dapr_dead_letter_parked",
             extra={

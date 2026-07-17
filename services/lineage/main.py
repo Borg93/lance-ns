@@ -26,7 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from lineage.api.dapr import register_dapr
 from lineage.api.v1.endpoints import demo
 from lineage.api.v1.router import api_router
-from lineage.core.age import make_pool
+from lineage.core.age import make_pool, run_cypher
 from lineage.core.config import apply_dapr_secrets, get_settings
 from lineage.services.repository import LineageRepository
 
@@ -129,8 +129,9 @@ async def livez() -> dict[str, str]:
 
 @app.get("/readyz", tags=["health"])
 async def readyz(request: Request) -> JSONResponse:
-    """Gate readiness on the AGE pool — lineage's sole hard dependency — plus the lifecycle flags, so a pod
-    with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of serving 500s."""
+    """Gate readiness on the AGE pool AND the graph — lineage's sole hard dependency — plus the lifecycle
+    flags, so a pod with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of
+    serving 500s."""
     state = request.app.state
     if getattr(state, "shutting_down", False):
         return JSONResponse(status_code=503, content={"status": "shutting_down"})
@@ -140,7 +141,13 @@ async def readyz(request: Request) -> JSONResponse:
         async with asyncio.timeout(2):
             async with state.pool.connection() as conn:
                 await conn.execute("SELECT 1")
-    except Exception:  # noqa: BLE001 — any pool/DB failure means not-ready; pull the pod from rotation
+                # Graph health, not just POOL health: `ensure_graph_constraints` is best-effort non-fatal, so
+                # a pod whose AGE graph is absent/broken (an external-PG that was never bootstrapped, a failed
+                # create_graph, a bad restore) would otherwise report Ready, get rotated in, and then silently
+                # DISCARD every delivered event — provenance loss as a green rollout. A trivial Cypher proves
+                # the graph is actually queryable; if it isn't, fail the pod loudly. (prod-readiness P1)
+                await run_cypher(conn, get_settings().graph, "RETURN 1")
+    except Exception:  # noqa: BLE001 — any pool/DB/graph failure means not-ready; pull the pod from rotation
         log.warning("readyz_db_unavailable")
         return JSONResponse(status_code=503, content={"status": "degraded", "database": "unavailable"})
     return JSONResponse(status_code=200, content={"status": "ready"})

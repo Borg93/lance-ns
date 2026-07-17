@@ -56,6 +56,12 @@ def test_mover_dlq_declares_dead_letter_and_parking_route(monkeypatch: pytest.Mo
 def test_dlq_route_parks_with_error_log_and_acks(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> None:
+    # Spy on the metric: a parked delivery must be COUNTED (dashboardable/alertable), not only logged —
+    # a permanently-stalled cascade item was log-only before (prod-readiness P1).
+    import medallion.api.dlq as dlq_mod
+
+    parked: list[str] = []
+    monkeypatch.setattr(dlq_mod, "record_dead_letter", parked.append)
     client = _mover_app(monkeypatch, "dlq.medallion.raw")
     with caplog.at_level(logging.ERROR, logger="medallion.api.dlq"):
         response = client.post(
@@ -66,6 +72,7 @@ def test_dlq_route_parks_with_error_log_and_acks(
     assert response.status_code == 200
     assert response.json() == {"status": "SUCCESS"}  # parked + ACKed — never a retry loop
     assert any(r.message == "dapr_dead_letter_parked" for r in caplog.records)
+    assert len(parked) == 1 and parked[0], f"parked delivery must increment the DLQ counter, got {parked}"
 
 
 def test_dlq_route_rejects_forged_deliveries(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -110,6 +110,9 @@ spec:
         {{- end }}
       {{- end }}
     spec:
+      {{- if .Values.podDisruptionBudget.enabled }}
+      {{- include "lance.spreadConstraints" "gateway" | nindent 6 }}
+      {{- end }}
       {{- if .Values.security.serviceAccounts.enabled }}
       serviceAccountName: {{ include "lance.fullname" . }}-sa-gateway
       {{- end }}

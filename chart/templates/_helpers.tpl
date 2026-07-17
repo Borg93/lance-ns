@@ -182,6 +182,21 @@ distinct signals: readiness (/readyz) is dependency-aware (503 until the pool/na
 draining) so k8s only routes traffic to a truly-ready pod; liveness (/livez) is process-up only (never
 checks a backend — a slow dependency must NOT trigger a restart loop). Liveness runs slower + more tolerant
 (failureThreshold 3 × 20s) so a busy-but-alive worker is never SIGKILLed. One helper = every app agrees. */}}
+{{/* Soft anti-affinity: spread a component's replicas across NODES so a single node drain/failure can't
+take the whole service down — otherwise the prod replicas:2 can co-locate and the PodDisruptionBudget buys
+nothing (audit: "the HA replica count buys nothing"). ScheduleAnyway (NOT DoNotSchedule) so single-node
+kind still schedules every replica. Gated by the caller on podDisruptionBudget.enabled (the prod HA signal
+that also bumps replicas). Call: include "lance.spreadConstraints" "<component-label>". (prod-readiness P2) */}}
+{{- define "lance.spreadConstraints" -}}
+topologySpreadConstraints:
+  - maxSkew: 1
+    topologyKey: kubernetes.io/hostname
+    whenUnsatisfiable: ScheduleAnyway
+    labelSelector:
+      matchLabels:
+        app.kubernetes.io/component: {{ . }}
+{{- end -}}
+
 {{- define "lance.appProbes" -}}
 {{/* startupProbe gates liveness+readiness until boot completes: the FastAPI lifespan (Dapr secret fetch
      ~80s worst case + AGE pool + DDL + FGA provision) runs BEFORE uvicorn accepts connections, so nothing

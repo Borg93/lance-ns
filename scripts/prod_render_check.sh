@@ -37,8 +37,13 @@ grep -A15 "name: lance-ns-openfga$" "$OUT" | grep -q "replicas: 3" \
 awk '/name: dapr-sentry$/{n=1} n&&/replicas:/{print; exit}' "$OUT" | grep -q "replicas: 3" \
   || fail "prod Dapr control-plane must be HA (dapr-sentry replicas: 3)"
 
-# 4. App PodDisruptionBudgets render for the replicas:2 request-serving services.
+# 4. PodDisruptionBudgets render for the 4 request-serving services + OpenFGA (the authz chokepoint).
 pdb=$(grep -c "kind: PodDisruptionBudget" "$OUT" || true)
-[ "$pdb" -ge 4 ] || fail "prod must render the app PodDisruptionBudgets (>=4), got $pdb"
+[ "$pdb" -ge 5 ] || fail "prod must render app + OpenFGA PodDisruptionBudgets (>=5), got $pdb"
+grep -q "name: lance-ns-openfga$" "$OUT" || fail "prod is missing the OpenFGA PDB"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb"
+# 5. Anti-affinity: the replicas:2 services spread across nodes (else one node loss defeats their PDB).
+spread=$(grep -c "topologySpreadConstraints:" "$OUT" || true)
+[ "$spread" -ge 4 ] || fail "prod must spread the 4 multi-replica services across nodes (>=4), got $spread"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread"

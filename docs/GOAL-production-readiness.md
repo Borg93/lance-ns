@@ -58,13 +58,18 @@ to main. Never weaken auth/secrets posture.
 
 ## P2 — Resilience topology (M-effort chart)
 
-- [ ] **Pod anti-affinity / topologySpreadConstraints** (HIGH) — prod's replicas:2 services can co-locate,
-  so one node loss removes the whole service despite the PDB. Add a soft hostname spread to the multi-replica
-  Deployments.
+- [x] **External-Postgres AGE bootstrap** (HIGH) — DONE (P2a, 0480c21): lineage `ensure_graph()` on boot
+  creates the graph if absent (self-healing + the only bootstrap on the managed-PG path), fatal on a real
+  failure. Real-AGE e2e proves create + idempotency; e2e-stack proves the boot path live.
+- [x] **Pod anti-affinity / topologySpreadConstraints** (HIGH) — DONE (P2b): soft hostname spread
+  (`lance.spreadConstraints`, ScheduleAnyway) on catalog/lineage/gateway/web, gated on
+  `podDisruptionBudget.enabled` (prod). Render-verified (spread=4); off on the default kind render.
+- [x] **OpenFGA PDB** (HIGH, was P1 carry-over) — DONE (P2b): a PDB on the subchart's `name: openfga`
+  selector in ha.yaml. Completes the P1b OpenFGA-HA item (3 replicas + PDB). prod-render-check asserts it.
 - [ ] **Per-workload resource tiers** (HIGH) — every workload shares `resources.default` (1 CPU/512Mi);
-  stateful stores + compute movers are sized like stateless request pods. Introduce sized tiers.
-- [ ] **External-Postgres AGE bootstrap** (HIGH) — the `age.externalHost` path never creates the graph
-  (no `ensure_graph`), so on managed PG the graph is absent + un-self-healing. Bootstrap on connect.
+  stateful stores + compute movers are sized like stateless request pods. Introduce sized tiers (folds in
+  the P1 catalog-memory + GreptimeDB-limits items).
+- [ ] **GreptimeDB probes** (MED) — 0 liveness/readiness on the telemetry store; add `/health` probes.
 - [ ] **Telemetry-store SPOF sharing data-plane disk** (HIGH) — separate GreptimeDB's storage from the
   data-plane volume; monitor it.
 

@@ -1,5 +1,4 @@
-{{- if .Values.observability.enabled }}
-{{- if not .Values.externalSecrets.enabled }}
+{{- if and .Values.observability.enabled (not .Values.externalSecrets.enabled) }}
 # GreptimeDB object-storage credentials — the greptimedb-standalone subchart reads these env-var keys
 # from `credentials.existingSecretName`. Points GreptimeDB at the in-cluster RustFS S3 (same keys).
 # Skipped when externalSecrets.enabled: the external-secrets operator then OWNS this same-named Secret,
@@ -16,12 +15,14 @@ stringData:
   GREPTIMEDB_STANDALONE__STORAGE__SECRET_ACCESS_KEY: {{ .Values.rustfs.secretKey | quote }}
 {{- end }}
 ---
-{{- if .Values.dapr.enabled }}
+{{- if and .Values.dapr.enabled (include "lance.otelEnabled" .) }}
 # Dapr tracing Configuration — sidecars annotated with dapr.io/config: lance-tracing. There is NO otel
 # exporter here (mirrors rask: the apps export OTLP-direct to GreptimeDB; Dapr's own sidecar spans can't
 # carry GreptimeDB's required db-name/pipeline headers). samplingRate "1" keeps Dapr sampling every
 # request so the W3C trace context always propagates across the pub/sub boundary — which is what makes
-# the app-level distributed trace span catalog → (Dapr/NATS) → lineage end to end.
+# the app-level distributed trace span catalog → (Dapr/NATS) → lineage end to end. Gated on otelEnabled,
+# NOT observability.enabled: the app pods that reference this config also render when telemetry ships to an
+# external collector (externalOtlpEndpoint), so a dangling dapr.io/config reference must not happen.
 apiVersion: dapr.io/v1alpha1
 kind: Configuration
 metadata:
@@ -32,7 +33,7 @@ spec:
     samplingRate: {{ .Values.observability.samplingRate | quote }}
 {{- end }}
 ---
-{{- if .Values.observability.edgeAuth.enabled }}
+{{- if and .Values.observability.enabled .Values.observability.edgeAuth.enabled }}
 # Edge basic-auth htpasswd for the gateway's public /perses/ + /greptime/ locations (§5e). Both are
 # otherwise UNAUTHENTICATED (the Perses dashboard + GreptimeDB's raw SQL/ingest on :4000), and the prod
 # Ingress→gateway proxies them publicly — this Secret backs the nginx `auth_basic_user_file` (gateway.yaml)
@@ -49,5 +50,4 @@ metadata:
 type: Opaque
 stringData:
   htpasswd: {{ required "observability.edgeAuth.htpasswd must be set when observability.edgeAuth.enabled=true — supply an htpasswd line (user:apr1/bcrypt-hash) via --set / an external secret, e.g. `htpasswd -nbB observer <pw>`" .Values.observability.edgeAuth.htpasswd | quote }}
-{{- end }}
 {{- end }}

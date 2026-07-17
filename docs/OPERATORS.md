@@ -15,6 +15,27 @@ is "flip values at rask's operators", never "deploy operators ourselves".
 | 3 | **rustfs-operator** | hand-rolled RustFS Deployment | S3 `Tenant` CR with a declarative `buckets:` list — our lakehouse + observability buckets become list entries. |
 | 4 | **NACK** (NATS operator) — *optional* | the imperative `nats-stream-job.yaml` provision Job | Declarative `Stream` CRDs would replace the shell Job that today creates `LINEAGE` / `MEDALLION` / `TRAINING` (Dapr's jetstream component does not auto-create streams). Nice-to-have: the Job works and is idempotent; NACK removes a boot-ordering foot-gun, nothing more. |
 | 5 | **Secrets operator** (External Secrets Operator, the Vault/OpenBao operator, or bank-vaults) — *interim: no operator, just a values flip* | the `server -dev` in-memory OpenBao + the `openbao-seed` post-upgrade hook | Dev-mode OpenBao (`server -dev`) holds secrets **in memory**: any pod restart wipes `secret/lance`, and the ONLY re-seed path is the helm post-upgrade hook — so an *out-of-band* restart leaves every app's `apply_dapr_secrets` retrying a Dapr `500` on the missing key **forever** (lifespan never completes → pod stuck `0/2` → daprd waits on the app that never listens). **Observed live 2026-07-14** (§5) when an interrupted helm upgrade restarted OpenBao mid-churn. The **acute fix is NOT an operator** — it is `openbao.devMode=false` → `server -config` on the existing PVC, which the chart already supports and which makes secrets survive restarts. The operator earns its place only at prod tier: **auto-unseal** (retire manual `bao operator init`/unseal), **declarative secret sync** (retire the seed Job entirely), plus rotation/PKI. |
+| 6 | **NVIDIA DCGM operator** — *net-new, arrives with #1* | nothing (no GPU in-chart today) | GPU telemetry (`dcgm-exporter` DaemonSet + driver/toolkit) for GPU-backed training. The demo `train_demo_model` is CPU-only; a real `TorchTrainer` on GPU workers lands as a **KubeRay `RayJob` under Kueue** (RAY-TRAIN.md D6), so DCGM rides in with #1. The exporter's `/metrics` is node-level infra scraped exactly like the Dapr sidecars — **`observability.infraMetrics` / vmagent** already provides the scrape→GreptimeDB path; the only additions at that point are a `dcgm-exporter` scrape target and `nvidia.com/gpu` limits + `num_gpus` on the Ray worker/job. Nothing to flip in this chart until GPU workers exist. |
+
+### Handoff wiring status (audited 2026-07-17 — what actually renders vs. what was documented)
+
+An 8-operator handoff audit found the *architecture* documented but three externalize paths claimed "wired"
+that weren't. Fixed:
+- **OTel / external Collector** — the app OTel SDK wiring was gated on `observability.enabled`, so
+  `externalOtlpEndpoint` alone emitted **nothing**. Now gated on `lance.otelEnabled` (= `enabled` OR
+  `externalOtlpEndpoint`); the `lance-tracing` Dapr config renders on the same predicate (no dangling
+  `dapr.io/config`). This is the seam the OpenTelemetry Operator's Collector plugs into.
+- **rustfs-operator (#3)** — externalizing RustFS left `greptimedb-standalone.objectStorage.s3.endpoint` at
+  the deleted in-cluster service (a static subchart value that can't follow the helper). The `values-prod`
+  EXTERNALIZE block now pairs them atomically and `prod-render-check` leg 10 fails if only one is set.
+- **External Secrets Operator (#5)** — `externalSecrets.enabled=true` is now exercised by `prod-render-check`
+  leg 11 (SecretStore + ExternalSecret CRs render, static Secrets skipped, fail-closed guard satisfied with
+  no plaintext `age.password`/`rustfs.secretKey`).
+- **CloudNativePG (#2)** — the AGE-extension decision is the one **headline blocker**: run CNPG with a
+  **custom `imageName` that bundles Apache AGE** (built from the CNPG PG16 base, matching `age.image`'s major),
+  since stock CNPG images can't `LOAD 'age'`. OpenFGA (plain SQL) is unaffected. See RASK-INTEGRATION.md.
+- **KubeRay (#1)** — the submit seam is already agnostic; the only chart handoff is repointing
+  `medallion.rayAddress` at the RayCluster head's dashboard service (an EXTERNALIZE stanza is now shown).
 
 **What we never build: a custom lance-ns operator.** An operator earns its complexity when state of
 record lives in CRDs and needs reconciling. Ours does not: catalog/lakehouse state lives in **Lance

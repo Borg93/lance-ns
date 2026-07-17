@@ -192,10 +192,14 @@ to main. Never weaken auth/secrets posture.
 
 ## P7 — Structural SPOFs → externalize (runbook, not in-chart HA)
 
-- [ ] **RustFS single-replica Recreate/RWO SPOF** (HIGH) — document + verify the `rustfs.externalEndpoint`
-  managed-S3 path as the prod answer (no in-chart object-store HA).
-- [ ] **AGE-Postgres single-replica SPOF** (HIGH) — document + verify the `age.externalHost` managed-PG
-  path (CloudNativePG / RDS) as the prod answer.
+- [~] **RustFS single-replica Recreate/RWO SPOF** (HIGH) — the SPOF remains in-chart (no object-store HA),
+  but the prod answer — externalize to managed S3 / rustfs-operator — is now documented AND CI-verified: the
+  `rustfs.externalEndpoint` handoff is atomic with the GreptimeDB object-store endpoint (`prod-render-check`
+  leg 10 fails if either is set without the other — an operator-handoff audit fix). Adopting the operator = flip.
+- [~] **AGE-Postgres single-replica SPOF** (HIGH) — SPOF remains in-chart; the CloudNativePG prod answer is
+  documented (docs/OPERATORS.md #2, RASK-INTEGRATION.md value→CNPG map, the values-prod EXTERNALIZE stanza),
+  gated on the one **headline decision**: CNPG needs a custom image bundling Apache AGE (stock CNPG can't
+  `LOAD 'age'`). `age.externalHost` + the openfga `datastore.uri` handoff renders clean.
 - [ ] **Movers cross-pod lock → scale the event-driven tier** (MED·code) — the single-flight lock is
   process-local, capping each stage at 1 mover; a distributed lock to allow >1 is a larger change — park
   with rationale until throughput demands it.

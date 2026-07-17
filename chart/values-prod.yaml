@@ -171,24 +171,41 @@ observability:
 # AND set its external endpoint — the apps then connect to the managed service (verified: no in-cluster
 # DNS leaks into app env). Uncomment per service.
 # ---------------------------------------------------------------------------------------------------
-# rustfs:                                            # managed S3 for the lakehouse + observability bucket
+# rustfs (rustfs-operator / any managed S3):         # managed S3 for the lakehouse AND observability bucket
 #   enabled: false
 #   externalEndpoint: https://s3.us-east-1.amazonaws.com
-# age:                                               # managed Postgres (RDS / Cloud SQL / CNPG)
+# greptimedb-standalone:                             # REQUIRED COMPANION — the subchart's object-store endpoint
+#   objectStorage:                                   # is a static subchart value that CANNOT follow the
+#     s3:                                            # rustfs.externalEndpoint helper, so it must be repointed
+#       endpoint: https://s3.us-east-1.amazonaws.com # HERE too or GreptimeDB writes to the deleted in-cluster
+#                                                    # RustFS. prod-render-check guards this pairing.
+# age (CloudNativePG):                               # managed Postgres for the AGE graph + OpenFGA datastore
 #   enabled: false
-#   externalHost: my-pg.internal
-#   user: lance                                      # match the managed DB's role/password/dbs
+#   externalHost: lance-pg-rw                        # the CNPG Cluster's -rw service
+#   user: lance                                      # match the CNPG Cluster's role/password/dbs
 #   password: REPLACE-ME
+#   # ⚠ AGE-EXTENSION DECISION (docs/OPERATORS.md, RASK-INTEGRATION.md): a STOCK CNPG image cannot run the
+#   # lineage graph — `LOAD 'age'` / create_graph / ag_catalog need the Apache AGE extension compiled in. Run
+#   # CNPG with a CUSTOM imageName that bundles AGE (ghcr image built from the CNPG PG16 base + AGE), matching
+#   # age.image's PG major. OpenFGA (plain SQL) is unaffected. Alternatively keep AGE as a separate operand.
 # openfga:                                           # the openfga subchart's datastore points at the same DB
 #   datastore:
-#     uri: postgres://lance:REPLACE-ME@my-pg.internal:5432/openfga?sslmode=require
-# openbao:                                           # external Vault / cloud KMS (operator populates the Secret)
-#   enabled: false
+#     uri: postgres://lance:REPLACE-ME@lance-pg-rw:5432/openfga?sslmode=require
+# openbao (External Secrets Operator):               # externalSecrets.enabled syncs the infra Secrets FROM Vault
+#   enabled: false                                   # — see externalSecrets below; the static Secrets are skipped
 #   externalAddr: https://vault.internal:8200
-# nats:                                              # managed/clustered NATS JetStream (the in-cluster single
-#   enabled: false                                   # node is a SPOF: bus down = no lineage ingest, no cascade)
-#   externalUrl: nats://nats.internal:4222
+# externalSecrets:                                   # ESO owns infra-credentials + observability-s3 from Vault
+#   enabled: true                                    # (no plaintext secret ships; age.password/rustfs.secretKey
+#   role: lance                                      # then need NOT be set — ESO satisfies the fail-closed guard)
+# nats (managed / NACK-provisioned JetStream):       # the in-cluster single node is a SPOF: bus down = no
+#   enabled: false                                   # lineage ingest, no cascade. NACK Stream CRs are optional
+#   externalUrl: nats://nats.internal:4222           # (the in-chart provision Job stays idempotent either way).
 #   streamReplicas: 3                                # raft-replicated streams (needs the 3+ node cluster)
-# observability:                                     # ship telemetry to an off-cluster collector
-#   enabled: false
-#   externalOtlpEndpoint: http://otel-collector.observability:4318/v1/otlp
+# medallion (KubeRay RayCluster):                    # point the Ray submit seam at the operator-managed cluster
+#   rayAddress: http://lance-raycluster-head-svc:8265 # the RayCluster head's dashboard svc (Jobs REST is agnostic)
+# observability (OpenTelemetry Collector):           # ship telemetry to an off-cluster / OTel-operator Collector
+#   enabled: false                                   # apps + Dapr still emit OTLP (otelEnabled tracks the endpoint,
+#   externalOtlpEndpoint: http://otel-collector.observability:4318/v1/otlp # not just observability.enabled)
+# GPU metrics (NVIDIA DCGM operator): net-new, rides in with KubeRay+Kueue for GPU training — the dcgm-exporter
+# is node-level infra (a DaemonSet the DCGM operator owns), scraped like the Dapr sidecars (observability.
+# infraMetrics / vmagent). Nothing to flip in this chart until GPU Ray workers land (docs/OPERATORS.md).

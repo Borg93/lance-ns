@@ -53,6 +53,13 @@ is the single-bucket layout, unchanged. Call: {{ include "lance.stageBucket" (li
 {{- define "lance.otlpEndpoint" -}}
 {{- if .Values.observability.externalOtlpEndpoint -}}{{ .Values.observability.externalOtlpEndpoint }}{{- else -}}http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/v1/otlp{{- end -}}
 {{- end -}}
+{{/* Whether the apps should carry the OTel SDK wiring (instrument + otelEnv + the lance-tracing Dapr config).
+Decoupled from `observability.enabled`: that flag deploys the IN-CLUSTER store (GreptimeDB/Vector/Perses), but
+telemetry must also flow when it's OFF and `externalOtlpEndpoint` ships OTLP to an external collector (the OTel
+operator path) — otherwise externalize silently emits nothing. Non-empty string = on (helm `if` truthiness). */}}
+{{- define "lance.otelEnabled" -}}
+{{- if or .Values.observability.enabled .Values.observability.externalOtlpEndpoint -}}true{{- end -}}
+{{- end -}}
 {{- define "lance.vaultAddr" -}}
 {{- if .Values.openbao.externalAddr -}}{{ .Values.openbao.externalAddr }}{{- else -}}http://{{ include "lance.openbaoHost" . }}:{{ .Values.openbao.port }}{{- end -}}
 {{- end -}}

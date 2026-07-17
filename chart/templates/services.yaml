@@ -25,7 +25,7 @@ spec:
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
         dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- include "lance.daprSidecarResources" . | nindent 8 }}
-        {{- if .Values.observability.enabled }}
+        {{- if include "lance.otelEnabled" $root }}
         dapr.io/config: "lance-tracing"
         {{- end }}
       {{- end }}
@@ -43,14 +43,14 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "lance.securityContext" . | nindent 10 }}
           {{- include "lance.preStop" . | nindent 10 }}
-          {{- if .Values.observability.enabled }}
+          {{- if include "lance.otelEnabled" $root }}
           command: ["opentelemetry-instrument", "uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
           {{- else }}
           command: ["uvicorn", "{{ .Values.services.catalog.module }}", "--host=0.0.0.0", "--port={{ .Values.services.catalog.port }}"]
           {{- end }}
           ports: [{ name: http, containerPort: {{ .Values.services.catalog.port }} }]
           env:
-            {{- if .Values.observability.enabled }}
+            {{- if include "lance.otelEnabled" $root }}
             {{- include "lance.otelEnv" (list $root "catalog") | nindent 12 }}
             {{- end }}
             - { name: LANCE_REST_IMPL, value: "dir" }
@@ -183,7 +183,7 @@ spec:
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
         dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- include "lance.daprSidecarResources" . | nindent 8 }}
-        {{- if .Values.observability.enabled }}
+        {{- if include "lance.otelEnabled" $root }}
         dapr.io/config: "lance-tracing"
         {{- end }}
       {{- end }}
@@ -210,14 +210,14 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "lance.securityContext" . | nindent 10 }}
           {{- include "lance.preStop" . | nindent 10 }}
-          {{- if .Values.observability.enabled }}
+          {{- if include "lance.otelEnabled" $root }}
           command: ["opentelemetry-instrument", "uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
           {{- else }}
           command: ["uvicorn", "{{ .Values.services.lineage.module }}", "--host=0.0.0.0", "--port={{ .Values.services.lineage.port }}"]
           {{- end }}
           ports: [{ name: http, containerPort: {{ .Values.services.lineage.port }} }]
           env:
-            {{- if .Values.observability.enabled }}
+            {{- if include "lance.otelEnabled" $root }}
             {{- include "lance.otelEnv" (list $root "lineage") | nindent 12 }}
             {{- end }}
             # Explicit APP_API_TOKEN (recommended k8s approach) so require_dapr_token can verify the

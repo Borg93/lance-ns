@@ -98,4 +98,44 @@ peak=$((cap * body + headroom))
 [ "$peak" -le "$(to_bytes "$cat_mem")" ] \
   || fail "catalog sizing incoherent: $cap × $body buffered bodies + 512Mi headroom = $peak bytes > the $cat_mem limit"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, infra-metrics on, write-cap=$cap fits $cat_mem"
+# 10. RustFS externalize is ATOMIC (operator-handoff audit): the greptimedb-standalone object-store endpoint
+# is a static subchart value that can't follow the rustfs.externalEndpoint helper, so externalizing RustFS
+# without ALSO repointing GreptimeDB leaves its object backend at the deleted in-cluster service. The
+# values-prod EXTERNALIZE block documents both as a pair; prove that when BOTH are set no in-cluster rustfs
+# DNS survives anywhere (app env OR the greptime config), and that setting ONLY the rustfs half leaks.
+EXT_S3=https://s3.ext.example.com
+atomic=$(helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
+  --set image.catalog.tag=v0 --set image.web.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
+  --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
+  --set age.password=ci-dummy-pw --set rustfs.secretKey=ci-dummy-key \
+  --set backups.volumeSnapshot.snapshotClassName=csi-snapclass --set ingress.host=lance.example.com \
+  --set rustfs.enabled=false --set rustfs.externalEndpoint="$EXT_S3" \
+  --set greptimedb-standalone.objectStorage.s3.endpoint="$EXT_S3" 2>/dev/null)
+grep -q "lance-ns-rustfs:9000" <<<"$atomic" \
+  && fail "externalizing RustFS + the greptime endpoint companion still leaks in-cluster rustfs DNS"
+# Negative: rustfs externalized but the greptime companion OMITTED must still show the leak (proves the pairing
+# is load-bearing, i.e. the guard above isn't vacuous).
+leak=$(helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
+  --set image.catalog.tag=v0 --set image.web.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
+  --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
+  --set age.password=ci-dummy-pw --set rustfs.secretKey=ci-dummy-key \
+  --set backups.volumeSnapshot.snapshotClassName=csi-snapclass --set ingress.host=lance.example.com \
+  --set rustfs.enabled=false --set rustfs.externalEndpoint="$EXT_S3" 2>/dev/null)
+grep -q "lance-ns-rustfs:9000" <<<"$leak" \
+  || fail "the rustfs-externalize coherence guard is vacuous (expected the greptime leak without the companion override)"
+
+# 11. External Secrets Operator path renders (operator-handoff audit): externalSecrets.enabled=true must
+# render the SecretStore + ExternalSecret CRs, SKIP the static infra-credentials + observability-s3 Secrets,
+# and SATISFY the fail-closed prod-secret guard WITHOUT age.password/rustfs.secretKey (ESO supplies them).
+eso=$(helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
+  --set image.catalog.tag=v0 --set image.web.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
+  --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
+  --set backups.volumeSnapshot.snapshotClassName=csi-snapclass --set ingress.host=lance.example.com \
+  --set externalSecrets.enabled=true 2>/dev/null) \
+  || fail "prod render with externalSecrets.enabled=true FAILED (age.password/rustfs.secretKey should not be required)"
+grep -q "kind: SecretStore" <<<"$eso" || fail "ESO path must render a SecretStore"
+grep -q "kind: ExternalSecret" <<<"$eso" || fail "ESO path must render the ExternalSecret CRs"
+grep -A2 "name: lance-ns-infra-credentials" <<<"$eso" | grep -q "stringData:" \
+  && fail "ESO path must SKIP the static infra-credentials Secret (external-secrets owns it)"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, infra-metrics on, write-cap=$cap fits $cat_mem, rustfs-externalize atomic, ESO path renders"

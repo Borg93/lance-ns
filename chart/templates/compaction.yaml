@@ -45,7 +45,7 @@ spec:
         dapr.io/log-level: {{ .Values.dapr.logLevel | quote }}
         dapr.io/app-token-secret: {{ .Release.Name }}-dapr-app-token
         {{- include "lance.daprSidecarResources" . | nindent 8 }}
-        {{- if .Values.observability.enabled }}
+        {{- if include "lance.otelEnabled" $root }}
         dapr.io/config: "lance-tracing"
         {{- end }}
       {{- end }}
@@ -61,14 +61,14 @@ spec:
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           {{- include "lance.securityContext" . | nindent 10 }}
           {{- include "lance.preStop" . | nindent 10 }}
-          {{- if .Values.observability.enabled }}
+          {{- if include "lance.otelEnabled" $root }}
           command: ["opentelemetry-instrument", "uvicorn", "compaction.service:app", "--host=0.0.0.0", "--port={{ $port }}"]
           {{- else }}
           command: ["uvicorn", "compaction.service:app", "--host=0.0.0.0", "--port={{ $port }}"]
           {{- end }}
           ports: [{ name: http, containerPort: {{ $port }} }]
           env:
-            {{- if .Values.observability.enabled }}
+            {{- if include "lance.otelEnabled" $root }}
             {{- include "lance.otelEnv" (list $root .Values.compaction.daprAppId) | nindent 12 }}
             {{- end }}
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }

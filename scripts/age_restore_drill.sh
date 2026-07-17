@@ -30,9 +30,18 @@ pg_dump -d "$DRILL" | gzip > /tmp/drill.sql.gz
 psql -d postgres -v ON_ERROR_STOP=1 -c "DROP DATABASE $DRILL WITH (FORCE);" -c "CREATE DATABASE $DRILL;"
 gunzip -c /tmp/drill.sql.gz | psql -d "$DRILL" -v ON_ERROR_STOP=1
 
-# 4. VERIFY the graph came back with its labels + vertex — not just the ag_catalog metadata rows.
-n=$(psql -tA -d "$DRILL" -c "LOAD 'age'; SET search_path = ag_catalog, public; SELECT count(*) FROM cypher('drilltest', \$\$ MATCH (d:Dataset) RETURN d \$\$) AS (d agtype);")
-echo "restored-Dataset-vertex-count=$n"
+# 4. VERIFY the graph came back with its labels + vertex — not just the ag_catalog metadata rows. Use a
+#    QUOTED heredoc (no shell $$-PID expansion of the Cypher dollar-quotes) + tail -1 so the count is the
+#    LAST output line, not the "LOAD"/"SET" command output that a multi-statement psql -c prints first.
+#    2>/dev/null + || true: if the graph is genuinely GONE (the hazard), the Cypher errors — we want an
+#    empty count → a clean "not 1" verdict below, not a mid-script set -e abort.
+n=$(psql -tA -d "$DRILL" 2>/dev/null <<'SQL' | tail -1
+LOAD 'age';
+SET search_path = ag_catalog, public;
+SELECT count(*) FROM cypher('drilltest', $$ MATCH (d:Dataset) RETURN d $$) AS (d agtype);
+SQL
+) || true
+echo "restored-Dataset-vertex-count=${n:-<none>}"
 [ "$n" = "1" ] || {
   echo "!! AGE restore drill FAILED: the graph came back with $n Dataset vertices, expected 1 — a plain"
   echo "   pg_dump of AGE did NOT round-trip the labels. Switch backup-pg.yaml to an AGE-aware dump."

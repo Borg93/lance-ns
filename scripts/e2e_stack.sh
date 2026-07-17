@@ -347,8 +347,11 @@ fi
 # flake — E2E_RESTORE_DRILL=0 disables it while that follow-up is built. ---------------------------------
 if [ "${E2E_RESTORE_DRILL:-1}" = "1" ]; then
   step "restore drill: AGE pg_dump → restore round-trips the graph (P4)"
-  AGE_POD="$(kubectl get pod -l "app.kubernetes.io/component=age-postgres" -o jsonpath='{.items[0].metadata.name}')"
-  [ -n "$AGE_POD" ] || { echo "!! no age-postgres pod found for the restore drill"; exit 1; }
+  # The AGE StatefulSet ($RELEASE-age, 1 replica) → pod $RELEASE-age-0 deterministically (StatefulSet naming),
+  # more robust than a label guess. Wait for it to be Ready (the suites already used it, so it is).
+  AGE_POD="$RELEASE-age-0"
+  kubectl wait --for=condition=ready "pod/$AGE_POD" --timeout=60s >/dev/null 2>&1 \
+    || { echo "!! $AGE_POD not ready for the restore drill"; kubectl get pods | grep age || true; exit 1; }
   kubectl cp scripts/age_restore_drill.sh "$AGE_POD:/tmp/age_restore_drill.sh"
   kubectl exec "$AGE_POD" -- bash /tmp/age_restore_drill.sh
   echo "   ✓ restore drill passed — RUNBOOK-restore.md is proven, not just authored"

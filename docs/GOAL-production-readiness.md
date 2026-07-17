@@ -84,10 +84,12 @@ to main. Never weaken auth/secrets posture.
   FGA-denied), on metrics the estate actually emits. `chart/alerting/rules_test.yml` PROVES they fire on
   synthetic series (`promtool test rules`, hermetic — the proof render-checking can't give); `make
   alert-rules-check` runs check+test, wired into the CI test job.
-- [ ] **Deploy the evaluator** (CRIT — P3b-2 NEXT): vmalert (loads the rules, queries GreptimeDB's
-  `:4000/v1/prometheus`) + Alertmanager (routes), raw templates gated on `observability.alerting.enabled`
-  (prod). Render- + prod-render-check-verified. REMAINING drill: the live vmalert→GreptimeDB query
-  round-trip + a real Alertmanager receiver route (per-deployment) — needs a live cluster.
+- [x] **Deploy the evaluator** (CRIT — P3b-2 DONE): `chart/templates/alerting.yaml` — vmalert (mounts the
+  proven rules via `.Files.Get`, queries GreptimeDB's `:4000/v1/prometheus`, notifies Alertmanager) +
+  Alertmanager (groups + routes; `webhookUrl` → Slack/PagerDuty), gated on `observability.alerting.enabled`
+  (on in prod). Render-verified (default off; prod deploys both + mounts the real rules); prod-render-check
+  asserts it. REMAINING drill (needs a live cluster): the vmalert→GreptimeDB query round-trip + wiring a real
+  Alertmanager receiver. The alert LOGIC is already proven (P3b-1 promtool), so only the transport is unproven.
 - [x] **Symptom-indexed on-call runbook** (HIGH·runbook) — DONE (P3a): `docs/RUNBOOK-oncall.md` — a symptom
   index + per-mode symptom→cause→diagnose→act for OpenFGA-down (503-everywhere), OpenBao sealed (boot
   deadlock), CrashLoop-on-boot, /readyz degraded (pool vs graph), cascade stalled, DLQ parking, outbox not

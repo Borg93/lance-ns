@@ -148,6 +148,10 @@ ingress:
 observability:
   edgeAuth:
     enabled: true
+  # Alerting engine ON (P3b): vmalert evaluates the proven rules against GreptimeDB + routes via Alertmanager.
+  # Set webhookUrl (Slack/PagerDuty) out-of-band to actually page — empty groups alerts but pages nowhere.
+  alerting:
+    enabled: true
 
 # ===================================================================================================
 # EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Disable the in-cluster component

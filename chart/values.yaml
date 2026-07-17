@@ -347,6 +347,16 @@ observability:
   dbName: public # the GreptimeDB database all signals land in (x-greptime-db-name header)
   tracePipeline: greptime_trace_v1 # required pipeline header for OTLP trace ingestion → opentelemetry_traces
   samplingRate: "1" # Dapr trace sampling — full, so the catalog→lineage context always propagates
+  # Alerting engine (P3b): vmalert evaluates chart/alerting/rules.yml against GreptimeDB's PromQL endpoint
+  # (:4000/v1/prometheus) and routes firing alerts through Alertmanager. Default OFF (kind has no on-call);
+  # values-prod flips it on. The rules are PROVEN to fire by `make alert-rules-check` (promtool); the live
+  # query round-trip + a real receiver route are a prod drill. Set webhookUrl to your Slack/PagerDuty webhook.
+  alerting:
+    enabled: false
+    vmalertImage: victoriametrics/vmalert:v1.106.1
+    alertmanagerImage: prom/alertmanager:v0.28.0
+    evaluationInterval: "1m"
+    webhookUrl: "" # empty → Alertmanager still receives + groups alerts, but pages nowhere (black-hole)
   # Edge auth (§5e hardening) — nginx `auth_basic` on the gateway's /perses/ + /greptime/ locations.
   # BOTH are otherwise UNAUTHENTICATED: Perses is the dashboard, and GreptimeDB exposes its RAW SQL/ingest
   # API on :4000 — and in prod the Ingress→gateway proxies both publicly (a wide-open telemetry store +

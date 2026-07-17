@@ -52,4 +52,13 @@ spread=$(grep -c "topologySpreadConstraints:" "$OUT" || true)
 tiers=$(grep -c "memory: 1Gi" "$OUT" || true)
 [ "$tiers" -ge 3 ] || fail "prod must tier the memory-heavy workloads (catalog/age/rustfs) to 1Gi, got $tiers"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers"
+# 7. Alerting engine (P3b): vmalert + Alertmanager deployed, vmalert wired to GreptimeDB's PromQL endpoint,
+# and the PROVEN rules actually mounted (a known alertname must appear — proves .Files.Get loaded rules.yml,
+# not an empty ConfigMap). Off on the default render.
+grep -q "name: lance-ns-vmalert$" "$OUT" || fail "prod must deploy vmalert (the alert evaluator)"
+grep -q "name: lance-ns-alertmanager$" "$OUT" || fail "prod must deploy Alertmanager"
+grep -q "datasource.url=http://lance-ns-greptimedb-standalone:.*prometheus" "$OUT" \
+  || fail "vmalert must query GreptimeDB's PromQL endpoint"
+grep -q "LineageOutboxNotDraining" "$OUT" || fail "the proven alert rules must be mounted into vmalert"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on"

@@ -578,8 +578,9 @@ export interface paths {
         };
         /**
          * Readyz
-         * @description Gate readiness on the AGE pool — lineage's sole hard dependency — plus the lifecycle flags, so a pod
-         *     with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of serving 500s.
+         * @description Gate readiness on the AGE pool AND the graph — lineage's sole hard dependency — plus the lifecycle
+         *     flags, so a pod with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of
+         *     serving 500s.
          */
         get: operations["readyz_readyz_get"];
         put?: never;

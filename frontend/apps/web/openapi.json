@@ -2035,7 +2035,7 @@
           "health"
         ],
         "summary": "Readyz",
-        "description": "Gate readiness on the AGE pool \u2014 lineage's sole hard dependency \u2014 plus the lifecycle flags, so a pod\nwith an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of serving 500s.",
+        "description": "Gate readiness on the AGE pool AND the graph \u2014 lineage's sole hard dependency \u2014 plus the lifecycle\nflags, so a pod with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of\nserving 500s.",
         "operationId": "readyz_readyz_get",
         "responses": {
           "200": {

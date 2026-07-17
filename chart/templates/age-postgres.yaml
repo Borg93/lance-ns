@@ -113,7 +113,7 @@ spec:
             exec: { command: ["pg_isready", "-U", {{ .Values.age.user | quote }}, "-d", {{ .Values.age.lineageDb | quote }}] }
             initialDelaySeconds: 5
             periodSeconds: 10
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "age") | nindent 12 }}
       volumes:
         - name: init
           configMap: { name: {{ include "lance.ageHost" . }}-init }

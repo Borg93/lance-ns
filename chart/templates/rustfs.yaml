@@ -99,7 +99,7 @@ spec:
           {{- include "lance.tcpProbes" "s3" | nindent 10 }}
           volumeMounts:
             - { name: data, mountPath: /data }
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "rustfs") | nindent 12 }}
       volumes:
         - name: data
           {{- if .Values.rustfs.persistence.enabled }}

@@ -187,6 +187,16 @@ take the whole service down — otherwise the prod replicas:2 can co-locate and 
 nothing (audit: "the HA replica count buys nothing"). ScheduleAnyway (NOT DoNotSchedule) so single-node
 kind still schedules every replica. Gated by the caller on podDisruptionBudget.enabled (the prod HA signal
 that also bumps replicas). Call: include "lance.spreadConstraints" "<component-label>". (prod-readiness P2) */}}
+{{/* Per-workload resource tier: resources.<comp> if defined, else resources.default. Lets a stateful store
+(age/rustfs) or the Arrow-IPC-buffering catalog be sized ABOVE the stateless-pod default without a
+per-template edit — just set resources.<comp> in values(-prod). Every workload shared one 1-CPU/512Mi
+default before, so the stores + the 256MiB-body catalog were sized like request pods (audit). Call:
+include "lance.resources" (dict "root" $ "comp" "catalog"). (prod-readiness P2) */}}
+{{- define "lance.resources" -}}
+{{- $tier := (index .root.Values.resources .comp) | default .root.Values.resources.default -}}
+{{- toYaml $tier -}}
+{{- end -}}
+
 {{- define "lance.spreadConstraints" -}}
 topologySpreadConstraints:
   - maxSkew: 1

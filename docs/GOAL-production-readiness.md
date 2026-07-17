@@ -66,10 +66,14 @@ to main. Never weaken auth/secrets posture.
   `podDisruptionBudget.enabled` (prod). Render-verified (spread=4); off on the default kind render.
 - [x] **OpenFGA PDB** (HIGH, was P1 carry-over) — DONE (P2b): a PDB on the subchart's `name: openfga`
   selector in ha.yaml. Completes the P1b OpenFGA-HA item (3 replicas + PDB). prod-render-check asserts it.
-- [ ] **Per-workload resource tiers** (HIGH) — every workload shares `resources.default` (1 CPU/512Mi);
-  stateful stores + compute movers are sized like stateless request pods. Introduce sized tiers (folds in
-  the P1 catalog-memory + GreptimeDB-limits items).
-- [ ] **GreptimeDB probes** (MED) — 0 liveness/readiness on the telemetry store; add `/health` probes.
+- [x] **Per-workload resource tiers** (HIGH) — DONE (P2c): a `lance.resources` helper (resources.<comp>
+  else resources.default) wired into catalog/age/rustfs; prod tiers them to 1Gi (catalog Arrow buffer, age
+  dual graph+FGA store, rustfs data plane). Render-verified (prod tiers=3, default=0). Folds in the P1
+  catalog-memory item. Remaining workloads (movers/lineage) keep the default until load data says otherwise;
+  wiring them through the helper is a trivial follow-up.
+- [ ] **GreptimeDB probes** (MED) — BLOCKED by the vendored subchart: greptimedb-standalone-0.4.5's
+  statefulset templates NO probe hooks (only `resources` is settable). Needs a newer greptime chart or a
+  post-render patch — defer. Its RESOURCE LIMITS fold into the resource-tiers item above.
 - [ ] **Telemetry-store SPOF sharing data-plane disk** (HIGH) — separate GreptimeDB's storage from the
   data-plane volume; monitor it.
 

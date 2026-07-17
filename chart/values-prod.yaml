@@ -70,6 +70,21 @@ openfga:
 networkPolicy:
   enabled: true
 
+# Per-workload resource tiers (P2): the shared 1-CPU/512Mi default sizes the stateful stores + the Arrow-
+# IPC-buffering catalog like stateless request pods. Give the memory-heavy workloads a real limit (the rest
+# keep resources.default). Requests reserve scheduler headroom. Movers/lineage stay on default until load
+# data says otherwise. (prod-readiness P2)
+resources:
+  catalog:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi } # a 256MiB Arrow-IPC body + pyarrow decode overhead needs >512Mi
+  age:
+    requests: { cpu: 250m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi } # dual-purpose store: the lineage graph AND OpenFGA's datastore
+  rustfs:
+    requests: { cpu: 200m, memory: 512Mi }
+    limits: { cpu: "2", memory: 1Gi } # the lakehouse + observability object store under real load
+
 # --- Backups (P4): ON for the SELF-CONTAINED in-cluster-prod path (in-cluster AGE + RustFS PVC). If you
 # externalize to CloudNativePG / rustfs-operator (the rask path), set BOTH back to false — the operators do
 # PITR/scheduled backups + snapshots better. (snapshotClassName must be a real CSI VolumeSnapshotClass.) ----

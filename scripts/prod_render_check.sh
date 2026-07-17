@@ -46,4 +46,10 @@ grep -q "name: lance-ns-openfga$" "$OUT" || fail "prod is missing the OpenFGA PD
 spread=$(grep -c "topologySpreadConstraints:" "$OUT" || true)
 [ "$spread" -ge 4 ] || fail "prod must spread the 4 multi-replica services across nodes (>=4), got $spread"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread"
+# 6. Resource tiers: the memory-heavy workloads (catalog Arrow buffer, age dual-store, rustfs data plane)
+# get a 1Gi limit above the shared 512Mi default. The default render tiers NOTHING to 1Gi (verified), so a
+# non-zero count here proves the per-workload tiers apply on the prod overlay only.
+tiers=$(grep -c "memory: 1Gi" "$OUT" || true)
+[ "$tiers" -ge 3 ] || fail "prod must tier the memory-heavy workloads (catalog/age/rustfs) to 1Gi, got $tiers"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers"

@@ -122,8 +122,12 @@ to main. Never weaken auth/secrets posture.
   fail-closed + retry when the object store is down.
 - [ ] **OpenFGA-down live outage test** (MED·test) — fail-closed is only mock-proven; drive it against a
   real OpenFGA outage.
-- [ ] **App-level rate-limiting / load-shedding** (MED·code) — the `THROTTLING→429` mapping has no
-  producer; add ingest backpressure.
+- [x] **App-level load-shedding** (MED·code) — DONE (P5, #54): `WriteConcurrencyLimitMiddleware` caps
+  concurrent Arrow-IPC writes (create/insert/merge_insert) and sheds the overflow with **429** (the
+  `THROTTLING` mapping that had no producer) + `Retry-After`, BEFORE the body is buffered — so shedding
+  relieves the N×256MiB OOM the P2c memory tier only partly bounds. Pure-ASGI, sits above body_limit;
+  `LANCE_MAX_CONCURRENT_WRITES` (default 16, 0=off); a `catalog.writes.shed` metric. Unit-tested at the ASGI
+  layer (over-cap → 429 before the app; reads + /commit ungated; 0 disables).
 - [x] **Compaction sweep single-flight** (MED·code) — DONE (P5a): an in-process `asyncio.Lock` with
   skip-on-overlap on `on_cron` (compaction is stateless — no DB for a pg advisory lock like reconcile; with
   compactionReplicas=1 this is cluster-wide). A slow sweep now self-limits by skipping ticks instead of

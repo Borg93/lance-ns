@@ -182,6 +182,11 @@ class Settings(BaseSettings):
     # 256 MiB — generous for tabular batches + small inline blobs, bounded well under a worker's memory.
     max_body_bytes: int = Field(default=256 * 1024 * 1024, ge=1, alias="LANCE_MAX_BODY_BYTES")
 
+    # Load-shedding (P5): cap CONCURRENT in-flight Arrow-IPC writes. Each buffers up to max_body_bytes, so N
+    # concurrent = N × 256MiB — an OOM the memory tier only partly bounds. Over the cap → 429 (THROTTLING),
+    # shed before the body is buffered. Generous default (rarely trips); 0 disables it (pre-P5 behavior).
+    max_concurrent_writes: int = Field(default=16, ge=0, alias="LANCE_MAX_CONCURRENT_WRITES")
+
     # Lineage emission (opt-in). When enabled, the catalog emits an OpenLineage event to the lineage
     # service on a table write — fire-and-forget + best-effort, so the lineage service being down can
     # never block or fail a catalog write. The catalog is the only component that knows the verified

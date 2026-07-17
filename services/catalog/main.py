@@ -27,6 +27,7 @@ from lance_namespace import LanceNamespaceError
 from pydantic import SecretStr
 
 from catalog.api.body_limit import BodySizeLimitMiddleware
+from catalog.api.load_shed import WriteConcurrencyLimitMiddleware
 from catalog.api.maintenance import maintenance_middleware
 from catalog.api.v1.router import api_router
 from catalog.core.config import get_settings
@@ -150,9 +151,12 @@ app = FastAPI(
 app.include_router(api_router)
 # Read-only maintenance gate (no-op unless LANCE_MAINTENANCE_READ_ONLY=true).
 app.middleware("http")(maintenance_middleware)
-# Outermost: reject oversized request bodies with 413 before they are buffered (Arrow-IPC OOM guard).
-# Added last so it wraps everything and inspects the body first. See catalog/api/body_limit.py.
+# Reject oversized request bodies with 413 before they are buffered (Arrow-IPC OOM guard). See body_limit.py.
 app.add_middleware(BodySizeLimitMiddleware, max_bytes=_settings.max_body_bytes)
+# Outermost (added LAST → wraps everything, runs FIRST): shed a bulk-write burst with 429 once the
+# concurrent-write cap is reached, BEFORE the body is buffered — so shedding relieves memory pressure rather
+# than adding to it. Sits above body_limit so an over-cap write is rejected before even the size check. (P5)
+app.add_middleware(WriteConcurrencyLimitMiddleware, max_concurrent=_settings.max_concurrent_writes)
 
 
 install_problem_handlers(app, log)

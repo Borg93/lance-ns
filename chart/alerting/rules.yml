@@ -43,6 +43,22 @@ groups:
             A lineage event exhausted its Dapr resiliency schedule and was parked (a terminal loss signal).
             Runbook: docs/RUNBOOK-oncall.md#dlq-parking
 
+  - name: lance-catalog
+    rules:
+      - alert: CatalogWritesShedSustained
+        expr: sum(rate(catalog_writes_shed_total[5m])) > 0
+        for: 15m
+        labels:
+          severity: warning
+          service: catalog
+        annotations:
+          summary: "Catalog shedding writes for 15m — persistently over write-concurrency capacity"
+          description: >-
+            The catalog has been returning 429 on bulk Arrow-IPC writes (the concurrent-write cap, P5
+            load-shedding) for 15m — it is persistently over capacity, not just riding out a burst. Scale
+            catalog replicas or raise LANCE_MAX_CONCURRENT_WRITES (watch the pod memory: each write buffers
+            up to 256MiB). Runbook: docs/RUNBOOK-oncall.md
+
   - name: lance-medallion
     rules:
       - alert: MedallionCascadeDeadLettering

@@ -60,3 +60,29 @@ tests:
       - eval_time: 8m
         alertname: MedallionCascadeDeadLettering
         exp_alerts: []
+
+  # 5. Catalog shedding writes continuously for >15m → the capacity alert fires.
+  - interval: 1m
+    input_series:
+      - series: "catalog_writes_shed_total"
+        values: "0+3x20" # a steadily-rising shed counter (writes being 429'd every scrape)
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: CatalogWritesShedSustained
+        exp_alerts:
+          - exp_labels:
+              severity: warning
+              service: catalog
+            exp_annotations:
+              summary: "Catalog shedding writes for 15m — persistently over write-concurrency capacity"
+              description: "The catalog has been returning 429 on bulk Arrow-IPC writes (the concurrent-write cap, P5 load-shedding) for 15m — it is persistently over capacity, not just riding out a burst. Scale catalog replicas or raise LANCE_MAX_CONCURRENT_WRITES (watch the pod memory: each write buffers up to 256MiB). Runbook: docs/RUNBOOK-oncall.md"
+
+  # 6. A brief shed burst that stops well under 15m → NO alert (backpressure riding out a spike is normal).
+  - interval: 1m
+    input_series:
+      - series: "catalog_writes_shed_total"
+        values: "0 1 2 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3 3" # shedding only in the first ~3 min, then flat
+    alert_rule_test:
+      - eval_time: 18m
+        alertname: CatalogWritesShedSustained
+        exp_alerts: []

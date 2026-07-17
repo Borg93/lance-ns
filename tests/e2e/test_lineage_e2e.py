@@ -138,6 +138,42 @@ def test_run_inputs_pin_versions_against_age(dsn: str) -> None:
     )
 
 
+def test_ensure_graph_bootstraps_and_is_idempotent_against_age(dsn: str) -> None:
+    """Prod-readiness P2: ensure_graph is the ONLY graph bootstrap on the external managed-PG path (the
+    in-cluster age-postgres init SQL runs create_graph, a managed PG has none). Proven against real AGE: a
+    FRESH graph name is CREATED, a second call is a no-op (a bare create_graph would ERROR 'already exists'),
+    and the registry ends with exactly one. Concurrency-safety (the create race) is covered by the checked-
+    then-created path; here we prove the create + idempotency end to end."""
+    import uuid
+    from contextlib import suppress
+
+    from lineage.core.age import make_pool
+    from lineage.services.repository import LineageRepository
+    from psycopg import sql
+
+    gname = f"e2e_ensure_{uuid.uuid4().hex[:8]}"
+
+    async def run() -> int:
+        pool = make_pool(dsn)
+        await pool.open()
+        try:
+            repo = LineageRepository(pool, gname)
+            await repo.ensure_graph()  # absent → created
+            await repo.ensure_graph()  # present → idempotent no-op (no 'already exists' raised)
+            async with pool.connection() as conn:
+                cur = await conn.execute(
+                    "SELECT count(*) FROM ag_catalog.ag_graph WHERE name = %s", (gname,)
+                )
+                row = await cur.fetchone()
+                with suppress(Exception):  # best-effort cleanup so the throwaway graph doesn't accumulate
+                    await conn.execute(sql.SQL("SELECT drop_graph({}, true)").format(sql.Literal(gname)))
+            return row[0] if row else 0
+        finally:
+            await pool.close()
+
+    assert asyncio.run(run()) == 1
+
+
 def test_discovery_lists_against_age(dsn: str) -> None:
     """GOAL 4 A1/A2: the browse lists run their REAL Cypher against AGE (not a mocked ``run_cypher``).
 

@@ -216,6 +216,9 @@ _READERS: Final = (
     "SELECT reader, MAX(read_at) AS last_read, COUNT(*) AS reads "
     "FROM public.lineage_reads WHERE dataset = %s GROUP BY reader ORDER BY last_read DESC LIMIT %s"
 )
+# Does the AGE graph exist? ag_catalog.ag_graph is AGE's registry of graphs. Used to make create_graph
+# idempotent + concurrency-safe (create_graph ERRORS if the graph already exists).
+_GRAPH_EXISTS: Final = "SELECT 1 FROM ag_catalog.ag_graph WHERE name = %s"
 
 # Reconcile single-flight (B4 hardening) — a fixed session-level advisory-lock id. The cron reconcile fires
 # on EVERY lineage replica's sidecar independently, and a sweep back-fills the graph; two overlapping sweeps
@@ -1192,6 +1195,30 @@ class LineageRepository:
                 await conn.execute(_CREATE_TERMINAL_INDEX)
         except psycopg.errors.DuplicateTable:
             pass
+
+    async def ensure_graph(self) -> None:
+        """Create the AGE graph if it does not exist — idempotent, self-healing, concurrency-safe.
+
+        The in-cluster ``age-postgres`` init SQL runs ``create_graph`` once, but the EXTERNAL managed-PG path
+        (``age.externalHost``, ``age.enabled=false``) has NO such init, so without this the graph is never
+        created and every ingest fails silently. Unlike :meth:`ensure_graph_constraints` (best-effort
+        hardening), this is a HARD boot dependency — the graph IS lineage's storage — so a create that
+        genuinely fails (AGE extension absent, no DDL grant) must fail the pod loudly, complementing the
+        ``/readyz`` graph check. Checked-then-created (``create_graph`` errors if the graph exists); a
+        concurrent replica winning the race between our check and create is benign (a re-check confirms it now
+        exists), any other failure re-raises. Runs autocommit like the rest (the pool's ``configure``)."""
+        async with self._pool.connection() as conn:
+            cur = await conn.execute(_GRAPH_EXISTS, (self._graph,))
+            if await cur.fetchone():
+                return
+            try:
+                await conn.execute(sql.SQL("SELECT create_graph({})").format(sql.Literal(self._graph)))
+                log.info("age_graph_created", extra={"graph": self._graph})
+            except Exception:  # noqa: BLE001 — benign IFF a concurrent replica created it; else a real failure
+                cur = await conn.execute(_GRAPH_EXISTS, (self._graph,))
+                if not await cur.fetchone():
+                    raise  # AGE missing / no DDL grant / wrong DB — a real boot failure, not the create race
+                log.info("age_graph_create_raced", extra={"graph": self._graph})
 
     async def ensure_graph_constraints(self) -> None:
         """Add the per-label indexes: UNIQUE on each ``_VERTEX_UNIQUE_KEYS`` MERGE key (a CONCURRENT MERGE

@@ -64,6 +64,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # node; both now survive restart + are replica-shared — no in-memory state. (#22)
     await repository.ensure_events_table()
     await repository.ensure_reads_table()  # the read-audit log (#6); off unless LINEAGE_READ_AUDIT_ENABLED
+    # Create the AGE graph if absent — self-healing + the ONLY graph bootstrap on the external managed-PG
+    # path (the in-cluster age-postgres init has none). Fatal on a real failure (the graph is our storage),
+    # so it runs BEFORE ensure_graph_constraints, which needs the graph to exist. (prod-readiness P2)
+    await repository.ensure_graph()
     # UNIQUE index per AGE vertex label so a concurrent MERGE (reconcile racing ingest) can't create a
     # duplicate vertex (item 6). Best-effort: a per-label failure is logged, not fatal, so ingest still boots.
     await repository.ensure_graph_constraints()

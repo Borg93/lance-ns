@@ -17,17 +17,22 @@ Self-contained by design (baked into the ray image; no ``services/`` imports) �
 mirrors ``common.openlineage.run_id_for`` byte-for-byte and is pinned against it by a unit test.
 
 Env: MODEL FEATURES(json [{dataset,version,uri}]) CONFIG TOKEN MODELS_NAMESPACE REGISTRY_URI
-     ARTIFACT_BASE [LINEAGE_URL] [LINEAGE_TOKEN] S3_ENDPOINT S3_KEY S3_SECRET [S3_REGION].
+     ARTIFACT_BASE [LINEAGE_URL] [LINEAGE_TOKEN] S3_ENDPOINT S3_KEY S3_SECRET [S3_REGION]
+     [TRACEPARENT TRACESTATE OTEL_*] — trace continuity across the Ray boundary (prod-readiness P3):
+     when the submitting consumer injected its span + OTLP config, the job runs under one root span
+     parented on that trace; absent → untraced, exactly as before.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
 import urllib.error
 import urllib.request
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from typing import Any
 
@@ -242,6 +247,94 @@ def emit_metrics(model: str, metrics: dict[str, Any], *, reader: Any = None) -> 
         print(f"OTLP metrics export failed: {exc}", file=sys.stderr)
 
 
+# --- trace continuity across the Ray boundary (prod-readiness P3) ---------------------------------------
+# Byte-identical in ray_stage_job.py / ray_train_job.py (the self-contained-job convention — no services/
+# imports), pinned equal by tests/unit/test_ray_trace_continuity.py so the two copies can never drift.
+
+
+def _extract_trace_parent() -> Any:
+    """The submitter-injected W3C trace context, or ``None`` to run untraced.
+
+    The submitting service (services/medallion/services/ray_submit.py) injects its active span as a
+    TRACEPARENT env var in the job's runtime_env. Absent, malformed, or opentelemetry unimportable
+    (the ray image ships the SDK, but a telemetry regression must never kill the job) → ``None`` and
+    the job runs exactly as before — the trace is only ever continued, never fabricated.
+    """
+    traceparent = os.environ.get("TRACEPARENT", "")
+    if not traceparent:
+        return None
+    try:
+        from opentelemetry import trace
+        from opentelemetry.trace.propagation.tracecontext import TraceContextTextMapPropagator
+
+        carrier = {"traceparent": traceparent}
+        if tracestate := os.environ.get("TRACESTATE", ""):
+            carrier["tracestate"] = tracestate
+        parent = TraceContextTextMapPropagator().extract(carrier)
+        if not trace.get_current_span(parent).get_span_context().is_valid:
+            return None  # garbage traceparent — extract() yielded no usable span context
+        return parent
+    except Exception as exc:  # noqa: BLE001 — telemetry is best-effort; it must never fail the job
+        print(f"trace context extraction failed: {exc}", file=sys.stderr)
+        return None
+
+
+@contextlib.contextmanager
+def _traced_root(name: str, attributes: dict[str, str], *, span_processor: Any = None) -> Iterator[None]:
+    """Run the job under one root span parented on the submitter's trace (continuity, not fabrication).
+
+    Only when the submitter handed over a valid TRACEPARENT *and* an OTLP endpoint is configured does
+    the job build a TracerProvider, start ``name`` as a child of the extracted context, and force-flush
+    + shut down inline before exit (short-lived process — the same build→flush→shutdown shape as the
+    train job's emit_metrics). Any missing piece → the work still runs, just untraced. ``span_processor``
+    is injectable so a test can capture spans without a real export; an injected processor is the
+    caller's to collect (no flush/shutdown here).
+    """
+    own_processor = span_processor is None
+    if own_processor and not os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT"):
+        yield  # nowhere to export — same no-op contract as emit_metrics
+        return
+    parent = _extract_trace_parent()
+    if parent is None:
+        yield
+        return
+    try:
+        from opentelemetry.sdk.resources import Resource
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+
+        if own_processor:
+            from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+
+            span_processor = BatchSpanProcessor(OTLPSpanExporter())
+        resource = Resource.create({"service.name": os.environ.get("OTEL_SERVICE_NAME") or "ray-job"})
+        provider = TracerProvider(resource=resource)
+        provider.add_span_processor(span_processor)
+        tracer = provider.get_tracer("lance.ray_jobs")
+    except Exception as exc:  # noqa: BLE001 — telemetry is best-effort; it must never fail the job
+        print(f"trace continuation unavailable: {exc}", file=sys.stderr)
+        yield
+        return
+    try:
+        with tracer.start_as_current_span(name, context=parent, attributes=attributes) as span:
+            try:
+                yield
+            except BaseException as exc:
+                # The SDK's use_span records only Exception subclasses — a SystemExit (the jobs' own
+                # verification-failure exit) would otherwise export a green UNSET span for a failed job.
+                if not isinstance(exc, Exception):
+                    from opentelemetry.trace import Status, StatusCode
+
+                    span.record_exception(exc)
+                    span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
+    finally:
+        if own_processor:
+            with contextlib.suppress(Exception):
+                provider.force_flush()
+                provider.shutdown()
+
+
 def train_demo_model(tables: list[Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     """Demo-tier CPU 'training': per-numeric-column means over all pinned features → 'weights', plus
     row-count metrics. Deterministic and dependency-free — the seam a TorchTrainer drops into (D6)."""
@@ -357,6 +450,15 @@ def main() -> None:
     model = os.environ["MODEL"]
     token = os.environ["TRAIN_TOKEN"]  # NOT "TOKEN" — a bare TOKEN env is consumed by lance's object-store
     # env fallback as the AWS session token (bogus x-amz-security-token → RustFS 500) — live 2026-07-13.
+
+    # Continue the submitting consumer's trace (P3): the whole training run is one child span of the
+    # submitting trace (a FAIL below re-raises through the span, marking it ERROR before the flush);
+    # without a handed-over context it runs exactly as before.
+    with _traced_root("ray.train_job", {"lance.model": model}):
+        _run_train(model, token)
+
+
+def _run_train(model: str, token: str) -> None:
     namespace = os.environ.get("MODELS_NAMESPACE", "models")
     registry_uri = os.environ.get("REGISTRY_URI", "")
     features: list[dict[str, Any]] = []

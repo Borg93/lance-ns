@@ -71,4 +71,31 @@ grep -q "x-greptime-db-name:public" "$OUT" || fail "vmagent remote-write must ca
 grep -q "regex: dapr-metrics" "$OUT" || fail "vmagent must scrape the Dapr sidecar metrics port"
 grep -q "DaprConsumerWedge" "$OUT" || fail "the consumer-wedge rule must be mounted so infra metrics are alertable"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, infra-metrics on"
+# 9. Catalog memory coherence (P1): the load-shed write cap must be sized to the catalog memory tier —
+# cap × maxBodyBytes of buffered Arrow-IPC bodies + 512Mi baseline headroom (process + pyarrow decode)
+# must fit the memory limit. The code default (16 × 256MiB = 4Gi) OOM-kills the 1Gi tier before shedding
+# helps, so prod must ship an explicit, coherent cap (values-prod.yaml states the formula).
+to_bytes() { # Gi/Mi → bytes (the only units the chart's memory quantities use)
+  case "$1" in
+    *Gi) echo $((${1%Gi} * 1024 * 1024 * 1024)) ;;
+    *Mi) echo $((${1%Mi} * 1024 * 1024)) ;;
+    *) fail "unparseable memory quantity: $1" ;;
+  esac
+}
+# `|| true`: a no-match grep exits 1 and set -e would kill the script BEFORE the actionable fail
+# message below — let the emptiness checks do the failing instead.
+cap=$(grep -o 'name: LANCE_MAX_CONCURRENT_WRITES, value: "[0-9]*"' "$OUT" | head -1 | grep -o '[0-9]\+' || true)
+body=$(grep -o 'name: LANCE_MAX_BODY_BYTES, value: "[0-9]*"' "$OUT" | head -1 | grep -o '[0-9]\+' || true)
+[ -n "$cap" ] || fail "prod catalog must set LANCE_MAX_CONCURRENT_WRITES explicitly (else the code default 16 admits 4Gi of buffers)"
+[ -n "$body" ] || fail "could not extract LANCE_MAX_BODY_BYTES from the render"
+[ "$cap" -ge 1 ] || fail "prod LANCE_MAX_CONCURRENT_WRITES must be >=1 (0 disables shedding → unbounded buffer memory)"
+# The catalog Deployment is the only manifest carrying LANCE_MAX_BODY_BYTES; its limits block follows in
+# the same document, so the first memory after the first limits is the catalog's memory limit.
+cat_mem=$(awk '/LANCE_MAX_BODY_BYTES/{n=1} n&&/limits:/{l=1} l&&/memory:/{print $2; exit}' "$OUT")
+[ -n "$cat_mem" ] || fail "could not extract the catalog memory limit from the render"
+headroom=$((512 * 1024 * 1024))
+peak=$((cap * body + headroom))
+[ "$peak" -le "$(to_bytes "$cat_mem")" ] \
+  || fail "catalog sizing incoherent: $cap × $body buffered bodies + 512Mi headroom = $peak bytes > the $cat_mem limit"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, infra-metrics on, write-cap=$cap fits $cat_mem"

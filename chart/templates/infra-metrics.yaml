@@ -1,4 +1,8 @@
-{{- if and .Values.observability.enabled .Values.observability.infraMetrics.enabled }}
+{{- /* Nil-safe gate: under `helm upgrade --reuse-values` from a release whose stored values predate the
+infraMetrics key, a bare .Values.observability.infraMetrics.enabled nil-pointers the whole render — the
+default-dict guard makes the missing key mean "off" instead (the reuse-values landmine). */ -}}
+{{- $im := .Values.observability.infraMetrics | default dict }}
+{{- if and .Values.observability.enabled $im.enabled }}
 {{- /*
 Infra-tier metrics (prod-readiness P3). The app services export OTLP straight to GreptimeDB, but the Dapr
 sidecars only EXPOSE Prometheus metrics on :9090 and nothing pulls them — so a consumer-wedge (a subscriber
@@ -46,7 +50,7 @@ metadata:
 data:
   scrape.yml: |
     global:
-      scrape_interval: {{ .Values.observability.infraMetrics.scrapeInterval }}
+      scrape_interval: {{ $im.scrapeInterval }}
       external_labels:
         collector: vmagent-infra
     scrape_configs:
@@ -90,7 +94,7 @@ spec:
       securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
       containers:
         - name: vmagent
-          image: {{ .Values.observability.infraMetrics.vmagentImage }}
+          image: {{ $im.vmagentImage }}
           args:
             - -promscrape.config=/etc/vmagent/scrape.yml
             - -remoteWrite.url=http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/v1/prometheus/write

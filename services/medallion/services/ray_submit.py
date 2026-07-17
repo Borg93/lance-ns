@@ -35,6 +35,7 @@ import re
 from collections.abc import Mapping
 
 import httpx
+from opentelemetry import propagate
 
 from medallion.core.config import MedallionSettings
 
@@ -57,6 +58,20 @@ def _submission_id(stage: str, token: str | None) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "-", raw)[:200]
 
 
+def _trace_env() -> dict[str, str]:
+    """The current span's W3C trace context, lifted to env-var shape for the job's ``runtime_env``.
+
+    Trace continuity across the Ray boundary (prod-readiness P3): the estate's distributed trace went
+    dark at ``ray job submit`` because neither submission site propagated context — the job-side spans
+    were orphans. ``propagate.inject`` writes nothing when no valid span is active (tracing off, unit
+    tier), so this degrades to an empty dict and the job runs untraced — the trace is only ever
+    CONTINUED, never fabricated. Only the W3C keys are lifted (the global propagator also emits
+    baggage, which has no reader on the job side)."""
+    carrier: dict[str, str] = {}
+    propagate.inject(carrier)
+    return {key.upper(): value for key, value in carrier.items() if key in ("traceparent", "tracestate")}
+
+
 async def submit_stage_job(
     settings: MedallionSettings, *, from_uri: str, to_uri: str, stage: str, token: str | None
 ) -> None:
@@ -74,6 +89,22 @@ async def submit_stage_job(
         "S3_KEY": settings.s3_access_key_id,
         "S3_SECRET": settings.s3_secret_access_key.get_secret_value(),
         "S3_REGION": settings.s3_region,
+        # Forward this pod's OTLP config (the train path below already does) so the job can export the
+        # span it parents on the handed-over trace context. The service name is the mover's own — the
+        # job executes that mover's stage transform, so its span belongs to the same logical service.
+        # Empty endpoint (observability off) → the job runs untraced.
+        "OTEL_EXPORTER_OTLP_ENDPOINT": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
+        "OTEL_EXPORTER_OTLP_PROTOCOL": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", ""),
+        "OTEL_EXPORTER_OTLP_HEADERS": os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", ""),
+        # Spans ride GreptimeDB's trace pipeline — the chart sets a traces-specific header
+        # (x-greptime-pipeline-name) the generic headers above don't carry.
+        "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
+        "OTEL_SERVICE_NAME": os.environ.get("OTEL_SERVICE_NAME", ""),
+        "OTEL_RESOURCE_ATTRIBUTES": os.environ.get("OTEL_RESOURCE_ATTRIBUTES", ""),
+        # Trace continuity (prod-readiness P3): the mover's active span rides the runtime_env as
+        # TRACEPARENT, and the job starts its root span as a child of it — the cascade's distributed
+        # trace no longer goes dark at `ray job submit`. Empty when no span is active.
+        **_trace_env(),
     }
     body = {
         "entrypoint": settings.ray_entrypoint,
@@ -207,10 +238,17 @@ async def submit_train_job(
                 "OTEL_EXPORTER_OTLP_ENDPOINT": os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
                 "OTEL_EXPORTER_OTLP_PROTOCOL": os.environ.get("OTEL_EXPORTER_OTLP_PROTOCOL", ""),
                 "OTEL_EXPORTER_OTLP_HEADERS": os.environ.get("OTEL_EXPORTER_OTLP_HEADERS", ""),
+                # Spans ride GreptimeDB's trace pipeline — the chart sets a traces-specific header
+                # (x-greptime-pipeline-name) the generic headers above don't carry.
+                "OTEL_EXPORTER_OTLP_TRACES_HEADERS": os.environ.get("OTEL_EXPORTER_OTLP_TRACES_HEADERS", ""),
                 "OTEL_SERVICE_NAME": settings.trainer_identity,
                 # Same resource attrs as the submitting pod (deployment env / namespace / version), so the
                 # trainer's series carry the estate's standard resource dimensions, not a bare service name.
                 "OTEL_RESOURCE_ATTRIBUTES": os.environ.get("OTEL_RESOURCE_ATTRIBUTES", ""),
+                # Trace continuity (prod-readiness P3): the consumer's active span rides the runtime_env
+                # as TRACEPARENT, and the job starts its root span as a child of it — the training run's
+                # spans join the submitting trace instead of orphaning. Empty when no span is active.
+                **_trace_env(),
             }
         },
     }

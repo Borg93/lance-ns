@@ -58,7 +58,14 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     pool = make_pool(settings.database_url, statement_timeout_seconds=settings.age_statement_timeout_seconds)
     await pool.open()
     app.state.pool = pool
-    repository = LineageRepository(pool, settings.graph, events_retention=settings.events_retention)
+    repository = LineageRepository(
+        pool,
+        settings.graph,
+        events_retention=settings.events_retention,
+        # The same value the pool sets session-wide — the repository re-asserts it transaction-scoped
+        # (SET LOCAL) around the first-boot DDL so a wedged Postgres fails boot fast. (P6)
+        statement_timeout_seconds=settings.age_statement_timeout_seconds,
+    )
     app.state.repository = repository
     # Durable events feed: a Postgres table created on first boot. /runs folds onto the AGE (:Run)
     # node; both now survive restart + are replica-shared — no in-memory state. (#22)

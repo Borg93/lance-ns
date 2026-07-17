@@ -70,6 +70,15 @@ openfga:
 networkPolicy:
   enabled: true
 
+# Load-shed cap sized to the catalog memory tier below (P1): the code default (16) admits 16 × 256MiB
+# buffered Arrow-IPC bodies = 4Gi of buffers against the 1Gi limit — a write burst OOM-kills the pod even
+# though shedding "worked". Sizing formula: maxConcurrentWrites × maxBodyBytes (2 × 256MiB = 512Mi of body
+# buffers) + 512Mi baseline headroom (process + pyarrow decode) = the 1Gi catalog memory limit. Keep the
+# formula true when changing either side — prod_render_check.sh asserts it. Overflow writes get 429 +
+# Retry-After; multi-hundred-MiB payloads belong on the direct-write/vending path anyway.
+catalog:
+  maxConcurrentWrites: 2
+
 # Per-workload resource tiers (P2): the shared 1-CPU/512Mi default sizes the stateful stores + the Arrow-
 # IPC-buffering catalog like stateless request pods. Give the memory-heavy workloads a real limit (the rest
 # keep resources.default). Requests reserve scheduler headroom. Movers/lineage stay on default until load
@@ -77,7 +86,7 @@ networkPolicy:
 resources:
   catalog:
     requests: { cpu: 200m, memory: 512Mi }
-    limits: { cpu: "2", memory: 1Gi } # a 256MiB Arrow-IPC body + pyarrow decode overhead needs >512Mi
+    limits: { cpu: "2", memory: 1Gi } # sized by catalog.maxConcurrentWrites above (cap×256MiB + 512Mi)
   age:
     requests: { cpu: 250m, memory: 512Mi }
     limits: { cpu: "2", memory: 1Gi } # dual-purpose store: the lineage graph AND OpenFGA's datastore

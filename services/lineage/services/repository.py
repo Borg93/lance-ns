@@ -467,10 +467,19 @@ def _tags_from(value: object) -> list[str]:
 class LineageRepository:
     """Reads and writes the OpenLineage graph in one Apache AGE database."""
 
-    def __init__(self, pool: AsyncConnectionPool, graph: str, events_retention: int = 0) -> None:
+    def __init__(
+        self,
+        pool: AsyncConnectionPool,
+        graph: str,
+        events_retention: int = 0,
+        statement_timeout_seconds: float = 30.0,
+    ) -> None:
         self._pool = pool
         self._graph = graph
         self._events_retention = events_retention
+        # The same configured value make_pool sets session-wide on every pooled connection — used to
+        # bound the first-boot DDL with a transaction-scoped SET LOCAL (see ensure_events_table).
+        self._statement_timeout_seconds = statement_timeout_seconds
 
     async def ingest_event(self, event: RunEvent) -> None:
         """Upsert the run, its job, its datasets, and their edges in one transaction."""
@@ -1182,9 +1191,21 @@ class LineageRepository:
         ``CREATE TABLE IF NOT EXISTS`` is not atomic against itself: two replicas booting at once can
         both pass the existence check and then race the create, so the loser raises ``DuplicateTable``.
         That's the success case — the table exists — so we swallow it. (#22 audit)
+
+        The DDL runs in one transaction opened with ``SET LOCAL statement_timeout`` at the configured
+        pool value, so its bound is carried by the transaction itself, not inherited from how the
+        connection was made (prod-readiness P6): the dedup DELETEs + CREATE UNIQUE INDEX scan the whole
+        table, and on a wedged/locked Postgres each statement is cancelled instead of hanging boot
+        forever. ``SET LOCAL`` dies with the transaction, so nothing leaks into the pooled session; a
+        timeout raises out of the lifespan (fail-closed boot → crash-loop), never a half-built feed.
         """
         try:
-            async with self._pool.connection() as conn:
+            async with self._pool.connection() as conn, conn.transaction():
+                await conn.execute(
+                    sql.SQL("SET LOCAL statement_timeout = {}").format(
+                        sql.Literal(int(self._statement_timeout_seconds * 1000))
+                    )
+                )
                 await conn.execute(_CREATE_EVENTS_TABLE)
                 # Remove any pre-existing redelivered duplicates BEFORE each unique index, else CREATE UNIQUE
                 # INDEX fails on a table populated before the dedup landed (the events feed is a diagnostic

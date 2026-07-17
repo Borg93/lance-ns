@@ -60,6 +60,22 @@ spec:
     app.kubernetes.io/component: age
     app.kubernetes.io/instance: {{ .Release.Name }}
 ---
+{{- /* Guard: StatefulSet volumeClaimTemplates are immutable, so bumping age.storage on an upgrade
+either hard-fails deep in the apply or (worse) looks accepted without resizing anything. Catch it
+up-front with a clear path forward. `lookup` returns empty on `helm template`/client dry-run, so
+render/CI paths are unaffected; the comparison is textual (write the same unit as the live object,
+normally the one this chart installed). */}}
+{{- $existingSts := lookup "apps/v1" "StatefulSet" .Release.Namespace (include "lance.ageHost" .) }}
+{{- if $existingSts }}
+{{- range $existingSts.spec.volumeClaimTemplates }}
+{{- if eq .metadata.name "data" }}
+{{- $current := .spec.resources.requests.storage }}
+{{- if ne (toString $current) (toString $.Values.age.storage) }}
+{{- fail (printf "age.storage=%s but the deployed AGE StatefulSet's volumeClaimTemplate requests %s — volumeClaimTemplates are immutable, so this upgrade cannot resize the volume. To resize: patch the PVC (kubectl patch pvc data-%s-0 -p '{\"spec\":{\"resources\":{\"requests\":{\"storage\":\"%s\"}}}}'), delete the StatefulSet with --cascade=orphan (pods and PVC stay), then re-run the upgrade. See docs/RUNBOOK-restore.md. To keep the current size, revert age.storage to %s." (toString $.Values.age.storage) (toString $current) (include "lance.ageHost" $) (toString $.Values.age.storage) (toString $current)) }}
+{{- end }}
+{{- end }}
+{{- end }}
+{{- end }}
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:

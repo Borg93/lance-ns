@@ -11,9 +11,11 @@ import json
 from pathlib import Path
 from typing import Any, cast
 
+import psycopg
 import pytest
 from lineage.core.age import _parse, _sql
 from lineage.models import RunEvent
+from psycopg import sql
 
 _SAMPLE = Path(__file__).resolve().parent.parent.parent / "services" / "lineage" / "sample_events.json"
 
@@ -893,3 +895,86 @@ def test_input_version_reads_the_pinned_feature_version() -> None:
     assert event.input_version("gold$catalog") is None  # floating read → no pin to record
     assert event.input_version("not-an-input") is None
     assert event.output_version("models$churn") == "3"  # the write twin still works
+
+
+class _DDLConn:
+    """Records executed SQL + transaction boundaries (the first-boot DDL runs no Cypher).
+
+    ``fail_on`` raises ``QueryCanceled`` on the first matching statement — a served statement
+    timeout, to prove the fail-closed boot path.
+    """
+
+    def __init__(self, fail_on: str | None = None) -> None:
+        self.calls: list[str] = []
+        self._fail_on = fail_on
+
+    async def execute(self, statement: object, params: object = None) -> None:
+        del params
+        text = statement.as_string() if isinstance(statement, sql.Composable) else str(statement)
+        self.calls.append(text)
+        if self._fail_on and self._fail_on in text:
+            raise psycopg.errors.QueryCanceled("canceling statement due to statement timeout")
+
+    def transaction(self) -> Any:
+        conn = self
+
+        class _Tx:
+            async def __aenter__(self) -> _Tx:
+                conn.calls.append("BEGIN")
+                return self
+
+            async def __aexit__(self, *_a: object) -> bool:
+                conn.calls.append("END")
+                return False
+
+        return _Tx()
+
+
+class _DDLPool:
+    """Minimal async pool whose ``connection()`` yields one recording ``_DDLConn`` (no DB)."""
+
+    def __init__(self, conn: _DDLConn) -> None:
+        self._conn = conn
+
+    def connection(self) -> Any:
+        conn = self._conn
+
+        class _Ctx:
+            async def __aenter__(self) -> _DDLConn:
+                return conn
+
+            async def __aexit__(self, *_a: object) -> bool:
+                return False
+
+        return _Ctx()
+
+
+def test_ensure_events_table_runs_ddl_under_set_local_timeout() -> None:
+    """The first-boot DDL opens its transaction with SET LOCAL statement_timeout at the configured
+    value (P6): the bound rides the transaction (so nothing leaks to the pooled session) and covers
+    every statement — a wedged/locked Postgres cancels the boot instead of hanging it forever."""
+    import lineage.services.repository as repo_mod
+
+    conn = _DDLConn()
+    repo = repo_mod.LineageRepository(cast(Any, _DDLPool(conn)), "g", statement_timeout_seconds=5.0)
+    asyncio.run(repo.ensure_events_table())
+
+    # SET LOCAL is the transaction's first statement, at the configured seconds → milliseconds.
+    assert conn.calls[:2] == ["BEGIN", "SET LOCAL statement_timeout = 5000"]
+    # Every DDL statement runs inside the same transaction, after the timeout is in force.
+    ddl = conn.calls[2:-1]
+    assert conn.calls[-1] == "END"
+    assert any("CREATE TABLE IF NOT EXISTS public.lineage_events" in s for s in ddl)
+    assert sum("DELETE FROM public.lineage_events" in s for s in ddl) == 2  # both dedup passes
+    assert sum("CREATE UNIQUE INDEX" in s for s in ddl) == 2  # natural + terminal keys
+
+
+def test_ensure_events_table_timeout_raises_fail_closed() -> None:
+    """A statement timeout (QueryCanceled) propagates out of the lifespan — fail-closed boot /
+    crash-loop, never a half-built feed; only the DuplicateTable create race is swallowed."""
+    import lineage.services.repository as repo_mod
+
+    conn = _DDLConn(fail_on="DELETE FROM public.lineage_events")
+    repo = repo_mod.LineageRepository(cast(Any, _DDLPool(conn)), "g")
+    with pytest.raises(psycopg.errors.QueryCanceled):
+        asyncio.run(repo.ensure_events_table())

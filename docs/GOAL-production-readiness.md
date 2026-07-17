@@ -52,9 +52,11 @@ to main. Never weaken auth/secrets posture.
   posture would have passed green.
 - [ ] **GreptimeDB probes + limits** (MED·chart) — 0 probes, unbounded resources; unready store still
   gets OTLP/Perses traffic. Add `/health` readiness/liveness + CPU/mem limits. → folded into **P2**.
-- [ ] **Catalog memory sizing** (MED·chart) — 512Mi default limit vs its own 256MiB in-memory Arrow-IPC
-  body buffer. Give catalog a dedicated higher limit (or lower the body cap). → folded into **P2** (per-
-  workload resource tiers).
+- [x] **Catalog memory sizing** (MED·chart) — DONE: prod now ships an explicit, coherent load-shed cap.
+  The chart wires `catalog.maxConcurrentWrites` into `LANCE_MAX_CONCURRENT_WRITES` (hasKey+ternary, reuse-
+  values-safe); values-prod sets 2 with the sizing formula (2 × 256MiB buffered bodies + 512Mi headroom =
+  the 1Gi tier). prod-render-check check 9 asserts the arithmetic (cap × maxBodyBytes + 512Mi ≤ limit), so
+  the coherence can't silently regress — proven to trip on cap=4/16. Kind/default stays the code default 16.
 
 ## P2 — Resilience topology (M-effort chart)
 
@@ -106,8 +108,15 @@ to main. Never weaken auth/secrets posture.
   vmagent→GreptimeDB scrape round-trip needs an obs-on cluster — deploying it creates the vmagent Role, a
   protected-scope mutation, so it's an operator-authorized drill (same shape as the alert/restore drills).
   NATS JetStream metrics (the subchart's promExporter, `-jsz`) are a follow-on second scrape target.
-- [ ] **Trace continuity across Ray + Dapr boundary** (MED·code) — the distributed trace goes dark at the
-  Ray compute boundary; propagate context into the stage/train jobs.
+- [x] **Trace continuity across Ray + Dapr boundary** (MED·code) — DONE at the unit tier: both in-service
+  submission sites (`ray_submit.submit_stage_job`/`submit_train_job`) inject the active span's W3C
+  traceparent into the job `runtime_env` (`opentelemetry.propagate.inject` — nothing injected without a
+  real active span, never fabricated); both job scripts run their whole work under one root span parented
+  on the extracted context (inline build→flush→shutdown, guarded imports for the separate Ray image),
+  degrading to untraced on missing/garbage TRACEPARENT or missing SDK. Failures — including the jobs' own
+  `SystemExit` verification exits (BaseException, which the SDK alone would leave green) — mark the span
+  ERROR. 13 unit tests incl. a drift-pin holding the two inlined helper copies byte-identical. REMAINING
+  (drill): one live cascade with tracing on to see the joined catalog→…→ray span in GreptimeDB.
 
 ## P4 — Backup / restore / DR (critical/high)
 
@@ -157,12 +166,20 @@ to main. Never weaken auth/secrets posture.
 
 ## P6 — Upgrade & migration safety (medium)
 
-- [ ] **AGE Postgres-major image-bump migration** (MED·runbook) — AGE is PG16-pinned; a routine image bump
-  is an unhandled data migration. Document + guard.
-- [ ] **AGE volumeClaimTemplate immutability** (MED·chart) — changing `age.storage` makes `helm upgrade`
-  fail hard; document/guard the immutable field.
-- [ ] **`ensure_events_table` DDL statement-timeout safety** (LOW·code) — first-boot dedup DELETE + CREATE
-  UNIQUE INDEX isn't statement-timeout-safe on a large table.
+- [x] **AGE Postgres-major image-bump migration** (MED·runbook) — DONE: RUNBOOK-restore.md gained "Planned
+  migration — bumping AGE across a Postgres major": the CrashLoop failure signature, why (PVC keeps the
+  PG16 datadir; the AGE extension build is also per-major; no in-pod pg_upgrade), the logical-migration
+  procedure reusing the pg-backup CronJob dumps + snapshot + restore + a re-drill on the new major before
+  cutover, the rollback, and the shared-OpenFGA-database warning. Authored, not yet rehearsed (says so).
+- [x] **AGE volumeClaimTemplate immutability** (MED·chart) — DONE: an upgrade-time `lookup` guard on the
+  AGE StatefulSet fails the render with the exact resize commands (patch PVC → delete STS --cascade=orphan
+  → re-upgrade; runbook section added) when `age.storage` differs from the deployed template. Inert on
+  `helm template`/CI (lookup returns empty) — proven live both directions via server-side dry-run against
+  the kind release. Known limit: textual compare, so write the same unit the chart installed.
+- [x] **`ensure_events_table` DDL statement-timeout safety** (LOW·code) — DONE: the first-boot DDL runs in
+  one transaction opened with `SET LOCAL statement_timeout` at the same configured value the pool options
+  use (no new knob); the bound is carried by the transaction itself, leaks nothing to pooled sessions, and
+  a timeout still fails boot closed. DuplicateTable create-race swallow preserved. Unit-proven.
 
 ## P7 — Structural SPOFs → externalize (runbook, not in-chart HA)
 

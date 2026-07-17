@@ -161,9 +161,7 @@ def test_ensure_graph_bootstraps_and_is_idempotent_against_age(dsn: str) -> None
             await repo.ensure_graph()  # absent → created
             await repo.ensure_graph()  # present → idempotent no-op (no 'already exists' raised)
             async with pool.connection() as conn:
-                cur = await conn.execute(
-                    "SELECT count(*) FROM ag_catalog.ag_graph WHERE name = %s", (gname,)
-                )
+                cur = await conn.execute("SELECT count(*) FROM ag_catalog.ag_graph WHERE name = %s", (gname,))
                 row = await cur.fetchone()
                 with suppress(Exception):  # best-effort cleanup so the throwaway graph doesn't accumulate
                     await conn.execute(sql.SQL("SELECT drop_graph({}, true)").format(sql.Literal(gname)))

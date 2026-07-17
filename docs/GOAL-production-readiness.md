@@ -79,13 +79,19 @@ to main. Never weaken auth/secrets posture.
 
 ## P3 — Observability & operability (critical/high)
 
-- [ ] **SLOs + alerting rules** (CRIT·chart) — dashboards exist but zero alert rules; the stack can be
-  watched, never pages. Define SLOs (ingest latency, cascade lag, error rate, DLQ depth) + Perses/Greptime
-  alert rules.
+- [ ] **Alerting engine + rules** (CRIT·chart) — dashboards exist (incl. panels literally labelled
+  "alertable": outbox depth/age, DLQ rate, error rate) but NO evaluator, so nobody is paged. Two parts:
+  (a) DEFINE the alert rules as a rendered artifact (PromQL seeded from the alertable panels: outbox_depth>0
+  sustained, medallion.dlq.parked rate>0, lineage error-rate, cascade stall, pod restarts, readyz-degraded);
+  (b) DEPLOY the evaluator — GreptimeDB speaks PromQL (`/v1/prometheus`), so vmalert (or Prometheus
+  rule-only) + Alertmanager with a real route (per docs/ASSESSMENT-2026-07-15.md gap #2). Part (b) is the
+  real lift + a new component; part (a) is chart-render-verifiable now.
+- [x] **Symptom-indexed on-call runbook** (HIGH·runbook) — DONE (P3a): `docs/RUNBOOK-oncall.md` — a symptom
+  index + per-mode symptom→cause→diagnose→act for OpenFGA-down (503-everywhere), OpenBao sealed (boot
+  deadlock), CrashLoop-on-boot, /readyz degraded (pool vs graph), cascade stalled, DLQ parking, outbox not
+  draining, RustFS down, AGE down. Grounded in the real services/metrics/fail-closed behaviors.
 - [ ] **Infra-tier metrics collection** (CRIT·chart) — Dapr/NATS/infra metrics aren't scraped, so a
   consumer-wedge is a silent outage. Wire the infra metrics into GreptimeDB.
-- [ ] **Symptom-indexed on-call runbook** (HIGH·runbook) — no "symptom → cause → action" runbook for the
-  known failure modes. Author `docs/RUNBOOK-oncall.md`.
 - [ ] **Trace continuity across Ray + Dapr boundary** (MED·code) — the distributed trace goes dark at the
   Ray compute boundary; propagate context into the stage/train jobs.
 

@@ -373,7 +373,7 @@ observability:
   # policy retries the same message forever, the cascade silently stops draining) is invisible: no app metric
   # moves, no alert fires. vmagent closes the gap — it discovers every dapr.io/enabled pod, scrapes its
   # :9090 sidecar, and remote-writes into the SAME GreptimeDB (public db) so the infra signal
-  # (dapr_component_pubsub_ingress_count{process_status="retry"}, dapr_resiliency_count{policy="retry"}) is
+  # (dapr_component_pubsub_ingress_count{process_status="retry"} — the per-delivery retry outcome) is
   # queryable + alertable next to the app metrics. Pairs with the DaprConsumerWedge rule (chart/alerting).
   # Default OFF — the kind e2e runner is 2c/7G and doesn't carry the infra scrape; values-prod flips it on.
   infraMetrics:

@@ -87,12 +87,12 @@ tests:
         alertname: CatalogWritesShedSustained
         exp_alerts: []
 
-  # 7. A Dapr consumer retrying inbound continuously for >15m → DaprConsumerWedge fires. sum by (app_id)
-  #    keeps app_id on the resulting alert, so it names the wedged subscriber.
+  # 7. A Dapr consumer booking process_status=retry continuously for >15m → DaprConsumerWedge fires. sum by
+  #    (app_id) keeps app_id on the resulting alert, so it names the wedged subscriber.
   - interval: 1m
     input_series:
-      - series: 'dapr_resiliency_count{policy="retry",flow_direction="inbound",app_id="bronze-to-silver"}'
-        values: "0+1x20" # a retry every scrape — the handler never succeeds
+      - series: 'dapr_component_pubsub_ingress_count{process_status="retry",app_id="bronze-to-silver"}'
+        values: "0+1x20" # a retried delivery every scrape — the handler never succeeds
     alert_rule_test:
       - eval_time: 16m
         alertname: DaprConsumerWedge
@@ -103,13 +103,25 @@ tests:
               app_id: bronze-to-silver
             exp_annotations:
               summary: "Dapr consumer wedged — a subscriber is retrying inbound messages for 15m"
-              description: "A subscriber's handler has failed continuously: Dapr's inbound retry policy has fired for 15m without clearing, so this consumer is not draining its subscription and the cascade / lineage ingest has silently stopped. A healthy transient error clears in seconds. Check the wedged app's logs and its downstream (AGE / OpenFGA / RustFS). Runbook: docs/RUNBOOK-oncall.md#cascade-stalled"
+              description: "A subscriber's handler has failed continuously: Dapr has booked process_status=retry on inbound deliveries for 15m without clearing, so this consumer is not draining its subscription and the cascade / lineage ingest has silently stopped. A healthy transient error clears in seconds. Check the wedged app's logs and its downstream (AGE / OpenFGA / RustFS). Runbook: docs/RUNBOOK-oncall.md#cascade-stalled"
 
-  # 8. A transient inbound error that clears in a few minutes → NO alert (retries are normal; a WEDGE is
-  #    retries that never stop). The counter stops rising after ~4 min, so rate() falls back to 0.
+  # 8. A busy-but-HEALTHY consumer books only process_status=success (no retry series at all) → NO alert.
+  #    This is the case the old dapr_resiliency_count rule got wrong: that counter rises on healthy traffic
+  #    too, so it would have false-paged here; process_status=retry stays absent on the happy path.
   - interval: 1m
     input_series:
-      - series: 'dapr_resiliency_count{policy="retry",flow_direction="inbound",app_id="bronze-to-silver"}'
+      - series: 'dapr_component_pubsub_ingress_count{process_status="success",app_id="bronze-to-silver"}'
+        values: "0+5x20" # heavy healthy throughput — five successful deliveries per scrape, no retries
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DaprConsumerWedge
+        exp_alerts: []
+
+  # 9. A transient inbound error that clears in a few minutes → NO alert (retries are normal; a WEDGE is
+  #    retries that never stop). The retry counter stops rising after ~4 min, so rate() falls back to 0.
+  - interval: 1m
+    input_series:
+      - series: 'dapr_component_pubsub_ingress_count{process_status="retry",app_id="bronze-to-silver"}'
         values: "0 1 2 3 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4" # retried only in the first ~4 min, then recovered
     alert_rule_test:
       - eval_time: 16m

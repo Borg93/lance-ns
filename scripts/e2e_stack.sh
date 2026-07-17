@@ -302,14 +302,19 @@ fi
 # RustFS/S3 outage at all. Runs LAST (the suites already passed; the cluster is torn down after) and each
 # probe RESTORES the dependency + verifies recovery, so it leaves the stack healthy. Fail-CLOSED assertions
 # are STRICT (a 200 while a dep is down is a security/data hole → hard fail); recovery polls are GENEROUS (a
-# slow reschedule must not false-red). Probes are namespace CREATEs with fresh names: a create runs the FGA
-# check THEN a genuine S3 write, so FGA-down → 503 before storage, RustFS-down → 5xx on the write — both
-# deterministic, no cache can mask them, no 409 on retry. E2E_CHAOS=0 disables it (iteration escape hatch).
+# slow reschedule must not false-red). Probes are CHILD namespace CREATEs under the alice-owned `mbns`
+# parent (created above), NOT root creates: a child create runs the can_create_child FGA check on the parent
+# THEN a genuine S3 write, so FGA-down → 503 AT THE CHECK before storage (a root create with lockRootCreate
+# off would skip the FGA check entirely and only 500 later on the ownership-seed write — that would pass this
+# drill even if the authz check itself fail-opened). RustFS-down → 5xx on the write. Both deterministic, no
+# cache can mask them, no 409 on retry. E2E_CHAOS=0 disables it (iteration escape hatch).
 if [ "${E2E_CHAOS:-1}" = "1" ]; then
   step "chaos: dependency-outage fail-closed drill (P5)"
   CAT=http://localhost:2333
+  # mbns is alice's own namespace (created earlier), so can_create_child is authorized on the happy path;
+  # the $-delimited id makes chaos-$1 a CHILD of mbns (not a root namespace).
   gov_create() { curl -s -o /dev/null -w '%{http_code}' -m15 -H "authorization: Bearer $ALICE" \
-    -X POST "$CAT/v1/namespace/chaos-$1/create"; }
+    -X POST "$CAT/v1/namespace/mbns\$chaos-$1/create"; }
   restore_dep() { kubectl scale "deploy/$1" --replicas=1 >/dev/null 2>&1 || true
                   kubectl rollout status "deploy/$1" --timeout=180s >/dev/null 2>&1 || true; }
 

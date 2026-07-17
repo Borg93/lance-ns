@@ -188,6 +188,7 @@ spec:
                   - compaction
                   - lance-ray
                   - rustfs-backup
+                  - backup-pg # the pg-backup CronJob uploads its dumps to the lakehouse (_backups/pg/)
                   {{- range .Values.medallion.movers }}
                   - {{ .name }}
                   {{- end }}

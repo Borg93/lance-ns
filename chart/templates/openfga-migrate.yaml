@@ -15,6 +15,14 @@ metadata:
 spec:
   backoffLimit: 30
   template:
+    metadata:
+      # Load-bearing under the prod NetworkPolicy: the age-postgres ingress allows `from`
+      # component=openfga-migrate. Without this label the hook pod (and its wait-age init) can't reach
+      # age:5432 — the init loops forever, the post-install hook never completes, and helm rolls the
+      # release back on a policy-enforcing CNI (default-deny drops the SYN).
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: openfga-migrate
     spec:
       restartPolicy: OnFailure
       initContainers:

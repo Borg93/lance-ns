@@ -5,6 +5,15 @@ Living tracker for hardening the Lance-lakehouse estate from "feature-complete +
 40 gaps confirmed real, 3 rejected as already-handled. Each item below was confirmed by re-opening the
 cited file, so this is real work, not a generic checklist.
 
+**Post-phase re-audit (2026-07-17, 33-agent adversarial sweep over the whole phase diff, 6 lenses + 3-refuter
+verification):** 5 confirmed never-driven-union defects, all fixed — DaprConsumerWedge keyed on a metric that
+doesn't discriminate a wedge (→ `dapr_component_pubsub_ingress_count{process_status="retry"}`, the live-
+verified signal); the pg-backup CronJob and openfga-migrate hook pods carried no component label so the prod
+NetworkPolicy default-deny silently blocked backups + the install hook (→ labels added, `backup-pg` allowed
+to rustfs); the load-shed `/create` suffix over-matched cheap metadata creates (→ gate on the Arrow-IPC
+content-type); the chaos drill's OpenFGA leg didn't exercise the authz check on a root create (→ probe a
+child create under an owned parent). All CI-green.
+
 ## Scope & exclusions
 
 **In scope:** resilience/availability, prod security posture, durability/backup/DR, observability/SLOs,

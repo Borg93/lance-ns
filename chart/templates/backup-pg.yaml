@@ -14,6 +14,13 @@ spec:
     spec:
       backoffLimit: 3
       template:
+        metadata:
+          # The component label is load-bearing under the prod NetworkPolicy: the age-postgres and rustfs
+          # ingress rules allow `from` component=backup-pg — without this label the CronJob pod matches
+          # neither, default-deny drops its pg_dump SYN + mc upload, and the backup silently never runs.
+          labels:
+            {{- include "lance.labels" . | nindent 12 }}
+            app.kubernetes.io/component: backup-pg
         spec:
           restartPolicy: OnFailure
           volumes:

@@ -87,13 +87,16 @@ groups:
 
   - name: lance-infra
     rules:
-      # The infra-tier signal (observability.infraMetrics) — a Dapr consumer-wedge. When a subscriber's handler
-      # keeps failing, Dapr's inbound retry resiliency policy fires on every redelivery; a HEALTHY transient
-      # error clears in seconds, so a rate that stays > 0 for 15m means the consumer is stuck redelivering the
-      # same message and its subscription has silently stopped draining. Needs vmagent scraping the Dapr
-      # sidecars into GreptimeDB (without it dapr_* is absent and this never evaluates).
+      # The infra-tier signal (observability.infraMetrics) — a Dapr consumer-wedge. Dapr records the OUTCOME
+      # of every inbound pub/sub delivery as dapr_component_pubsub_ingress_count{process_status=...}: a
+      # healthy consumer books `success`; a handler that returns RETRY (its work keeps failing) books
+      # `retry` on every redelivery. So a sustained rate of process_status="retry" is the wedge — the
+      # subscription is not draining. (NOT dapr_resiliency_count, which is flat regardless of outcome, nor
+      # dapr_resiliency_activations_total, which Dapr 1.18 doesn't emit — both verified live on the cluster.)
+      # A healthy transient error retries then succeeds, so the 15m `for` rides out blips. Needs vmagent
+      # scraping the Dapr sidecars into GreptimeDB (without it dapr_* is absent and this never evaluates).
       - alert: DaprConsumerWedge
-        expr: sum by (app_id) (rate(dapr_resiliency_count{policy="retry",flow_direction="inbound"}[5m])) > 0
+        expr: sum by (app_id) (rate(dapr_component_pubsub_ingress_count{process_status="retry"}[5m])) > 0
         for: 15m
         labels:
           severity: critical
@@ -101,7 +104,7 @@ groups:
         annotations:
           summary: "Dapr consumer wedged — a subscriber is retrying inbound messages for 15m"
           description: >-
-            A subscriber's handler has failed continuously: Dapr's inbound retry policy has fired for 15m
-            without clearing, so this consumer is not draining its subscription and the cascade / lineage
-            ingest has silently stopped. A healthy transient error clears in seconds. Check the wedged app's
-            logs and its downstream (AGE / OpenFGA / RustFS). Runbook: docs/RUNBOOK-oncall.md#cascade-stalled
+            A subscriber's handler has failed continuously: Dapr has booked process_status=retry on inbound
+            deliveries for 15m without clearing, so this consumer is not draining its subscription and the
+            cascade / lineage ingest has silently stopped. A healthy transient error clears in seconds. Check
+            the wedged app's logs and its downstream (AGE / OpenFGA / RustFS). Runbook: docs/RUNBOOK-oncall.md#cascade-stalled

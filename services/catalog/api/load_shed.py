@@ -25,6 +25,24 @@ _PROBLEM_JSON = b"application/problem+json"
 # Only the bulk Arrow-IPC body writes — the ones that buffer a large body. /commit (a small metadata op) and
 # update/delete (predicate-driven) are deliberately NOT gated: they don't carry the multi-hundred-MiB payload.
 _WRITE_SUFFIXES = ("/create", "/insert", "/merge_insert")
+# The discriminator is the Arrow-IPC content-type, NOT the path suffix alone: `/create` also ends the CHEAP
+# metadata endpoints (`/v1/namespace/{id}/create`, `/v1/table/{id}/tags/create`, `.../version/create`,
+# `/v1/materialized_view/{id}/create`) which send JSON and buffer nothing — shedding those under write
+# pressure would be nonsense. The bulk table writes are exactly the ones that POST an Arrow stream.
+_ARROW_IPC = b"application/vnd.apache.arrow.stream"
+
+
+def _is_bulk_arrow_write(scope: Scope) -> bool:
+    """A POST to a write endpoint that actually carries an Arrow-IPC body (the large buffer to shed)."""
+    if scope.get("method") != "POST":
+        return False
+    if not any(scope.get("path", "").endswith(s) for s in _WRITE_SUFFIXES):
+        return False
+    for name, value in scope.get("headers", ()):
+        if name == b"content-type":
+            return value.startswith(_ARROW_IPC)
+    return False
+
 
 _meter = metrics.get_meter("lance.catalog")
 _writes_shed = _meter.create_counter(
@@ -43,12 +61,7 @@ class WriteConcurrencyLimitMiddleware:
         self._inflight = 0
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if (
-            self._max <= 0
-            or scope["type"] != "http"
-            or scope.get("method") != "POST"
-            or not any(scope.get("path", "").endswith(s) for s in _WRITE_SUFFIXES)
-        ):
+        if self._max <= 0 or scope["type"] != "http" or not _is_bulk_arrow_write(scope):
             await self._app(scope, receive, send)
             return
 

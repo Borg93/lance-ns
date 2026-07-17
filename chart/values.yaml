@@ -357,6 +357,19 @@ observability:
     alertmanagerImage: prom/alertmanager:v0.28.0
     evaluationInterval: "1m"
     webhookUrl: "" # empty → Alertmanager still receives + groups alerts, but pages nowhere (black-hole)
+  # Infra-tier metrics (prod-readiness P3): the app services push their OTLP metrics/traces/logs straight to
+  # GreptimeDB, but the INFRA layer — the Dapr sidecars — only EXPOSE Prometheus metrics on :9090 (pull), and
+  # nothing scrapes them. So a Dapr consumer-wedge (a subscriber whose handler keeps failing → the resiliency
+  # policy retries the same message forever, the cascade silently stops draining) is invisible: no app metric
+  # moves, no alert fires. vmagent closes the gap — it discovers every dapr.io/enabled pod, scrapes its
+  # :9090 sidecar, and remote-writes into the SAME GreptimeDB (public db) so the infra signal
+  # (dapr_component_pubsub_ingress_count{process_status="retry"}, dapr_resiliency_count{policy="retry"}) is
+  # queryable + alertable next to the app metrics. Pairs with the DaprConsumerWedge rule (chart/alerting).
+  # Default OFF — the kind e2e runner is 2c/7G and doesn't carry the infra scrape; values-prod flips it on.
+  infraMetrics:
+    enabled: false
+    vmagentImage: victoriametrics/vmagent:v1.106.1
+    scrapeInterval: "30s"
   # Edge auth (§5e hardening) — nginx `auth_basic` on the gateway's /perses/ + /greptime/ locations.
   # BOTH are otherwise UNAUTHENTICATED: Perses is the dashboard, and GreptimeDB exposes its RAW SQL/ingest
   # API on :4000 — and in prod the Ingress→gateway proxies both publicly (a wide-open telemetry store +

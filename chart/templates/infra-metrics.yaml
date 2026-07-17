@@ -1,0 +1,111 @@
+{{- if and .Values.observability.enabled .Values.observability.infraMetrics.enabled }}
+{{- /*
+Infra-tier metrics (prod-readiness P3). The app services export OTLP straight to GreptimeDB, but the Dapr
+sidecars only EXPOSE Prometheus metrics on :9090 and nothing pulls them — so a consumer-wedge (a subscriber
+whose handler keeps failing → Dapr's resiliency policy retries the same message forever, the cascade stops
+draining) is a SILENT outage. vmagent discovers every dapr.io/enabled pod IN THIS NAMESPACE, scrapes its
+sidecar, and remote-writes into the same GreptimeDB (public db, via the x-greptime-db-name header the OTLP
+path also uses) so the infra signal lands next to the app metrics and the DaprConsumerWedge rule can fire.
+SD is namespace-scoped, so a namespaced Role (get/list/watch pods) is enough — no ClusterRole needed. The
+one thing render-checking can't prove is the live scrape->GreptimeDB round-trip; that's verified on a real
+cluster (GOAL-production-readiness.md P3c), the same way the alert rules are promtool-proven then drilled.
+*/ -}}
+{{- $fullname := include "lance.fullname" . }}
+{{- $sa := printf "%s-vmagent" $fullname }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $sa }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $sa }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $sa }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+roleRef: { apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $sa }} }
+subjects:
+  - { kind: ServiceAccount, name: {{ $sa }}, namespace: {{ .Release.Namespace }} }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $sa }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+data:
+  scrape.yml: |
+    global:
+      scrape_interval: {{ .Values.observability.infraMetrics.scrapeInterval }}
+      external_labels:
+        collector: vmagent-infra
+    scrape_configs:
+      # Dapr sidecars — one target per pod, the daprd :9090 metrics port only (keep on the port NAME so the
+      # app container's own ports don't produce duplicate targets). dapr.io/enabled marks the sidecar pods.
+      - job_name: dapr-sidecars
+        kubernetes_sd_configs:
+          - role: pod
+            namespaces:
+              names: [{{ .Release.Namespace }}]
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_pod_annotation_dapr_io_enabled]
+            action: keep
+            regex: "true"
+          - source_labels: [__meta_kubernetes_pod_container_port_name]
+            action: keep
+            regex: dapr-metrics
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_pod_name]
+            target_label: pod
+          - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_component]
+            target_label: component
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $sa }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app.kubernetes.io/component: vmagent, app.kubernetes.io/instance: {{ .Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: vmagent
+    spec:
+      serviceAccountName: {{ $sa }}
+      securityContext: { runAsNonRoot: true, runAsUser: 65534, fsGroup: 65534 }
+      containers:
+        - name: vmagent
+          image: {{ .Values.observability.infraMetrics.vmagentImage }}
+          args:
+            - -promscrape.config=/etc/vmagent/scrape.yml
+            - -remoteWrite.url=http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/v1/prometheus/write
+            - -remoteWrite.headers=x-greptime-db-name:{{ .Values.observability.dbName }}
+            - -remoteWrite.tmpDataPath=/vmagent-data
+            - -httpListenAddr=:8429
+          ports: [{ name: http, containerPort: 8429 }]
+          readinessProbe: { httpGet: { path: /health, port: http }, initialDelaySeconds: 5, periodSeconds: 10 }
+          livenessProbe: { httpGet: { path: /health, port: http }, initialDelaySeconds: 10, periodSeconds: 20 }
+          resources: {{- include "lance.resources" (dict "root" . "comp" "vmagent") | nindent 12 }}
+          volumeMounts:
+            - { name: config, mountPath: /etc/vmagent, readOnly: true }
+            - { name: data, mountPath: /vmagent-data }
+      volumes:
+        - name: config
+          configMap: { name: {{ $sa }} }
+        - { name: data, emptyDir: {} }
+{{- end }}

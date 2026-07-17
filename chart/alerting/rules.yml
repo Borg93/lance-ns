@@ -84,3 +84,24 @@ groups:
           description: >-
             A mover lacked the grant to write its target stage; re-seed with scripts/seed_medallion_fga.sh.
             Runbook: docs/RUNBOOK-oncall.md#cascade-stalled
+
+  - name: lance-infra
+    rules:
+      # The infra-tier signal (observability.infraMetrics) — a Dapr consumer-wedge. When a subscriber's handler
+      # keeps failing, Dapr's inbound retry resiliency policy fires on every redelivery; a HEALTHY transient
+      # error clears in seconds, so a rate that stays > 0 for 15m means the consumer is stuck redelivering the
+      # same message and its subscription has silently stopped draining. Needs vmagent scraping the Dapr
+      # sidecars into GreptimeDB (without it dapr_* is absent and this never evaluates).
+      - alert: DaprConsumerWedge
+        expr: sum by (app_id) (rate(dapr_resiliency_count{policy="retry",flow_direction="inbound"}[5m])) > 0
+        for: 15m
+        labels:
+          severity: critical
+          service: dapr
+        annotations:
+          summary: "Dapr consumer wedged — a subscriber is retrying inbound messages for 15m"
+          description: >-
+            A subscriber's handler has failed continuously: Dapr's inbound retry policy has fired for 15m
+            without clearing, so this consumer is not draining its subscription and the cascade / lineage
+            ingest has silently stopped. A healthy transient error clears in seconds. Check the wedged app's
+            logs and its downstream (AGE / OpenFGA / RustFS). Runbook: docs/RUNBOOK-oncall.md#cascade-stalled

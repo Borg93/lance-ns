@@ -86,3 +86,32 @@ tests:
       - eval_time: 18m
         alertname: CatalogWritesShedSustained
         exp_alerts: []
+
+  # 7. A Dapr consumer retrying inbound continuously for >15m → DaprConsumerWedge fires. sum by (app_id)
+  #    keeps app_id on the resulting alert, so it names the wedged subscriber.
+  - interval: 1m
+    input_series:
+      - series: 'dapr_resiliency_count{policy="retry",flow_direction="inbound",app_id="bronze-to-silver"}'
+        values: "0+1x20" # a retry every scrape — the handler never succeeds
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DaprConsumerWedge
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: dapr
+              app_id: bronze-to-silver
+            exp_annotations:
+              summary: "Dapr consumer wedged — a subscriber is retrying inbound messages for 15m"
+              description: "A subscriber's handler has failed continuously: Dapr's inbound retry policy has fired for 15m without clearing, so this consumer is not draining its subscription and the cascade / lineage ingest has silently stopped. A healthy transient error clears in seconds. Check the wedged app's logs and its downstream (AGE / OpenFGA / RustFS). Runbook: docs/RUNBOOK-oncall.md#cascade-stalled"
+
+  # 8. A transient inbound error that clears in a few minutes → NO alert (retries are normal; a WEDGE is
+  #    retries that never stop). The counter stops rising after ~4 min, so rate() falls back to 0.
+  - interval: 1m
+    input_series:
+      - series: 'dapr_resiliency_count{policy="retry",flow_direction="inbound",app_id="bronze-to-silver"}'
+        values: "0 1 2 3 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4" # retried only in the first ~4 min, then recovered
+    alert_rule_test:
+      - eval_time: 16m
+        alertname: DaprConsumerWedge
+        exp_alerts: []

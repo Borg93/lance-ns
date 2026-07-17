@@ -61,4 +61,14 @@ grep -q "datasource.url=http://lance-ns-greptimedb-standalone:.*prometheus" "$OU
   || fail "vmalert must query GreptimeDB's PromQL endpoint"
 grep -q "LineageOutboxNotDraining" "$OUT" || fail "the proven alert rules must be mounted into vmalert"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on"
+# 8. Infra-tier metrics (P3c): vmagent deployed, remote-writing the Dapr sidecar scrape into GreptimeDB with
+# the db-name header, discovering the dapr-metrics port, on a NAMESPACED Role (least privilege). And the
+# DaprConsumerWedge rule must be mounted so the scraped signal is actually alertable. Off on the default render.
+grep -q "name: lance-ns-vmagent$" "$OUT" || fail "prod must deploy vmagent (the infra-metrics scraper)"
+grep -q "remoteWrite.url=http://lance-ns-greptimedb-standalone:.*/v1/prometheus/write" "$OUT" \
+  || fail "vmagent must remote-write to GreptimeDB's prometheus endpoint"
+grep -q "x-greptime-db-name:public" "$OUT" || fail "vmagent remote-write must carry the greptime db-name header"
+grep -q "regex: dapr-metrics" "$OUT" || fail "vmagent must scrape the Dapr sidecar metrics port"
+grep -q "DaprConsumerWedge" "$OUT" || fail "the consumer-wedge rule must be mounted so infra metrics are alertable"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, infra-metrics on"

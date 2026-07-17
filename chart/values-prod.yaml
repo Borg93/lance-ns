@@ -152,6 +152,10 @@ observability:
   # Set webhookUrl (Slack/PagerDuty) out-of-band to actually page — empty groups alerts but pages nowhere.
   alerting:
     enabled: true
+  # Infra-tier metrics ON (P3c): vmagent scrapes the Dapr sidecars into GreptimeDB so a consumer-wedge
+  # (silent in the app metrics) becomes queryable + fires DaprConsumerWedge. Kept off in the kind e2e (2c/7G).
+  infraMetrics:
+    enabled: true
 
 # ===================================================================================================
 # EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Disable the in-cluster component

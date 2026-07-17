@@ -136,20 +136,24 @@ def standing_features(stack: tuple[str, str, str], alice: dict[str, str]) -> Non
     granted warehouse reader) — an ungranted human 403s here, so the grant is the fixture's whole point."""
     lance_ray, _catalog, lineage = stack
 
-    # A dataset "exists" in the graph iff its /upstream resolves 200 (there is no bare /datasets/{name}).
-    def _silver_exists() -> bool:
-        return (
-            requests.get(f"{lineage}/datasets/silver$features/upstream", headers=alice, timeout=8).status_code
-            == 200
+    # silver$features is trainable iff a run actually COMPLETED writing it. A bare 200 on /upstream is NOT
+    # proof: the FGA object table:silver$features is a SEEDED parent link, so an authorized reader (alice)
+    # gets 200 with EMPTY edges for a not-yet-written dataset — which silently skipped /produce and made the
+    # train 422 "cannot resolve feature dataset". The COMPLETE producer run is the true "data committed"
+    # signal (the mover emits it AFTER the Lance write lands), so it implies the dataset the head opens exists.
+    def _silver_written() -> bool:
+        r = requests.get(f"{lineage}/datasets/silver$features/producers", headers=alice, timeout=8)
+        return r.status_code == 200 and any(
+            p.get("event_type") == "COMPLETE" for p in r.json().get("producers", [])
         )
 
-    if _silver_exists():
+    if _silver_written():
         return
     resp = requests.post(f"{lance_ray}/produce", headers={"dapr-api-token": DAPR_TOKEN}, timeout=30)
     assert resp.status_code == 202, f"/produce to seed silver$features failed: {resp.status_code} {resp.text}"
     # Generous window: on a FRESH kind cluster the cascade is raw→bronze→silver via sequential Ray jobs,
     # and the first Ray job cold-starts its runtime env (~2 min) before any stage completes.
-    _poll(lambda: _silver_exists() or None, timeout=480.0, label="silver$features written by the cascade")
+    _poll(lambda: _silver_written() or None, timeout=480.0, label="a COMPLETE silver$features producer run")
 
 
 @pytest.mark.usefixtures("standing_features")

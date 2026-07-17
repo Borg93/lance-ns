@@ -1,0 +1,62 @@
+# promtool test rules — PROVES the alert logic fires on synthetic series, hermetically (no live GreptimeDB).
+# `make alert-rules-check` runs `promtool check rules rules.yml` + `promtool test rules rules_test.yml`.
+# This is the "prove it fires" that render-checking alone can't give: the render can be valid while the
+# PromQL never trips. The remaining unproven piece is only the live vmalert->GreptimeDB query round-trip
+# (a drill, GOAL-production-readiness.md P3b).
+rule_files:
+  - rules.yml
+
+evaluation_interval: 1m
+
+tests:
+  # 1. Outbox stuck at depth 5 for 12 min → LineageOutboxNotDraining fires (past its 10m `for`).
+  - interval: 1m
+    input_series:
+      - series: "outbox_depth"
+        values: "5+0x14" # 5, held for 15 samples (0..14 min)
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: LineageOutboxNotDraining
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: lineage
+            exp_annotations:
+              summary: "Lineage outbox not draining (depth > 0 for 10m)"
+              description: "Durable lineage events are staged but not published — provenance is not reaching the AGE graph. The relay, lineage, or the NATS bus is unhealthy. Runbook: docs/RUNBOOK-oncall.md#outbox-not-draining"
+
+  # 2. Outbox healthy (depth 0) → NO alert. A gauge that falls back must not page forever.
+  - interval: 1m
+    input_series:
+      - series: "outbox_depth"
+        values: "0+0x14"
+    alert_rule_test:
+      - eval_time: 12m
+        alertname: LineageOutboxNotDraining
+        exp_alerts: []
+
+  # 3. Cascade DLQ counter rising → rate() > 0 → MedallionCascadeDeadLettering fires.
+  - interval: 1m
+    input_series:
+      - series: 'medallion_dlq_parked_total{lance_medallion_app="raw-to-bronze"}'
+        values: "0+1x11" # 0,1,2,...,11 — a monotonically rising counter
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: MedallionCascadeDeadLettering
+        exp_alerts:
+          - exp_labels:
+              severity: critical
+              service: medallion
+            exp_annotations:
+              summary: "Medallion cascade dead-lettering — a stage delivery gave up"
+              description: "A cascade delivery exhausted its retries and was parked; a dataset has silently stopped updating. Runbook: docs/RUNBOOK-oncall.md#dlq-parking--a-delivery-gave-up"
+
+  # 4. No dead-letters (flat counter) → the cascade alert stays silent.
+  - interval: 1m
+    input_series:
+      - series: 'medallion_dlq_parked_total{lance_medallion_app="raw-to-bronze"}'
+        values: "0+0x11"
+    alert_rule_test:
+      - eval_time: 8m
+        alertname: MedallionCascadeDeadLettering
+        exp_alerts: []

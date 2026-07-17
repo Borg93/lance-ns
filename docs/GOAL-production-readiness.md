@@ -79,13 +79,15 @@ to main. Never weaken auth/secrets posture.
 
 ## P3 — Observability & operability (critical/high)
 
-- [ ] **Alerting engine + rules** (CRIT·chart) — dashboards exist (incl. panels literally labelled
-  "alertable": outbox depth/age, DLQ rate, error rate) but NO evaluator, so nobody is paged. Two parts:
-  (a) DEFINE the alert rules as a rendered artifact (PromQL seeded from the alertable panels: outbox_depth>0
-  sustained, medallion.dlq.parked rate>0, lineage error-rate, cascade stall, pod restarts, readyz-degraded);
-  (b) DEPLOY the evaluator — GreptimeDB speaks PromQL (`/v1/prometheus`), so vmalert (or Prometheus
-  rule-only) + Alertmanager with a real route (per docs/ASSESSMENT-2026-07-15.md gap #2). Part (b) is the
-  real lift + a new component; part (a) is chart-render-verifiable now.
+- [x] **Alert rules, proven to fire** (CRIT — P3b-1 DONE): `chart/alerting/rules.yml` — 5 rules seeded from
+  the "alertable" panels (outbox not-draining / backlog-aging, lineage + medallion dead-lettering, stage
+  FGA-denied), on metrics the estate actually emits. `chart/alerting/rules_test.yml` PROVES they fire on
+  synthetic series (`promtool test rules`, hermetic — the proof render-checking can't give); `make
+  alert-rules-check` runs check+test, wired into the CI test job.
+- [ ] **Deploy the evaluator** (CRIT — P3b-2 NEXT): vmalert (loads the rules, queries GreptimeDB's
+  `:4000/v1/prometheus`) + Alertmanager (routes), raw templates gated on `observability.alerting.enabled`
+  (prod). Render- + prod-render-check-verified. REMAINING drill: the live vmalert→GreptimeDB query
+  round-trip + a real Alertmanager receiver route (per-deployment) — needs a live cluster.
 - [x] **Symptom-indexed on-call runbook** (HIGH·runbook) — DONE (P3a): `docs/RUNBOOK-oncall.md` — a symptom
   index + per-mode symptom→cause→diagnose→act for OpenFGA-down (503-everywhere), OpenBao sealed (boot
   deadlock), CrashLoop-on-boot, /readyz degraded (pool vs graph), cascade stalled, DLQ parking, outbox not

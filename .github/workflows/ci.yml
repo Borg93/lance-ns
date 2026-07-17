@@ -140,6 +140,17 @@ jobs:
       - name: Helm render prod overlay + HA/security invariants
         run: make prod-render-check
 
+      # The alert rules are only useful if they actually FIRE — a rendered rule can be valid PromQL that
+      # never trips. promtool `test rules` feeds synthetic series and asserts each alert fires (and stays
+      # silent when healthy) — the hermetic proof render-checking can't give. (prod-readiness P3b)
+      - name: Alert rules — validate + prove they fire (promtool)
+        run: |
+          PV=2.55.1
+          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${PV}/prometheus-${PV}.linux-amd64.tar.gz" \
+            | tar xz -C /tmp
+          sudo cp "/tmp/prometheus-${PV}.linux-amd64/promtool" /usr/local/bin/promtool
+          make alert-rules-check
+
       # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
       # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.
       - name: OpenFGA model test

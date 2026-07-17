@@ -44,7 +44,7 @@ BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_RE
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
         gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage e2e-web \
         e2e-governance e2e-governed-union dashboards status k9s tilt-up tilt-ci clean down openapi openapi-check \
-        prod-render-check
+        prod-render-check alert-rules-check
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -58,6 +58,10 @@ openapi-check: openapi ## Fail if the committed OpenAPI specs drift from the cod
 
 prod-render-check: ## Render values-prod.yaml + assert its HA/security switches are ON (CI guard)
 	@bash scripts/prod_render_check.sh
+
+alert-rules-check: ## Validate the alert rules + PROVE they fire on synthetic series (promtool; needs promtool on PATH)
+	@promtool check rules chart/alerting/rules.yml
+	@cd chart/alerting && promtool test rules rules_test.yml
 
 bootstrap: ## Download kind/kubectl/k9s/tilt/fga into .localbin (idempotent, OS+arch-aware) — helm + docker on PATH
 	@mkdir -p $(LOCALBIN)

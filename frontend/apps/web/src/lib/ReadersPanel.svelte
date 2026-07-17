@@ -14,7 +14,9 @@
 	// State keyed by the dataset it belongs to (no cross-dataset bleed — mirrors GrantsPanel): the panel is
 	// open, loading, or showing a log only for the dataset it was produced for; switching blanks by derivation.
 	let openedFor = $state<string | null>(null);
-	let log = $state<{ for: string; readers: ReaderInfo[] | null; denied: string | null } | null>(null);
+	let log = $state<{ for: string; readers: ReaderInfo[] | null; denied: string | null } | null>(
+		null,
+	);
 	let loadingFor = $state<string | null>(null);
 	let failedFor = $state<string | null>(null); // transient failure — never cached, reopen retries
 

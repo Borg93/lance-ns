@@ -97,11 +97,15 @@ to main. Never weaken auth/secrets posture.
 
 ## P4 — Backup / restore / DR (critical/high)
 
-- [ ] **AGE-graph backup that doesn't share fate with the primary** (CRIT) — the backup lives on the same
-  volume it's meant to protect. Ship backups off-volume.
-- [ ] **Restore procedure + AGE-restorable dump** (HIGH·runbook) — no restore procedure; the pg_dump is
-  likely not AGE-restorable as written (needs the AGE load/allow-list + label recreation). Author + PROVE a
-  restore.
+- [~] **Restore procedure + AGE-restorable dump** (HIGH·runbook) — PARTLY DONE (P4a):
+  `docs/RUNBOOK-restore.md` authors the order-sensitive AGE-aware restore (drop/recreate DB → CREATE
+  EXTENSION age → restore → VERIFY the graph has real labels, not just metadata) + the RustFS-snapshot
+  restore + the consistency pairing. REMAINING: run it once in a real drill (needs a live throwaway
+  cluster) — and IF the verify step shows the plain pg_dump lost the labels (the known hazard), switch to an
+  AGE-aware dump. The drill is the done-condition.
+- [ ] **AGE-graph backup that doesn't share fate with the primary** (CRIT) — the pg_dump lands on RustFS, so
+  a total RustFS loss loses BOTH the Lance data and the DB dumps (documented in RUNBOOK-restore.md). Ship the
+  dumps off-cluster (a second object store / off-site), or externalize to CNPG PITR (P7).
 - [ ] **RPO/RTO + retention/pruning + verified VolumeSnapshots** (MED) — backups off by default, no
   RPO/RTO, unbounded dumps, empty snapshotClassName never verified.
 - [ ] **OpenBao PVC backup** (MED) — the file-backend PVC has no backup path.

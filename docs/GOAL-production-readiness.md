@@ -116,8 +116,11 @@ to main. Never weaken auth/secrets posture.
   real OpenFGA outage.
 - [ ] **App-level rate-limiting / load-shedding** (MED·code) — the `THROTTLING→429` mapping has no
   producer; add ingest backpressure.
-- [ ] **Bound the compaction + reconcile sweeps** (MED·code) — per-tick work is unbounded + the compaction
-  sweep lacks the single-flight lock the reconcile sweep has.
+- [x] **Compaction sweep single-flight** (MED·code) — DONE (P5a): an in-process `asyncio.Lock` with
+  skip-on-overlap on `on_cron` (compaction is stateless — no DB for a pg advisory lock like reconcile; with
+  compactionReplicas=1 this is cluster-wide). A slow sweep now self-limits by skipping ticks instead of
+  starting a 2nd concurrent sweep that races compact/GC on the same datasets. Unit-tested. The explicit
+  per-tick DATASET bound (needs a rotation cursor to avoid tail-starvation) is a deferred follow-up.
 
 ## P6 — Upgrade & migration safety (medium)
 

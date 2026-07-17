@@ -88,3 +88,34 @@ def test_summarize_aggregates_reclaimed_and_errors() -> None:
     assert summary["versions_removed"] == 2
     # failures keep their message (the why), not just the URI
     assert summary["errors"] == {"s3://b/c": "open: not a dataset"}
+
+
+def test_on_cron_single_flight_skips_an_overlapping_sweep(monkeypatch: Any) -> None:
+    """A cron tick that finds a prior sweep still in flight SKIPS instead of starting a SECOND concurrent
+    sweep — two sweeps would race compact_files()/cleanup_old_versions() on the same datasets. The sweep is
+    unbounded (every dataset) so overlap is real once it outlasts the cron interval. (prod-readiness P5)"""
+    import asyncio
+    import types
+
+    from compaction.api import routes
+
+    ran: list[int] = []
+    monkeypatch.setattr(routes, "run_sweep", lambda _settings: (ran.append(1), [])[1])
+
+    async def _noop_emit(*_a: Any, **_k: Any) -> None:
+        return None
+
+    monkeypatch.setattr(routes, "emit_sweep_lineage", _noop_emit)
+    monkeypatch.setattr(routes, "summarize", lambda _results: {"status": "ok", "datasets": 0})
+    settings = cast(Any, types.SimpleNamespace(delimiter="$"))
+
+    async def while_a_sweep_is_running() -> dict:
+        async with routes._sweep_lock:  # simulate the previous tick's sweep still holding the lock
+            return await routes.on_cron(settings, cast(Any, object()))
+
+    skipped = asyncio.run(while_a_sweep_is_running())
+    assert skipped["status"] == "skipped" and ran == [], "an overlapping tick must NOT start a 2nd sweep"
+
+    # once the lock is free again, a tick runs the sweep exactly once
+    ok = asyncio.run(routes.on_cron(settings, cast(Any, object())))
+    assert ok["status"] == "ok" and ran == [1]

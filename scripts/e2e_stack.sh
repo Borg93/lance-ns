@@ -297,5 +297,48 @@ fi
 # cluster first with `make ray-demo`). A dedicated ray-enabled CI job is the right home and a scoped
 # follow-up; wiring them into THIS job is a net regression.
 
+# --- P5 chaos drill: prove a core-dependency OUTAGE fails CLOSED (never fail-open) and RECOVERS. The stack
+# is auth-on, so this is the LIVE counterpart to the mocked OpenFGA-down unit test + the first test of the
+# RustFS/S3 outage at all. Runs LAST (the suites already passed; the cluster is torn down after) and each
+# probe RESTORES the dependency + verifies recovery, so it leaves the stack healthy. Fail-CLOSED assertions
+# are STRICT (a 200 while a dep is down is a security/data hole → hard fail); recovery polls are GENEROUS (a
+# slow reschedule must not false-red). Probes are namespace CREATEs with fresh names: a create runs the FGA
+# check THEN a genuine S3 write, so FGA-down → 503 before storage, RustFS-down → 5xx on the write — both
+# deterministic, no cache can mask them, no 409 on retry. E2E_CHAOS=0 disables it (iteration escape hatch).
+if [ "${E2E_CHAOS:-1}" = "1" ]; then
+  step "chaos: dependency-outage fail-closed drill (P5)"
+  CAT=http://localhost:2333
+  gov_create() { curl -s -o /dev/null -w '%{http_code}' -m15 -H "authorization: Bearer $ALICE" \
+    -X POST "$CAT/v1/namespace/chaos-$1/create"; }
+  restore_dep() { kubectl scale "deploy/$1" --replicas=1 >/dev/null 2>&1 || true
+                  kubectl rollout status "deploy/$1" --timeout=180s >/dev/null 2>&1 || true; }
+
+  b=$(gov_create base); [ "$b" = "200" ] || { echo "!! chaos baseline create expected 200, got $b"; exit 1; }
+  echo "   baseline governed create = 200 ✓"
+
+  # 1. OpenFGA (authz chokepoint) down → the FGA check fails CLOSED (never fail-open 200).
+  echo "   -- OpenFGA outage --"
+  kubectl scale "deploy/$RELEASE-openfga" --replicas=0 >/dev/null
+  n=0; down=""; for _ in $(seq 1 40); do n=$((n+1)); down=$(gov_create "f$n"); [ "$down" != "200" ] && break; sleep 2; done
+  if [ "$down" = "200" ]; then restore_dep "$RELEASE-openfga"; echo "!! OpenFGA down but create STILL 200 — FAIL-OPEN (security hole)"; exit 1; fi
+  echo "   OpenFGA down → governed create $down (fail-closed) ✓"
+  restore_dep "$RELEASE-openfga"
+  up=""; for _ in $(seq 1 40); do up=$(gov_create "fr$RANDOM"); [ "$up" = "200" ] && break; sleep 3; done
+  [ "$up" = "200" ] || { echo "!! create did not recover after OpenFGA restored (got $up)"; exit 1; }
+  echo "   OpenFGA restored → governed create 200 (recovered) ✓"
+
+  # 2. RustFS (data plane) down → the S3 write fails CLOSED (a write with no object store would be data loss).
+  echo "   -- RustFS outage --"
+  kubectl scale "deploy/$RELEASE-rustfs" --replicas=0 >/dev/null
+  n=0; down=""; for _ in $(seq 1 40); do n=$((n+1)); down=$(gov_create "s$n"); [ "$down" != "200" ] && break; sleep 2; done
+  if [ "$down" = "200" ]; then restore_dep "$RELEASE-rustfs"; echo "!! RustFS down but create STILL 200 — a write with no object store is data loss"; exit 1; fi
+  echo "   RustFS down → governed create $down (fail-closed) ✓"
+  restore_dep "$RELEASE-rustfs"
+  up=""; for _ in $(seq 1 50); do up=$(gov_create "sr$RANDOM"); [ "$up" = "200" ] && break; sleep 3; done
+  [ "$up" = "200" ] || { echo "!! create did not recover after RustFS restored (got $up)"; exit 1; }
+  echo "   RustFS restored → governed create 200 (recovered) ✓"
+  echo "   ✓ chaos drill: both dependency outages fail closed + recover"
+fi
+
 echo
 echo "✓ e2e stack suite green — the live proof is now an artifact, not an anecdote"

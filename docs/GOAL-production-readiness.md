@@ -116,12 +116,14 @@ to main. Never weaken auth/secrets posture.
 
 ## P5 — Fault-injection & load (high/medium)
 
-- [ ] **CI dependency-outage chaos drill** (HIGH·ci) — the pull-a-service recovery drills are manual + now
-  stale. Add a repeatable chaos leg to CI.
-- [ ] **RustFS / S3 outage test** (HIGH·test) — the data-plane outage is entirely untested. Prove
-  fail-closed + retry when the object store is down.
-- [ ] **OpenFGA-down live outage test** (MED·test) — fail-closed is only mock-proven; drive it against a
-  real OpenFGA outage.
+- [x] **CI dependency-outage chaos drill** (HIGH·ci — P5 #54): a repeatable chaos leg in `e2e_stack.sh`
+  (final guarded step, restores + verifies recovery). Covers BOTH gaps below. `E2E_CHAOS=0` escape hatch.
+- [x] **RustFS / S3 outage test** (HIGH·test — P5 #54): the chaos leg scales `rustfs` to 0 and asserts a
+  governed namespace CREATE (a genuine S3 write) fails **closed** (5xx, never a silent 200 = data loss), then
+  recovers. The data-plane outage was entirely untested before.
+- [x] **OpenFGA-down live outage test** (MED·test — P5 #54): the chaos leg scales `openfga` to 0 and asserts
+  a governed create fails **closed** (5xx, never fail-open 200), then recovers — the live counterpart to the
+  mock-only unit test.
 - [x] **App-level load-shedding** (MED·code) — DONE (P5, #54): `WriteConcurrencyLimitMiddleware` caps
   concurrent Arrow-IPC writes (create/insert/merge_insert) and sheds the overflow with **429** (the
   `THROTTLING` mapping that had no producer) + `Retry-After`, BEFORE the body is buffered — so shedding
@@ -133,6 +135,11 @@ to main. Never weaken auth/secrets posture.
   compactionReplicas=1 this is cluster-wide). A slow sweep now self-limits by skipping ticks instead of
   starting a 2nd concurrent sweep that races compact/GC on the same datasets. Unit-tested. The explicit
   per-tick DATASET bound (needs a rotation cursor to avoid tail-starvation) is a deferred follow-up.
+- [ ] **Reconcile sweep per-dataset bound** (MED·code) — DEFERRED: the reconcile sweep already single-flights
+  (pg advisory lock) + caps the outbox drain, but `reconcile_all` still scans EVERY dataset per tick. A bound
+  needs a PERSISTED name-cursor (resume-after-last, shared across the 2 replicas the advisory lock hands the
+  tick to) to avoid tail-starvation — a bigger, careful change than the stateless compaction guard. Park
+  until estate size demands it.
 
 ## P6 — Upgrade & migration safety (medium)
 

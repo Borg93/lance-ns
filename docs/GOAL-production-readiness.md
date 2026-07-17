@@ -101,12 +101,12 @@ to main. Never weaken auth/secrets posture.
 
 ## P4 — Backup / restore / DR (critical/high)
 
-- [~] **Restore procedure + AGE-restorable dump** (HIGH·runbook) — PARTLY DONE (P4a):
-  `docs/RUNBOOK-restore.md` authors the order-sensitive AGE-aware restore (drop/recreate DB → CREATE
-  EXTENSION age → restore → VERIFY the graph has real labels, not just metadata) + the RustFS-snapshot
-  restore + the consistency pairing. REMAINING: run it once in a real drill (needs a live throwaway
-  cluster) — and IF the verify step shows the plain pg_dump lost the labels (the known hazard), switch to an
-  AGE-aware dump. The drill is the done-condition.
+- [x] **Restore procedure + AGE-restore drill** (HIGH — P4a + P4b): `docs/RUNBOOK-restore.md` authors the
+  order-sensitive AGE-aware restore; **P4b now PROVES it** — `scripts/age_restore_drill.sh` runs inside the
+  age-postgres pod (throwaway DB, never touches the real graph) doing the RUNBOOK's exact pg_dump→drop→restore
+  and VERIFYING the graph came back with its labels + vertex (not just ag_catalog metadata — the known
+  plain-pg_dump-of-AGE hazard). Wired into `e2e_stack.sh` (gated `E2E_RESTORE_DRILL`). A red = a real finding:
+  switch backup-pg.yaml to an AGE-aware dump. Turns the restore from *authored* to *proven*.
 - [ ] **AGE-graph backup that doesn't share fate with the primary** (CRIT) — the pg_dump lands on RustFS, so
   a total RustFS loss loses BOTH the Lance data and the DB dumps (documented in RUNBOOK-restore.md). Ship the
   dumps off-cluster (a second object store / off-site), or externalize to CNPG PITR (P7).

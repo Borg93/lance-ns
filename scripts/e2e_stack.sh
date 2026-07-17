@@ -340,5 +340,19 @@ if [ "${E2E_CHAOS:-1}" = "1" ]; then
   echo "   ✓ chaos drill: both dependency outages fail closed + recover"
 fi
 
+# --- P4 restore drill: PROVE the AGE backup is restorable. docs/RUNBOOK-restore.md warns that a plain
+# pg_dump of an Apache AGE database can restore the ag_catalog metadata but LOSE the graph's labels/data.
+# Run the drill INSIDE the age-postgres pod (it has psql/pg_dump) on a throwaway DB, so it never touches the
+# real lineage graph. A red here is a genuine finding (switch backup-pg.yaml to an AGE-aware dump), not a
+# flake — E2E_RESTORE_DRILL=0 disables it while that follow-up is built. ---------------------------------
+if [ "${E2E_RESTORE_DRILL:-1}" = "1" ]; then
+  step "restore drill: AGE pg_dump → restore round-trips the graph (P4)"
+  AGE_POD="$(kubectl get pod -l "app.kubernetes.io/component=age-postgres" -o jsonpath='{.items[0].metadata.name}')"
+  [ -n "$AGE_POD" ] || { echo "!! no age-postgres pod found for the restore drill"; exit 1; }
+  kubectl cp scripts/age_restore_drill.sh "$AGE_POD:/tmp/age_restore_drill.sh"
+  kubectl exec "$AGE_POD" -- bash /tmp/age_restore_drill.sh
+  echo "   ✓ restore drill passed — RUNBOOK-restore.md is proven, not just authored"
+fi
+
 echo
 echo "✓ e2e stack suite green — the live proof is now an artifact, not an anecdote"

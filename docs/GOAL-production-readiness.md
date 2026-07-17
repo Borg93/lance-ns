@@ -105,13 +105,17 @@ to main. Never weaken auth/secrets posture.
   order-sensitive AGE-aware restore; **P4b now PROVES it** — `scripts/age_restore_drill.sh` runs inside the
   age-postgres pod (throwaway DB, never touches the real graph) doing the RUNBOOK's exact pg_dump→drop→restore
   and VERIFYING the graph came back with its labels + vertex (not just ag_catalog metadata — the known
-  plain-pg_dump-of-AGE hazard). Wired into `e2e_stack.sh` (gated `E2E_RESTORE_DRILL`). A red = a real finding:
-  switch backup-pg.yaml to an AGE-aware dump. Turns the restore from *authored* to *proven*.
+  plain-pg_dump-of-AGE hazard). Wired into `e2e_stack.sh` (gated `E2E_RESTORE_DRILL`). **PROVEN GREEN**
+  (e23b077): the drill passes (restored-Dataset-vertex-count=1), so a plain pg_dump DOES round-trip the AGE
+  graph for the pinned engine — the hazard did not materialise; the restore is authored AND proven. (An
+  AGE-aware dump would still be more robust across a Postgres-major restore — see P6.)
 - [ ] **AGE-graph backup that doesn't share fate with the primary** (CRIT) — the pg_dump lands on RustFS, so
   a total RustFS loss loses BOTH the Lance data and the DB dumps (documented in RUNBOOK-restore.md). Ship the
   dumps off-cluster (a second object store / off-site), or externalize to CNPG PITR (P7).
-- [ ] **RPO/RTO + retention/pruning + verified VolumeSnapshots** (MED) — backups off by default, no
-  RPO/RTO, unbounded dumps, empty snapshotClassName never verified.
+- [~] **Backup retention/pruning** (MED) — DONE (P4c): the pg-backup CronJob now prunes all but the newest
+  `backups.pgDump.keep` dumps each run (default 7; 0 disables) so the `_backups/pg/` prefix doesn't grow
+  unbounded. Render-verified. REMAINING in this item: a documented RPO/RTO + verifying the VolumeSnapshot
+  actually succeeds (the empty snapshotClassName is a per-cluster value).
 - [ ] **OpenBao PVC backup** (MED) — the file-backend PVC has no backup path.
 
 ## P5 — Fault-injection & load (high/medium)

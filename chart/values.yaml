@@ -671,6 +671,7 @@ backups:
   pgDump:
     enabled: false
     schedule: "0 2 * * *" # daily 02:00
+    keep: 7 # retention: prune all but the newest N daily dumps each run, so the backups don't grow unbounded
   # CSI VolumeSnapshot of the RustFS lakehouse PVC. Needs a CSI snapshotter + a VolumeSnapshotClass.
   volumeSnapshot:
     enabled: false

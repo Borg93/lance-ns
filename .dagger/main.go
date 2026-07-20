@@ -1,15 +1,17 @@
-// Dagger CI module for lance-ns — reproducible lint / type-check / test in containers.
+// Dagger CI module for lance-ns — reproducible lint / type-check / openapi / test in containers.
 //
-// Runs the CONTAINER-HERMETIC SUBSET of .github/workflows/ci.yml (ruff lint + ty type-check + unit/
-// integration pytest), identical locally and in CI:
+// Runs the CONTAINER-HERMETIC SUBSET of the CI `test` job (ruff lint + ty type-check + OpenAPI drift +
+// unit/integration pytest), identical locally and in CI:
 //
-//	dagger call ci          # lint + type-check + unit/integration tests
+//	dagger call ci          # lint + type-check + openapi drift + unit/integration tests
 //	dagger call lint        # ruff check + format --check
 //	dagger call typecheck   # ty
-//	dagger call test        # pytest -m "not e2e"
+//	dagger call openapi     # regenerate the specs from the apps + fail on drift
+//	dagger call test        # pytest -m "not e2e" (covers the claim-lint invariants too)
 //
-// NOT covered here (ci.yml runs them separately, as they need non-Python tooling): the Helm lint/render
-// gate and the OpenFGA `fga model test` gate. So `make ci` green ⊂ CI green — CI is the full gate.
+// The CI `test` job's non-Python gates live in their own function — `dagger call charts` (helm lint/render
+// invariants + prod-render-check + alert-rules-check). The one CI `test` gate NOT yet daggerized is the
+// OpenFGA `fga model test` + model.json drift check (needs the `fga` CLI + jq); it stays a GHA step.
 //
 // The base image is the project's uv image (pylance ships a Linux-only wheel, so the lockfile is
 // Linux-only — matching the container). A uv cache volume makes re-runs fast. The e2e tests are
@@ -35,14 +37,19 @@ func (m *LanceNs) base(src *dagger.Directory) *dagger.Container {
 		From(uvImage).
 		WithMountedCache("/root/.cache/uv", dag.CacheVolume("lance-ns-uv")).
 		WithDirectory("/src", src, dagger.ContainerWithDirectoryOpts{
-			Exclude: []string{".venv", ".git", "node_modules", ".dagger", "frontend/node_modules"},
+			// `rask` is a gitignored sibling checkout (its own Dagger module + toolchain) that CI's
+			// `actions/checkout` never sees — excluding it keeps the mounted Python surface (services/
+			// tests/ scripts/) byte-identical to CI's, so `dagger call ci` == the CI `test` job. Without
+			// this, ruff/ty/pytest would scan rask's tree (which its own pyproject governs) and diverge.
+			Exclude: []string{".venv", ".git", "node_modules", ".dagger", "frontend/node_modules", "rask"},
 		}).
 		WithWorkdir("/src").
 		WithExec([]string{"uv", "sync", "--frozen", "--all-groups"})
 }
 
-// Ci runs every gate (lint → type-check → test) and returns a combined report. It fails on the first
-// gate whose command exits non-zero (Dagger surfaces the container error).
+// Ci runs every Python gate (lint → type-check → openapi drift → test) and returns a combined report. It
+// fails on the first gate whose command exits non-zero (Dagger surfaces the container error). The order
+// mirrors the CI `test` job: lint, then type-check, then the OpenAPI drift check, then the pytest suite.
 func (m *LanceNs) Ci(
 	ctx context.Context,
 	// +defaultPath="/"
@@ -57,12 +64,16 @@ func (m *LanceNs) Ci(
 	if err != nil {
 		return "", err
 	}
+	openapi, err := m.Openapi(ctx, src)
+	if err != nil {
+		return "", err
+	}
 	tests, err := m.Test(ctx, src)
 	if err != nil {
 		return "", err
 	}
 	return fmt.Sprintf(
-		"=== lint ===\n%s\n=== typecheck ===\n%s\n=== test ===\n%s\n=== CI PASSED ===",
-		lint, types, tests,
+		"=== lint ===\n%s\n=== typecheck ===\n%s\n=== openapi ===\n%s\n=== test ===\n%s\n=== CI PASSED ===",
+		lint, types, openapi, tests,
 	), nil
 }

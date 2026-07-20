@@ -10,148 +10,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install uv
-        uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-
-      - name: Sync dependencies (Linux-only lockfile)
-        run: uv sync --frozen --all-groups
-
-      - name: Lint (ruff)
+      - name: Install Dagger CLI (pinned to the module's engineVersion)
         run: |
-          uvx ruff check services tests
-          uvx ruff format --check services tests
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
 
-      - name: Type-check (ty)
-        run: uvx ty check
+      # Python gates — ruff lint + ty type-check + OpenAPI-spec drift + unit/integration pytest — run
+      # hermetically in the pinned uv image via the Dagger module (.dagger/main.go Ci). The pytest leg runs
+      # the whole non-e2e suite (`-m "not e2e"`), which INCLUDES the claim-lint invariants
+      # (tests/unit/test_invariants.py) — so that gate is not lost, just folded into the suite. `dagger call
+      # ci` == `make ci`, so "green in CI" and "green on my machine" cannot diverge.
+      - name: Python CI gate — lint + type-check + openapi + tests (Dagger)
+        env:
+          DAGGER_NO_NAG: "1"
+        run: dagger call ci
 
-      # The committed OpenAPI specs (docs/*-openapi.json) are the canonical, reviewable contract of every
-      # endpoint we serve — model promotion, warehouse admin, client-direct commit, MVs, and the rest. They
-      # are GENERATED from the live FastAPI apps, so this regenerates + fails on drift: a route added or
-      # changed without refreshing the spec is caught here, not discovered by a client.
-      - name: OpenAPI spec up-to-date
-        run: make openapi-check
+      # Chart gates — helm lint + a full template render, the networkPolicy / security-hardening / Dapr-
+      # resiliency `--set` render-and-grep invariants, the prod-overlay HA/security render check, and the
+      # promtool alert-rules validate-and-fire proof — run hermetically via the Dagger module
+      # (.dagger/charts.go), with helm + promtool pinned inside the container. Every invariant is
+      # byte-identical to the inline shell it replaces. `dagger call charts` == `make charts`.
+      - name: Chart CI gate — helm render invariants + prod-render + alert-rules (Dagger)
+        env:
+          DAGGER_NO_NAG: "1"
+        run: dagger call charts
 
-      # Unit + integration tests (our logic only) + the moto-S3 round-trip.
-      # No external infra needed — moto runs an in-process S3 server, and the
-      # auth/authz tests fake the OIDC verifier + fga.check. The `e2e` marker is
-      # excluded here; the live stack runs in the `auth-e2e` job below.
-      # `tests/unit` is included when present (guarded so CI is green before the
-      # write-side unit suite lands).
-      - name: Tests (unit + integration)
-        run: |
-          paths="tests/integration"
-          [ -d tests/unit ] && paths="tests/unit $paths"
-          uv run --no-sync pytest $paths -q -m "not e2e"
-
-      # CLAIM-LINT (GOAL-prove-it P0.2) — run FIRST-CLASS and loudly, because this repo's recurring
-      # failure was never a hard bug: it was a prose CLAIM the code did not honor, which every other
-      # gate happily passed. Each guard below fails on a bug that ACTUALLY SHIPPED:
-      #   · three publishers bypassed the #4 outbox while the docs said "every publish is staged"
-      #   · MEDALLION_LINEAGE_OUTBOX_URI was injected by the chart and read by nobody (a dead feature)
-      #   · seed_warehouse wrote `warehouse#parent`, a relation the type does not define → live 503,
-      #     invisible to every mocked-fga unit test
-      - name: Claim-lint (invariants that prose cannot fake)
-        run: uv run --no-sync pytest tests/unit/test_invariants.py -v
-
-      # The Helm chart is a first-class deliverable (the whole stack deploys from it), so lint + a full
-      # template render gate on every push — a broken template or values reference fails here, not at deploy.
-      - name: Install Helm
-        uses: azure/setup-helm@v4
-
-      - name: Helm lint + render
-        run: |
-          helm lint chart
-          helm template chart >/dev/null
-
-      # Render-and-grep the OPT-IN network-isolation layer (Batch 9): default values must render
-      # ZERO NetworkPolicies beyond nothing (flag off), and the flag ON must produce the audit's
-      # invariants — a default-deny covering Ingress+Egress, the kube-dns egress allow IN THE SAME
-      # RENDER (the audit's named footgun: default-deny egress without it bricks DNS), and the
-      # exclusive openbao client list (the headline gap: openbao was reachable by any pod).
-      - name: Helm render network-policy layer (flag on) + invariants
-        run: |
-          set -euo pipefail
-          off=$(helm template chart --set networkPolicy.enabled=false | grep -c "kind: NetworkPolicy" || true)
-          [ "$off" = "0" ] || { echo "flag OFF must render zero NetworkPolicies, got $off"; exit 1; }
-          helm template chart --set networkPolicy.enabled=true > /tmp/np.yaml
-          count=$(grep -c "kind: NetworkPolicy" /tmp/np.yaml)
-          [ "$count" -ge 9 ] || { echo "expected >=9 NetworkPolicies, got $count"; exit 1; }
-          grep -q "default-deny" /tmp/np.yaml
-          grep -q "allow-dns" /tmp/np.yaml
-          grep -q "k8s-app: kube-dns" /tmp/np.yaml
-          grep -q -- "-openbao" /tmp/np.yaml
-          # the general intra-namespace ingress allow must EXCLUDE the guarded stores
-          grep -q "NotIn" /tmp/np.yaml
-
-      # Render-and-grep the SA + infra-context layer (Batch 10, same opt-in discipline):
-      # flags OFF → zero of our SAs, zero serviceAccountName lines, zero infra runAsUser blocks;
-      # flags ON → every first-party workload gets its dedicated unbound SA (automount false ON
-      # THE SA object) and the infra pods + wait-age init containers carry their contexts.
-      - name: Helm render security hardening (flags on) + invariants
-        run: |
-          set -euo pipefail
-          off=$(helm template chart | grep -c -- "-sa-" || true)
-          [ "$off" = "0" ] || { echo "flags OFF must render zero of our SAs, got $off"; exit 1; }
-          helm template chart \
-            --set security.serviceAccounts.enabled=true \
-            --set security.infraContexts.enabled=true > /tmp/sec.yaml
-          sa_objects=$(grep -c "kind: ServiceAccount" /tmp/sec.yaml || true)
-          [ "$sa_objects" -ge 16 ] || { echo "expected >=16 SA objects (12 fixed + 4 movers), got $sa_objects"; exit 1; }
-          automount_off=$(grep -c "automountServiceAccountToken: false" /tmp/sec.yaml || true)
-          [ "$automount_off" -ge 16 ] || { echo "every OUR SA must set automount false, got $automount_off"; exit 1; }
-          wired=$(grep -c "serviceAccountName: .*-sa-" /tmp/sec.yaml || true)
-          # >=12: some workloads are toggle-gated in default values (dex behind auth, backups off)
-          [ "$wired" -ge 12 ] || { echo "expected >=12 pods wired to dedicated SAs, got $wired"; exit 1; }
-          grep -q "runAsUser: 999" /tmp/sec.yaml   # age-postgres context rendered
-          grep -q "runAsUser: 65532" /tmp/sec.yaml # wait-age init hardening rendered (PSA prereq)
-
-      # Render-and-grep the Dapr resiliency + dead-letter layer (Batch 18; DEFAULT ON per the
-      # Dapr-first rule): the default render must ship the SET together — the Resiliency CRD
-      # (sidecar-owned retries), the *_DLQ_TOPIC envs (deadLetterTopic subscriptions), the DLQ
-      # stream (a parking publish with no stream FAILS — Dapr does not auto-create streams), and
-      # the crash-recovery broker backOff (720s first step > the sidecar's total retry span).
-      # A deadLetterTopic WITHOUT the retry policy dead-letters on the FIRST failure (Dapr default)
-      # — this gate makes shipping one without the others impossible. The escape hatch
-      # (enabled=false) must restore the exact chaos-verified broker-only behavior.
-      - name: Helm render dapr resiliency + DLQ layer (default on) + invariants
-        run: |
-          set -euo pipefail
-          helm template chart > /tmp/resil.yaml
-          grep -q "kind: Resiliency" /tmp/resil.yaml
-          grep -q "pubsubDeliveryRetry" /tmp/resil.yaml
-          dlq=$(grep -c "DLQ_TOPIC" /tmp/resil.yaml || true)
-          [ "$dlq" -ge 3 ] || { echo "expected >=3 DLQ envs (lineage+producer+movers), got $dlq"; exit 1; }
-          grep -q '"dlq.>"' /tmp/resil.yaml                 # the DLQ stream is provisioned
-          grep -q "720s,720s" /tmp/resil.yaml               # broker demoted to crash recovery
-          ! grep -q "30s,60s,120s,300s" /tmp/resil.yaml     # never BOTH retry owners at once
-          helm template chart --set dapr.resiliency.enabled=false > /tmp/legacy.yaml
-          off=$(grep -c "kind: Resiliency" /tmp/legacy.yaml || true)
-          [ "$off" = "0" ] || { echo "escape hatch must render zero Resiliency CRDs, got $off"; exit 1; }
-          offdlq=$(grep -c "DLQ_TOPIC" /tmp/legacy.yaml || true)
-          [ "$offdlq" = "0" ] || { echo "escape hatch must render zero DLQ envs, got $offdlq"; exit 1; }
-          grep -q '30s,60s,120s,300s' /tmp/legacy.yaml      # chaos-verified schedule restored
-
-      # Render-and-grep the PRODUCTION overlay (values-prod.yaml). Nothing else in CI renders it — the e2e
-      # jobs deploy the DEFAULT kind values — so a regression that ships the dev posture in prod (NetworkPolicy
-      # off, OpenFGA/Dapr single-replica) would otherwise pass green. Asserts the HA + security switches are ON
-      # and that the render-FAILS-CLOSED prod-secret guards don't block a legitimate render. (prod-readiness)
-      - name: Helm render prod overlay + HA/security invariants
-        run: make prod-render-check
-
-      # The alert rules are only useful if they actually FIRE — a rendered rule can be valid PromQL that
-      # never trips. promtool `test rules` feeds synthetic series and asserts each alert fires (and stays
-      # silent when healthy) — the hermetic proof render-checking can't give. (prod-readiness P3b)
-      - name: Alert rules — validate + prove they fire (promtool)
-        run: |
-          PV=2.55.1
-          curl -fsSL "https://github.com/prometheus/prometheus/releases/download/v${PV}/prometheus-${PV}.linux-amd64.tar.gz" \
-            | tar xz -C /tmp
-          sudo cp "/tmp/prometheus-${PV}.linux-amd64/promtool" /usr/local/bin/promtool
-          make alert-rules-check
-
-      # The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
+      # NOT yet daggerized — the one `test`-job gate that isn't in `dagger call ci`/`charts`: it needs the
+      # `fga` CLI + jq, not the uv/helm/promtool toolchain the Dagger functions carry, so it stays a native
+      # step. The OpenFGA authorization model is source-of-truth for who-can — gate its tests (7 types,
       # concentric rungs, the validator promote gate, create-on-parent) so a model edit can't regress access.
       - name: OpenFGA model test
         run: |
@@ -174,30 +59,40 @@ jobs:
   # real SSR dev server, so hydration + routing are exercised with zero backend).
   frontend:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install Dagger CLI (pinned to the module's engineVersion)
+        run: |
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
+
+      # Turborepo workspace bun gates (Batch 12) — svelte-check + unit tests fan out over apps/* AND
+      # packages/* (the @lance/ui exports/transport-agnosticism tests run here too); lint/fmt:check are the
+      # turbo ROOT tasks (oxlint warnings-as-errors incl. .svelte script blocks; oxfmt over ts/js/json AND
+      # .svelte). Run hermetically in the pinned oven/bun image via the Dagger module (.dagger/frontend.go).
+      # `dagger call frontend` == `make frontend`.
+      - name: Frontend bun gate — svelte-check + unit + oxlint + oxfmt (Dagger)
+        env:
+          DAGGER_NO_NAG: "1"
+        run: dagger call frontend
+
+      # The Playwright e2e is browser-bound (chromium + system deps), so — like the kind-based e2e jobs — it
+      # stays a native runner leg rather than being folded into the hermetic bun-gate function. It was BUILT
+      # hermetic for CI anyway (playwright.config.ts mocks every /api/** via page.route; the webServer is the
+      # real SSR dev server, so hydration + routing are exercised with zero backend). It needs the workspace
+      # installed on the runner, hence its own bun setup + frozen install.
       - uses: oven-sh/setup-bun@v2
 
       - name: Install (frozen lockfile)
+        working-directory: frontend
         run: bun install --frozen-lockfile
-
-      # Turborepo workspace (Batch 12): check + unit tests fan out over apps/* AND packages/*
-      # (the @lance/ui exports/transport-agnosticism tests run here too). lint/fmt:check are turbo
-      # ROOT tasks (//#) — oxlint gates warnings-as-errors (incl. .svelte script blocks); oxfmt
-      # gates formatting (ts/js/json AND .svelte via its prettier-plugin-svelte support; the
-      # generated api.generated.ts/openapi.json are ignorePatterns so gen:types never fights it).
-      - name: svelte-check + unit tests + oxlint + oxfmt (turbo)
-        run: bunx turbo run check test lint fmt:check
 
       - name: Install Playwright chromium
         working-directory: frontend/apps/web
         run: bunx playwright install --with-deps chromium
 
       - name: Playwright e2e (hermetic — /api mocked in-page)
+        working-directory: frontend
         run: bunx turbo run test:e2e --filter=lance-lineage-web
 
       - name: Upload Playwright traces on failure

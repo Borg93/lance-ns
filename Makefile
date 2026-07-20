@@ -44,7 +44,7 @@ BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_RE
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
         gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage e2e-web \
         e2e-governance e2e-governed-union dashboards status k9s tilt-up tilt-ci clean down openapi openapi-check \
-        prod-render-check alert-rules-check
+        prod-render-check alert-rules-check ci charts frontend
 
 help: ## Show this help
 	@grep -hE '^[a-z0-9-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
@@ -402,8 +402,14 @@ tilt-up: ## Dev loop: build + deploy via Tilt, hot-reload the FastAPI services (
 tilt-ci: ## One-shot: build + deploy via Tilt and wait for all workloads healthy
 	@tilt ci --timeout 900s
 
-ci: ## Run the full CI gate (ruff + ty + unit/integration tests) hermetically in containers via Dagger
+ci: ## Run the Python CI gate (ruff + ty + openapi drift + unit/integration tests) hermetically via Dagger
 	@dagger call ci
+
+charts: ## Run the chart CI gate (helm lint/render invariants + prod-render-check + alert-rules-check) via Dagger
+	@dagger call charts
+
+frontend: ## Run the frontend CI gate (svelte-check + bun unit tests + oxlint + oxfmt) hermetically via Dagger
+	@dagger call frontend
 
 clean: ## helm uninstall the release (keep the cluster)
 	@helm uninstall $(RELEASE) 2>/dev/null || true

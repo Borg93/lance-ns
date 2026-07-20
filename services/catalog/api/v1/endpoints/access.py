@@ -54,6 +54,22 @@ class AccessListResponse(BaseModel):
     grants: list[RelationGrants]
 
 
+class AccessCheckRequest(BaseModel):
+    """A simulated authorization question — does ``user`` hold ``relation`` on this object? The
+    ``user`` may be a bare subject (``alice``, taken as ``user:alice``) or a fully-qualified userset
+    (``role:project_admin``, ``team:acme#member``)."""
+
+    user: str
+    relation: str
+
+
+class AccessCheckResponse(BaseModel):
+    object: str
+    user: str
+    relation: str
+    allowed: bool
+
+
 @lru_cache
 def _can_relations(fga_type: str) -> tuple[str, ...]:
     """Every ``can_*`` action the compiled model defines on ``fga_type``, sorted.
@@ -116,6 +132,57 @@ async def list_namespace_access(
     """Effective access on the namespace, per ``can_*`` action — owner-gated by the router
     (``can_delete``)."""
     return await _access_list(request, settings, token, "namespace", id)
+
+
+async def _access_check(
+    request: Request,
+    settings: Settings,
+    token: CurrentToken,
+    fga_type: str,
+    id: str,
+    body: AccessCheckRequest,
+) -> AccessCheckResponse:
+    """The #68 playground's check primitive — a single ``(user, relation, object)`` OpenFGA Check,
+    owner-gated identically to ``access/list`` (probing the graph is the same disclosure as enumerating
+    it). Only relations the compiled model defines on ``fga_type`` may be probed, so an unknown relation
+    is a clean 4xx here rather than a 400 that fails closed to a 503 for the caller."""
+    if not settings.fga_enabled:
+        raise UnsupportedOperationError("access simulation requires OpenFGA (this stack runs auth-off)")
+    client = getattr(request.app.state, "fga", None)
+    if client is None:  # the router gate already 503s this; kept so the endpoint is safe standalone
+        raise ServiceUnavailableError("authorization service is not available")
+    if body.relation not in _can_relations(fga_type):
+        raise UnsupportedOperationError(f"{body.relation!r} is not a can_* relation on {fga_type}")
+    segments = parse_identifier(id, settings.delimiter)
+    obj = f"{fga_type}:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    subject = token.sub if token else "anonymous"
+    # A bare subject is a user; a qualified userset (``role:…`` / ``team:…#member``) is passed through.
+    user = body.user if ":" in body.user else f"user:{body.user}"
+    try:
+        allowed = await fga.check(client, user=user, relation=body.relation, obj=obj)
+    except ServiceUnavailableError:
+        audit("access_simulate", FAILURE, subject=subject, resource=obj, reason="authz_unavailable")
+        raise
+    # #41: the simulation IS an authz-graph disclosure (who probed what) — audit it distinctly from the
+    # gate's owner allow, exactly like access_review / credential vending.
+    audit("access_simulate", SUCCESS, subject=subject, resource=obj)
+    return AccessCheckResponse(object=obj, user=user, relation=body.relation, allowed=allowed)
+
+
+@table_router.post("/{id}/access/check")
+async def check_table_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken, body: AccessCheckRequest
+) -> AccessCheckResponse:
+    """Simulate 'does <user> hold <relation> on this table?' — owner-gated by the router (``can_drop``)."""
+    return await _access_check(request, settings, token, "table", id, body)
+
+
+@namespace_router.post("/{id}/access/check")
+async def check_namespace_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken, body: AccessCheckRequest
+) -> AccessCheckResponse:
+    """Simulate 'does <user> hold <relation> on this namespace?' — owner-gated (``can_delete``)."""
+    return await _access_check(request, settings, token, "namespace", id, body)
 
 
 # The v1 aggregator includes one ``router`` per module — the table + namespace routers are stitched here.

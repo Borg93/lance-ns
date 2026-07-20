@@ -100,12 +100,17 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         # #51 access review: enumerating who holds access reveals principals, so it clears the
         # owner bar — a reader must not be able to map the ACL they are inside of.
         "access/list": "can_drop",
+        # #68 access simulation (the "who can do what" playground check): probing an arbitrary
+        # (user, relation) is the same authz-graph disclosure as enumerating it, so it clears the
+        # same owner bar. An unmapped suffix would fall through to writer-tier — never leave it unset.
+        "access/check": "can_drop",
     },
     "namespace": {
         "drop": "can_delete",
         "policy/set": "can_delete",
         "policy/delete": "can_delete",
         "access/list": "can_delete",
+        "access/check": "can_delete",
     },
 }
 

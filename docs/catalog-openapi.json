@@ -1,6 +1,53 @@
 {
   "components": {
     "schemas": {
+      "AccessCheckRequest": {
+        "description": "A simulated authorization question \u2014 does ``user`` hold ``relation`` on this object? The\n``user`` may be a bare subject (``alice``, taken as ``user:alice``) or a fully-qualified userset\n(``role:project_admin``, ``team:acme#member``).",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "relation"
+        ],
+        "title": "AccessCheckRequest",
+        "type": "object"
+      },
+      "AccessCheckResponse": {
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "object": {
+            "title": "Object",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "user",
+          "relation",
+          "allowed"
+        ],
+        "title": "AccessCheckResponse",
+        "type": "object"
+      },
       "AccessListResponse": {
         "properties": {
           "grants": {
@@ -8337,6 +8384,64 @@
         ]
       }
     },
+    "/v1/namespace/{id}/access/check": {
+      "post": {
+        "description": "Simulate 'does <user> hold <relation> on this namespace?' \u2014 owner-gated (``can_delete``).",
+        "operationId": "check_namespace_access_v1_namespace__id__access_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Check Namespace Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/namespace/{id}/access/list": {
       "post": {
         "description": "Effective access on the namespace, per ``can_*`` action \u2014 owner-gated by the router\n(``can_delete``).",
@@ -9105,6 +9210,64 @@
         "summary": "Batch Create Table Versions",
         "tags": [
           "version"
+        ]
+      }
+    },
+    "/v1/table/{id}/access/check": {
+      "post": {
+        "description": "Simulate 'does <user> hold <relation> on this table?' \u2014 owner-gated by the router (``can_drop``).",
+        "operationId": "check_table_access_v1_table__id__access_check_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessCheckRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCheckResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Check Table Access",
+        "tags": [
+          "access"
         ]
       }
     },

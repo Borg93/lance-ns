@@ -112,6 +112,15 @@ export const restoreTableVersion = (table: string, version: number) =>
 		body: JSON.stringify({ version }),
 	});
 
+/** #64 data-plane row insert — append Arrow-IPC rows (built in the browser via apache-arrow). Writer-gated
+ * (can_write_data) at the catalog, session-only BFF. `mode=append` never rewrites existing versions. */
+export const insertRows = (table: string, arrow: Uint8Array) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/insert?mode=append`, {
+		method: "POST",
+		headers: { "content-type": "application/vnd.apache.arrow.stream" },
+		body: arrow as BodyInit,
+	});
+
 /** Warehouse admin (#3-A UI): reads for any signed-in user the catalog allows; writes are
  * project-admin gated by the catalog (can_create_warehouse / can_administer). */
 export const fetchWarehouses = () => requestJSON<Warehouse[]>("v1/warehouses");

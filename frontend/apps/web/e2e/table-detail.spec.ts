@@ -31,10 +31,12 @@ const DETAIL = {
 // The writes the interaction tests make; recorded so we can assert the BFF POST fired with the right body.
 let tagPost: { tag: string; version: number } | null;
 let restorePost: { version: number } | null;
+let insertPostBytes: number;
 
 test.beforeEach(async ({ page }) => {
 	tagPost = null;
 	restorePost = null;
+	insertPostBytes = 0;
 	await page.route("**/capi/**", (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^\/capi/, "");
@@ -46,6 +48,11 @@ test.beforeEach(async ({ page }) => {
 		if (path.endsWith("/restore") && req.method() === "POST") {
 			restorePost = req.postDataJSON() as { version: number };
 			return json(route, { version: 4 });
+		}
+		if (path.endsWith("/insert") && req.method() === "POST") {
+			// The body is a browser-built Arrow-IPC stream — assert it's non-empty binary, not JSON.
+			insertPostBytes = req.postDataBuffer()?.length ?? 0;
+			return json(route, { transaction_id: "tx1" });
 		}
 		return json(route, { detail: "unstubbed" }, 404);
 	});
@@ -88,4 +95,16 @@ test("restore is a two-click confirm and posts {version} (#64)", async ({ page }
 	expect(restorePost).toBeNull();
 	await firstRow.getByRole("button", { name: "confirm restore" }).click();
 	await expect.poll(() => restorePost).toEqual({ version: 3 });
+});
+
+test("insert-rows form encodes JSON to an Arrow-IPC body and posts to /insert (#64)", async ({
+	page,
+}) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Insert rows" });
+	await section.locator("textarea.ins").fill('[{ "id": 9, "name": "z" }]');
+	await section.getByRole("button", { name: "Insert" }).click();
+	// the browser encoded the rows to a non-empty Arrow-IPC binary body (apache-arrow), not JSON
+	await expect.poll(() => insertPostBytes).toBeGreaterThan(0);
+	await expect(section).toContainText("Inserted 1 row");
 });

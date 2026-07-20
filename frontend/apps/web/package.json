@@ -20,6 +20,7 @@
 		"@lance/ui": "workspace:*",
 		"@lucide/svelte": "^1.21.0",
 		"@xyflow/svelte": "^1.0.0",
+		"apache-arrow": "^21.1.0",
 		"bits-ui": "^1.0.0",
 		"gsap": "^3.12.0"
 	},

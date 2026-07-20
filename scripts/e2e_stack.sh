@@ -288,6 +288,14 @@ if grep -qE "[1-9][0-9]* skipped" /tmp/e2e-stack.log; then
   exit 1
 fi
 
+# DuckDB external-consumer read (own step, separate log): proves DuckDB's core `lance` extension reads a
+# pylance-8 dataset over this RustFS store. Kept OUT of the strict no-skip block on purpose — `INSTALL lance`
+# fetches the extension from duckdb.org, so a transient CDN miss should skip (offline), not red the whole
+# guarded suite; but a real READ failure returns non-zero and — under `set -o pipefail` — still fails the job.
+PYTHONPATH=services uv run pytest \
+  tests/e2e/test_duckdb_lance_e2e.py \
+  -v -rs -p no:cacheprovider | tee /tmp/e2e-duckdb.log
+
 # The two Ray-path suites (#53, test_ray_{train,batch}_e2e.py) are NOT run here on purpose. They need a
 # real KubeRay cluster AND medallion.ray/compute flipped on — and flipping ray-on rolls the medallion
 # movers into stage-compute-via-ray mode, which on a fresh CI stack races the OpenBao secret-store

@@ -43,6 +43,7 @@ dev = [
     "ruff>=0.6",
     "moto[s3,server]>=5",
     "openlineage-python>=1.50.0",
+    "duckdb>=1.4",
 ]
 
 # pylance 8.0.0 caps lance-namespace<0.9 in its metadata (7.x capped <0.8), but at
@@ -78,6 +79,7 @@ markers = [
     "governed_union: e2e for the FULL governed union (auth+FGA+compute+quality ON): allow path, FGA-deny→DROP, quality-block, media — make e2e-governed-union",
     "ray_train: e2e for the Ray TRAIN path — governed train→candidate→blessed + reproducibility capture (pinned versions, OTLP metrics, validator gate) — make e2e-ray-train",
     "ray_batch: e2e for the Ray BATCH path — distributed Lance write/index/evolve/compact on a real KubeRay cluster — make e2e-ray-batch",
+    "duckdb: e2e proving DuckDB's core lance extension reads lance-ns Lance datasets over the deployed S3 store — set LANCE_E2E_S3_*",
 ]
 
 [tool.ty.environment]

@@ -34,6 +34,8 @@ let restorePost: { version: number } | null;
 let insertPostBytes: number;
 let indexCreate: { url: string; body: Record<string, unknown> } | null;
 let indexDrop: string | null;
+let gcPreviewBody: Record<string, unknown> | null;
+let gcRan: boolean;
 
 test.beforeEach(async ({ page }) => {
 	tagPost = null;
@@ -41,6 +43,8 @@ test.beforeEach(async ({ page }) => {
 	insertPostBytes = 0;
 	indexCreate = null;
 	indexDrop = null;
+	gcPreviewBody = null;
+	gcRan = false;
 	await page.route("**/capi/**", (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^\/capi/, "");
@@ -65,6 +69,21 @@ test.beforeEach(async ({ page }) => {
 		if (path.match(/\/index\/[^/]+\/drop$/) && req.method() === "POST") {
 			indexDrop = path;
 			return json(route, { transaction_id: "ix2" });
+		}
+		if (path.endsWith("/maintenance/preview")) {
+			gcPreviewBody = req.postDataJSON() as Record<string, unknown>;
+			return json(route, {
+				current_version: 3,
+				total_versions: 3,
+				eligible_versions: [1],
+				protected_tags: { blessed: 2 },
+				retention_days: null,
+				retain_versions: 2,
+			});
+		}
+		if (path.endsWith("/maintenance/run")) {
+			gcRan = true;
+			return json(route, { ok: true, old_versions_removed: 1, bytes_removed: 512 });
 		}
 		return json(route, { detail: "unstubbed" }, 404);
 	});
@@ -142,4 +161,27 @@ test("drops an index via the chip × (#73)", async ({ page }) => {
 	const section = page.locator("section", { hasText: "Indexes" });
 	await section.getByRole("button", { name: "drop index id_idx" }).click();
 	await expect.poll(() => indexDrop).toContain("/index/id_idx/drop");
+});
+
+test("GC preview lists reclaimable versions + protected tags (#75)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Maintenance policy" });
+	await section.getByRole("spinbutton", { name: "keep last" }).fill("2");
+	await section.getByRole("button", { name: "Preview" }).click();
+	await expect(section.locator(".gc")).toContainText("1 version reclaimable");
+	await expect(section.locator(".gc")).toContainText("blessed→v2"); // tag protection surfaced
+	expect(gcPreviewBody).toEqual({ retention_days: null, retain_versions: 2 });
+});
+
+test("GC reclaim is a two-click confirm and posts to /maintenance/run (#75)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const gc = page.locator("section", { hasText: "Maintenance policy" }).locator(".gc");
+	await gc.getByRole("spinbutton", { name: "keep last" }).fill("2");
+	await gc.getByRole("button", { name: "Preview" }).click();
+	await gc.getByRole("button", { name: "Reclaim now" }).click();
+	// first click only arms the confirm — no run yet
+	expect(gcRan).toBe(false);
+	await gc.getByRole("button", { name: "Confirm reclaim" }).click();
+	await expect.poll(() => gcRan).toBe(true);
+	await expect(gc).toContainText("Reclaimed 1 version");
 });

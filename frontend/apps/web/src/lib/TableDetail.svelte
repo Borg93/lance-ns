@@ -16,13 +16,16 @@
 		deleteTablePolicy,
 		dropTableIndex,
 		fetchTableDetail,
+		type GcPreview,
 		insertRows,
 		partErrored,
 		type Policy,
 		type PolicyRequest,
+		previewMaintenance,
 		type TableStats,
 		type TableDetail,
 		restoreTableVersion,
+		runMaintenance,
 		setTablePolicy,
 	} from "./catalog";
 
@@ -109,6 +112,12 @@
 		insertJson = "";
 		insertMsg = null;
 		showGraph = false;
+		gcDays = null;
+		gcKeep = null;
+		gcPreview = null;
+		gcResult = null;
+		gcError = null;
+		gcConfirm = false;
 		load();
 	});
 
@@ -160,6 +169,58 @@
 			else policyFail(res.status, res.detail);
 		} finally {
 			busy = false;
+		}
+	}
+
+	// #75 on-demand GC — preview (dry-run reclaimable versions) + run (destructive, two-click confirm).
+	let gcDays = $state<number | null>(null);
+	let gcKeep = $state<number | null>(null);
+	let gcBusy = $state(false);
+	let gcPreview = $state<GcPreview | null>(null);
+	let gcResult = $state<string | null>(null);
+	let gcError = $state<string | null>(null);
+	let gcConfirm = $state(false);
+	const gcHasBound = $derived(gcDays != null || gcKeep != null);
+
+	function gcFail(status: number, detail: string): void {
+		if (status === 401) gcError = "Sign in to run garbage collection.";
+		else if (status === 403) gcError = "Denied: GC needs the owner rung (can_drop).";
+		else if (status === 422) gcError = "Set a retention-days and/or keep-last bound first.";
+		else gcError = detail;
+	}
+
+	async function runGcPreview(): Promise<void> {
+		if (gcBusy || !gcHasBound) return;
+		gcBusy = true;
+		gcError = null;
+		gcResult = null;
+		gcConfirm = false;
+		try {
+			const res = await previewMaintenance(table, {
+				retention_days: gcDays,
+				retain_versions: gcKeep,
+			});
+			if (res.ok) gcPreview = res.data;
+			else gcFail(res.status, res.detail);
+		} finally {
+			gcBusy = false;
+		}
+	}
+
+	async function runGc(): Promise<void> {
+		if (gcBusy || !gcHasBound) return;
+		gcBusy = true;
+		gcError = null;
+		try {
+			const res = await runMaintenance(table, { retention_days: gcDays, retain_versions: gcKeep });
+			if (res.ok) {
+				gcResult = `Reclaimed ${res.data.old_versions_removed} version(s) · ${fmtBytes(res.data.bytes_removed)}.`;
+				gcPreview = null;
+				gcConfirm = false;
+				await load(); // GC changed the version set — refresh
+			} else gcFail(res.status, res.detail);
+		} finally {
+			gcBusy = false;
 		}
 	}
 
@@ -746,6 +807,68 @@
 				</p>
 			{/if}
 			{#if policyError}<p class="error">{policyError}</p>{/if}
+
+			<!-- #75 on-demand GC: dry-run reclaimable versions, then reclaim (owner-gated, destructive). -->
+			<div class="gc">
+				<h3>Garbage collection</h3>
+				<div class="row">
+					<label
+						>older than (days) <input
+							class="mono"
+							type="number"
+							min="1"
+							bind:value={gcDays}
+							placeholder="any age"
+						/></label
+					>
+					<label
+						>keep last <input
+							class="mono"
+							type="number"
+							min="1"
+							bind:value={gcKeep}
+							placeholder="—"
+						/></label
+					>
+					<button class="btn ghost" disabled={gcBusy || !gcHasBound} onclick={runGcPreview}>
+						Preview
+					</button>
+				</div>
+				{#if gcPreview}
+					<p class="mut">
+						{gcPreview.eligible_versions.length} version{gcPreview.eligible_versions.length === 1
+							? ""
+							: "s"} reclaimable
+						{#if gcPreview.eligible_versions.length}(v{gcPreview.eligible_versions.join(
+								", v",
+							)}){/if}
+						· {gcPreview.total_versions} total, current v{gcPreview.current_version}.
+						{#if Object.keys(gcPreview.protected_tags).length}
+							Protected by tags: {Object.entries(gcPreview.protected_tags)
+								.map(([t, v]) => `${t}→v${v}`)
+								.join(", ")}.
+						{/if}
+					</p>
+					{#if gcPreview.eligible_versions.length}
+						{#if gcConfirm}
+							<div class="row">
+								<span class="mut"
+									>Permanently reclaim {gcPreview.eligible_versions.length} version(s)?</span
+								>
+								<button class="btn danger" disabled={gcBusy} onclick={runGc}>Confirm reclaim</button
+								>
+								<button class="btn ghost" onclick={() => (gcConfirm = false)}>Cancel</button>
+							</div>
+						{:else}
+							<button class="btn" disabled={gcBusy} onclick={() => (gcConfirm = true)}>
+								<Trash2 size={12} /> Reclaim now
+							</button>
+						{/if}
+					{/if}
+				{/if}
+				{#if gcResult}<p class="mut">{gcResult}</p>{/if}
+				{#if gcError}<p class="error">{gcError}</p>{/if}
+			</div>
 		</section>
 
 		<section>
@@ -892,7 +1015,8 @@
 		align-items: center;
 		gap: 6px;
 	}
-	.policy-edit input[type="number"] {
+	.policy-edit input[type="number"],
+	.gc input[type="number"] {
 		width: 110px;
 		background: var(--panel-2);
 		border: 1px solid var(--line);
@@ -900,6 +1024,22 @@
 		color: var(--ink);
 		padding: 4px 8px;
 		font-size: 12px;
+	}
+	.gc {
+		margin-top: 14px;
+		padding-top: 12px;
+		border-top: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+	}
+	.gc h3 {
+		font-size: 13px;
+		margin: 0 0 8px;
+	}
+	.gc label {
+		display: inline-flex;
+		flex-direction: column;
+		gap: 3px;
+		font-size: 12px;
+		color: var(--mut);
 	}
 	.tagform input,
 	.tagform input {

@@ -120,6 +120,26 @@ export const setTablePolicy = (table: string, policy: PolicyRequest) =>
 export const deleteTablePolicy = (table: string) =>
 	requestJSON<{ status: string }>(`v1/table/${enc(table)}/policy`, { method: "DELETE" });
 
+export type GcBounds = { retention_days?: number | null; retain_versions?: number | null };
+export type GcPreview = components["schemas"]["GcPreview"];
+export type GcRunResult = components["schemas"]["GcRunResult"];
+
+/** #75 dry-run GC — the versions reclaimable under these bounds + the tags protecting others. Owner-gated
+ * (can_drop), session-only BFF. Never mutates. */
+export const previewMaintenance = (table: string, bounds: GcBounds) =>
+	requestJSON<GcPreview>(`v1/table/${enc(table)}/maintenance/preview`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(bounds),
+	});
+/** #75 reclaim old versions on demand (destructive; tag-pinned versions exempt). Owner-gated. */
+export const runMaintenance = (table: string, bounds: GcBounds) =>
+	requestJSON<GcRunResult>(`v1/table/${enc(table)}/maintenance/run`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(bounds),
+	});
+
 /** #64 version management — name (tag) a Lance version. Writer-gated (can_create_tag) by the catalog,
  * session-only BFF. A promotion pins its version with a tag; this is the manual equivalent. */
 export const createTableTag = (table: string, tag: string, version: number) =>

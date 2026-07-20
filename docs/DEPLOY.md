@@ -36,7 +36,7 @@ into `.localbin/` (gitignored).
 | **RustFS** | Deployment | S3-compatible object store for the Lance lakehouse |
 | **OpenBao** | Deployment | secret store (Vault fork), fronted by a Dapr `secretstores.hashicorp.vault` component |
 | **GreptimeDB** | subchart | **one unified store for metrics + logs + traces** (on RustFS S3) — apps export OTLP-direct here |
-| **Vector** | subchart | Agent DaemonSet shipping pod logs → GreptimeDB (`lance_logs`) |
+| **OTel Collector** | template | Receives app OTLP + tails infra logs (filelog) + scrapes Dapr metrics → GreptimeDB (`opentelemetry_logs`/`_traces`/metrics) |
 | **Perses** | subchart | dashboards-as-code over GreptimeDB's Prometheus API (`/v1/prometheus`) |
 | **Dapr dashboard** | Deployment | web UI for the Dapr stuff (components, subscriptions, configurations) |
 

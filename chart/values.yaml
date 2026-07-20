@@ -340,16 +340,26 @@ externalSecrets:
   kubernetesAuthPath: kubernetes # the Vault Kubernetes auth backend mount
   role: lance-infra # the Vault role the operator's ServiceAccount assumes
 
-# --- Observability — the rask stack: GreptimeDB + Vector + Perses (standard OTLP, NOT OTel-Arrow) ----
-# GreptimeDB is ONE unified store for metrics+logs+traces (tables: metrics → PromQL series, lance_logs,
-# opentelemetry_traces), backed by RustFS S3. Apps + Dapr export OTLP-direct to :4000/v1/otlp — there is
-# NO OTel Collector in the path (mirrors rask). Vector ships pod logs; Perses is dashboards-as-code over
-# GreptimeDB's Prometheus-compatible API (:4000/v1/prometheus).
+# --- Observability — OTel-first: a single OpenTelemetry Collector is the telemetry hub, GreptimeDB the
+# store, Perses the dashboards. GreptimeDB is ONE unified store for metrics+logs+traces (tables: metrics →
+# PromQL series, opentelemetry_logs, opentelemetry_traces), backed by RustFS S3. The Collector RECEIVES app
+# OTLP, TAILS infra-pod logs (filelog — retires Vector), and SCRAPES the Dapr sidecars (prometheus + k8s SD
+# — the DaprConsumerWedge source), exporting everything OTLP → GreptimeDB (:4000/v1/otlp). Perses is
+# dashboards-as-code over GreptimeDB's Prometheus-compatible API (:4000/v1/prometheus).
 observability:
   enabled: true
   environment: kind # deployment.environment.name resource attr — override per deploy (kind / staging / prod)
-  # Externalize: when set, the apps + Dapr export OTLP to THIS collector/endpoint instead of the in-cluster
-  # GreptimeDB — pair with observability.enabled=false to ship telemetry off-cluster (a separate platform).
+  # OTel Collector — the single telemetry hub (receives app OTLP + tails infra logs + scrapes Dapr metrics).
+  # enabled: deploy the in-cluster Collector (dev/kind). externalEndpoint: point at an operator-managed
+  # external Collector instead (prod) — when set, NO in-cluster Collector is deployed and the apps + the
+  # scrape config are that platform's concern; the chart just aims its OTLP export there. This is the
+  # "we run the OTel operator + an external Collector; in Helm just point to the existing one" prod path.
+  otelCollector:
+    enabled: true
+    image: otel/opentelemetry-collector-contrib:0.116.0
+    externalEndpoint: "" # e.g. http://otel-collector.observability.svc:4318 — set in prod, deploys nothing
+  # Legacy escape hatch: ship OTLP to an off-cluster endpoint AND run no in-cluster store. Prefer
+  # otelCollector.externalEndpoint (the OTel-first prod path); this stays for a raw non-Collector target.
   externalOtlpEndpoint: "" # e.g. http://otel-collector.observability:4318/v1/otlp
   bucket: lance-observability # RustFS bucket for GreptimeDB object storage
   retention: "14d" # DB-level TTL on the `public` database (applied by greptimedb-ttl-job)
@@ -406,44 +416,9 @@ greptimedb-standalone:
     credentials:
       existingSecretName: lance-ns-observability-s3
 
-# Vector subchart — Agent DaemonSet shipping pod logs to GreptimeDB's logs sink (table lance_logs).
-vector:
-  role: Agent
-  service:
-    enabled: false # the Agent only pushes; it exposes no inbound ports → no Service
-  serviceHeadless:
-    enabled: false
-  # customConfig fully REPLACES the chart default, so it must be complete.
-  customConfig:
-    data_dir: /vector-data-dir
-    api:
-      enabled: false
-    sources:
-      pod_logs:
-        type: kubernetes_logs
-        # Skip pods that already ship structured, trace-correlated logs via the OTel SDK (OTLP → the
-        # `opentelemetry_logs` table): the 7 Python app services carry `lance.dev/logs=otlp`. This is the
-        # "one SDK, three signals, all OTLP" path (otel skill) — Vector tails only the INFRA pods (nats,
-        # age, openbao, dapr, dex, rustfs, greptimedb, perses, gateway, web) that have no OTel SDK, so app
-        # logs are NOT double-ingested. (A pod without the label matches `!=otlp` → included.)
-        extra_label_selector: "lance.dev/logs!=otlp"
-        # GreptimeDB's logs sink is schema-on-write — every distinct enrichment key becomes a PERMANENT
-        # column, so disable the noisy node/namespace/pod-annotation enrichments (rask learned this the
-        # hard way: node labels alone added ~107 columns). Keep the core pod/container/namespace fields.
-        node_annotation_fields:
-          node_labels: ""
-        namespace_annotation_fields:
-          namespace_labels: ""
-        pod_annotation_fields:
-          pod_annotations: ""
-    sinks:
-      greptimedb_logs:
-        type: greptimedb_logs
-        inputs: ["pod_logs"]
-        endpoint: http://lance-ns-greptimedb-standalone:4000
-        dbname: public
-        table: lance_logs
-        compression: gzip
+# Vector is gone — the OTel Collector's filelog receiver (templates/otel-collector.yaml) tails the infra-pod
+# logs now, dropping the app pods (lance.dev/logs=otlp) that already ship OTLP logs. Infra logs land in
+# GreptimeDB's `opentelemetry_logs` (via OTLP), not the old Vector-specific `lance_logs` table.
 
 # Perses subchart — dashboards-as-code over GreptimeDB's Prometheus-compatible API.
 perses:

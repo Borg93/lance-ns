@@ -50,8 +50,22 @@ is the single-bucket layout, unchanged. Call: {{ include "lance.stageBucket" (li
 {{- define "lance.ageConnectHost" -}}
 {{- .Values.age.externalHost | default (include "lance.ageHost" .) -}}
 {{- end -}}
+{{- /* The OTLP endpoint the apps export to. OTel-first: the Collector is the default target. Priority:
+external Collector (prod) > in-cluster Collector > a raw externalOtlpEndpoint (legacy) > GreptimeDB-direct. */ -}}
 {{- define "lance.otlpEndpoint" -}}
-{{- if .Values.observability.externalOtlpEndpoint -}}{{ .Values.observability.externalOtlpEndpoint }}{{- else -}}http://{{ include "lance.greptimeHost" . }}:{{ .Values.observability.greptimePort }}/v1/otlp{{- end -}}
+{{- $o := .Values.observability -}}
+{{- $c := $o.otelCollector | default dict -}}
+{{- if $c.externalEndpoint -}}{{ $c.externalEndpoint }}
+{{- else if $c.enabled -}}http://{{ include "lance.fullname" . }}-otel-collector:4318
+{{- else if $o.externalOtlpEndpoint -}}{{ $o.externalOtlpEndpoint }}
+{{- else -}}http://{{ include "lance.greptimeHost" . }}:{{ $o.greptimePort }}/v1/otlp{{- end -}}
+{{- end -}}
+{{- /* Non-empty when the apps export THROUGH a Collector (external or in-cluster). In that case they send
+plain OTLP and the Collector adds GreptimeDB's db-name/pipeline headers; only the direct-to-GreptimeDB paths
+carry those headers on the app side. */ -}}
+{{- define "lance.otelViaCollector" -}}
+{{- $c := .Values.observability.otelCollector | default dict -}}
+{{- if or $c.externalEndpoint $c.enabled -}}true{{- end -}}
 {{- end -}}
 {{/* Whether the apps should carry the OTel SDK wiring (instrument + otelEnv + the lance-tracing Dapr config).
 Decoupled from `observability.enabled`: that flag deploys the IN-CLUSTER store (GreptimeDB/Vector/Perses), but
@@ -140,10 +154,11 @@ lineage-events{{ with $bn }}|{{ . }}{{ end }}
 {{- end -}}
 
 {{/* OTel SDK env for an app (call: include "lance.otelEnv" (list $root "<service.name>")). The apps run
-under `opentelemetry-instrument` and export all three signals OTLP-direct to GreptimeDB — no Collector
-(mirrors rask). The SDK appends /v1/{traces,metrics,logs} to the /v1/otlp base. GreptimeDB needs the
-db-name header on every signal and ADDITIONALLY the trace-pipeline header on traces (→ opentelemetry_traces
-table); metrics/logs must NOT carry the pipeline header, so traces get their own *_TRACES_HEADERS. */}}
+under `opentelemetry-instrument` and export all three signals OTLP. OTel-first: the target is the Collector
+(lance.otlpEndpoint), which adds GreptimeDB's headers — so the app stays backend-agnostic (plain OTLP, no
+vendor headers). ONLY on the direct-to-GreptimeDB paths (no Collector) does the app carry the db-name header
+on every signal + the trace-pipeline header on traces (metrics/logs must NOT carry it → separate
+*_TRACES_HEADERS). The SDK appends /v1/{traces,metrics,logs} to the endpoint. */}}
 {{- define "lance.otelEnv" -}}
 {{- $root := index . 0 -}}
 {{- $svc := index . 1 -}}
@@ -151,16 +166,18 @@ table); metrics/logs must NOT carry the pipeline header, so traces get their own
 - { name: OTEL_SERVICE_NAME, value: {{ $svc | quote }} }
 - { name: OTEL_EXPORTER_OTLP_ENDPOINT, value: "{{ include "lance.otlpEndpoint" $root }}" }
 - { name: OTEL_EXPORTER_OTLP_PROTOCOL, value: "http/protobuf" }
+{{- if not (include "lance.otelViaCollector" $root) }}
 - { name: OTEL_EXPORTER_OTLP_HEADERS, value: "x-greptime-db-name={{ $o.dbName }}" }
 - { name: OTEL_EXPORTER_OTLP_TRACES_HEADERS, value: "x-greptime-db-name={{ $o.dbName }},x-greptime-pipeline-name={{ $o.tracePipeline }}" }
+{{- end }}
 - { name: OTEL_TRACES_EXPORTER, value: "otlp" }
 - { name: OTEL_METRICS_EXPORTER, value: "otlp" }
-{{/* Logs go out via the OTel SDK (OTLP → GreptimeDB `opentelemetry_logs`) — the "three signals, one SDK,
-all OTLP" path. NO double-ingest: the app pods carry `lance.dev/logs=otlp`, and Vector's kubernetes_logs
-source excludes that label (values.yaml `vector.customConfig`), so Vector tails only the INFRA pods (no OTel
-SDK) into `lance_logs`. Each pod's logs land in exactly one table; `make e2e-obs` still sees both populated
-(apps → opentelemetry_logs, infra → lance_logs). Tradeoff: an app crash BEFORE the SDK inits is only in
-`kubectl logs`, not GreptimeDB — acceptable for the OTLP-native path. */}}
+{{/* Logs go out via the OTel SDK (OTLP → the Collector → GreptimeDB `opentelemetry_logs`) — the "three
+signals, one SDK, all OTLP" path. NO double-ingest: the app pods carry `lance.dev/logs=otlp`, and the
+Collector's filelog receiver drops that label (a filter processor), so the file-tailed infra logs (no OTel
+SDK) land in the SAME `opentelemetry_logs` table without duplicating the app logs. Tradeoff: an app crash
+BEFORE the SDK inits is only in `kubectl logs`, not GreptimeDB — the Collector's filelog tail still catches
+it (it's not labelled until the pod is up, so it's not dropped). */}}
 - { name: OTEL_LOGS_EXPORTER, value: "otlp" }
 {{/* Default metric export interval is 60s — too slow to observe in a demo/test. Push every 5s. */}}
 - { name: OTEL_METRIC_EXPORT_INTERVAL, value: "5000" }

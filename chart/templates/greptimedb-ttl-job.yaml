@@ -1,7 +1,7 @@
 {{- if and .Values.observability.enabled .Values.observability.retention }}
 {{- /*
 Durable retention: a post-install/post-upgrade hook that sets a database-level TTL on GreptimeDB's
-`public` database. Every table (lance_logs, opentelemetry_traces, the metrics physical table) inherits
+`public` database. Every table (opentelemetry_logs, opentelemetry_traces, the metrics physical table) inherits
 the DB TTL, so all three signals age out at observability.retention instead of growing forever on the
 single local disk. Idempotent; runs as a hook so it re-applies after GreptimeDB is (re)created, with a
 retry loop that tolerates GreptimeDB still starting up.

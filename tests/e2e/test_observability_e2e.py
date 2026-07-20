@@ -8,7 +8,7 @@ GreptimeDB store, not mocks:
   1. Durable graph data in Apache AGE       — the dataset node landed (the pipeline actually works)
   2. The custom domain metric in GreptimeDB — lineage_events_processed_total by lance_lineage_outcome went UP
   3. A distributed trace in GreptimeDB      — ONE trace spans catalog → Dapr publish → lineage → AGE
-  4. Logs in GreptimeDB                      — apps via OTLP; infra via Vector (both tables populate)
+  4. Logs in GreptimeDB                      — apps (OTLP) + infra (Collector filelog) → opentelemetry_logs
 
 Run (port-forward the three services first), or `make e2e-obs`:
 
@@ -203,18 +203,23 @@ def test_distributed_trace_spans_catalog_to_lineage() -> None:
 
 @pytest.mark.usefixtures("pipeline_run")
 def test_logs_populated() -> None:
-    """4. Both log paths populate GreptimeDB — app OTLP logs and Vector pod logs."""
+    """4. Both log paths land in GreptimeDB's `opentelemetry_logs` — OTel-first, one table:
+    the apps push OTLP logs (trace-correlated) directly, and the OTel Collector's filelog receiver
+    tails the no-SDK infra pods into the SAME table (Vector is gone; there is no more `lance_logs`)."""
 
-    def both_log_tables_nonempty() -> bool | None:
-        otlp = int(_gt_sql("SELECT count(*) FROM opentelemetry_logs")[0][0])
-        pods = int(_gt_sql("SELECT count(*) FROM lance_logs")[0][0])
-        return otlp > 0 and pods > 0 or None
+    def app_and_infra_logs_present() -> bool | None:
+        # App OTLP logs carry a real service.name (catalog/lineage/…); the Collector's file-tailed infra
+        # logs carry the collector's own service.name (or none). Assert BOTH the table populates AND it
+        # holds logs from more than one service — proof the filelog path landed alongside the app OTLP.
+        total = int(_gt_sql("SELECT count(*) FROM opentelemetry_logs")[0][0])
+        services = int(_gt_sql("SELECT count(DISTINCT service_name) FROM opentelemetry_logs")[0][0])
+        return total > 0 and services >= 2 or None
 
-    assert _eventually(both_log_tables_nonempty)
+    assert _eventually(app_and_infra_logs_present)
 
     # Log↔trace CORRELATION, not just presence (otel signals.md: "Every log emitted inside an
     # active span carries trace_id"): if the logging auto-instrumentation env flag were dropped,
-    # both tables would still fill and the suite would pass while correlation silently died.
+    # the table would still fill and the suite would pass while correlation silently died.
     def correlated_log_exists() -> bool | None:
         rows = _gt_sql(
             "SELECT count(*) FROM opentelemetry_logs WHERE trace_id IS NOT NULL AND trace_id != ''"

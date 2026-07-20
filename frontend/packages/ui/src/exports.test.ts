@@ -12,7 +12,12 @@ test("every exported component file exists", () => {
 	const files = [
 		...new Set([...index.matchAll(/from ["']\.\/(\w+\.svelte)["']/g)].map((m) => m[1])),
 	];
-	expect(files.sort()).toEqual(["Chip.svelte", "SearchBar.svelte", "StatusBoard.svelte"]);
+	expect(files.sort()).toEqual([
+		"Chip.svelte",
+		"SearchBar.svelte",
+		"Select.svelte",
+		"StatusBoard.svelte",
+	]);
 	for (const f of files) expect(existsSync(join(src, f))).toBe(true);
 });
 

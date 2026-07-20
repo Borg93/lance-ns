@@ -4,6 +4,7 @@
 	// round-trip through the /capi detail BFF aggregate; policy writes go through their own narrow
 	// session-only routes. A dataset the catalog does not register (e.g. a storage-managed medallion
 	// zone) renders the honest not-in-catalog state instead of a broken page.
+	import { Select } from "@lance/ui";
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
 	import { tableFromJSON, tableToIPC } from "apache-arrow";
 	import GrantsPanel from "./GrantsPanel.svelte";
@@ -43,7 +44,7 @@
 
 	// #64 version management — name (tag) a Lance version (writer-gated). Reset on table change below.
 	let tagName = $state("");
-	let tagVersion = $state<number | null>(null);
+	let tagVersion = $state(""); // the bits-ui Select value is a string; parsed to a number on submit
 	let tagBusy = $state(false);
 	let tagError = $state<string | null>(null);
 
@@ -93,7 +94,7 @@
 		policyError = null;
 		busy = false;
 		tagName = "";
-		tagVersion = null;
+		tagVersion = "";
 		tagError = null;
 		restoreConfirm = null;
 		restoreError = null;
@@ -159,14 +160,14 @@
 
 	async function runTag(): Promise<void> {
 		const name = tagName.trim();
-		if (tagBusy || !name || tagVersion == null) return;
+		if (tagBusy || !name || !tagVersion) return;
 		tagBusy = true;
 		tagError = null;
 		try {
-			const res = await createTableTag(table, name, tagVersion);
+			const res = await createTableTag(table, name, Number(tagVersion));
 			if (res.ok) {
 				tagName = "";
-				tagVersion = null;
+				tagVersion = "";
 				await load(); // pull the new tag into the tags row
 			} else if (res.status === 401) {
 				tagError = "Sign in to tag a version.";
@@ -494,10 +495,12 @@
 				<p class="mut">No blob columns on this table.</p>
 			{:else}
 				<div class="refs tagform">
-					<select class="mono" bind:value={blobCol}>
-						<option value="" disabled>column…</option>
-						{#each blobColumns as c (c)}<option value={c}>{c}</option>{/each}
-					</select>
+					<Select
+						bind:value={blobCol}
+						ariaLabel="Blob column"
+						placeholder="column…"
+						options={blobColumns.map((c) => ({ value: c, label: c }))}
+					/>
 					<input class="mono" type="number" min="0" placeholder="row" bind:value={blobRow} />
 					<button class="btn" disabled={!blobCol || blobRow == null} onclick={previewBlob}
 						>Preview</button
@@ -551,20 +554,24 @@
 				}}
 			>
 				<input class="mono" bind:value={ixColumn} placeholder="column" aria-label="Index column" />
-				<select class="mono" bind:value={ixType} aria-label="Index type">
-					<optgroup label="scalar">
-						{#each SCALAR_TYPES as t (t)}<option value={t}>{t}</option>{/each}
-					</optgroup>
-					<optgroup label="vector">
-						{#each VECTOR_TYPES as t (t)}<option value={t}>{t}</option>{/each}
-					</optgroup>
-				</select>
+				<Select
+					bind:value={ixType}
+					ariaLabel="Index type"
+					options={[
+						...SCALAR_TYPES.map((t) => ({ value: t, label: `scalar · ${t}` })),
+						...VECTOR_TYPES.map((t) => ({ value: t, label: `vector · ${t}` })),
+					]}
+				/>
 				{#if !ixScalar}
-					<select class="mono" bind:value={ixDistance} aria-label="Distance type">
-						<option value="cosine">cosine</option>
-						<option value="l2">l2</option>
-						<option value="dot">dot</option>
-					</select>
+					<Select
+						bind:value={ixDistance}
+						ariaLabel="Distance type"
+						options={[
+							{ value: "cosine", label: "cosine" },
+							{ value: "l2", label: "l2" },
+							{ value: "dot", label: "dot" },
+						]}
+					/>
 				{/if}
 				<button class="btn" type="submit" disabled={ixBusy || !ixColumn.trim()}>
 					{ixBusy ? "…" : "Build index"}
@@ -649,15 +656,13 @@
 			{#if versions.length > 0}
 				<div class="refs tagform">
 					<input class="mono" placeholder="tag name (e.g. blessed)" bind:value={tagName} />
-					<select class="mono" bind:value={tagVersion}>
-						<option value={null} disabled>version…</option>
-						{#each versions as v (v.version)}<option value={v.version}>v{v.version}</option>{/each}
-					</select>
-					<button
-						class="btn"
-						disabled={tagBusy || !tagName.trim() || tagVersion == null}
-						onclick={runTag}
-					>
+					<Select
+						bind:value={tagVersion}
+						ariaLabel="Version to tag"
+						placeholder="version…"
+						options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
+					/>
+					<button class="btn" disabled={tagBusy || !tagName.trim() || !tagVersion} onclick={runTag}>
 						{tagBusy ? "…" : "Tag version"}
 					</button>
 					{#if tagError}<span class="error">{tagError}</span>{/if}
@@ -887,14 +892,6 @@
 		font-size: 12px;
 	}
 	.tagform input,
-	.tagform select {
-		background: var(--panel-2);
-		border: 1px solid var(--line);
-		border-radius: var(--radius-sm);
-		color: var(--ink);
-		font-size: 12px;
-		padding: 3px 8px;
-	}
 	.tagform input {
 		width: 150px;
 	}

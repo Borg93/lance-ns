@@ -4,6 +4,7 @@
 	// catalog gates the enumeration on can_drop, so a non-owner sees the denial state, never the ACL.
 	// Collapsed by default: one owner-tier round-trip per dataset, with definitive outcomes (the ACL,
 	// 401/403/501) cached and transient failures (offline, 5xx) retried on the next open.
+	import { Select } from "@lance/ui";
 	import { ChevronRight, ShieldCheck } from "@lucide/svelte";
 	import {
 		type AccessList,
@@ -197,10 +198,12 @@
 						bind:value={simUser}
 						onkeydown={(e) => e.key === "Enter" && runCheck()}
 					/>
-					<select class="mono" bind:value={simRelation}>
-						<option value="" disabled>action…</option>
-						{#each relations as r (r)}<option value={r}>{r}</option>{/each}
-					</select>
+					<Select
+						bind:value={simRelation}
+						ariaLabel="Simulate action"
+						placeholder="action…"
+						options={relations.map((r) => ({ value: r, label: r }))}
+					/>
 					<button
 						class="btn"
 						disabled={simBusy || !simUser.trim() || !simRelation}
@@ -232,10 +235,12 @@
 						placeholder="user (e.g. alice), or role:… / team:…#member"
 						bind:value={mgUser}
 					/>
-					<select class="mono" bind:value={mgRelation}>
-						<option value="" disabled>rung…</option>
-						{#each GRANTABLE as r (r)}<option value={r}>{r}</option>{/each}
-					</select>
+					<Select
+						bind:value={mgRelation}
+						ariaLabel="Grant rung"
+						placeholder="rung…"
+						options={GRANTABLE.map((r) => ({ value: r, label: r }))}
+					/>
 					<button
 						class="btn"
 						disabled={mgBusy || !mgUser.trim() || !mgRelation}
@@ -346,8 +351,7 @@
 		gap: 6px;
 		align-items: center;
 	}
-	.sim-form input,
-	.sim-form select {
+	.sim-form input {
 		background: var(--panel-2);
 		border: 1px solid var(--line);
 		border-radius: var(--radius-sm);

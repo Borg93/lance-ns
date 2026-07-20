@@ -3,6 +3,7 @@
 	// physical tenancy), activate/deactivate lifecycle, namespace binding, and provisioning. Reads
 	// are session-forwarded; writes are project-admin gated by the catalog (can_create_warehouse /
 	// can_administer) — a non-admin sees the denial banner, never a silent no-op.
+	import { Select } from "@lance/ui";
 	import { RefreshCw, ShieldAlert, Warehouse as WarehouseIcon } from "@lucide/svelte";
 	import {
 		bindWarehouseNamespace,
@@ -215,10 +216,12 @@
 					bind();
 				}}
 			>
-				<select class="mono" bind:value={bindDraft.warehouse} aria-label="Warehouse">
-					<option value="" disabled>warehouse…</option>
-					{#each warehouses as w (w.id)}<option value={w.id}>{w.id}</option>{/each}
-				</select>
+				<Select
+					bind:value={bindDraft.warehouse}
+					ariaLabel="Warehouse"
+					placeholder="warehouse…"
+					options={warehouses.map((w) => ({ value: w.id, label: w.id }))}
+				/>
 				<input
 					class="mono"
 					bind:value={bindDraft.namespace}
@@ -313,8 +316,7 @@
 		flex-wrap: wrap;
 		gap: 8px;
 	}
-	input,
-	select {
+	input {
 		background: var(--panel-2);
 		border: 1px solid var(--line);
 		border-radius: var(--radius-sm);

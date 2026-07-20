@@ -67,8 +67,9 @@ test("grant writes a base rung and shows the result", async ({ page }) => {
 	await page.getByRole("button", { name: "Access review" }).click();
 	await expect(page.locator("table.acl")).toContainText("can_read_data");
 	await page.getByPlaceholder("user (e.g. alice), or role:… / team:…#member").last().fill("bob");
-	// The manage form's rung select (the second select in the panel; the first is the simulator's action).
-	await page.locator("select").last().selectOption("reader");
+	// The manage form's rung picker is the @lance/ui Select (bits-ui) — open by its aria-label, click option.
+	await page.getByLabel("Grant rung").click();
+	await page.getByRole("option", { name: "reader", exact: true }).click();
 	await page.getByRole("button", { name: "Grant", exact: true }).click();
 	await expect(page.locator(".verdict.allow")).toContainText("granted to");
 	expect(grantPost).toEqual({ user: "bob", relation: "reader" });
@@ -78,7 +79,8 @@ test("revoke hits the revoke endpoint", async ({ page }) => {
 	await page.goto("/tables/db1%24t");
 	await page.getByRole("button", { name: "Access review" }).click();
 	await page.getByPlaceholder("user (e.g. alice), or role:… / team:…#member").last().fill("bob");
-	await page.locator("select").last().selectOption("writer");
+	await page.getByLabel("Grant rung").click();
+	await page.getByRole("option", { name: "writer", exact: true }).click();
 	await page.getByRole("button", { name: "Revoke", exact: true }).click();
 	await expect(page.locator(".verdict.allow")).toContainText("revoked from");
 	expect(revokePost).toEqual({ user: "bob", relation: "writer" });

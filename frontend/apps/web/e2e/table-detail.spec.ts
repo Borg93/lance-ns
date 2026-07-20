@@ -93,7 +93,9 @@ test("tag-a-version form posts {tag, version} through the BFF (#64)", async ({ p
 	await page.goto("/tables/db1%24t");
 	const section = page.locator("section", { hasText: "Versions, branches & tags" });
 	await section.getByPlaceholder("tag name (e.g. blessed)").fill("release-1");
-	await section.locator(".tagform select").selectOption("3");
+	// the version picker is the @lance/ui Select (bits-ui) — open it, then click the option
+	await section.getByLabel("Version to tag").click();
+	await page.getByRole("option", { name: "v3", exact: true }).click();
 	await section.getByRole("button", { name: "Tag version" }).click();
 	await expect.poll(() => tagPost).toEqual({ tag: "release-1", version: 3 });
 });
@@ -125,7 +127,8 @@ test("builds a vector index through the create form (#73)", async ({ page }) => 
 	await page.goto("/tables/db1%24t");
 	const section = page.locator("section", { hasText: "Indexes" });
 	await section.getByLabel("Index column").fill("vec");
-	await section.getByLabel("Index type").selectOption("IVF_PQ");
+	await section.getByLabel("Index type").click();
+	await page.getByRole("option", { name: "vector · IVF_PQ" }).click();
 	await section.getByRole("button", { name: "Build index" }).click();
 	// a vector type routes to create_index (scalar=0) and carries the distance type
 	await expect

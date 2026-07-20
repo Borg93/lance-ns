@@ -329,6 +329,18 @@
 	const stateColor = (s?: string | null) =>
 		/FAIL|ABORT/i.test(s ?? "") ? "var(--fail)" : s === "COMPLETE" ? "var(--ok)" : "var(--mut)";
 
+	function fmtBytes(n: number | null | undefined): string {
+		if (n == null) return "";
+		const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+		let v = n;
+		let u = 0;
+		while (v >= 1024 && u < units.length - 1) {
+			v /= 1024;
+			u += 1;
+		}
+		return `${v.toFixed(v >= 10 || u === 0 ? 0 : 1)} ${units[u]}`;
+	}
+
 	const selectedRuns = $derived(store.selected ? (store.producers[store.selected] ?? []) : []);
 	// The distinct Lance versions this dataset was written at (newest-first, from its producing runs) —
 	// the version options the schema-time-travel viewer steps through.
@@ -715,9 +727,31 @@
 									<span class="badge" style:background={stateColor(r.event_type)}>
 										{r.dataset_version ? `v${r.dataset_version}` : r.event_type}
 									</span>
+									{#if r.operation}<span class="op mono">{r.operation}</span>{/if}
 									<span class="who">{r.author ?? "—"}</span>
 								</div>
 								<div class="who">{r.event_time}</div>
+								{#if r.row_count != null || r.size_bytes != null}
+									<div class="metrics mono">
+										{#if r.row_count != null}{r.row_count.toLocaleString()} rows{/if}
+										{#if r.size_bytes != null}<span class="dot">·</span>{fmtBytes(
+												r.size_bytes,
+											)}{/if}
+									</div>
+								{/if}
+								{#if r.quality_passed != null}
+									<div class="metrics">
+										<span
+											class="qchip"
+											class:pass={r.quality_passed}
+											class:block={!r.quality_passed}
+										>
+											quality {r.quality_passed ? "passed" : "blocked"}{r.quality_assertions?.length
+												? ` · ${r.quality_assertions.length} check${r.quality_assertions.length === 1 ? "" : "s"}`
+												: ""}
+										</span>
+									</div>
+								{/if}
 								{#if r.error_message}<div class="err">{r.error_message}</div>{/if}
 								<RunInputs runId={r.run_id} />
 							</div>
@@ -1025,7 +1059,43 @@
 	}
 	.run-top {
 		display: flex;
-		justify-content: space-between;
+		align-items: center;
+		gap: 6px;
+	}
+	.run-top .who {
+		margin-top: 0;
+		margin-left: auto;
+	}
+	.op {
+		font-size: 10.5px;
+		color: var(--mut);
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm, 4px);
+		padding: 0 5px;
+	}
+	.metrics {
+		color: var(--mut);
+		font-size: 11px;
+		margin-top: 4px;
+	}
+	.metrics .dot {
+		margin: 0 5px;
+		color: var(--faint);
+	}
+	.qchip {
+		font-size: 10.5px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm, 4px);
+		padding: 0 6px;
+	}
+	.qchip.pass {
+		border-color: color-mix(in srgb, var(--ok) 55%, var(--line));
+		color: var(--ok);
+	}
+	.qchip.block {
+		border-color: color-mix(in srgb, var(--fail) 55%, var(--line));
+		color: var(--fail);
 	}
 
 	/* ---- selected-dataset relationships (upstream / downstream / column-lineage) ---- */

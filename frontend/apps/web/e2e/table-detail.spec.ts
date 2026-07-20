@@ -12,7 +12,10 @@ const DETAIL = {
 	describe: {
 		version: 3,
 		location: "s3://lance-catalog/db1$t",
-		schema: { fields: [{ name: "id", type: "int64", nullable: false }] },
+		schema: {
+			fields: [{ name: "id", type: "int64", nullable: false, metadata: { unit: "count" } }],
+		},
+		metadata: { owner: "data-eng" }, // #74 tail — table-level schema metadata (properties editor seed)
 	},
 	stats: { num_rows: 100, total_bytes: 2048, num_indices: 1 },
 	versions: {
@@ -113,7 +116,10 @@ test.beforeEach(async ({ page }) => {
 			compactBody = req.postDataJSON() as Record<string, unknown>;
 			return json(route, { ok: true, fragments_removed: 6, fragments_added: 1 });
 		}
-		if (path.match(/\/columns\/(add|alter|drop)$/) && req.method() === "POST") {
+		if (
+			path.match(/\/columns\/(add|alter|drop|field-meta|table-meta)$/) &&
+			req.method() === "POST"
+		) {
 			colPost = {
 				op: path.split("/").pop() ?? "",
 				body: req.postDataJSON() as Record<string, unknown>,
@@ -271,6 +277,59 @@ test("rename-column via the row ✎ posts an alter path→rename (#74)", async (
 	await section.getByRole("button", { name: "save" }).click();
 	await expect.poll(() => colPost?.op).toBe("alter");
 	expect(colPost?.body).toEqual({ alterations: [{ path: "id", rename: "identifier" }] });
+});
+
+test("re-type-column via the row ⇄ posts an alter path→data_type (#74 tail)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Schema" }).first();
+	await section.getByRole("button", { name: "re-type id" }).click();
+	// the target type is the @lance/ui Select (bits-ui) — open it, pick float32
+	await section.getByLabel("re-type id to").click();
+	await page.getByRole("option", { name: "float32", exact: true }).click();
+	await section.getByRole("button", { name: "save" }).click();
+	await expect.poll(() => colPost?.op).toBe("alter");
+	expect(colPost?.body).toEqual({ alterations: [{ path: "id", data_type: { type: "float32" } }] });
+});
+
+test("save table properties posts the full metadata map (#74 tail)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Properties" });
+	// the seed row is describe.metadata { owner: "data-eng" }; add a second key, then save the whole map
+	await section.getByRole("button", { name: "+ add row" }).click();
+	await section.getByLabel("Property key 2").fill("tier");
+	await section.getByLabel("Property value 2").fill("gold");
+	await section.getByRole("button", { name: "Save properties" }).click();
+	await expect.poll(() => colPost?.op).toBe("table-meta");
+	expect(colPost?.body).toEqual({ metadata: { owner: "data-eng", tier: "gold" } });
+	await expect(section.getByText("Saved.")).toBeVisible();
+});
+
+test("set a column property merges one key (#74 tail)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Properties" });
+	await section.getByLabel("Column for properties").click();
+	await page.getByRole("option", { name: "id", exact: true }).click();
+	// the seeded field metadata { unit: "count" } renders as a deletable chip
+	await expect(section).toContainText("unit=count");
+	await section.getByLabel("Column property key").fill("pii");
+	await section.getByLabel("Column property value").fill("false");
+	await section.getByRole("button", { name: "Set", exact: true }).click();
+	await expect.poll(() => colPost?.op).toBe("field-meta");
+	expect(colPost?.body).toEqual({
+		updates: [{ path: "id", metadata: { pii: "false" }, replace: false }],
+	});
+});
+
+test("delete a column property posts a null-valued key (#74 tail)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Properties" });
+	await section.getByLabel("Column for properties").click();
+	await page.getByRole("option", { name: "id", exact: true }).click();
+	await section.getByRole("button", { name: "Delete column property unit" }).click();
+	await expect.poll(() => colPost?.op).toBe("field-meta");
+	expect(colPost?.body).toEqual({
+		updates: [{ path: "id", metadata: { unit: null }, replace: false }],
+	});
 });
 
 test("delete a tag via the chip × (#74)", async ({ page }) => {

@@ -230,6 +230,60 @@ export const dropColumn = (table: string, name: string) =>
 		body: JSON.stringify({ columns: [name] }),
 	});
 
+/** #74 tail — the scalar Arrow types the catalog's `_SCALAR_ARROW` map accepts as an alter_columns re-type
+ * target. A cast Lance can't perform (e.g. string→int on non-numeric text) 400s at the catalog, surfaced. */
+export const RETYPE_TYPES = [
+	"int8",
+	"int16",
+	"int32",
+	"int64",
+	"uint8",
+	"uint16",
+	"uint32",
+	"uint64",
+	"float16",
+	"float32",
+	"float64",
+	"string",
+	"large_string",
+	"bool",
+	"date32",
+	"date64",
+	"binary",
+	"large_binary",
+] as const;
+
+/** #74 tail — re-type an existing column (alter_columns path→data_type). Writer-gated, session-only BFF. */
+export const retypeColumn = (table: string, path: string, type: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/columns/alter`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ alterations: [{ path, data_type: { type } }] }),
+	});
+
+/** #74 tail — merge or replace one field's metadata (update_field_metadata). A `null` value deletes that key.
+ * Writer-gated (can_write_data) at the catalog; session-only BFF. */
+export const setFieldMetadata = (
+	table: string,
+	path: string,
+	metadata: Record<string, string | null>,
+	replace = false,
+) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/columns/field-meta`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ updates: [{ path, metadata, replace }] }),
+	});
+
+/** #74 tail — SET the table's schema-level metadata map (schema_metadata/update replaces the whole map, so
+ * the caller sends the full desired map). Writer-gated (can_write_data) at the catalog; session-only BFF. */
+export const setTableProperties = (table: string, metadata: Record<string, string>) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/columns/table-meta`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ metadata }),
+	});
+
 export type CreateIndexBody = { column: string; index_type: string; distance_type?: string };
 
 /** #73 build an index — `scalar` picks the catalog's create_scalar_index (BTREE/BITMAP/INVERTED …) vs

@@ -41,11 +41,14 @@ describe("column-ops BFF (#74)", () => {
 		expect(d.calls.length).toBe(0);
 	});
 
-	test("add|alter|drop map to the catalog {op}_columns with the bearer", async () => {
+	test("every allowlisted op maps to its catalog route with the bearer (#74 incl. tail)", async () => {
 		for (const [op, upstream] of [
 			["add", "add_columns"],
 			["alter", "alter_columns"],
 			["drop", "drop_columns"],
+			// #74 tail — per-field + table-level metadata (the latter a two-segment upstream that composes).
+			["field-meta", "update_field_metadata"],
+			["table-meta", "schema_metadata/update"],
 		]) {
 			const d = drive(op, { session: true });
 			expect((await d.run()).status).toBe(200);

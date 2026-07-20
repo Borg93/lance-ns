@@ -33,12 +33,15 @@
 		type Policy,
 		type PolicyRequest,
 		previewMaintenance,
+		RETYPE_TYPES,
 		type TableStats,
 		type TableDetail,
 		restoreTableVersion,
+		retypeColumn,
 		runMaintenance,
 		setTablePolicy,
 	} from "./catalog";
+	import TableProperties from "./TableProperties.svelte";
 
 	let { table }: { table: string } = $props();
 
@@ -148,6 +151,8 @@
 		addColExpr = "";
 		renaming = null;
 		renameTo = "";
+		retyping = null;
+		retypeTo = "";
 		refBusy = false;
 		refError = null;
 		movingTag = null;
@@ -271,6 +276,8 @@
 	let addColExpr = $state("");
 	let renaming = $state<string | null>(null); // the column currently being renamed
 	let renameTo = $state("");
+	let retyping = $state<string | null>(null); // the column currently being re-typed (#74 tail)
+	let retypeTo = $state(""); // the target scalar Arrow type (bits-ui Select string)
 
 	function colFail(status: number, detail: string): void {
 		if (status === 401) colError = "Sign in to change the schema.";
@@ -321,6 +328,24 @@
 			if (res.ok) {
 				renaming = null;
 				renameTo = "";
+				await load();
+			} else colFail(res.status, res.detail);
+		} finally {
+			colBusy = false;
+		}
+	}
+
+	async function runRetypeColumn(): Promise<void> {
+		const path = retyping;
+		const type = retypeTo;
+		if (colBusy || !path || !type) return;
+		colBusy = true;
+		colError = null;
+		try {
+			const res = await retypeColumn(table, path, type);
+			if (res.ok) {
+				retyping = null;
+				retypeTo = "";
 				await load();
 			} else colFail(res.status, res.detail);
 		} finally {
@@ -510,8 +535,12 @@
 			name: string;
 			type?: unknown;
 			nullable?: boolean;
+			metadata?: Record<string, string>;
 		}[],
 	);
+	// #74 tail — the table's schema-level metadata map (what schema_metadata/update sets), for the properties
+	// editor. `describe.metadata` is the current map; absent → an empty, still-editable map.
+	const tableMeta = $derived((detail?.describe.metadata ?? {}) as Record<string, string>);
 	// Columns whose type is binary/blob — the ones the blob preview can read a cell from.
 	const blobColumns = $derived(
 		schemaFields
@@ -741,6 +770,23 @@
 											onclick={runRenameColumn}>save</button
 										>
 										<button class="btn ghost" onclick={() => (renaming = null)}>×</button>
+									{:else if retyping === f.name}
+										<!-- #74 tail — re-type via alter_columns; the target is a scalar Arrow type the
+										     catalog's _SCALAR_ARROW map accepts. An impossible cast 400s and surfaces. -->
+										<div class="retype">
+											<Select
+												bind:value={retypeTo}
+												ariaLabel="re-type {f.name} to"
+												placeholder="new type"
+												options={RETYPE_TYPES.map((t) => ({ value: t, label: t }))}
+											/>
+											<button
+												class="btn ghost"
+												disabled={colBusy || !retypeTo}
+												onclick={runRetypeColumn}>save</button
+											>
+											<button class="btn ghost" onclick={() => (retyping = null)}>×</button>
+										</div>
 									{:else}
 										<button
 											class="chip-x"
@@ -751,6 +797,16 @@
 												renaming = f.name;
 												renameTo = "";
 											}}>✎</button
+										>
+										<button
+											class="chip-x"
+											title="re-type column"
+											aria-label="re-type {f.name}"
+											disabled={colBusy}
+											onclick={() => {
+												retyping = f.name;
+												retypeTo = "";
+											}}>⇄</button
 										>
 										<button
 											class="chip-x"
@@ -796,6 +852,9 @@
 			</form>
 			{#if colError}<p class="error">{colError}</p>{/if}
 		</section>
+
+		<!-- #74 tail — table + per-column property editor (writer-gated; session-only /capi BFF). -->
+		<TableProperties {table} fields={schemaFields} {tableMeta} onchange={load} />
 
 		<section>
 			<h2>Insert rows</h2>

@@ -552,6 +552,56 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/admin/dlq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dlq
+         * @description The outbox saturation snapshot + the visible at-risk events (oldest first, capped at ``limit``).
+         *
+         *     ``depth``/``oldest_age_seconds`` are the raw system-health signal; ``events`` is the per-dataset-governed
+         *     subset the caller may see. Requires an authenticated principal when FGA is on (else the raw depth would
+         *     leak to an anonymous caller); the event list is then filtered by dataset visibility.
+         */
+        get: operations["list_dlq_admin_dlq_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/dlq/{run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Dlq
+         * @description Re-ingest one staged event on demand, then drop it — the manual twin of the reconcile relay's drain.
+         *
+         *     A replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the
+         *     event's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The
+         *     ingest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop
+         *     is only reached on success — a failed re-ingest leaves the object staged for the relay to retry. A poison
+         *     (unparseable) object cannot be replayed (422); the relay drops those. Audited on the #41 trail.
+         */
+        post: operations["replay_dlq_admin_dlq__run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/livez": {
         parameters: {
             query?: never;
@@ -876,6 +926,61 @@ export interface components {
         DescriptionUpdate: {
             /** Description */
             description: string;
+        };
+        /**
+         * DlqBacklog
+         * @description The outbox saturation snapshot + the visible at-risk events (#83).
+         *
+         *     ``depth`` / ``oldest_age_seconds`` are the RAW system-health signal (the same numbers the
+         *     ``outbox.depth`` gauge alerts on); ``events`` is the governed subset the caller may see (≤ depth when
+         *     per-dataset filtering drops events for datasets outside the caller's reach), capped at ``limit``.
+         */
+        DlqBacklog: {
+            /** Depth */
+            depth: number;
+            /** Oldest Age Seconds */
+            oldest_age_seconds: number;
+            /** Events */
+            events: components["schemas"]["DlqEvent"][];
+            /** Limit */
+            limit: number;
+        };
+        /**
+         * DlqEvent
+         * @description One staged-but-not-yet-drained lineage event in the transactional outbox (#83 ops view).
+         *
+         *     A file's presence in the outbox means "committed write, lineage not yet confirmed delivered" — the
+         *     at-risk set the reconcile relay drains. ``parseable=False`` marks a poison object (the relay would drop
+         *     it): its run_id is the filename, the rest is unknown.
+         */
+        DlqEvent: {
+            /** Run Id */
+            run_id: string;
+            /** Event Type */
+            event_type?: string | null;
+            /** Event Time */
+            event_time?: string | null;
+            /** Job */
+            job?: string | null;
+            /** Inputs */
+            inputs?: string[];
+            /** Outputs */
+            outputs?: string[];
+            /**
+             * Parseable
+             * @default true
+             */
+            parseable: boolean;
+        };
+        /**
+         * DlqReplayResponse
+         * @description The result of re-ingesting one staged event (#83): idempotent MERGE on ``run_id``, then drop.
+         */
+        DlqReplayResponse: {
+            /** Status */
+            status: string;
+            /** Run Id */
+            run_id: string;
         };
         /**
          * EventRecord
@@ -2131,6 +2236,74 @@ export interface operations {
                     "application/json": {
                         [key: string]: string;
                     };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_dlq_admin_dlq_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DlqBacklog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_dlq_admin_dlq__run_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DlqReplayResponse"];
                 };
             };
             /** @description Validation Error */

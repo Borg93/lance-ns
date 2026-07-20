@@ -48,6 +48,18 @@ def drop_event(outbox_uri: str, storage_options: StorageOptions, run_id: str) ->
         fs.delete_file(f"{base}/{run_id}.json")
 
 
+def read_event(outbox_uri: str, storage_options: StorageOptions, run_id: str) -> str | None:
+    """The staged event JSON for one ``run_id``, or ``None`` if it isn't staged (already drained / never
+    staged). The targeted read behind an admin DLQ replay (#83) — cheaper + race-safer than scanning the
+    whole prefix. Blocking IO; callers threadpool it."""
+    fs, base = fs_and_base(outbox_uri, storage_options)
+    try:
+        with fs.open_input_stream(f"{base}/{run_id}.json") as stream:
+            return stream.readall().decode("utf-8")
+    except FileNotFoundError:
+        return None
+
+
 def _staged_infos(outbox_uri: str, storage_options: StorageOptions) -> list[pafs.FileInfo]:
     """Every staged `.json` object under the prefix, OLDEST FIRST.
 

@@ -432,6 +432,123 @@
         "title": "DescriptionUpdate",
         "type": "object"
       },
+      "DlqBacklog": {
+        "description": "The outbox saturation snapshot + the visible at-risk events (#83).\n\n``depth`` / ``oldest_age_seconds`` are the RAW system-health signal (the same numbers the\n``outbox.depth`` gauge alerts on); ``events`` is the governed subset the caller may see (\u2264 depth when\nper-dataset filtering drops events for datasets outside the caller's reach), capped at ``limit``.",
+        "properties": {
+          "depth": {
+            "title": "Depth",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DlqEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "limit": {
+            "title": "Limit",
+            "type": "integer"
+          },
+          "oldest_age_seconds": {
+            "title": "Oldest Age Seconds",
+            "type": "number"
+          }
+        },
+        "required": [
+          "depth",
+          "oldest_age_seconds",
+          "events",
+          "limit"
+        ],
+        "title": "DlqBacklog",
+        "type": "object"
+      },
+      "DlqEvent": {
+        "description": "One staged-but-not-yet-drained lineage event in the transactional outbox (#83 ops view).\n\nA file's presence in the outbox means \"committed write, lineage not yet confirmed delivered\" \u2014 the\nat-risk set the reconcile relay drains. ``parseable=False`` marks a poison object (the relay would drop\nit): its run_id is the filename, the rest is unknown.",
+        "properties": {
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Inputs",
+            "type": "array"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Outputs",
+            "type": "array"
+          },
+          "parseable": {
+            "default": true,
+            "title": "Parseable",
+            "type": "boolean"
+          },
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "run_id"
+        ],
+        "title": "DlqEvent",
+        "type": "object"
+      },
+      "DlqReplayResponse": {
+        "description": "The result of re-ingesting one staged event (#83): idempotent MERGE on ``run_id``, then drop.",
+        "properties": {
+          "run_id": {
+            "title": "Run Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "run_id"
+        ],
+        "title": "DlqReplayResponse",
+        "type": "object"
+      },
       "EventRecord": {
         "description": "One ingested OpenLineage event, Marquez-style (summary + the full event with facets).",
         "properties": {
@@ -1467,6 +1584,169 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/admin/dlq": {
+      "get": {
+        "description": "The outbox saturation snapshot + the visible at-risk events (oldest first, capped at ``limit``).\n\n``depth``/``oldest_age_seconds`` are the raw system-health signal; ``events`` is the per-dataset-governed\nsubset the caller may see. Requires an authenticated principal when FGA is on (else the raw depth would\nleak to an anonymous caller); the event list is then filtered by dataset visibility.",
+        "operationId": "list_dlq_admin_dlq_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "dapr-api-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-lance-service-identity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DlqBacklog"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List Dlq",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/admin/dlq/{run_id}/replay": {
+      "post": {
+        "description": "Re-ingest one staged event on demand, then drop it \u2014 the manual twin of the reconcile relay's drain.\n\nA replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the\nevent's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The\ningest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop\nis only reached on success \u2014 a failed re-ingest leaves the object staged for the relay to retry. A poison\n(unparseable) object cannot be replayed (422); the relay drops those. Audited on the #41 trail.",
+        "operationId": "replay_dlq_admin_dlq__run_id__replay_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "run_id",
+            "required": true,
+            "schema": {
+              "title": "Run Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "dapr-api-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-lance-service-identity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DlqReplayResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Replay Dlq",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
     "/api/v1/lineage": {
       "post": {
         "description": "Ingest one OpenLineage ``RunEvent`` into the lineage graph.\n\nThis is the OpenLineage HTTP-transport default path, so any OpenLineage producer\n(our emitter, Airflow, Spark, dbt, \u2026) configured with ``OPENLINEAGE_URL`` pointed\nhere ingests with no glue \u2014 the lightweight-Marquez contract.\n\nWhen OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token\n(401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that\ntoken's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`\nrequires ``can_write_data`` on every output dataset (a producer can't record provenance for a table\nit can't write). Both are no-ops when auth is off.",

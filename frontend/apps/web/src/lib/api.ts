@@ -6,6 +6,8 @@ import type {
 	ColumnNeighbors,
 	Datasets,
 	DemoDatasets,
+	DlqBacklog,
+	DlqReplayResponse,
 	Events,
 	Jobs,
 	LineageGraph,
@@ -46,6 +48,14 @@ export const fetchEvents = (opts: { after?: number; limit?: number; summary?: bo
 	const qs = p.toString();
 	return getJSON<Events>(`events${qs ? `?${qs}` : ""}`);
 };
+// #83 DLQ ops — the transactional-outbox backlog (admin). Status-aware (a 401 on a governed stack must read
+// differently from an empty backlog), so it goes through requestJSON, not the null-swallowing getJSON.
+export const fetchDlq = (limit = 100) =>
+	requestJSON<DlqBacklog>("/api", `admin/dlq?limit=${limit}`);
+// Replay one staged event — a session-only write (its own /api/admin/dlq/{run}/replay BFF route forwards the
+// user's bearer, never the service token). Writer-gated at the lineage service (can_write_data on outputs).
+export const replayDlq = (runId: string) =>
+	requestJSON<DlqReplayResponse>("/api", `admin/dlq/${enc(runId)}/replay`, { method: "POST" });
 export const fetchDemo = () => getJSON<DemoDatasets>("demo/datasets");
 export const fetchRuns = () => getJSON<Runs>("runs");
 // The inputs a run consumed, each with the version it PINNED (#115 D1 reproducibility) — "which exact

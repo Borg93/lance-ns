@@ -258,6 +258,44 @@ class Events(BaseModel):
     next_cursor: int | None = None
 
 
+class DlqEvent(BaseModel):
+    """One staged-but-not-yet-drained lineage event in the transactional outbox (#83 ops view).
+
+    A file's presence in the outbox means "committed write, lineage not yet confirmed delivered" — the
+    at-risk set the reconcile relay drains. ``parseable=False`` marks a poison object (the relay would drop
+    it): its run_id is the filename, the rest is unknown.
+    """
+
+    run_id: str
+    event_type: str | None = None
+    event_time: str | None = None
+    job: str | None = None
+    inputs: list[str] = Field(default_factory=list)
+    outputs: list[str] = Field(default_factory=list)
+    parseable: bool = True
+
+
+class DlqBacklog(BaseModel):
+    """The outbox saturation snapshot + the visible at-risk events (#83).
+
+    ``depth`` / ``oldest_age_seconds`` are the RAW system-health signal (the same numbers the
+    ``outbox.depth`` gauge alerts on); ``events`` is the governed subset the caller may see (≤ depth when
+    per-dataset filtering drops events for datasets outside the caller's reach), capped at ``limit``.
+    """
+
+    depth: int
+    oldest_age_seconds: float
+    events: list[DlqEvent]
+    limit: int
+
+
+class DlqReplayResponse(BaseModel):
+    """The result of re-ingesting one staged event (#83): idempotent MERGE on ``run_id``, then drop."""
+
+    status: str
+    run_id: str
+
+
 class DemoField(BaseModel):
     """A column of a Lance dataset version (name + Arrow type)."""
 

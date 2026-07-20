@@ -2004,6 +2004,169 @@
         }
       }
     },
+    "/admin/dlq": {
+      "get": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "List Dlq",
+        "description": "The outbox saturation snapshot + the visible at-risk events (oldest first, capped at ``limit``).\n\n``depth``/``oldest_age_seconds`` are the raw system-health signal; ``events`` is the per-dataset-governed\nsubset the caller may see. Requires an authenticated principal when FGA is on (else the raw depth would\nleak to an anonymous caller); the event list is then filtered by dataset visibility.",
+        "operationId": "list_dlq_admin_dlq_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 500,
+              "minimum": 1,
+              "default": 100,
+              "title": "Limit"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DlqBacklog"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/admin/dlq/{run_id}/replay": {
+      "post": {
+        "tags": [
+          "admin"
+        ],
+        "summary": "Replay Dlq",
+        "description": "Re-ingest one staged event on demand, then drop it \u2014 the manual twin of the reconcile relay's drain.\n\nA replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the\nevent's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The\ningest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop\nis only reached on success \u2014 a failed re-ingest leaves the object staged for the relay to retry. A poison\n(unparseable) object cannot be replayed (422); the relay drops those. Audited on the #41 trail.",
+        "operationId": "replay_dlq_admin_dlq__run_id__replay_post",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "run_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Run Id"
+            }
+          },
+          {
+            "name": "dapr-api-token",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "name": "x-lance-service-identity",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DlqReplayResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/livez": {
       "get": {
         "tags": [
@@ -2697,6 +2860,123 @@
         ],
         "title": "DescriptionUpdate",
         "description": "The ``PUT /datasets/{name}/description`` body. An empty string clears the description."
+      },
+      "DlqBacklog": {
+        "properties": {
+          "depth": {
+            "type": "integer",
+            "title": "Depth"
+          },
+          "oldest_age_seconds": {
+            "type": "number",
+            "title": "Oldest Age Seconds"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/DlqEvent"
+            },
+            "type": "array",
+            "title": "Events"
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit"
+          }
+        },
+        "type": "object",
+        "required": [
+          "depth",
+          "oldest_age_seconds",
+          "events",
+          "limit"
+        ],
+        "title": "DlqBacklog",
+        "description": "The outbox saturation snapshot + the visible at-risk events (#83).\n\n``depth`` / ``oldest_age_seconds`` are the RAW system-health signal (the same numbers the\n``outbox.depth`` gauge alerts on); ``events`` is the governed subset the caller may see (\u2264 depth when\nper-dataset filtering drops events for datasets outside the caller's reach), capped at ``limit``."
+      },
+      "DlqEvent": {
+        "properties": {
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          },
+          "event_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Type"
+          },
+          "event_time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Time"
+          },
+          "job": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Job"
+          },
+          "inputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Inputs"
+          },
+          "outputs": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Outputs"
+          },
+          "parseable": {
+            "type": "boolean",
+            "title": "Parseable",
+            "default": true
+          }
+        },
+        "type": "object",
+        "required": [
+          "run_id"
+        ],
+        "title": "DlqEvent",
+        "description": "One staged-but-not-yet-drained lineage event in the transactional outbox (#83 ops view).\n\nA file's presence in the outbox means \"committed write, lineage not yet confirmed delivered\" \u2014 the\nat-risk set the reconcile relay drains. ``parseable=False`` marks a poison object (the relay would drop\nit): its run_id is the filename, the rest is unknown."
+      },
+      "DlqReplayResponse": {
+        "properties": {
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "run_id": {
+            "type": "string",
+            "title": "Run Id"
+          }
+        },
+        "type": "object",
+        "required": [
+          "status",
+          "run_id"
+        ],
+        "title": "DlqReplayResponse",
+        "description": "The result of re-ingesting one staged event (#83): idempotent MERGE on ``run_id``, then drop."
       },
       "EventRecord": {
         "properties": {

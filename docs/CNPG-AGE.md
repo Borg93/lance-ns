@@ -54,12 +54,16 @@ environment snag, not an AGE one.
 2. **The ImageVolume infra prerequisites — PROVEN reachable.** Stood up a throwaway kind cluster on **K8s 1.34**
    with **containerd v2.1.3** (≥2.1, the CRI requirement) and the `ImageVolume` feature gate enabled — so a
    real cluster can do the mount.
-3. **The CNPG operator managing a real Cluster — NOT completed here.** On that fresh kind-1.34 throwaway the
-   CNPG operator (tried 1.30 and 1.28) would not reach Ready (its `:9443` manager exits 2 shortly after
-   loading config — a CNPG-operator/very-new-kind startup issue, unrelated to AGE), so the final
-   "operator mounts the AGE ImageVolume + runs `CREATE EXTENSION`" step wasn't exercised. On a conformant
-   managed 1.33+ cluster the operator runs normally; combined with (1)+(2) the path is sound — re-run
-   `deploy/cnpg-age-cluster.yaml` there to close the last mile.
+3. **The CNPG operator managing a real Cluster — NOT completed on this host.** The CNPG operator (tried 1.30
+   AND 1.28, on kind K8s **1.34 and 1.33**, with a bumped 512Mi limit and a loosened startup probe) would not
+   reach Ready — its `:9443` manager exits 2 a few seconds after "Listening for changes", a **real crash, not
+   a probe/memory timing issue**. This is a **host-environment wall on this dev machine** (the same class of
+   quirk that made the OTel `0.116` collector image fail to `exec` here — kernel 6.17-oem), **not an AGE, a
+   CNPG-config, or a Kubernetes-version issue** — CNPG runs normally on standard managed clusters. So the
+   operator-managed-Cluster step (both the ImageVolume and the bridge path need a working operator) can't be
+   exercised on this box; it needs a normal cluster. Both extension images are built (`age-cnpg-ext:1.7.0-18`,
+   `cnpg-pg16-age:bridge`); combined with (1)+(2), running `deploy/cnpg-age-cluster.yaml` on any conformant
+   cluster closes the last mile.
 
 ## Bridge (older clusters without ImageVolume): a custom full image
 If your prod K8s can't do ImageVolume yet, build AGE into a **custom CNPG Postgres image** and point the

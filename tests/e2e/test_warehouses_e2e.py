@@ -152,3 +152,34 @@ def test_create_warehouse_denied_for_non_admin(catalog: str) -> None:
         timeout=30,
     )
     assert r.status_code == 403, r.text
+
+
+# NONADMIN is only provided on an auth-ON governed stack, so it doubles as the "auth is enforced here" gate
+# for the two anon legs below (on an auth-off stack an anon POST is a legitimate 200, not a bug).
+def test_admin_plane_unauthenticated_is_401(catalog: str) -> None:
+    """Admin control plane fails CLOSED to an ANONYMOUS caller — no token is 401, before any FGA check.
+    The 403 leg proves a known non-admin is denied; this proves the anonymous door is shut at the auth gate,
+    so a token-less request can never provision a warehouse."""
+    if not NONADMIN:
+        pytest.skip("auth-on stack only (set LANCE_E2E_NONADMIN_TOKEN)")
+    r = requests.post(
+        f"{catalog}/v1/warehouses",
+        json={"id": "e2e-wh-anon", "project": PROJECT},
+        timeout=30,  # deliberately no authorization header
+    )
+    assert r.status_code == 401, r.text
+
+
+def test_data_plane_unauthenticated_write_is_401(catalog: str) -> None:
+    """Data plane fails CLOSED too — a token-less table create is 401 at the router auth gate (before
+    namespace resolution), never an anonymous write that would land data with no attributable author
+    (the forgeable-provenance / confused-deputy hazard)."""
+    if not NONADMIN:
+        pytest.skip("auth-on stack only (set LANCE_E2E_NONADMIN_TOKEN)")
+    r = requests.post(
+        f"{catalog}/v1/table/e2ens{DELIM}e2e_anon/create?mode=overwrite",
+        data=_arrow_ipc(),
+        headers={"content-type": ARROW_STREAM},  # deliberately no authorization header
+        timeout=30,
+    )
+    assert r.status_code == 401, r.text

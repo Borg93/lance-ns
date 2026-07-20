@@ -61,6 +61,13 @@ data:
     extensions:
       health_check:
         endpoint: 0.0.0.0:13133
+      # Persist filelog read offsets so a collector RESTART resumes where it left off instead of jumping to the
+      # tail (filelog's default start_at: end = logs written during the gap are lost) — the durability Vector's
+      # data_dir gave. The emptyDir survives container crash/OOM restarts (the common case, same pod); a full
+      # pod reschedule starts fresh, but in prod the OTel operator owns the Collector (this file renders nothing)
+      # and manages its own offset persistence. fsGroup 65534 makes the dir writable by the non-root runtime.
+      file_storage:
+        directory: /var/lib/otelcol/file_storage
     receivers:
       otlp:
         protocols:
@@ -73,6 +80,8 @@ data:
         include: [/var/log/pods/*/*/*.log]
         exclude: [/var/log/pods/{{ .Release.Namespace }}_{{ $fullname }}-otel-collector-*/*/*.log]
         include_file_path: true
+        start_at: end
+        storage: file_storage
         retry_on_failure: { enabled: true }
         operators:
           - type: container
@@ -134,7 +143,7 @@ data:
         headers:
           x-greptime-db-name: {{ $o.dbName | quote }}
     service:
-      extensions: [health_check]
+      extensions: [health_check, file_storage]
       pipelines:
         traces:
           receivers: [otlp]
@@ -183,11 +192,14 @@ spec:
             # containerd, so mount both roots (the second is where the real files live on most nodes).
             - { name: varlogpods, mountPath: /var/log/pods, readOnly: true }
             - { name: varlibdockercontainers, mountPath: /var/lib/docker/containers, readOnly: true }
+            # filelog offset checkpoints (file_storage extension) — writable via fsGroup 65534.
+            - { name: offsets, mountPath: /var/lib/otelcol/file_storage }
       volumes:
         - name: config
           configMap: { name: {{ $sa }} }
         - { name: varlogpods, hostPath: { path: /var/log/pods } }
         - { name: varlibdockercontainers, hostPath: { path: /var/lib/docker/containers } }
+        - { name: offsets, emptyDir: {} }
 ---
 apiVersion: v1
 kind: Service

@@ -22,7 +22,7 @@ import pytest
 from common import fga
 from lance_namespace import ServiceUnavailableError
 from openfga_sdk import OpenFgaClient
-from openfga_sdk.client.models import ClientTuple
+from openfga_sdk.client.models import ClientCheckRequest, ClientTuple
 
 
 def test_is_transient_classifies_network_errors() -> None:
@@ -72,6 +72,46 @@ def test_check_fails_closed_on_network_error() -> None:
                 retry_max_backoff_seconds=0.0,
             )
         )
+
+
+class _CapturingCheck:
+    """Fake client that records the exact subject string sent to OpenFGA Check."""
+
+    def __init__(self) -> None:
+        self.seen: list[str] = []
+
+    async def check(self, request: ClientCheckRequest) -> object:
+        self.seen.append(request.user)
+        return SimpleNamespace(allowed=True)
+
+
+def test_check_qualifies_bare_subject() -> None:
+    """The common case — callers pass a bare token.sub; fga.check prepends ``user:``."""
+    c = _CapturingCheck()
+    asyncio.run(fga.check(cast(OpenFgaClient, c), user="alice", relation="can_read_data", obj="table:t"))
+    assert c.seen == ["user:alice"]
+
+
+def test_check_qualify_false_sends_subject_verbatim() -> None:
+    """The access simulator (#68) passes a FULL subject: ``qualify=False`` must send it verbatim — never
+    double-prefix a user (``user:user:alice`` → always denies) and let a userset be Checked at all
+    (audit 2026-07-20 caught the double-prefix bug that made every simulated Check falsely deny)."""
+    c = _CapturingCheck()
+    asyncio.run(
+        fga.check(
+            cast(OpenFgaClient, c), user="user:alice", relation="can_drop", obj="table:t", qualify=False
+        )
+    )
+    asyncio.run(
+        fga.check(
+            cast(OpenFgaClient, c),
+            user="role:project_admin#member",
+            relation="can_drop",
+            obj="table:t",
+            qualify=False,
+        )
+    )
+    assert c.seen == ["user:alice", "role:project_admin#member"]
 
 
 def test_batch_check_fails_closed_on_network_error() -> None:

@@ -292,21 +292,28 @@ async def check(
     user: str,
     relation: str,
     obj: str,
+    qualify: bool = True,
     retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
     retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
     retry_max_backoff_seconds: float = DEFAULT_RETRY_MAX_BACKOFF_SECONDS,
 ) -> bool:
     """Return whether ``user:<user>`` has ``relation`` on ``obj`` (e.g. ``table:db1$t``).
 
+    Callers pass a BARE subject id (the token's ``sub``) and this prepends ``user:``. Pass
+    ``qualify=False`` when ``user`` is ALREADY a full subject — a ``type:id`` user or a ``type:id#rel``
+    userset — so it is sent verbatim (the access-simulator probes arbitrary subjects, incl. usersets;
+    double-prefixing them to ``user:user:…`` would make every Check falsely deny — review 2026-07-20).
+
     Transient OpenFGA failures (network/timeout, 429, 5xx) are retried with
     backoff; a definitive ``allowed=false`` is a normal result and is NOT retried.
     On exhausted retries / outage we fail closed with ``ServiceUnavailableError``.
     The per-request timeout is carried by ``client`` (see ``make_client``).
     """
+    subject = f"user:{user}" if qualify else user
 
     @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
     async def _do_check() -> bool:
-        response = await client.check(ClientCheckRequest(user=f"user:{user}", relation=relation, object=obj))
+        response = await client.check(ClientCheckRequest(user=subject, relation=relation, object=obj))
         return bool(response.allowed)
 
     try:

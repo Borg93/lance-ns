@@ -156,10 +156,13 @@ async def _access_check(
     segments = parse_identifier(id, settings.delimiter)
     obj = f"{fga_type}:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
     subject = token.sub if token else "anonymous"
-    # A bare subject is a user; a qualified userset (``role:…`` / ``team:…#member``) is passed through.
+    # Resolve to a FULL subject: a bare id is a user (``user:<id>``); a qualified userset
+    # (``role:…#member`` / ``team:…#member``) is passed through as-is. Then check with qualify=False so
+    # fga.check sends it verbatim — otherwise its default ``user:`` prefix would double to ``user:user:…``
+    # and every simulated Check would falsely deny (audit 2026-07-20 caught exactly this).
     user = body.user if ":" in body.user else f"user:{body.user}"
     try:
-        allowed = await fga.check(client, user=user, relation=body.relation, obj=obj)
+        allowed = await fga.check(client, user=user, relation=body.relation, obj=obj, qualify=False)
     except ServiceUnavailableError:
         audit("access_simulate", FAILURE, subject=subject, resource=obj, reason="authz_unavailable")
         raise

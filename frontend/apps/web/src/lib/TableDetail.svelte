@@ -135,12 +135,28 @@
 	const versions = $derived(
 		partErrored(detail?.versions)
 			? []
-			: ((detail?.versions?.versions ?? []) as { version?: number }[]),
+			: ((detail?.versions?.versions ?? []) as {
+					version?: number;
+					timestamp_millis?: number | null;
+					manifest_size?: number | null;
+					e_tag?: string | null;
+				}[]),
 	);
 	const tags = $derived(
 		partErrored(detail?.tags)
 			? []
 			: Object.entries((detail?.tags?.tags ?? {}) as Record<string, { version?: number }>),
+	);
+	// Lance branches: a name → BranchContents map (createAt in seconds, manifestSize in bytes).
+	const branches = $derived(
+		partErrored(detail?.branches)
+			? []
+			: Object.entries(
+					(detail?.branches?.branches ?? {}) as Record<
+						string,
+						{ createAt?: number; manifestSize?: number | null }
+					>,
+				),
 	);
 
 	function typeName(t: unknown): string {
@@ -158,6 +174,13 @@
 			u += 1;
 		}
 		return `${v.toFixed(v >= 10 || u === 0 ? 0 : 1)} ${units[u]}`;
+	}
+
+	// version manifest timestamps arrive in ms; branch createAt in seconds — normalise to one UTC string.
+	function fmtEpoch(value: number | null | undefined, unit: "ms" | "s"): string {
+		if (value == null) return "—";
+		const ms = unit === "s" ? value * 1000 : value;
+		return `${new Date(ms).toISOString().replace("T", " ").slice(0, 16)}Z`;
 	}
 </script>
 
@@ -234,14 +257,43 @@
 		</section>
 
 		<section>
-			<h2>Versions & tags</h2>
-			<div class="refs">
-				<span class="mut">{versions.length} version{versions.length === 1 ? "" : "s"}:</span>
-				{#each versions.slice(-12) as v (v.version)}
-					<span class="chip mono">v{v.version}</span>
-				{/each}
-				{#if versions.length > 12}<span class="mut">…</span>{/if}
+			<h2>Versions, branches & tags</h2>
+			{#if versions.length === 0}
+				<p class="mut">No version history available.</p>
+			{:else}
+				<p class="mut">
+					{versions.length} version{versions.length === 1 ? "" : "s"} — most recent first, one Lance manifest
+					per commit:
+				</p>
+				<table>
+					<thead><tr><th>version</th><th>committed</th><th>manifest</th></tr></thead>
+					<tbody>
+						{#each versions.slice().reverse().slice(0, 10) as v (v.version)}
+							<tr>
+								<td class="mono">v{v.version}</td>
+								<td class="mono">{fmtEpoch(v.timestamp_millis, "ms")}</td>
+								<td class="mono">{fmtBytes(v.manifest_size)}</td>
+							</tr>
+						{/each}
+					</tbody>
+				</table>
+				{#if versions.length > 10}<p class="mut">…and {versions.length - 10} older.</p>{/if}
+			{/if}
+
+			<div class="refs br">
+				<span class="mut">branches:</span>
+				{#if branches.length === 0}
+					<span class="chip mono">main</span>
+					<span class="mut">(no additional branches)</span>
+				{:else}
+					{#each branches as [name, b] (name)}
+						<span class="chip branch mono"
+							>{name}<span class="mut"> · {fmtBytes(b.manifestSize)}</span></span
+						>
+					{/each}
+				{/if}
 			</div>
+
 			<div class="refs">
 				{#if tags.length === 0}
 					<span class="mut">No tags — a promotion pins its version with one (e.g. blessed).</span>
@@ -408,6 +460,12 @@
 	}
 	.chip.off {
 		border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+	}
+	.chip.branch {
+		border-color: color-mix(in srgb, var(--faint) 60%, var(--line));
+	}
+	.refs.br {
+		margin-top: 10px;
 	}
 	.mut {
 		color: var(--faint);

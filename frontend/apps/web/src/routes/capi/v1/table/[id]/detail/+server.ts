@@ -38,13 +38,14 @@ export const GET: RequestHandler = async ({ params, fetch, locals }) => {
 				headers: { "content-type": describe.headers.get("content-type") ?? "application/json" },
 			});
 		}
-		const [stats, versions, tags, policy] = await Promise.all([
+		const [stats, versions, tags, branches, policy] = await Promise.all([
 			post("stats").then(part),
 			post("version/list").then(part),
 			post("tags/list").then(part),
+			post("branches/list").then(part),
 			post("policy/describe").then(part),
 		]);
-		return json({ describe: await describe.json(), stats, versions, tags, policy });
+		return json({ describe: await describe.json(), stats, versions, tags, branches, policy });
 	} catch (err) {
 		console.error(`capi detail proxy upstream failure: ${String(err)}`);
 		return json({ detail: String(err) }, { status: 502 });

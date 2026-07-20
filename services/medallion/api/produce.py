@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from common.dapr_auth import require_dapr_token
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
+from medallion.api.produce_auth import authorize_produce
 from medallion.services.produce import produce as run_produce
 
 router = APIRouter(tags=["produce"])
@@ -18,7 +18,7 @@ router = APIRouter(tags=["produce"])
 async def produce(
     dapr: DaprClientDep,
     settings: SettingsDep,
-    _: Annotated[None, Depends(require_dapr_token)],
+    _: Annotated[None, Depends(authorize_produce)],
     idempotency_key: Annotated[
         str | None, Header(alias="Idempotency-Key", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     ] = None,

@@ -557,6 +557,11 @@ medallion:
   # (scripts/seed_medallion_fga.sh) before flipping it on.
   fgaEnabled: false
   fgaApiUrl: http://lance-ns-openfga:8080
+  # #64 human trigger door: the project a signed-in user must hold `can_administer` on to fire /produce or
+  # /train from the UI (the web BFF forwards ONLY the user's bearer — no service token leaves the web pod).
+  # The service-to-service app-token path is unchanged; this is a SECOND, admin-only door, gated on
+  # auth.enabled + fga. Matches the project the seed grants admin on (scripts/e2e_stack.sh → project:acme).
+  produceAdminProject: acme
   # Replica counts — each mover's own pubsub component carries queueGroupName=<app-id>, so its replicas
   # form a competing-consumer group (single delivery per trigger; without the queue group every replica
   # would process EVERY trigger — up to 8× at gold with 2 replicas per stage). Movers are idempotent on

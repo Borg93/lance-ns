@@ -357,6 +357,12 @@ spec:
             # #42 models page: the /capi BFF proxies to the catalog. Reads/writes carry ONLY a signed-in
             # user's bearer (the catalog has no service-token door), so no service credential is wired here.
             - { name: CATALOG_API, value: "http://{{ include "lance.fullname" . }}-catalog:{{ .Values.services.catalog.port }}" }
+            # #64 human trigger door: the BFF proxies /produce + /train to lance-ray forwarding ONLY the
+            # signed-in user's bearer (no service token leaves the web pod); lance-ray's authorize_produce
+            # verifies it (OIDC) and checks project-admin (can_administer). Only rendered when medallion is on.
+            {{- if .Values.medallion.enabled }}
+            - { name: MEDALLION_API, value: "http://{{ include "lance.fullname" . }}-lance-ray:{{ .Values.medallion.port }}" }
+            {{- end }}
             # #53 embedded experiment tracking: the BFF queries GreptimeDB's Prometheus-compatible endpoint
             # server-side for the deployed Perses "Model Training" dashboard's metrics. In-cluster ClusterIP,
             # so the §5e edge auth (nginx auth_basic on the gateway's /greptime/, /perses/ locations) is not

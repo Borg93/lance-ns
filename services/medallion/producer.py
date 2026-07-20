@@ -23,6 +23,7 @@ from common import fga
 from common.dapr_auth import assert_app_token_configured
 from common.lance_metrics import instrument_lance_if_available
 from common.obs import configure_app_logging
+from common.oidc import OIDCVerifier
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI
 from fastapi.concurrency import run_in_threadpool
@@ -68,6 +69,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             store_id, model_id = await fga.provision(settings.fga_api_url)
         app.state.fga = fga.make_client(
             settings.fga_api_url, store_id, model_id, timeout_seconds=settings.fga_timeout_seconds
+        )
+    # #64 OIDC verifier for the /produce human door (admin can trigger the cascade without the service
+    # token). Same construction shape as catalog/lineage; None when OIDC is off (dev / service-only).
+    app.state.oidc = None
+    _oidc = get_settings()
+    if _oidc.oidc_enabled and _oidc.oidc_issuer and _oidc.oidc_audience:
+        app.state.oidc = OIDCVerifier(
+            _oidc.oidc_issuer,
+            _oidc.oidc_audience,
+            _oidc.oidc_cache_ttl,
+            leeway=_oidc.oidc_leeway,
+            allow_insecure=_oidc.oidc_allow_insecure,
         )
     app.state.startup_complete = True
     try:

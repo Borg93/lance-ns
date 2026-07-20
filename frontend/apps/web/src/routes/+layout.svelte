@@ -9,13 +9,15 @@
 <nav class="navbar">
 	<a
 		href="/"
-		class:active={!/^\/(models|tables|namespaces|warehouses|experiments)/.test(page.url.pathname)}
-		>Lineage</a
+		class:active={!/^\/(models|tables|namespaces|warehouses|experiments|pipeline)/.test(
+			page.url.pathname,
+		)}>Lineage</a
 	>
 	<a href="/models" class:active={page.url.pathname === "/models"}>Models</a>
 	<a href="/tables" class:active={page.url.pathname.startsWith("/tables")}>Tables</a>
 	<a href="/namespaces" class:active={page.url.pathname === "/namespaces"}>Namespaces</a>
 	<a href="/warehouses" class:active={page.url.pathname === "/warehouses"}>Warehouses</a>
+	<a href="/pipeline" class:active={page.url.pathname === "/pipeline"}>Pipeline</a>
 	<a href="/experiments" class:active={page.url.pathname === "/experiments"}>Experiments</a>
 </nav>
 

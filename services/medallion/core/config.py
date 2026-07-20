@@ -88,6 +88,19 @@ class MedallionSettings(BaseSettings):
     fga_service_identity: str = Field(default="service-mover", alias="MEDALLION_FGA_SERVICE_IDENTITY")
     fga_required_action: str = Field(default="can_create_table", alias="MEDALLION_FGA_REQUIRED_ACTION")
 
+    # --- Produce-trigger admin auth (#64): ``/produce`` accepts EITHER the Dapr app-api-token (service-to-
+    # service, unchanged) OR a signed-in OIDC user who is a project admin (``can_administer``). The OIDC path
+    # lets the web UI trigger produce WITHOUT the web pod ever holding the service token — the human/external
+    # door, mirroring the catalog's OIDC verifier. Off by default; enabled with an issuer + audience. --------
+    oidc_enabled: bool = Field(default=False, alias="MEDALLION_OIDC_ENABLED")
+    oidc_issuer: str | None = Field(default=None, alias="MEDALLION_OIDC_ISSUER")
+    oidc_audience: str | None = Field(default=None, alias="MEDALLION_OIDC_AUDIENCE")
+    oidc_cache_ttl: int = Field(default=3600, alias="MEDALLION_OIDC_CACHE_TTL")
+    oidc_leeway: int = Field(default=60, alias="MEDALLION_OIDC_LEEWAY")
+    oidc_allow_insecure: bool = Field(default=False, alias="MEDALLION_OIDC_ALLOW_INSECURE")
+    # The project a trigger-ing user must administer — the gate is ``can_administer`` on ``project:<this>``.
+    produce_admin_project: str = Field(default="acme", alias="MEDALLION_PRODUCE_ADMIN_PROJECT")
+
     def fga_object(self) -> str:
         """The FGA object the mover must be authorized on — the target stage namespace."""
         return f"namespace:{self.to_namespace}"

@@ -161,6 +161,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/namespace/{id}/access/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Namespace Access
+         * @description Simulate 'does <user> hold <relation> on this namespace?' — owner-gated (``can_delete``).
+         */
+        post: operations["check_namespace_access_v1_namespace__id__access_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/namespace/{id}/access/list": {
         parameters: {
             query?: never;
@@ -435,6 +455,26 @@ export interface paths {
          *     that names a warehouse-bound namespace rather than writing its version metadata to the wrong bucket.
          */
         post: operations["batch_create_table_versions_v1_table_version_batch_create_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/access/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Table Access
+         * @description Simulate 'does <user> hold <relation> on this table?' — owner-gated by the router (``can_drop``).
+         */
+        post: operations["check_table_access_v1_table__id__access_check_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1660,6 +1700,29 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * AccessCheckRequest
+         * @description A simulated authorization question — does ``user`` hold ``relation`` on this object? The
+         *     ``user`` may be a bare subject (``alice``, taken as ``user:alice``) or a fully-qualified userset
+         *     (``role:project_admin``, ``team:acme#member``).
+         */
+        AccessCheckRequest: {
+            /** Relation */
+            relation: string;
+            /** User */
+            user: string;
+        };
+        /** AccessCheckResponse */
+        AccessCheckResponse: {
+            /** Allowed */
+            allowed: boolean;
+            /** Object */
+            object: string;
+            /** Relation */
+            relation: string;
+            /** User */
+            user: string;
+        };
         /** AccessListResponse */
         AccessListResponse: {
             /** Grants */
@@ -5376,6 +5439,41 @@ export interface operations {
             };
         };
     };
+    check_namespace_access_v1_namespace__id__access_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessCheckResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_namespace_access_v1_namespace__id__access_list_post: {
         parameters: {
             query?: never;
@@ -5791,6 +5889,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["BatchCreateTableVersionsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    check_table_access_v1_table__id__access_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessCheckRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessCheckResponse"];
                 };
             };
             /** @description Validation Error */

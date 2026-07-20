@@ -10,6 +10,7 @@ export type ModelsList = components["schemas"]["ModelsListResponse"];
 export type ModelDescribe = components["schemas"]["ModelDescribeResponse"];
 export type PromoteResponse = components["schemas"]["PromoteResponse"];
 export type AccessList = components["schemas"]["AccessListResponse"];
+export type AccessCheck = components["schemas"]["AccessCheckResponse"];
 export type TableDescribe = components["schemas"]["DescribeTableResponse"];
 export type TableStats = components["schemas"]["GetTableStatsResponse"];
 export type TableVersions = components["schemas"]["ListTableVersionsResponse"];
@@ -62,6 +63,15 @@ export const promoteModel = (model: string, version: number) =>
  * (403 for non-owners); the BFF forwards only the signed-in user's session. */
 export const fetchTableAccess = (table: string) =>
 	requestJSON<AccessList>(`v1/table/${enc(table)}/access/list`, { method: "POST" });
+
+/** #68 "who can do what" simulator — a live OpenFGA Check: does `user` hold `relation` on this table?
+ * Owner-gated by the catalog (can_drop), the same bar as the review (probing the graph == disclosing it). */
+export const checkTableAccess = (table: string, user: string, relation: string) =>
+	requestJSON<AccessCheck>(`v1/table/${enc(table)}/access/check`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ user, relation }),
+	});
 
 export type TablesList = components["schemas"]["ListTablesResponse"];
 

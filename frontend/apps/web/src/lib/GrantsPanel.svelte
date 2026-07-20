@@ -5,7 +5,7 @@
 	// Collapsed by default: one owner-tier round-trip per dataset, with definitive outcomes (the ACL,
 	// 401/403/501) cached and transient failures (offline, 5xx) retried on the next open.
 	import { ChevronRight, ShieldCheck } from "@lucide/svelte";
-	import { type AccessList, fetchTableAccess } from "./catalog";
+	import { type AccessList, checkTableAccess, fetchTableAccess } from "./catalog";
 
 	let { dataset }: { dataset: string } = $props();
 
@@ -19,6 +19,15 @@
 	);
 	let loadingFor = $state<string | null>(null);
 	let failedFor = $state<string | null>(null); // transient failure — never cached, reopen retries
+
+	// #68 access-check simulator — probe an arbitrary (user, relation) against THIS dataset. Owner-gated
+	// server-side (the same can_drop bar as the review). Keyed by dataset so a verdict never bleeds across nav.
+	let simUser = $state("");
+	let simRelation = $state("");
+	let simFor = $state<string | null>(null);
+	let simVerdict = $state<{ user: string; relation: string; allowed: boolean } | null>(null);
+	let simBusy = $state(false);
+	let simError = $state<string | null>(null);
 
 	const open = $derived(openedFor === dataset);
 	const shown = $derived(review?.for === dataset ? review : null);
@@ -59,6 +68,36 @@
 
 	// Hide the empty rows: a relation nobody holds is noise in a review of who has access.
 	const held = $derived(shown?.access ? shown.access.grants.filter((g) => g.users.length > 0) : []);
+	// Every can_* action the model defines on this type (incl. ones nobody holds) — the options you can
+	// simulate, taken from the unfiltered grants the review already fetched. Verdict keyed to this dataset.
+	const relations = $derived(shown?.access ? shown.access.grants.map((g) => g.relation) : []);
+	const simVerdictShown = $derived(simFor === dataset ? simVerdict : null);
+
+	async function runCheck(): Promise<void> {
+		const user = simUser.trim();
+		if (simBusy || !user || !simRelation) return;
+		simBusy = true;
+		simError = null;
+		const current = dataset;
+		try {
+			const res = await checkTableAccess(current, user, simRelation);
+			if (dataset !== current) return; // navigated away — drop the stale verdict
+			if (res.ok) {
+				simVerdict = {
+					user: res.data.user,
+					relation: res.data.relation,
+					allowed: res.data.allowed,
+				};
+				simFor = current;
+			} else if (res.status === 401 || res.status === 403) {
+				simError = "Simulating access needs the owner tier on this table.";
+			} else {
+				simError = `Check failed (HTTP ${res.status}).`;
+			}
+		} finally {
+			simBusy = false;
+		}
+	}
 </script>
 
 <div class="grants">
@@ -96,6 +135,42 @@
 					</tbody>
 				</table>
 			{/if}
+
+			<div class="sim">
+				<div class="sim-head">Check a specific access</div>
+				<div class="sim-form">
+					<input
+						class="mono"
+						placeholder="user (e.g. alice), or role:… / team:…#member"
+						bind:value={simUser}
+						onkeydown={(e) => e.key === "Enter" && runCheck()}
+					/>
+					<select class="mono" bind:value={simRelation}>
+						<option value="" disabled>action…</option>
+						{#each relations as r (r)}<option value={r}>{r}</option>{/each}
+					</select>
+					<button
+						class="btn"
+						disabled={simBusy || !simUser.trim() || !simRelation}
+						onclick={runCheck}
+					>
+						{simBusy ? "…" : "Check"}
+					</button>
+				</div>
+				{#if simError}
+					<p class="mut">{simError}</p>
+				{:else if simVerdictShown}
+					<p
+						class="verdict"
+						class:allow={simVerdictShown.allowed}
+						class:deny={!simVerdictShown.allowed}
+					>
+						<span class="mono">{simVerdictShown.user}</span>
+						{simVerdictShown.allowed ? "can" : "cannot"}
+						<span class="mono">{simVerdictShown.relation}</span> on this table.
+					</p>
+				{/if}
+			</div>
 		{/if}
 	{/if}
 </div>
@@ -162,5 +237,59 @@
 	}
 	.who.wild {
 		border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+	}
+	.sim {
+		margin-top: 10px;
+		padding-top: 8px;
+		border-top: 1px solid color-mix(in srgb, var(--line) 55%, transparent);
+	}
+	.sim-head {
+		color: var(--faint);
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		margin-bottom: 5px;
+	}
+	.sim-form {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+		align-items: center;
+	}
+	.sim-form input,
+	.sim-form select {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 3px 7px;
+	}
+	.sim-form input {
+		flex: 1 1 220px;
+		min-width: 160px;
+	}
+	.btn {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 3px 12px;
+		cursor: pointer;
+	}
+	.btn:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.verdict {
+		font-size: 12px;
+		margin: 8px 0 0;
+	}
+	.verdict.allow {
+		color: var(--ok);
+	}
+	.verdict.deny {
+		color: var(--fail);
 	}
 </style>

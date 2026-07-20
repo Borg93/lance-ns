@@ -6,6 +6,7 @@
 	// zone) renders the honest not-in-catalog state instead of a broken page.
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
 	import GrantsPanel from "./GrantsPanel.svelte";
+	import ReadersPanel from "./ReadersPanel.svelte";
 	import {
 		createTableTag,
 		deleteTablePolicy,
@@ -513,6 +514,7 @@
 		<section>
 			<h2>Access</h2>
 			<GrantsPanel dataset={table} />
+			<ReadersPanel dataset={table} />
 		</section>
 	{/if}
 </div>

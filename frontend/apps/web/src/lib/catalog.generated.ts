@@ -212,7 +212,7 @@ export interface paths {
         put?: never;
         /**
          * Graph Namespace Access
-         * @description One hop of the authorization graph around the namespace — owner-gated by the router (``can_delete``).
+         * @description One hop of the authorization graph around the namespace — owner-gated (``can_delete``).
          */
         post: operations["graph_namespace_access_v1_namespace__id__access_graph_post"];
         delete?: never;
@@ -1205,6 +1205,48 @@ export interface paths {
          *     ``branch`` targets a non-main branch (spec 0.9 query param for Arrow-IPC-body ops).
          */
         post: operations["insert_into_table_v1_table__id__insert_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/maintenance/preview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Preview Maintenance
+         * @description Dry-run the old-version cleanup — the versions GC would reclaim + the tags protecting others. Owner-
+         *     gated (``can_drop``); never mutates.
+         */
+        post: operations["preview_maintenance_v1_table__id__maintenance_preview_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/maintenance/run": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Run Maintenance
+         * @description Reclaim old versions on demand (DESTRUCTIVE; tag-pinned versions are exempt). Owner-gated
+         *     (``can_drop``) — the same bar as scheduling it via the retention policy.
+         */
+        post: operations["run_maintenance_v1_table__id__maintenance_run_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3958,6 +4000,43 @@ export interface components {
             match?: components["schemas"]["MatchQuery"] | null;
             multi_match?: components["schemas"]["MultiMatchQuery"] | null;
             phrase?: components["schemas"]["PhraseQuery"] | null;
+        };
+        /** GcPreview */
+        GcPreview: {
+            /** Current Version */
+            current_version: number;
+            /** Eligible Versions */
+            eligible_versions: number[];
+            /** Protected Tags */
+            protected_tags: {
+                [key: string]: number;
+            };
+            /** Retain Versions */
+            retain_versions: number | null;
+            /** Retention Days */
+            retention_days: number | null;
+            /** Total Versions */
+            total_versions: number;
+        };
+        /**
+         * GcRequest
+         * @description The GC bounds — a version is reclaimable only if it clears BOTH given bounds (older than
+         *     ``retention_days`` AND outside the most-recent ``retain_versions``). At least one is required.
+         */
+        GcRequest: {
+            /** Retain Versions */
+            retain_versions?: number | null;
+            /** Retention Days */
+            retention_days?: number | null;
+        };
+        /** GcRunResult */
+        GcRunResult: {
+            /** Bytes Removed */
+            bytes_removed: number;
+            /** Ok */
+            ok: boolean;
+            /** Old Versions Removed */
+            old_versions_removed: number;
         };
         /**
          * GetTableStatsResponse
@@ -7263,6 +7342,76 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InsertIntoTableResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    preview_maintenance_v1_table__id__maintenance_preview_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GcRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GcPreview"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    run_maintenance_v1_table__id__maintenance_run_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["GcRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["GcRunResult"];
                 };
             };
             /** @description Validation Error */

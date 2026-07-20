@@ -1,0 +1,72 @@
+"""#75 on-demand garbage collection — the operator's per-table analog of the compaction sweep's GC.
+
+``preview_gc`` is a DRY RUN: which old versions ``cleanup_old_versions`` would reclaim, honouring the
+current version, tag pins (a tagged version is NEVER collected), the retain-last-N window, and the age
+cutoff — it never mutates. ``run_gc`` performs the reclaim with the SAME tag exemption the sweep uses
+(``error_if_tagged_old_versions=False``), so a long-lived promotion tag can't stall GC. Pure over a Lance
+dataset handle, so both are unit-testable with a fake ``ds``.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from typing import Any
+
+
+def _as_utc(ts: Any) -> datetime:
+    """Coerce a version timestamp to an aware UTC datetime; an unknown shape is treated as 'now' so it is
+    never eligible for collection (fail-safe — GC must not remove a version whose age it can't read)."""
+    if isinstance(ts, datetime):
+        return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+    return datetime.now(UTC)
+
+
+def _tag_versions(ds: Any) -> dict[str, int]:
+    """``{tag: version}`` — the pinned versions, exempt from GC (pylance's Tag is a TypedDict at runtime)."""
+    out: dict[str, int] = {}
+    for name, tag in ds.tags.list().items():
+        entry = tag if isinstance(tag, dict) else {"version": getattr(tag, "version", None)}
+        version = entry.get("version")
+        if version is not None:
+            out[name] = int(version)
+    return out
+
+
+def preview_gc(ds: Any, *, retention_days: int | None, retain_versions: int | None) -> dict[str, Any]:
+    """Dry-run the old-version cleanup — the versions GC would reclaim, and the tags protecting others."""
+    current = int(ds.version)
+    tags = _tag_versions(ds)
+    tagged = set(tags.values())
+    versions = sorted(ds.versions(), key=lambda v: int(v["version"]), reverse=True)
+    keep_recent = {int(v["version"]) for v in versions[:retain_versions]} if retain_versions else set()
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days) if retention_days else None
+    eligible: list[int] = []
+    for v in versions:
+        ver = int(v["version"])
+        if ver == current or ver in tagged or ver in keep_recent:
+            continue  # never the current version, a tag-pinned one, or inside the retain window
+        ts = v.get("timestamp")
+        if cutoff is not None and ts is not None and _as_utc(ts) > cutoff:
+            continue  # too new to reclaim under the age cutoff
+        eligible.append(ver)
+    return {
+        "current_version": current,
+        "total_versions": len(versions),
+        "eligible_versions": eligible,
+        "protected_tags": tags,
+        "retention_days": retention_days,
+        "retain_versions": retain_versions,
+    }
+
+
+def run_gc(ds: Any, *, retention_days: int | None, retain_versions: int | None) -> dict[str, Any]:
+    """Reclaim old versions (DESTRUCTIVE). Tagged versions are exempt, exactly like the compaction sweep."""
+    older_than = timedelta(days=retention_days) if retention_days else timedelta(0)
+    stats: Any = ds.cleanup_old_versions(
+        older_than=older_than, retain_versions=retain_versions, error_if_tagged_old_versions=False
+    )
+    return {
+        "ok": True,
+        "old_versions_removed": int(getattr(stats, "old_versions", 0) or 0),
+        "bytes_removed": int(getattr(stats, "bytes_removed", 0) or 0),
+    }

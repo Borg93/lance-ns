@@ -4918,6 +4918,120 @@
         "title": "FtsQuery",
         "type": "object"
       },
+      "GcPreview": {
+        "properties": {
+          "current_version": {
+            "title": "Current Version",
+            "type": "integer"
+          },
+          "eligible_versions": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Eligible Versions",
+            "type": "array"
+          },
+          "protected_tags": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Protected Tags",
+            "type": "object"
+          },
+          "retain_versions": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Versions"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          },
+          "total_versions": {
+            "title": "Total Versions",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "current_version",
+          "total_versions",
+          "eligible_versions",
+          "protected_tags",
+          "retention_days",
+          "retain_versions"
+        ],
+        "title": "GcPreview",
+        "type": "object"
+      },
+      "GcRequest": {
+        "description": "The GC bounds \u2014 a version is reclaimable only if it clears BOTH given bounds (older than\n``retention_days`` AND outside the most-recent ``retain_versions``). At least one is required.",
+        "properties": {
+          "retain_versions": {
+            "anyOf": [
+              {
+                "maximum": 10000.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retain Versions"
+          },
+          "retention_days": {
+            "anyOf": [
+              {
+                "maximum": 3650.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Retention Days"
+          }
+        },
+        "title": "GcRequest",
+        "type": "object"
+      },
+      "GcRunResult": {
+        "properties": {
+          "bytes_removed": {
+            "title": "Bytes Removed",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "old_versions_removed": {
+            "title": "Old Versions Removed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "ok",
+          "old_versions_removed",
+          "bytes_removed"
+        ],
+        "title": "GcRunResult",
+        "type": "object"
+      },
       "GetTableStatsResponse": {
         "description": "GetTableStatsResponse",
         "properties": {
@@ -8626,7 +8740,7 @@
     },
     "/v1/namespace/{id}/access/graph": {
       "post": {
-        "description": "One hop of the authorization graph around the namespace \u2014 owner-gated by the router (``can_delete``).",
+        "description": "One hop of the authorization graph around the namespace \u2014 owner-gated (``can_delete``).",
         "operationId": "graph_namespace_access_v1_namespace__id__access_graph_post",
         "parameters": [
           {
@@ -11730,6 +11844,122 @@
         "summary": "Insert Into Table",
         "tags": [
           "data"
+        ]
+      }
+    },
+    "/v1/table/{id}/maintenance/preview": {
+      "post": {
+        "description": "Dry-run the old-version cleanup \u2014 the versions GC would reclaim + the tags protecting others. Owner-\ngated (``can_drop``); never mutates.",
+        "operationId": "preview_maintenance_v1_table__id__maintenance_preview_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GcRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GcPreview"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Preview Maintenance",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/v1/table/{id}/maintenance/run": {
+      "post": {
+        "description": "Reclaim old versions on demand (DESTRUCTIVE; tag-pinned versions are exempt). Owner-gated\n(``can_drop``) \u2014 the same bar as scheduling it via the retention policy.",
+        "operationId": "run_maintenance_v1_table__id__maintenance_run_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GcRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GcRunResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Run Maintenance",
+        "tags": [
+          "maintenance"
         ]
       }
     },

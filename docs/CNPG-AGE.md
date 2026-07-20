@@ -42,14 +42,24 @@ pointing at the extension image, `shared_preload_libraries: [age]`, and `Databas
 `CREATE EXTENSION age` in the lineage DB (OpenFGA gets its own DB, plain SQL). CNPG auto-appends
 `/extensions/age/share` → `extension_control_path` and `/extensions/age/lib` → `dynamic_library_path`.
 
-### Proof it works (verified 2026-07-20)
-The mechanism was proven end-to-end locally (everything except the k8s CSI mount, which needs a 1.33+ cluster;
-kind here is 1.31). Built the extension image, mounted its artifacts into a **stock `postgres:18`** at a
-non-standard path, set `extension_control_path='$system:/extensions/age/share'` +
-`dynamic_library_path='$libdir:/extensions/age/lib'` (exactly what CNPG configures), and ran:
-`CREATE EXTENSION age` ✓ · `LOAD 'age'` ✓ · `create_graph('lineage')` ✓ · cypher `CREATE (:Dataset)` + `MATCH`
-→ 1 vertex ✓ · `extversion = 1.7.0` ✓. So AGE-on-PG18 + the `extension_control_path` discovery both work; the
-remaining piece is only the k8s ImageVolume mount that CNPG/kubelet perform on a qualifying cluster.
+### Proof status (verified 2026-07-20)
+Two of the three layers are proven; the third (the CNPG operator reconciling a Cluster) hit an
+environment snag, not an AGE one.
+
+1. **The AGE extension + the `extension_control_path` mechanism — PROVEN.** Built the extension image, mounted
+   its artifacts into a **stock `postgres:18`** at a non-standard path, set
+   `extension_control_path='$system:/extensions/age/share'` + `dynamic_library_path='$libdir:/extensions/age/lib'`
+   (exactly what CNPG configures), and ran: `CREATE EXTENSION age` ✓ · `LOAD 'age'` ✓ · `create_graph('lineage')`
+   ✓ · cypher `CREATE (:Dataset)` + `MATCH` → 1 vertex ✓ · `extversion = 1.7.0` ✓.
+2. **The ImageVolume infra prerequisites — PROVEN reachable.** Stood up a throwaway kind cluster on **K8s 1.34**
+   with **containerd v2.1.3** (≥2.1, the CRI requirement) and the `ImageVolume` feature gate enabled — so a
+   real cluster can do the mount.
+3. **The CNPG operator managing a real Cluster — NOT completed here.** On that fresh kind-1.34 throwaway the
+   CNPG operator (tried 1.30 and 1.28) would not reach Ready (its `:9443` manager exits 2 shortly after
+   loading config — a CNPG-operator/very-new-kind startup issue, unrelated to AGE), so the final
+   "operator mounts the AGE ImageVolume + runs `CREATE EXTENSION`" step wasn't exercised. On a conformant
+   managed 1.33+ cluster the operator runs normally; combined with (1)+(2) the path is sound — re-run
+   `deploy/cnpg-age-cluster.yaml` there to close the last mile.
 
 ## Bridge (older clusters without ImageVolume): a custom full image
 If your prod K8s can't do ImageVolume yet, build AGE into a **custom CNPG Postgres image** and point the

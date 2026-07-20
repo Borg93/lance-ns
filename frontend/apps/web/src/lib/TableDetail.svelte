@@ -11,6 +11,7 @@
 	import GrantsPanel from "./GrantsPanel.svelte";
 	import ReadersPanel from "./ReadersPanel.svelte";
 	import {
+		compactTable,
 		createTableIndex,
 		createTableTag,
 		deleteTablePolicy,
@@ -43,8 +44,9 @@
 		retention_days: number | null;
 		retain_versions: number | null;
 		interval: number | null;
+		target: number | null; // #76 target_rows_per_fragment
 		enabled: boolean;
-	}>({ retention_days: null, retain_versions: null, interval: null, enabled: true });
+	}>({ retention_days: null, retain_versions: null, interval: null, target: null, enabled: true });
 
 	// #64 version management — name (tag) a Lance version (writer-gated). Reset on table change below.
 	let tagName = $state("");
@@ -118,6 +120,7 @@
 		gcResult = null;
 		gcError = null;
 		gcConfirm = false;
+		compactResult = null;
 		load();
 	});
 
@@ -126,6 +129,7 @@
 			retention_days: policy?.retention_days ?? null,
 			retain_versions: policy?.retain_versions ?? null,
 			interval: policy?.compact_interval_hours ?? null,
+			target: policy?.target_rows_per_fragment ?? null,
 			enabled: policy?.compact_enabled ?? true,
 		};
 		policyError = null;
@@ -147,6 +151,7 @@
 			if (draft.retention_days != null) body.retention_days = draft.retention_days;
 			if (draft.retain_versions != null) body.retain_versions = draft.retain_versions;
 			if (draft.interval != null) body.compact_interval_hours = draft.interval;
+			if (draft.target != null) body.target_rows_per_fragment = draft.target;
 			const res = await setTablePolicy(table, body);
 			if (res.ok) {
 				editingPolicy = false;
@@ -221,6 +226,26 @@
 			} else gcFail(res.status, res.detail);
 		} finally {
 			gcBusy = false;
+		}
+	}
+
+	// #76 compact-now — merge small fragments (non-destructive), using the policy's target size if set.
+	let compactBusy = $state(false);
+	let compactResult = $state<string | null>(null);
+
+	async function runCompact(): Promise<void> {
+		if (compactBusy) return;
+		compactBusy = true;
+		gcError = null;
+		compactResult = null;
+		try {
+			const res = await compactTable(table, policy?.target_rows_per_fragment ?? null);
+			if (res.ok) {
+				compactResult = `Compacted · ${res.data.fragments_removed} fragment(s) → ${res.data.fragments_added}.`;
+				await load(); // compaction wrote a new version — refresh
+			} else gcFail(res.status, res.detail);
+		} finally {
+			compactBusy = false;
 		}
 	}
 
@@ -767,6 +792,15 @@
 							placeholder="every sweep"
 						/></label
 					>
+					<label
+						>target rows/fragment <input
+							class="mono"
+							type="number"
+							min="1024"
+							bind:value={draft.target}
+							placeholder="Lance default"
+						/></label
+					>
 					<label class="check"
 						><input type="checkbox" bind:checked={draft.enabled} /> maintenance enabled</label
 					>
@@ -790,6 +824,9 @@
 						>{/if}
 					{#if policy.compact_interval_hours}<span class="chip mono"
 							>every {policy.compact_interval_hours}h</span
+						>{/if}
+					{#if policy.target_rows_per_fragment}<span class="chip mono"
+							>target {policy.target_rows_per_fragment} rows/frag</span
 						>{/if}
 					{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
 					<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
@@ -867,6 +904,14 @@
 					{/if}
 				{/if}
 				{#if gcResult}<p class="mut">{gcResult}</p>{/if}
+
+				<!-- #76 compact-now: merge small fragments (non-destructive), using the policy's target size. -->
+				<div class="row gc-compact">
+					<button class="btn ghost" disabled={compactBusy} onclick={runCompact}>
+						{compactBusy ? "compacting…" : "Compact now"}
+					</button>
+					{#if compactResult}<span class="mut">{compactResult}</span>{/if}
+				</div>
 				{#if gcError}<p class="error">{gcError}</p>{/if}
 			</div>
 		</section>
@@ -1040,6 +1085,10 @@
 		gap: 3px;
 		font-size: 12px;
 		color: var(--mut);
+	}
+	.gc-compact {
+		align-items: center;
+		margin-top: 8px;
 	}
 	.tagform input,
 	.tagform input {

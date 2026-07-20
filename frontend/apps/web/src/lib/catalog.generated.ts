@@ -1211,6 +1211,27 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/table/{id}/maintenance/compact": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Compact Maintenance
+         * @description Compact small fragments on demand (#76 'compact now'). Owner-gated (``can_drop``) — the same bar as
+         *     the retention policy that schedules maintenance. Non-destructive: writes a new version, removes none.
+         */
+        post: operations["compact_maintenance_v1_table__id__maintenance_compact_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/table/{id}/maintenance/preview": {
         parameters: {
             query?: never;
@@ -2821,6 +2842,23 @@ export interface components {
             delete_table_versions?: components["schemas"]["BatchDeleteTableVersionsResponse"] | null;
             /** @description Result of a DeregisterTable operation */
             deregister_table?: components["schemas"]["DeregisterTableResponse"] | null;
+        };
+        /**
+         * CompactRequest
+         * @description Optional #76 target-size override for a one-off compaction (None → Lance's default fragment sizing).
+         */
+        CompactRequest: {
+            /** Target Rows Per Fragment */
+            target_rows_per_fragment?: number | null;
+        };
+        /** CompactResult */
+        CompactResult: {
+            /** Fragments Added */
+            fragments_added: number;
+            /** Fragments Removed */
+            fragments_removed: number;
+            /** Ok */
+            ok: boolean;
         };
         /**
          * CountTableRowsRequest
@@ -4672,6 +4710,8 @@ export interface components {
             retain_versions?: number | null;
             /** Retention Days */
             retention_days?: number | null;
+            /** Target Rows Per Fragment */
+            target_rows_per_fragment?: number | null;
         };
         /** PolicyResponse */
         PolicyResponse: {
@@ -4692,6 +4732,8 @@ export interface components {
             retain_versions?: number | null;
             /** Retention Days */
             retention_days?: number | null;
+            /** Target Rows Per Fragment */
+            target_rows_per_fragment?: number | null;
         };
         /**
          * PromoteRequest
@@ -7342,6 +7384,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["InsertIntoTableResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    compact_maintenance_v1_table__id__maintenance_compact_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CompactRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CompactResult"];
                 };
             };
             /** @description Validation Error */

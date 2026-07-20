@@ -54,6 +54,13 @@ describe("maintenance BFF (#75)", () => {
 		expect(d.calls[0].url).toBe("http://catalog.test/v1/table/db1%24t/maintenance/run");
 	});
 
+	test("compact forwards to the compact endpoint (#76)", async () => {
+		const d = drive("compact", { session: true });
+		expect((await d.run()).status).toBe(200);
+		expect(d.calls[0].url).toBe("http://catalog.test/v1/table/db1%24t/maintenance/compact");
+		expect(d.calls[0].auth).toBe("Bearer tok");
+	});
+
 	test("auth-off forwards without a bearer (dev / open stack)", async () => {
 		const d = drive("preview", { session: false, authEnabled: false });
 		expect((await d.run()).status).toBe(200);

@@ -131,6 +131,7 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
             span.set_attribute("lance.dataset_uri", uri)
             effective_older_than: timedelta | None = older_than
             retain_versions: int | None = None
+            target_rows: int | None = None  # #76 compaction target-size from the policy
             policy: dict[str, Any] | None
             try:
                 policy = maintenance_policies.resolve_policy(
@@ -151,10 +152,18 @@ def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
                         # silently keep everything younger than the global default and make the policy a
                         # no-op on fresh datasets. Tag-pinned versions stay exempt either way.
                         effective_older_than = None
+                    if policy.get("target_rows_per_fragment"):
+                        target_rows = int(str(policy["target_rows_per_fragment"]))
             except Exception as exc:  # noqa: BLE001 — a forged/malformed record must not halt the sweep
                 log.warning("compaction_policy_ignored", extra={"uri": uri, "error": str(exc)})
-                effective_older_than, retain_versions, policy = older_than, None, None
-            result = compact_one(uri, options, effective_older_than, retain_versions=retain_versions)
+                effective_older_than, retain_versions, target_rows, policy = older_than, None, None, None
+            result = compact_one(
+                uri,
+                options,
+                effective_older_than,
+                retain_versions=retain_versions,
+                target_rows_per_fragment=target_rows,
+            )
             if policy is not None and policy.get("compact_interval_hours") and result.error is None:
                 # Stamp cadence state only after a successful pass, so a failed tick retries next tick.
                 try:

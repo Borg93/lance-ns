@@ -70,6 +70,7 @@ def compact_one(
     storage_options: dict[str, str],
     older_than: timedelta | None,
     retain_versions: int | None = None,
+    target_rows_per_fragment: int | None = None,
 ) -> DatasetResult:
     """Compact small fragments + GC old versions for one dataset. Never raises — a per-dataset failure is
     captured in ``error`` so one bad dataset can't abort the whole maintenance pass."""
@@ -84,8 +85,10 @@ def compact_one(
         # of maintain: failures at the source. The optimize_indices() right below folds the compacted
         # fragments into the indices; the interplay is pinned by
         # tests/unit/test_compaction_optimize.py::test_compact_one_defer_index_remap_keeps_indices_working.
+        # #76 target-size tuning: the #50 policy's target_rows_per_fragment (None → Lance default sizing).
+        size_kw = {"target_rows_per_fragment": target_rows_per_fragment} if target_rows_per_fragment else {}
         try:
-            metrics: Any = ds.optimize.compact_files(defer_index_remap=True)
+            metrics: Any = ds.optimize.compact_files(defer_index_remap=True, **size_kw)
         except Exception as exc:  # noqa: BLE001 — see the row_addrs fallback just below
             # defer_index_remap needs row_addrs (a stable-row-id, fragment-reuse-able layout). A dataset
             # WITHOUT them — e.g. a small model-REGISTRY dataset (models$<model>) — raises
@@ -96,7 +99,7 @@ def compact_one(
             if "row_addrs" not in str(exc):
                 raise
             log.warning("compact_defer_index_remap_unsupported", extra={"uri": uri, "error": str(exc)})
-            metrics = ds.optimize.compact_files()
+            metrics = ds.optimize.compact_files(**size_kw)
         result.fragments_removed = int(getattr(metrics, "fragments_removed", 0))
         result.fragments_added = int(getattr(metrics, "fragments_added", 0))
         # Keep secondary indices (vector ANN / scalar / FTS) covering the new fragments. WITHOUT this a

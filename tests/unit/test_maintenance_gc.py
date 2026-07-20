@@ -31,6 +31,7 @@ class _FakeDs:
         self.tags = _Tags(tags)
         self._stats = stats
         self.cleaned: dict[str, Any] | None = None
+        self.optimize = _Optimize()
 
     def versions(self) -> list[dict[str, Any]]:
         return self._versions
@@ -38,6 +39,19 @@ class _FakeDs:
     def cleanup_old_versions(self, **kw: Any) -> Any:
         self.cleaned = kw  # record that a mutation was attempted (and with what bounds)
         return self._stats
+
+
+class _Optimize:
+    def __init__(self) -> None:
+        self.compact_kw: dict[str, Any] | None = None
+        self.indices_optimized = False
+
+    def compact_files(self, **kw: Any) -> Any:
+        self.compact_kw = kw
+        return SimpleNamespace(fragments_removed=4, fragments_added=1)
+
+    def optimize_indices(self) -> None:
+        self.indices_optimized = True
 
 
 def _versions(n: int, *, age_days: int = 100) -> list[dict[str, Any]]:
@@ -76,3 +90,17 @@ def test_run_gc_passes_bounds_and_reports_stats() -> None:
     assert ds.cleaned is not None
     assert ds.cleaned["error_if_tagged_old_versions"] is False
     assert ds.cleaned["retain_versions"] == 1
+
+
+def test_compact_now_passes_target_and_optimizes_indices() -> None:
+    ds = _FakeDs(version=1, versions=_versions(1), tags={})
+    out = maintenance.compact_now(ds, target_rows_per_fragment=1_000_000)
+    assert out == {"ok": True, "fragments_removed": 4, "fragments_added": 1}
+    assert ds.optimize.compact_kw == {"target_rows_per_fragment": 1_000_000}
+    assert ds.optimize.indices_optimized is True  # indices kept covering the new fragments
+
+
+def test_compact_now_omits_target_when_unset() -> None:
+    ds = _FakeDs(version=1, versions=_versions(1), tags={})
+    maintenance.compact_now(ds, target_rows_per_fragment=None)
+    assert ds.optimize.compact_kw == {}  # None → Lance's default sizing (no kwarg forced)

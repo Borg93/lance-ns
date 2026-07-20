@@ -25,7 +25,12 @@ const DETAIL = {
 	tags: { tags: { blessed: { version: 2 } } },
 	branches: { branches: { main: { createAt: 1_700_000_000, manifestSize: 512 } } },
 	indexes: { indexes: [{ index_name: "id_idx", columns: ["id"], index_type: "BTREE" }] },
-	policy: { retention_days: 7, retain_versions: 5, compact_enabled: true },
+	policy: {
+		retention_days: 7,
+		retain_versions: 5,
+		compact_enabled: true,
+		target_rows_per_fragment: 1048576,
+	},
 };
 
 // The writes the interaction tests make; recorded so we can assert the BFF POST fired with the right body.
@@ -36,6 +41,7 @@ let indexCreate: { url: string; body: Record<string, unknown> } | null;
 let indexDrop: string | null;
 let gcPreviewBody: Record<string, unknown> | null;
 let gcRan: boolean;
+let compactBody: Record<string, unknown> | null;
 
 test.beforeEach(async ({ page }) => {
 	tagPost = null;
@@ -45,6 +51,7 @@ test.beforeEach(async ({ page }) => {
 	indexDrop = null;
 	gcPreviewBody = null;
 	gcRan = false;
+	compactBody = null;
 	await page.route("**/capi/**", (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^\/capi/, "");
@@ -84,6 +91,10 @@ test.beforeEach(async ({ page }) => {
 		if (path.endsWith("/maintenance/run")) {
 			gcRan = true;
 			return json(route, { ok: true, old_versions_removed: 1, bytes_removed: 512 });
+		}
+		if (path.endsWith("/maintenance/compact")) {
+			compactBody = req.postDataJSON() as Record<string, unknown>;
+			return json(route, { ok: true, fragments_removed: 6, fragments_added: 1 });
 		}
 		return json(route, { detail: "unstubbed" }, 404);
 	});
@@ -184,4 +195,20 @@ test("GC reclaim is a two-click confirm and posts to /maintenance/run (#75)", as
 	await gc.getByRole("button", { name: "Confirm reclaim" }).click();
 	await expect.poll(() => gcRan).toBe(true);
 	await expect(gc).toContainText("Reclaimed 1 version");
+});
+
+test("compact-now posts to /maintenance/compact with the policy target size (#76)", async ({
+	page,
+}) => {
+	await page.goto("/tables/db1%24t");
+	const gc = page.locator("section", { hasText: "Maintenance policy" }).locator(".gc");
+	await gc.getByRole("button", { name: "Compact now" }).click();
+	await expect.poll(() => compactBody).toEqual({ target_rows_per_fragment: 1048576 });
+	await expect(gc).toContainText("6 fragment"); // "Compacted · 6 fragment(s) → 1."
+});
+
+test("the policy surfaces the compaction target size (#76)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Maintenance policy" });
+	await expect(section).toContainText("target 1048576 rows/frag");
 });

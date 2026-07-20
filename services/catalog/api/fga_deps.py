@@ -112,10 +112,11 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         # #81 authorization graph: one hop of the relationship graph discloses principals + the cascade,
         # the same disclosure as access/list — owner bar.
         "access/graph": "can_drop",
-        # #75 on-demand GC: previewing + reclaiming version history is the drop rung, exactly like the
-        # retention policy that schedules it. Both owner-gated (an unmapped suffix would fall to writer).
+        # #75/#76 on-demand maintenance: previewing/reclaiming version history + compacting are the drop
+        # rung, like the retention policy that schedules them (an unmapped suffix would fall to writer).
         "maintenance/preview": "can_drop",
         "maintenance/run": "can_drop",
+        "maintenance/compact": "can_drop",
     },
     "namespace": {
         "drop": "can_delete",

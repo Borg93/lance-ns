@@ -2176,6 +2176,49 @@
         "title": "CommitTableResult",
         "type": "object"
       },
+      "CompactRequest": {
+        "description": "Optional #76 target-size override for a one-off compaction (None \u2192 Lance's default fragment sizing).",
+        "properties": {
+          "target_rows_per_fragment": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1024.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Rows Per Fragment"
+          }
+        },
+        "title": "CompactRequest",
+        "type": "object"
+      },
+      "CompactResult": {
+        "properties": {
+          "fragments_added": {
+            "title": "Fragments Added",
+            "type": "integer"
+          },
+          "fragments_removed": {
+            "title": "Fragments Removed",
+            "type": "integer"
+          },
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "ok",
+          "fragments_removed",
+          "fragments_added"
+        ],
+        "title": "CompactResult",
+        "type": "object"
+      },
       "CountTableRowsRequest": {
         "description": "CountTableRowsRequest",
         "properties": {
@@ -6419,6 +6462,19 @@
               }
             ],
             "title": "Retention Days"
+          },
+          "target_rows_per_fragment": {
+            "anyOf": [
+              {
+                "maximum": 10000000.0,
+                "minimum": 1024.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Rows Per Fragment"
           }
         },
         "title": "PolicyRequest",
@@ -6475,6 +6531,17 @@
               }
             ],
             "title": "Retention Days"
+          },
+          "target_rows_per_fragment": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Rows Per Fragment"
           }
         },
         "required": [
@@ -11844,6 +11911,64 @@
         "summary": "Insert Into Table",
         "tags": [
           "data"
+        ]
+      }
+    },
+    "/v1/table/{id}/maintenance/compact": {
+      "post": {
+        "description": "Compact small fragments on demand (#76 'compact now'). Owner-gated (``can_drop``) \u2014 the same bar as\nthe retention policy that schedules maintenance. Non-destructive: writes a new version, removes none.",
+        "operationId": "compact_maintenance_v1_table__id__maintenance_compact_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CompactRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CompactResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Compact Maintenance",
+        "tags": [
+          "maintenance"
         ]
       }
     },

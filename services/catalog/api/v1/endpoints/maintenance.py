@@ -51,6 +51,18 @@ class GcRunResult(BaseModel):
     bytes_removed: int
 
 
+class CompactRequest(BaseModel):
+    """Optional #76 target-size override for a one-off compaction (None → Lance's default fragment sizing)."""
+
+    target_rows_per_fragment: int | None = Field(default=None, ge=1024, le=10_000_000)
+
+
+class CompactResult(BaseModel):
+    ok: bool
+    fragments_removed: int
+    fragments_added: int
+
+
 @router.post("/{id}/maintenance/preview")
 async def preview_maintenance(
     id: str, body: GcRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
@@ -80,3 +92,17 @@ async def run_maintenance(
         maintenance.run_gc, ds, retention_days=body.retention_days, retain_versions=body.retain_versions
     )
     return GcRunResult(**result)
+
+
+@router.post("/{id}/maintenance/compact")
+async def compact_maintenance(
+    id: str, body: CompactRequest, ns: NamespaceDep, settings: SettingsDep, so: StorageOptionsDep
+) -> CompactResult:
+    """Compact small fragments on demand (#76 'compact now'). Owner-gated (``can_drop``) — the same bar as
+    the retention policy that schedules maintenance. Non-destructive: writes a new version, removes none."""
+    segments = parse_identifier(id, settings.delimiter)
+    ds = await run_in_threadpool(open_dataset, ns, so, segments)
+    result = await run_in_threadpool(
+        maintenance.compact_now, ds, target_rows_per_fragment=body.target_rows_per_fragment
+    )
+    return CompactResult(**result)

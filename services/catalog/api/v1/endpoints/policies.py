@@ -47,6 +47,9 @@ class PolicyRequest(BaseModel):
     retain_versions: int | None = Field(default=None, ge=1, le=100_000)
     compact_enabled: bool = True
     compact_interval_hours: int | None = Field(default=None, ge=1, le=8760)
+    # #76 compaction target-size tuning: the target rows per compacted fragment the sweep passes to
+    # `compact_files` (Lance's `delta.targetFileSize` analog). None → Lance's default fragment sizing.
+    target_rows_per_fragment: int | None = Field(default=None, ge=1024, le=10_000_000)
 
     @model_validator(mode="after")
     def _not_empty(self) -> PolicyRequest:
@@ -69,6 +72,7 @@ class PolicyResponse(BaseModel):
     retain_versions: int | None = None
     compact_enabled: bool = True
     compact_interval_hours: int | None = None
+    target_rows_per_fragment: int | None = None
 
 
 class PolicyDeleteResponse(BaseModel):

@@ -140,6 +140,17 @@ export const runMaintenance = (table: string, bounds: GcBounds) =>
 		body: JSON.stringify(bounds),
 	});
 
+export type CompactResult = components["schemas"]["CompactResult"];
+
+/** #76 compact small fragments on demand (non-destructive — writes a new version). Optional
+ * target_rows_per_fragment overrides the sizing. Owner-gated (can_drop), session-only BFF. */
+export const compactTable = (table: string, targetRowsPerFragment?: number | null) =>
+	requestJSON<CompactResult>(`v1/table/${enc(table)}/maintenance/compact`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ target_rows_per_fragment: targetRowsPerFragment ?? null }),
+	});
+
 /** #64 version management — name (tag) a Lance version. Writer-gated (can_create_tag) by the catalog,
  * session-only BFF. A promotion pins its version with a tag; this is the manual equivalent. */
 export const createTableTag = (table: string, tag: string, version: number) =>

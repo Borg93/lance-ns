@@ -8,7 +8,7 @@ const CATALOG_API = env.CATALOG_API ?? "http://localhost:2333";
 // action allowlist (preview | run, never a blanket proxy). Forwards ONLY the signed-in user's bearer, so
 // the catalog's owner-tier gate (can_drop) is enforced against a real user; an anonymous visitor on an OIDC
 // tier is refused here.
-const ACTIONS = new Set(["preview", "run"]);
+const ACTIONS = new Set(["preview", "run", "compact"]);
 
 export const POST: RequestHandler = async ({ params, request, fetch, locals }) => {
 	if (!ACTIONS.has(params.action)) {

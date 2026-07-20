@@ -9,6 +9,7 @@ dataset handle, so both are unit-testable with a fake ``ds``.
 
 from __future__ import annotations
 
+import contextlib
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -69,4 +70,22 @@ def run_gc(ds: Any, *, retention_days: int | None, retain_versions: int | None) 
         "ok": True,
         "old_versions_removed": int(getattr(stats, "old_versions", 0) or 0),
         "bytes_removed": int(getattr(stats, "bytes_removed", 0) or 0),
+    }
+
+
+def compact_now(ds: Any, *, target_rows_per_fragment: int | None) -> dict[str, Any]:
+    """#76 on-demand compaction — merge small fragments now (the operator's manual 'compact now', the analog
+    of the sweep's per-table pass). Plain (non-deferred) compaction: a single on-demand pass isn't racing a
+    concurrent index build, so it needs no defer_index_remap. Then keep the indices covering the new
+    fragments (best-effort — a no-index dataset must not fail the compaction). Non-destructive: it writes a
+    new version, never removes one."""
+    size_kw = {"target_rows_per_fragment": target_rows_per_fragment} if target_rows_per_fragment else {}
+    metrics: Any = ds.optimize.compact_files(**size_kw)
+    # a no-index dataset / unindexed column must not fail the compaction
+    with contextlib.suppress(Exception):
+        ds.optimize.optimize_indices()
+    return {
+        "ok": True,
+        "fragments_removed": int(getattr(metrics, "fragments_removed", 0) or 0),
+        "fragments_added": int(getattr(metrics, "fragments_added", 0) or 0),
     }

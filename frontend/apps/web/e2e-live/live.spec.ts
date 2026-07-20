@@ -178,6 +178,40 @@ test("table-detail page renders per stack mode; policy + warehouse writes are se
 	expect(bad.status()).toBe(404);
 });
 
+test("the session-only version-mgmt + access-check BFF routes are LIVE and session-gated (#64/#68)", async ({
+	request,
+}) => {
+	// Each is a narrow session-only POST route added this session (tag a version / restore a version /
+	// simulate an access check). Two properties per route: (1) it must EXIST — a 405 means the request fell
+	// through to the GET-only /capi catch-all, i.e. the route regressed or a stale build shipped (this is
+	// exactly the stale-deploy signature a request-level render check catches); (2) on a governed stack an
+	// anonymous caller is refused with 401 without the request leaving the BFF (the confused-deputy stance).
+	const probe = await request.get("/capi/v1/model");
+	const governed = probe.status() === 401;
+	const routes = [
+		{ path: "/capi/v1/table/no-such%24t/tags", data: { tag: "e2e-live-probe", version: 1 } },
+		{ path: "/capi/v1/table/no-such%24t/restore", data: { version: 1 } },
+		{
+			path: "/capi/v1/table/no-such%24t/access/check",
+			data: { user: "alice", relation: "can_read_data" },
+		},
+	];
+	for (const r of routes) {
+		const res = await request.post(r.path, {
+			maxRedirects: 0,
+			headers: { "content-type": "application/json" },
+			data: r.data,
+		});
+		expect(
+			res.status(),
+			`${r.path} regressed to the GET-only catch-all (405 = stale/missing route)`,
+		).not.toBe(405);
+		if (governed) {
+			expect(res.status(), `governed: anonymous ${r.path} must be 401`).toBe(401);
+		}
+	}
+});
+
 test("experiments page renders the embedded training dashboard from real metrics (#53)", async ({
 	page,
 	request,

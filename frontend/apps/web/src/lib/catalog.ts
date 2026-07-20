@@ -92,6 +92,15 @@ export const setTablePolicy = (table: string, policy: PolicyRequest) =>
 export const deleteTablePolicy = (table: string) =>
 	requestJSON<{ status: string }>(`v1/table/${enc(table)}/policy`, { method: "DELETE" });
 
+/** #64 version management — name (tag) a Lance version. Writer-gated (can_create_tag) by the catalog,
+ * session-only BFF. A promotion pins its version with a tag; this is the manual equivalent. */
+export const createTableTag = (table: string, tag: string, version: number) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/tags`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ tag, version }),
+	});
+
 /** Warehouse admin (#3-A UI): reads for any signed-in user the catalog allows; writes are
  * project-admin gated by the catalog (can_create_warehouse / can_administer). */
 export const fetchWarehouses = () => requestJSON<Warehouse[]>("v1/warehouses");

@@ -7,14 +7,12 @@ import { describe, expect, mock, test } from "bun:test";
 mock.module("$env/dynamic/private", () => ({ env: { CATALOG_API: "http://catalog.test" } }));
 
 // Import AFTER the mock so the handler's static `$env/dynamic/private` import resolves to the stub.
-const { POST } = await import("../../routes/capi/v1/warehouses/[id]/[action]/+server.ts");
+// No `.ts` extension — svelte-check (tsc) rejects it; bun resolves `+server` to the file.
+const { POST } = await import("../../routes/capi/v1/warehouses/[id]/[action]/+server");
 
 type Handled = { url: string; auth: string | undefined };
 
-function drive(
-	action: string,
-	opts: { session?: boolean; authEnabled?: boolean } = {},
-): { run: () => Promise<Response>; calls: Handled[] } {
+function drive(action: string, opts: { session?: boolean; authEnabled?: boolean } = {}) {
 	const calls: Handled[] = [];
 	const event = {
 		params: { id: "wh 1", action },

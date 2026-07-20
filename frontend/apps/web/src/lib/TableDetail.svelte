@@ -7,6 +7,7 @@
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
 	import GrantsPanel from "./GrantsPanel.svelte";
 	import {
+		createTableTag,
 		deleteTablePolicy,
 		fetchTableDetail,
 		partErrored,
@@ -33,6 +34,12 @@
 		interval: number | null;
 		enabled: boolean;
 	}>({ retention_days: null, retain_versions: null, interval: null, enabled: true });
+
+	// #64 version management — name (tag) a Lance version (writer-gated). Reset on table change below.
+	let tagName = $state("");
+	let tagVersion = $state<number | null>(null);
+	let tagBusy = $state(false);
+	let tagError = $state<string | null>(null);
 
 	const unauthorized = $derived(detail === null && lastStatus === 401);
 	const notInCatalog = $derived(detail === null && lastStatus === 404);
@@ -62,6 +69,9 @@
 		editingPolicy = false;
 		policyError = null;
 		busy = false;
+		tagName = "";
+		tagVersion = null;
+		tagError = null;
 		load();
 	});
 
@@ -113,6 +123,29 @@
 			else policyFail(res.status, res.detail);
 		} finally {
 			busy = false;
+		}
+	}
+
+	async function runTag(): Promise<void> {
+		const name = tagName.trim();
+		if (tagBusy || !name || tagVersion == null) return;
+		tagBusy = true;
+		tagError = null;
+		try {
+			const res = await createTableTag(table, name, tagVersion);
+			if (res.ok) {
+				tagName = "";
+				tagVersion = null;
+				await load(); // pull the new tag into the tags row
+			} else if (res.status === 401) {
+				tagError = "Sign in to tag a version.";
+			} else if (res.status === 403) {
+				tagError = "Denied: tagging a version needs writer access (can_create_tag).";
+			} else {
+				tagError = res.detail;
+			}
+		} finally {
+			tagBusy = false;
 		}
 	}
 
@@ -303,6 +336,24 @@
 					{/each}
 				{/if}
 			</div>
+
+			{#if versions.length > 0}
+				<div class="refs tagform">
+					<input class="mono" placeholder="tag name (e.g. blessed)" bind:value={tagName} />
+					<select class="mono" bind:value={tagVersion}>
+						<option value={null} disabled>version…</option>
+						{#each versions as v (v.version)}<option value={v.version}>v{v.version}</option>{/each}
+					</select>
+					<button
+						class="btn"
+						disabled={tagBusy || !tagName.trim() || tagVersion == null}
+						onclick={runTag}
+					>
+						{tagBusy ? "…" : "Tag version"}
+					</button>
+					{#if tagError}<span class="error">{tagError}</span>{/if}
+				</div>
+			{/if}
 		</section>
 
 		<section>
@@ -509,6 +560,18 @@
 		padding: 4px 8px;
 		font-size: 12px;
 	}
+	.tagform input,
+	.tagform select {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 3px 8px;
+	}
+	.tagform input {
+		width: 150px;
+	}
 	.btn {
 		background: var(--panel-2);
 		border: 1px solid var(--line);
@@ -517,6 +580,10 @@
 		font-size: 12px;
 		padding: 3px 10px;
 		cursor: pointer;
+	}
+	.btn:disabled {
+		opacity: 0.5;
+		cursor: default;
 	}
 	.btn.ghost {
 		background: none;

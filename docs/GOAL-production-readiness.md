@@ -105,15 +105,13 @@ to main. Never weaken auth/secrets posture.
   index + per-mode symptom→cause→diagnose→act for OpenFGA-down (503-everywhere), OpenBao sealed (boot
   deadlock), CrashLoop-on-boot, /readyz degraded (pool vs graph), cascade stalled, DLQ parking, outbox not
   draining, RustFS down, AGE down. Grounded in the real services/metrics/fail-closed behaviors.
-- [~] **Infra-tier metrics collection** (CRIT·chart) — the Dapr sidecars expose `:9090` Prometheus metrics
-  nothing pulled, so a consumer-wedge (a subscriber retrying forever, cascade silently stalled) is invisible.
-  The **alert LOGIC is DONE**: the `DaprConsumerWedge` rule keys on
-  `dapr_component_pubsub_ingress_count{process_status="retry"}` (the live-verified per-delivery retry outcome)
-  sustained 15m, promtool-proven to fire and to stay silent on a busy-healthy consumer. The COLLECTION is
-  deliberately deferred to the **OTel Collector** (operator adoption): a first pass shipped a `vmagent`, but
-  that was a redundant third collector (the estate already runs Vector for infra logs + OTLP-direct for apps),
-  so it was **removed** — the Collector's `prometheus` receiver (k8s SD) owns the Dapr scrape and subsumes
-  Vector too. The rule evaluates the moment the Collector feeds `dapr_*` into GreptimeDB. See docs/OPERATORS.md #7.
+- [x] **Infra-tier metrics collection** (CRIT·chart) — DONE + LIVE-PROVEN (OTel-first). The in-chart **OTel
+  Collector**'s `prometheus` receiver (k8s SD) scrapes the Dapr sidecars' `:9090` into GreptimeDB — verified
+  live on kind: `dapr_component_pubsub_ingress_count_total` and the other `dapr_*` land (the receiver appends
+  `_total`, a rename caught + fixed live). The `DaprConsumerWedge` rule now keys on that `_total` metric,
+  promtool-proven to fire on a wedge and stay silent on a busy-healthy consumer — so a consumer-wedge is no
+  longer invisible. (The interim redundant `vmagent` was removed; the Collector owns the scrape AND replaced
+  Vector for infra logs.) See docs/OPERATORS.md #7 + the OTel-first commit.
 - [x] **Trace continuity across Ray + Dapr boundary** (MED·code) — DONE at the unit tier: both in-service
   submission sites (`ray_submit.submit_stage_job`/`submit_train_job`) inject the active span's W3C
   traceparent into the job `runtime_env` (`opentelemetry.propagate.inject` — nothing injected without a

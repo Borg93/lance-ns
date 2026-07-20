@@ -48,6 +48,13 @@
 	let restoreBusy = $state(false);
 	let restoreError = $state<string | null>(null);
 
+	// #64 blob preview — the credential-less read of a blob cell (GET /blobs?column=&row=), session-gated
+	// by the catch-all BFF (reader-tier can_read_data). Only offered for binary/blob-typed columns.
+	let blobCol = $state("");
+	let blobRow = $state<number | null>(null);
+	let blobSrc = $state<string | null>(null);
+	let blobFailed = $state(false);
+
 	const unauthorized = $derived(detail === null && lastStatus === 401);
 	const notInCatalog = $derived(detail === null && lastStatus === 404);
 	const denied = $derived(detail === null && lastStatus === 403);
@@ -81,6 +88,10 @@
 		tagError = null;
 		restoreConfirm = null;
 		restoreError = null;
+		blobCol = "";
+		blobRow = null;
+		blobSrc = null;
+		blobFailed = false;
 		load();
 	});
 
@@ -179,6 +190,13 @@
 		}
 	}
 
+	function previewBlob(): void {
+		if (!blobCol || blobRow == null) return;
+		blobFailed = false;
+		// The catch-all BFF forwards the query + the session bearer + the binary body → an <img> src works.
+		blobSrc = `/capi/v1/table/${encodeURIComponent(table)}/blobs?column=${encodeURIComponent(blobCol)}&row=${blobRow}`;
+	}
+
 	// Split each part into "resolved value" vs "upstream failed" so the markup can render an honest
 	// "unavailable" instead of an affirmative empty state (which for policy would invite an overwrite).
 	const stats = $derived(
@@ -194,6 +212,13 @@
 			type?: unknown;
 			nullable?: boolean;
 		}[],
+	);
+	// Columns whose type is binary/blob — the ones the blob preview can read a cell from.
+	const blobColumns = $derived(
+		schemaFields
+			.filter((f) => /binary|blob/i.test(typeName(f.type)))
+			.map((f) => f.name)
+			.filter((n): n is string => !!n),
 	);
 	const versions = $derived(
 		partErrored(detail?.versions)
@@ -326,6 +351,38 @@
 						{/each}
 					</tbody>
 				</table>
+			{/if}
+		</section>
+
+		<section>
+			<h2>Blob preview</h2>
+			{#if blobColumns.length === 0}
+				<p class="mut">No blob columns on this table.</p>
+			{:else}
+				<div class="refs tagform">
+					<select class="mono" bind:value={blobCol}>
+						<option value="" disabled>column…</option>
+						{#each blobColumns as c (c)}<option value={c}>{c}</option>{/each}
+					</select>
+					<input class="mono" type="number" min="0" placeholder="row" bind:value={blobRow} />
+					<button class="btn" disabled={!blobCol || blobRow == null} onclick={previewBlob}
+						>Preview</button
+					>
+				</div>
+				{#if blobSrc}
+					{#if blobFailed}
+						<p class="mut">
+							Not an inline-previewable image — <a href={blobSrc}>open the blob</a>.
+						</p>
+					{:else}
+						<img
+							class="blob"
+							src={blobSrc}
+							alt="blob preview"
+							onerror={() => (blobFailed = true)}
+						/>
+					{/if}
+				{/if}
 			{/if}
 		</section>
 
@@ -675,6 +732,14 @@
 	.act {
 		white-space: nowrap;
 		text-align: right;
+	}
+	.blob {
+		display: block;
+		max-width: 100%;
+		max-height: 320px;
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		margin-top: 10px;
 	}
 	.btn.ghost {
 		background: none;

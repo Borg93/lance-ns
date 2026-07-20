@@ -234,11 +234,11 @@ async def _access_mutate(
 ) -> AccessGrantResponse:
     """Grant or revoke one base rung (owner/writer/reader/validator) to a subject on a table/namespace.
 
-    The MUTATE half of the #68 governance surface — the write counterpart of ``access/list`` + ``access/check``.
+    The MUTATE half of the #68 governance surface — the write counterpart of ``access/list``.
     Owner-tier gated by the router (``access/grant`` / ``access/revoke`` → ``can_drop`` / ``can_delete`` in
-    fga_deps) — managing an object's ACL is an owner-privileged act, the same bar as reviewing it. Fail-closed:
-    only a grantable base rung the model defines is accepted (a ``can_*`` action or ``parent`` is a 4xx, not a
-    silently-written junk tuple); an OpenFGA outage is a 503, never a grant/revoke that silently no-ops. Both
+    fga_deps) — managing an object's ACL is an owner-privileged act, the same bar as reviewing it.
+    Fail-closed: only a grantable base rung the model defines is accepted (a ``can_*`` action or ``parent``
+    is a 4xx, not a silent junk tuple); an OpenFGA outage is a 503, never a silent grant/revoke no-op. Both
     directions are idempotent (``write_tuples`` swallows a duplicate, ``delete_tuples`` an absent tuple) and
     audited distinctly (``access_grant`` / ``access_revoke``), carrying the grantee + rung."""
     if not settings.fga_enabled:
@@ -301,6 +301,91 @@ async def revoke_namespace_access(
 ) -> AccessGrantResponse:
     """Revoke a base rung on the namespace from a subject — owner-gated by the router (``can_delete``)."""
     return await _access_mutate(request, settings, token, "namespace", id, body, grant=False)
+
+
+class GraphNode(BaseModel):
+    """One node in the authorization graph — an FGA object or subject. ``type`` is the FGA type
+    (user/role/team/table/namespace/warehouse/project), ``label`` the id without its ``type:`` prefix."""
+
+    id: str
+    type: str
+    label: str
+
+
+class GraphEdge(BaseModel):
+    """A relation edge: ``source`` holds ``relation`` on ``target`` (a grant), or an object's ``parent``
+    edge pointing at its container (``target`` is the parent object)."""
+
+    source: str
+    target: str
+    relation: str
+
+
+class AccessGraphResponse(BaseModel):
+    object: str
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+def _graph_node(node_id: str) -> GraphNode:
+    """Split ``<type>:<rest>`` into a typed, labelled node (a userset like ``role:admin#assignee`` keeps
+    its full id, labelled without the leading type)."""
+    fga_type, _, rest = node_id.partition(":")
+    return GraphNode(id=node_id, type=fga_type or "unknown", label=rest or node_id)
+
+
+async def _access_graph(
+    request: Request, settings: Settings, token: CurrentToken, fga_type: str, id: str
+) -> AccessGraphResponse:
+    """The #81 authorization-graph primitive — one hop of the relationship graph around an object: the
+    object, every subject directly granted a rung on it, and its ``parent``/``project`` container edge.
+
+    Built from ``read_object_tuples`` (the direct tuples on the object — grants + the parent edge), so a
+    grant appears as ``subject → object`` labelled with the rung and the container as ``object → parent``.
+    The frontend expands the cascade by calling this again on a parent node. Owner-tier gated by the router
+    (same disclosure bar as ``access/list``: the graph reveals principals), audited (``access_graph``), and
+    fail-closed — an OpenFGA outage is a 503, never a partial graph that reads as 'nobody has access'."""
+    if not settings.fga_enabled:
+        raise UnsupportedOperationError("access graph requires OpenFGA (this stack runs auth-off)")
+    client = getattr(request.app.state, "fga", None)
+    if client is None:  # the router gate already 503s this; kept so the endpoint is safe standalone
+        raise ServiceUnavailableError("authorization service is not available")
+    segments = parse_identifier(id, settings.delimiter)
+    obj = f"{fga_type}:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    subject = token.sub if token else "anonymous"
+    try:
+        tuples = await fga.read_object_tuples(client, obj)
+    except ServiceUnavailableError:
+        audit("access_graph", FAILURE, subject=subject, resource=obj, reason="authz_unavailable")
+        raise
+    nodes: dict[str, GraphNode] = {obj: _graph_node(obj)}
+    edges: list[GraphEdge] = []
+    for t in tuples:
+        nodes.setdefault(t.user, _graph_node(t.user))
+        # A parent/project tuple is written (parent_object, parent, obj) — the object's container edge, so
+        # it points obj → parent. Every other tuple is a grant of a rung to a subject → obj.
+        if t.relation in ("parent", "project"):
+            edges.append(GraphEdge(source=obj, target=t.user, relation=t.relation))
+        else:
+            edges.append(GraphEdge(source=t.user, target=obj, relation=t.relation))
+    audit("access_graph", SUCCESS, subject=subject, resource=obj)
+    return AccessGraphResponse(object=obj, nodes=list(nodes.values()), edges=edges)
+
+
+@table_router.post("/{id}/access/graph")
+async def graph_table_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken
+) -> AccessGraphResponse:
+    """One hop of the authorization graph around the table — owner-gated by the router (``can_drop``)."""
+    return await _access_graph(request, settings, token, "table", id)
+
+
+@namespace_router.post("/{id}/access/graph")
+async def graph_namespace_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken
+) -> AccessGraphResponse:
+    """One hop of the authorization graph around the namespace — owner-gated (``can_delete``)."""
+    return await _access_graph(request, settings, token, "namespace", id)
 
 
 # The v1 aggregator includes one ``router`` per module — the table + namespace routers are stitched here.

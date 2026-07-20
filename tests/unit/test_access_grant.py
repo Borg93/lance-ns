@@ -94,3 +94,31 @@ def test_structural_parent_edge_is_rejected(monkeypatch: pytest.MonkeyPatch) -> 
 def test_fga_outage_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(ServiceUnavailableError):
         _run(monkeypatch, user="bob", relation="reader", grant=True, outage=True)
+
+
+def test_access_graph_builds_nodes_and_edges(monkeypatch: pytest.MonkeyPatch) -> None:
+    # #81: read_object_tuples → a one-hop graph. A grant tuple is an inbound edge subject→obj labelled with
+    # the rung; the parent tuple is an outbound edge obj→parent.
+    tuples: list[Any] = [
+        access.fga.ClientTuple(user="user:alice", relation="owner", object="table:db1$t"),
+        access.fga.ClientTuple(user="role:eng#assignee", relation="reader", object="table:db1$t"),
+        access.fga.ClientTuple(user="namespace:db1", relation="parent", object="table:db1$t"),
+    ]
+
+    async def fake_read(_client: object, _obj: str) -> list[Any]:
+        return tuples
+
+    monkeypatch.setattr(access.fga, "read_object_tuples", fake_read)
+    request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(fga=object())))
+    settings = cast(Settings, SimpleNamespace(fga_enabled=True, delimiter="$"))
+    token = cast(IDToken, SimpleNamespace(sub="alice"))
+    resp = asyncio.run(access._access_graph(cast(access.Request, request), settings, token, "table", "db1$t"))
+
+    assert resp.object == "table:db1$t"
+    assert {n.id for n in resp.nodes} == {"table:db1$t", "user:alice", "role:eng#assignee", "namespace:db1"}
+    # the table node is typed from its prefix
+    assert next(n for n in resp.nodes if n.id == "table:db1$t").type == "table"
+    edges = {(e.source, e.target, e.relation) for e in resp.edges}
+    assert ("user:alice", "table:db1$t", "owner") in edges  # grant: subject → obj
+    assert ("role:eng#assignee", "table:db1$t", "reader") in edges
+    assert ("table:db1$t", "namespace:db1", "parent") in edges  # container: obj → parent

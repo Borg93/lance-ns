@@ -7,6 +7,7 @@
 	import { Select } from "@lance/ui";
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
 	import { tableFromJSON, tableToIPC } from "apache-arrow";
+	import AccessGraph from "./AccessGraph.svelte";
 	import GrantsPanel from "./GrantsPanel.svelte";
 	import ReadersPanel from "./ReadersPanel.svelte";
 	import {
@@ -65,6 +66,9 @@
 	let insertBusy = $state(false);
 	let insertMsg = $state<{ ok: boolean; text: string } | null>(null);
 
+	// #81 the SvelteFlow authorization graph is lazy-mounted (heavy) behind this toggle.
+	let showGraph = $state(false);
+
 	const unauthorized = $derived(detail === null && lastStatus === 401);
 	const notInCatalog = $derived(detail === null && lastStatus === 404);
 	const denied = $derived(detail === null && lastStatus === 403);
@@ -104,6 +108,7 @@
 		blobFailed = false;
 		insertJson = "";
 		insertMsg = null;
+		showGraph = false;
 		load();
 	});
 
@@ -747,6 +752,11 @@
 			<h2>Access</h2>
 			<GrantsPanel dataset={table} />
 			<ReadersPanel dataset={table} />
+			<!-- #81 the relationship graph is heavy (SvelteFlow) — lazy-mount behind a toggle. -->
+			<button class="btn ghost graphtoggle" onclick={() => (showGraph = !showGraph)}>
+				{showGraph ? "Hide" : "Show"} authorization graph
+			</button>
+			{#if showGraph}<AccessGraph dataset={table} />{/if}
 		</section>
 	{/if}
 </div>
@@ -950,6 +960,9 @@
 	.btn.ghost {
 		background: none;
 		color: var(--mut);
+	}
+	.graphtoggle {
+		margin: 10px 0 8px;
 	}
 	.btn.danger {
 		color: var(--fail);

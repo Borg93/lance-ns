@@ -201,6 +201,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/namespace/{id}/access/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Graph Namespace Access
+         * @description One hop of the authorization graph around the namespace — owner-gated by the router (``can_delete``).
+         */
+        post: operations["graph_namespace_access_v1_namespace__id__access_graph_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/namespace/{id}/access/list": {
         parameters: {
             query?: never;
@@ -535,6 +555,26 @@ export interface paths {
          * @description Grant a base rung on the table to a subject — owner-gated by the router (``can_drop``).
          */
         post: operations["grant_table_access_v1_table__id__access_grant_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/access/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Graph Table Access
+         * @description One hop of the authorization graph around the table — owner-gated by the router (``can_drop``).
+         */
+        post: operations["graph_table_access_v1_table__id__access_graph_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1826,6 +1866,15 @@ export interface components {
             relation: string;
             /** User */
             user: string;
+        };
+        /** AccessGraphResponse */
+        AccessGraphResponse: {
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /** Object */
+            object: string;
         };
         /** AccessListResponse */
         AccessListResponse: {
@@ -3984,6 +4033,32 @@ export interface components {
              */
             version: number;
         };
+        /**
+         * GraphEdge
+         * @description A relation edge: ``source`` holds ``relation`` on ``target`` (a grant), or an object's ``parent``
+         *     edge pointing at its container (``target`` is the parent object).
+         */
+        GraphEdge: {
+            /** Relation */
+            relation: string;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
+        };
+        /**
+         * GraphNode
+         * @description One node in the authorization graph — an FGA object or subject. ``type`` is the FGA type
+         *     (user/role/team/table/namespace/warehouse/project), ``label`` the id without its ``type:`` prefix.
+         */
+        GraphNode: {
+            /** Id */
+            id: string;
+            /** Label */
+            label: string;
+            /** Type */
+            type: string;
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -5613,6 +5688,37 @@ export interface operations {
             };
         };
     };
+    graph_namespace_access_v1_namespace__id__access_graph_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGraphResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_namespace_access_v1_namespace__id__access_list_post: {
         parameters: {
             query?: never;
@@ -6133,6 +6239,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessGrantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    graph_table_access_v1_table__id__access_graph_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGraphResponse"];
                 };
             };
             /** @description Validation Error */

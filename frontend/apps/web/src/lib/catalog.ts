@@ -94,6 +94,13 @@ export const revokeTableAccess = (table: string, user: string, relation: string)
 		body: JSON.stringify({ user, relation }),
 	});
 
+export type AccessGraph = components["schemas"]["AccessGraphResponse"];
+
+/** #81 one hop of the authorization graph around the table — its direct grantees + the parent edge, for the
+ * SvelteFlow relationship explorer. Owner-gated by the catalog (can_drop); session-only BFF. */
+export const fetchAccessGraph = (table: string) =>
+	requestJSON<AccessGraph>(`v1/table/${enc(table)}/access/graph`, { method: "POST" });
+
 export type TablesList = components["schemas"]["ListTablesResponse"];
 
 /** The catalog's own table registry (#52) — names in `<ns>$<table>` canonical form. */

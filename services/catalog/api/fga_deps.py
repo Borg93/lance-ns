@@ -109,6 +109,9 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         # through to the writer tier, letting a plain data writer hand out ownership.
         "access/grant": "can_drop",
         "access/revoke": "can_drop",
+        # #81 authorization graph: one hop of the relationship graph discloses principals + the cascade,
+        # the same disclosure as access/list — owner bar.
+        "access/graph": "can_drop",
     },
     "namespace": {
         "drop": "can_delete",
@@ -118,6 +121,7 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         "access/check": "can_delete",
         "access/grant": "can_delete",
         "access/revoke": "can_delete",
+        "access/graph": "can_delete",
     },
 }
 

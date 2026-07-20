@@ -328,6 +328,6 @@ def test_access_disclosure_routes_are_owner_tier() -> None:
     weakens. This asserts the resolved tier directly, so such a refactor fails loudly."""
     from catalog.api.fga_deps import _action_relation
 
-    for suffix in ("access/list", "access/check", "access/grant", "access/revoke"):
+    for suffix in ("access/list", "access/check", "access/grant", "access/revoke", "access/graph"):
         assert _action_relation("table", suffix) == "can_drop", suffix
         assert _action_relation("namespace", suffix) == "can_delete", suffix

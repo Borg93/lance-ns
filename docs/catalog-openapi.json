@@ -95,6 +95,35 @@
         "title": "AccessGrantResponse",
         "type": "object"
       },
+      "AccessGraphResponse": {
+        "properties": {
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "object": {
+            "title": "Object",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "nodes",
+          "edges"
+        ],
+        "title": "AccessGraphResponse",
+        "type": "object"
+      },
       "AccessListResponse": {
         "properties": {
           "grants": {
@@ -5036,6 +5065,54 @@
         "title": "GetTableTagVersionResponse",
         "type": "object"
       },
+      "GraphEdge": {
+        "description": "A relation edge: ``source`` holds ``relation`` on ``target`` (a grant), or an object's ``parent``\nedge pointing at its container (``target`` is the parent object).",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source",
+          "target",
+          "relation"
+        ],
+        "title": "GraphEdge",
+        "type": "object"
+      },
+      "GraphNode": {
+        "description": "One node in the authorization graph \u2014 an FGA object or subject. ``type`` is the FGA type\n(user/role/team/table/namespace/warehouse/project), ``label`` the id without its ``type:`` prefix.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "label"
+        ],
+        "title": "GraphNode",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -8547,6 +8624,54 @@
         ]
       }
     },
+    "/v1/namespace/{id}/access/graph": {
+      "post": {
+        "description": "One hop of the authorization graph around the namespace \u2014 owner-gated by the router (``can_delete``).",
+        "operationId": "graph_namespace_access_v1_namespace__id__access_graph_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Graph Namespace Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/namespace/{id}/access/list": {
       "post": {
         "description": "Effective access on the namespace, per ``can_*`` action \u2014 owner-gated by the router\n(``can_delete``).",
@@ -9487,6 +9612,54 @@
           }
         ],
         "summary": "Grant Table Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/v1/table/{id}/access/graph": {
+      "post": {
+        "description": "One hop of the authorization graph around the table \u2014 owner-gated by the router (``can_drop``).",
+        "operationId": "graph_table_access_v1_table__id__access_graph_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGraphResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Graph Table Access",
         "tags": [
           "access"
         ]

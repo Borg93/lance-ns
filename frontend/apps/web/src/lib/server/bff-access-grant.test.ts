@@ -9,6 +9,7 @@ mock.module("$env/dynamic/private", () => ({ env: { CATALOG_API: "http://catalog
 // cast to GRANT's handler type at its call site — the runtime shape is identical.
 const { POST: GRANT } = await import("../../routes/capi/v1/table/[id]/access/grant/+server");
 const { POST: REVOKE } = await import("../../routes/capi/v1/table/[id]/access/revoke/+server");
+const { POST: GRAPH } = await import("../../routes/capi/v1/table/[id]/access/graph/+server");
 
 type Handled = { url: string; auth: string | undefined; body: string };
 
@@ -66,5 +67,43 @@ describe("access grant/revoke BFF", () => {
 		const d = drive(GRANT, { session: false, authEnabled: false });
 		expect((await d.run()).status).toBe(200);
 		expect(d.calls[0].auth).toBeUndefined();
+	});
+});
+
+describe("access graph BFF (#81)", () => {
+	function driveGraph(opts: { session?: boolean; authEnabled?: boolean } = {}) {
+		const calls: { url: string; auth: string | undefined }[] = [];
+		const event = {
+			params: { id: "db1$t" },
+			request: new Request("http://bff/x", { method: "POST", body: "" }),
+			fetch: async (url: string, init: RequestInit) => {
+				calls.push({
+					url,
+					auth: ((init.headers ?? {}) as Record<string, string>)["authorization"],
+				});
+				return new Response('{"object":"table:db1$t","nodes":[],"edges":[]}', {
+					status: 200,
+					headers: { "content-type": "application/json" },
+				});
+			},
+			locals: {
+				authEnabled: opts.authEnabled ?? true,
+				session: opts.session ? { accessToken: "tok" } : null,
+			},
+		};
+		return { run: () => GRAPH(event as unknown as Parameters<typeof GRAPH>[0]), calls };
+	}
+
+	test("auth-on with no session fails closed to 401", async () => {
+		const d = driveGraph({ session: false });
+		expect((await d.run()).status).toBe(401);
+		expect(d.calls.length).toBe(0);
+	});
+
+	test("forwards to the catalog graph endpoint with the session bearer", async () => {
+		const d = driveGraph({ session: true });
+		expect((await d.run()).status).toBe(200);
+		expect(d.calls[0].url).toBe("http://catalog.test/v1/table/db1%24t/access/graph");
+		expect(d.calls[0].auth).toBe("Bearer tok");
 	});
 });

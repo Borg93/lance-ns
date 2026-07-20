@@ -32,11 +32,15 @@ const DETAIL = {
 let tagPost: { tag: string; version: number } | null;
 let restorePost: { version: number } | null;
 let insertPostBytes: number;
+let indexCreate: { url: string; body: Record<string, unknown> } | null;
+let indexDrop: string | null;
 
 test.beforeEach(async ({ page }) => {
 	tagPost = null;
 	restorePost = null;
 	insertPostBytes = 0;
+	indexCreate = null;
+	indexDrop = null;
 	await page.route("**/capi/**", (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^\/capi/, "");
@@ -53,6 +57,14 @@ test.beforeEach(async ({ page }) => {
 			// The body is a browser-built Arrow-IPC stream — assert it's non-empty binary, not JSON.
 			insertPostBytes = req.postDataBuffer()?.length ?? 0;
 			return json(route, { transaction_id: "tx1" });
+		}
+		if (path.includes("/index/create")) {
+			indexCreate = { url: req.url(), body: req.postDataJSON() as Record<string, unknown> };
+			return json(route, { transaction_id: "ix1" });
+		}
+		if (path.match(/\/index\/[^/]+\/drop$/) && req.method() === "POST") {
+			indexDrop = path;
+			return json(route, { transaction_id: "ix2" });
 		}
 		return json(route, { detail: "unstubbed" }, 404);
 	});
@@ -107,4 +119,24 @@ test("insert-rows form encodes JSON to an Arrow-IPC body and posts to /insert (#
 	// the browser encoded the rows to a non-empty Arrow-IPC binary body (apache-arrow), not JSON
 	await expect.poll(() => insertPostBytes).toBeGreaterThan(0);
 	await expect(section).toContainText("Inserted 1 row");
+});
+
+test("builds a vector index through the create form (#73)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Indexes" });
+	await section.getByLabel("Index column").fill("vec");
+	await section.getByLabel("Index type").selectOption("IVF_PQ");
+	await section.getByRole("button", { name: "Build index" }).click();
+	// a vector type routes to create_index (scalar=0) and carries the distance type
+	await expect
+		.poll(() => indexCreate?.body)
+		.toEqual({ column: "vec", index_type: "IVF_PQ", distance_type: "cosine" });
+	expect(indexCreate?.url).toContain("scalar=0");
+});
+
+test("drops an index via the chip × (#73)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Indexes" });
+	await section.getByRole("button", { name: "drop index id_idx" }).click();
+	await expect.poll(() => indexDrop).toContain("/index/id_idx/drop");
 });

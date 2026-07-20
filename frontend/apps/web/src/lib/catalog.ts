@@ -140,6 +140,21 @@ export const insertRows = (table: string, arrow: Uint8Array) =>
 		body: arrow as BodyInit,
 	});
 
+export type CreateIndexBody = { column: string; index_type: string; distance_type?: string };
+
+/** #73 build an index — `scalar` picks the catalog's create_scalar_index (BTREE/BITMAP/INVERTED …) vs
+ * create_index (the IVF/HNSW vector families). A rebuild is just a create with the same column (Lance
+ * replaces the existing one). Writer-gated (can_write_data) at the catalog; session-only BFF. */
+export const createTableIndex = (table: string, body: CreateIndexBody, scalar: boolean) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/index/create?scalar=${scalar ? 1 : 0}`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify(body),
+	});
+/** #73 drop a named index — writer-gated (can_write_data), session-only BFF. */
+export const dropTableIndex = (table: string, name: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/index/${enc(name)}/drop`, { method: "POST" });
+
 /** Warehouse admin (#3-A UI): reads for any signed-in user the catalog allows; writes are
  * project-admin gated by the catalog (can_create_warehouse / can_administer). */
 export const fetchWarehouses = () => requestJSON<Warehouse[]>("v1/warehouses");

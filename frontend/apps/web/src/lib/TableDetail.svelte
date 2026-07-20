@@ -9,8 +9,10 @@
 	import GrantsPanel from "./GrantsPanel.svelte";
 	import ReadersPanel from "./ReadersPanel.svelte";
 	import {
+		createTableIndex,
 		createTableTag,
 		deleteTablePolicy,
+		dropTableIndex,
 		fetchTableDetail,
 		insertRows,
 		partErrored,
@@ -322,6 +324,63 @@
 		return String(t ?? "—");
 	}
 
+	// #73 index management — build (scalar / vector) + drop. Vector indexes (IVF/HNSW) are the Lance
+	// differentiator neither Iceberg nor Unity has; a rebuild is a create with the same column (Lance
+	// replaces). The catalog gates all three at the writer tier (can_write_data).
+	const SCALAR_TYPES = ["BTREE", "BITMAP", "INVERTED", "NGRAM"];
+	const VECTOR_TYPES = ["IVF_PQ", "IVF_HNSW_SQ"];
+	let ixColumn = $state("");
+	let ixType = $state("BTREE");
+	let ixDistance = $state("cosine");
+	let ixBusy = $state(false);
+	let ixError = $state<string | null>(null);
+	const ixScalar = $derived(SCALAR_TYPES.includes(ixType));
+
+	async function runCreateIndex(): Promise<void> {
+		const column = ixColumn.trim();
+		if (ixBusy || !column || !ixType) return;
+		ixBusy = true;
+		ixError = null;
+		try {
+			const body = ixScalar
+				? { column, index_type: ixType }
+				: { column, index_type: ixType, distance_type: ixDistance };
+			const res = await createTableIndex(table, body, ixScalar);
+			if (res.ok) {
+				ixColumn = "";
+				await load(); // pull the new index into the list (the build bumps the version too)
+			} else if (res.status === 401) {
+				ixError = "Sign in to build an index.";
+			} else if (res.status === 403) {
+				ixError = "Denied: building an index needs writer access (can_write_data).";
+			} else {
+				ixError = res.detail;
+			}
+		} finally {
+			ixBusy = false;
+		}
+	}
+
+	async function runDropIndex(name: string | undefined): Promise<void> {
+		if (ixBusy || !name) return;
+		ixBusy = true;
+		ixError = null;
+		try {
+			const res = await dropTableIndex(table, name);
+			if (res.ok) {
+				await load();
+			} else if (res.status === 401) {
+				ixError = "Sign in to drop an index.";
+			} else if (res.status === 403) {
+				ixError = "Denied: dropping an index needs writer access (can_write_data).";
+			} else {
+				ixError = res.detail;
+			}
+		} finally {
+			ixBusy = false;
+		}
+	}
+
 	function fmtBytes(n: number | null | undefined): string {
 		if (n == null) return "—";
 		const units = ["B", "KiB", "MiB", "GiB", "TiB"];
@@ -471,11 +530,47 @@
 						<span class="chip mono"
 							>{ix.index_name}<span class="mut">
 								· {(ix.columns ?? []).join(", ")}{ix.index_type ? ` · ${ix.index_type}` : ""}</span
+							>
+							<button
+								class="chip-x"
+								title="drop index"
+								aria-label="drop index {ix.index_name}"
+								disabled={ixBusy}
+								onclick={() => runDropIndex(ix.index_name)}>×</button
 							></span
 						>
 					{/each}
 				</div>
 			{/if}
+			<!-- #73 build an index — scalar (BTREE/BITMAP/INVERTED/NGRAM) or vector (IVF/HNSW). Writer-gated. -->
+			<form
+				class="row"
+				onsubmit={(e) => {
+					e.preventDefault();
+					runCreateIndex();
+				}}
+			>
+				<input class="mono" bind:value={ixColumn} placeholder="column" aria-label="Index column" />
+				<select class="mono" bind:value={ixType} aria-label="Index type">
+					<optgroup label="scalar">
+						{#each SCALAR_TYPES as t (t)}<option value={t}>{t}</option>{/each}
+					</optgroup>
+					<optgroup label="vector">
+						{#each VECTOR_TYPES as t (t)}<option value={t}>{t}</option>{/each}
+					</optgroup>
+				</select>
+				{#if !ixScalar}
+					<select class="mono" bind:value={ixDistance} aria-label="Distance type">
+						<option value="cosine">cosine</option>
+						<option value="l2">l2</option>
+						<option value="dot">dot</option>
+					</select>
+				{/if}
+				<button class="btn" type="submit" disabled={ixBusy || !ixColumn.trim()}>
+					{ixBusy ? "…" : "Build index"}
+				</button>
+			</form>
+			{#if ixError}<p class="error">{ixError}</p>{/if}
 		</section>
 
 		<section>
@@ -720,6 +815,22 @@
 		border: 1px solid var(--line);
 		border-radius: var(--radius-sm);
 		padding: 0 7px;
+	}
+	.chip-x {
+		margin-left: 5px;
+		background: none;
+		border: none;
+		padding: 0;
+		color: var(--faint);
+		font: inherit;
+		cursor: pointer;
+	}
+	.chip-x:hover {
+		color: var(--fail);
+	}
+	.chip-x:disabled {
+		opacity: 0.4;
+		cursor: default;
 	}
 	.chip.tag {
 		border-color: color-mix(in srgb, var(--ok) 45%, var(--line));

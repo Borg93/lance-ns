@@ -61,15 +61,11 @@ grep -q "datasource.url=http://lance-ns-greptimedb-standalone:.*prometheus" "$OU
   || fail "vmalert must query GreptimeDB's PromQL endpoint"
 grep -q "LineageOutboxNotDraining" "$OUT" || fail "the proven alert rules must be mounted into vmalert"
 
-# 8. Infra-tier metrics (P3c): vmagent deployed, remote-writing the Dapr sidecar scrape into GreptimeDB with
-# the db-name header, discovering the dapr-metrics port, on a NAMESPACED Role (least privilege). And the
-# DaprConsumerWedge rule must be mounted so the scraped signal is actually alertable. Off on the default render.
-grep -q "name: lance-ns-vmagent$" "$OUT" || fail "prod must deploy vmagent (the infra-metrics scraper)"
-grep -q "remoteWrite.url=http://lance-ns-greptimedb-standalone:.*/v1/prometheus/write" "$OUT" \
-  || fail "vmagent must remote-write to GreptimeDB's prometheus endpoint"
-grep -q "x-greptime-db-name:public" "$OUT" || fail "vmagent remote-write must carry the greptime db-name header"
-grep -q "regex: dapr-metrics" "$OUT" || fail "vmagent must scrape the Dapr sidecar metrics port"
-grep -q "DaprConsumerWedge" "$OUT" || fail "the consumer-wedge rule must be mounted so infra metrics are alertable"
+# 8. The DaprConsumerWedge rule is mounted (SLO-as-code, ready for when the OTel Collector scrapes the Dapr
+# sidecars), and NO bespoke scraper is shipped — the redundant vmagent was removed; the OTel Collector's
+# prometheus receiver owns that scrape at operator-adoption time.
+grep -q "DaprConsumerWedge" "$OUT" || fail "the consumer-wedge rule must be mounted (SLO-as-code)"
+grep -q "name: lance-ns-vmagent$" "$OUT" && fail "vmagent must NOT be shipped (the OTel Collector owns the Dapr scrape)"
 
 # 9. Catalog memory coherence (P1): the load-shed write cap must be sized to the catalog memory tier —
 # cap × maxBodyBytes of buffered Arrow-IPC bodies + 512Mi baseline headroom (process + pyarrow decode)
@@ -138,4 +134,4 @@ grep -q "kind: ExternalSecret" <<<"$eso" || fail "ESO path must render the Exter
 grep -A2 "name: lance-ns-infra-credentials" <<<"$eso" | grep -q "stringData:" \
   && fail "ESO path must SKIP the static infra-credentials Secret (external-secrets owns it)"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, infra-metrics on, write-cap=$cap fits $cat_mem, rustfs-externalize atomic, ESO path renders"
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, no-bespoke-scraper, write-cap=$cap fits $cat_mem, rustfs-externalize atomic, ESO path renders"

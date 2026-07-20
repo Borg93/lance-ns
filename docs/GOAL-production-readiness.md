@@ -105,18 +105,15 @@ to main. Never weaken auth/secrets posture.
   index + per-mode symptom→cause→diagnose→act for OpenFGA-down (503-everywhere), OpenBao sealed (boot
   deadlock), CrashLoop-on-boot, /readyz degraded (pool vs graph), cascade stalled, DLQ parking, outbox not
   draining, RustFS down, AGE down. Grounded in the real services/metrics/fail-closed behaviors.
-- [x] **Infra-tier metrics collection** (CRIT·chart) — DONE (P3c): the app services push OTLP straight to
-  GreptimeDB but the Dapr sidecars only EXPOSE `:9090` Prometheus metrics that nothing pulled, so a
-  consumer-wedge (a subscriber retrying forever, cascade silently stalled) was invisible. `vmagent`
-  (chart/templates/infra-metrics.yaml, `observability.infraMetrics`) now discovers every `dapr.io/enabled`
-  pod in-namespace (least-privilege namespaced Role, not ClusterRole), scrapes the `dapr-metrics` port, and
-  remote-writes into the same GreptimeDB (`public` db, `x-greptime-db-name` header). The `DaprConsumerWedge`
-  rule (`dapr_resiliency_count{policy="retry",flow_direction="inbound"}` sustained 15m) makes the scraped
-  signal page — promtool-proven to fire and to stay silent on transient retries. Off in the kind e2e (2c/7G
-  runner); on in the prod overlay; render + prod-render-check verified. REMAINING (P3c-drill): the live
-  vmagent→GreptimeDB scrape round-trip needs an obs-on cluster — deploying it creates the vmagent Role, a
-  protected-scope mutation, so it's an operator-authorized drill (same shape as the alert/restore drills).
-  NATS JetStream metrics (the subchart's promExporter, `-jsz`) are a follow-on second scrape target.
+- [~] **Infra-tier metrics collection** (CRIT·chart) — the Dapr sidecars expose `:9090` Prometheus metrics
+  nothing pulled, so a consumer-wedge (a subscriber retrying forever, cascade silently stalled) is invisible.
+  The **alert LOGIC is DONE**: the `DaprConsumerWedge` rule keys on
+  `dapr_component_pubsub_ingress_count{process_status="retry"}` (the live-verified per-delivery retry outcome)
+  sustained 15m, promtool-proven to fire and to stay silent on a busy-healthy consumer. The COLLECTION is
+  deliberately deferred to the **OTel Collector** (operator adoption): a first pass shipped a `vmagent`, but
+  that was a redundant third collector (the estate already runs Vector for infra logs + OTLP-direct for apps),
+  so it was **removed** — the Collector's `prometheus` receiver (k8s SD) owns the Dapr scrape and subsumes
+  Vector too. The rule evaluates the moment the Collector feeds `dapr_*` into GreptimeDB. See docs/OPERATORS.md #7.
 - [x] **Trace continuity across Ray + Dapr boundary** (MED·code) — DONE at the unit tier: both in-service
   submission sites (`ray_submit.submit_stage_job`/`submit_train_job`) inject the active span's W3C
   traceparent into the job `runtime_env` (`opentelemetry.propagate.inject` — nothing injected without a

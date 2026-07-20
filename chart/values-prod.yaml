@@ -161,10 +161,8 @@ observability:
   # Set webhookUrl (Slack/PagerDuty) out-of-band to actually page — empty groups alerts but pages nowhere.
   alerting:
     enabled: true
-  # Infra-tier metrics ON (P3c): vmagent scrapes the Dapr sidecars into GreptimeDB so a consumer-wedge
-  # (silent in the app metrics) becomes queryable + fires DaprConsumerWedge. Kept off in the kind e2e (2c/7G).
-  infraMetrics:
-    enabled: true
+  # Dapr sidecar metrics (the DaprConsumerWedge signal) are scraped by the OTel Collector's prometheus
+  # receiver at operator-adoption time — not a bespoke scraper. See the OpenTelemetry-Collector EXTERNALIZE note.
 
 # ===================================================================================================
 # EXTERNALIZE the durable/managed tier (tier 3 in docs/DURABILITY.md). Disable the in-cluster component
@@ -207,5 +205,5 @@ observability:
 #   enabled: false                                   # apps + Dapr still emit OTLP (otelEnabled tracks the endpoint,
 #   externalOtlpEndpoint: http://otel-collector.observability:4318/v1/otlp # not just observability.enabled)
 # GPU metrics (NVIDIA DCGM operator): net-new, rides in with KubeRay+Kueue for GPU training — the dcgm-exporter
-# is node-level infra (a DaemonSet the DCGM operator owns), scraped like the Dapr sidecars (observability.
-# infraMetrics / vmagent). Nothing to flip in this chart until GPU Ray workers land (docs/OPERATORS.md).
+# is node-level infra (a DaemonSet the DCGM operator owns), scraped by the OTel Collector's prometheus receiver
+# (the same one that takes the Dapr sidecars). Nothing to flip in this chart until GPU Ray workers land.

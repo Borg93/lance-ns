@@ -101,6 +101,15 @@ export const createTableTag = (table: string, tag: string, version: number) =>
 		body: JSON.stringify({ tag, version }),
 	});
 
+/** #64 version management — restore the table to a prior version. Restore mints a FRESH version pointing
+ * at the restored data (history is never rewritten); owner-gated (can_restore), session-only BFF. */
+export const restoreTableVersion = (table: string, version: number) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/restore`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ version }),
+	});
+
 /** Warehouse admin (#3-A UI): reads for any signed-in user the catalog allows; writes are
  * project-admin gated by the catalog (can_create_warehouse / can_administer). */
 export const fetchWarehouses = () => requestJSON<Warehouse[]>("v1/warehouses");

@@ -15,6 +15,7 @@
 		type PolicyRequest,
 		type TableStats,
 		type TableDetail,
+		restoreTableVersion,
 		setTablePolicy,
 	} from "./catalog";
 
@@ -40,6 +41,11 @@
 	let tagVersion = $state<number | null>(null);
 	let tagBusy = $state(false);
 	let tagError = $state<string | null>(null);
+
+	// #64 restore-to-version (owner-gated) — two-click confirm, since restore mutates the current table.
+	let restoreConfirm = $state<number | null>(null);
+	let restoreBusy = $state(false);
+	let restoreError = $state<string | null>(null);
 
 	const unauthorized = $derived(detail === null && lastStatus === 401);
 	const notInCatalog = $derived(detail === null && lastStatus === 404);
@@ -72,6 +78,8 @@
 		tagName = "";
 		tagVersion = null;
 		tagError = null;
+		restoreConfirm = null;
+		restoreError = null;
 		load();
 	});
 
@@ -146,6 +154,27 @@
 			}
 		} finally {
 			tagBusy = false;
+		}
+	}
+
+	async function runRestore(version: number | undefined): Promise<void> {
+		if (restoreBusy || version == null) return;
+		restoreBusy = true;
+		restoreError = null;
+		try {
+			const res = await restoreTableVersion(table, version);
+			if (res.ok) {
+				restoreConfirm = null;
+				await load(); // restore mints a fresh current version — refresh to show it
+			} else if (res.status === 401) {
+				restoreError = "Sign in to restore a version.";
+			} else if (res.status === 403) {
+				restoreError = "Denied: restoring a version needs the owner tier (can_restore).";
+			} else {
+				restoreError = res.detail;
+			}
+		} finally {
+			restoreBusy = false;
 		}
 	}
 
@@ -299,18 +328,43 @@
 					per commit:
 				</p>
 				<table>
-					<thead><tr><th>version</th><th>committed</th><th>manifest</th></tr></thead>
+					<thead><tr><th>version</th><th>committed</th><th>manifest</th><th></th></tr></thead>
 					<tbody>
 						{#each versions.slice().reverse().slice(0, 10) as v (v.version)}
 							<tr>
 								<td class="mono">v{v.version}</td>
 								<td class="mono">{fmtEpoch(v.timestamp_millis, "ms")}</td>
 								<td class="mono">{fmtBytes(v.manifest_size)}</td>
+								<td class="act">
+									{#if restoreConfirm === v.version}
+										<button
+											class="btn tiny danger"
+											disabled={restoreBusy}
+											onclick={() => runRestore(v.version)}
+										>
+											{restoreBusy ? "…" : "confirm restore"}
+										</button>
+										<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}>
+											cancel
+										</button>
+									{:else}
+										<button
+											class="btn tiny ghost"
+											onclick={() => {
+												restoreConfirm = v.version ?? null;
+												restoreError = null;
+											}}
+										>
+											restore
+										</button>
+									{/if}
+								</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 				{#if versions.length > 10}<p class="mut">…and {versions.length - 10} older.</p>{/if}
+				{#if restoreError}<p class="error">{restoreError}</p>{/if}
 			{/if}
 
 			<div class="refs br">
@@ -584,6 +638,14 @@
 	.btn:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+	.btn.tiny {
+		font-size: 11px;
+		padding: 1px 7px;
+	}
+	.act {
+		white-space: nowrap;
+		text-align: right;
 	}
 	.btn.ghost {
 		background: none;

@@ -356,7 +356,7 @@ observability:
   # "we run the OTel operator + an external Collector; in Helm just point to the existing one" prod path.
   otelCollector:
     enabled: true
-    image: otel/opentelemetry-collector-contrib:0.116.0
+    image: otel/opentelemetry-collector-contrib:0.119.0
     externalEndpoint: "" # e.g. http://otel-collector.observability.svc:4318 — set in prod, deploys nothing
   # Legacy escape hatch: ship OTLP to an off-cluster endpoint AND run no in-cluster store. Prefer
   # otelCollector.externalEndpoint (the OTel-first prod path); this stays for a raw non-Collector target.

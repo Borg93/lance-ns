@@ -208,12 +208,14 @@ def test_logs_populated() -> None:
     tails the no-SDK infra pods into the SAME table (Vector is gone; there is no more `lance_logs`)."""
 
     def app_and_infra_logs_present() -> bool | None:
-        # App OTLP logs carry a real service.name (catalog/lineage/…); the Collector's file-tailed infra
-        # logs carry the collector's own service.name (or none). Assert BOTH the table populates AND it
-        # holds logs from more than one service — proof the filelog path landed alongside the app OTLP.
-        total = int(_gt_sql("SELECT count(*) FROM opentelemetry_logs")[0][0])
-        services = int(_gt_sql("SELECT count(DISTINCT service_name) FROM opentelemetry_logs")[0][0])
-        return total > 0 and services >= 2 or None
+        # opentelemetry_logs has no top-level service_name column (service.name lives in resource_attributes);
+        # distinguish the two paths by trace_id instead. App OTLP logs are emitted inside a span → carry a
+        # trace_id; the Collector's file-tailed infra logs have no span context → no trace_id. Both present in
+        # the ONE table proves both paths landed (Vector is gone — its lance_logs table no longer exists).
+        has_trace = "trace_id IS NOT NULL AND trace_id != ''"
+        app = int(_gt_sql(f"SELECT count(*) FROM opentelemetry_logs WHERE {has_trace}")[0][0])
+        infra = int(_gt_sql(f"SELECT count(*) FROM opentelemetry_logs WHERE NOT ({has_trace})")[0][0])
+        return app > 0 and infra > 0 or None
 
     assert _eventually(app_and_infra_logs_present)
 

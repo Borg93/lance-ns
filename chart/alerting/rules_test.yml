@@ -91,7 +91,7 @@ tests:
   #    (app_id) keeps app_id on the resulting alert, so it names the wedged subscriber.
   - interval: 1m
     input_series:
-      - series: 'dapr_component_pubsub_ingress_count{process_status="retry",app_id="bronze-to-silver"}'
+      - series: 'dapr_component_pubsub_ingress_count_total{process_status="retry",app_id="bronze-to-silver"}'
         values: "0+1x20" # a retried delivery every scrape — the handler never succeeds
     alert_rule_test:
       - eval_time: 16m
@@ -110,7 +110,7 @@ tests:
   #    too, so it would have false-paged here; process_status=retry stays absent on the happy path.
   - interval: 1m
     input_series:
-      - series: 'dapr_component_pubsub_ingress_count{process_status="success",app_id="bronze-to-silver"}'
+      - series: 'dapr_component_pubsub_ingress_count_total{process_status="success",app_id="bronze-to-silver"}'
         values: "0+5x20" # heavy healthy throughput — five successful deliveries per scrape, no retries
     alert_rule_test:
       - eval_time: 16m
@@ -121,7 +121,7 @@ tests:
   #    retries that never stop). The retry counter stops rising after ~4 min, so rate() falls back to 0.
   - interval: 1m
     input_series:
-      - series: 'dapr_component_pubsub_ingress_count{process_status="retry",app_id="bronze-to-silver"}'
+      - series: 'dapr_component_pubsub_ingress_count_total{process_status="retry",app_id="bronze-to-silver"}'
         values: "0 1 2 3 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4 4" # retried only in the first ~4 min, then recovered
     alert_rule_test:
       - eval_time: 16m

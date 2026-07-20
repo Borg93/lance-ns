@@ -93,11 +93,12 @@ groups:
       # So a sustained rate of process_status="retry" is the wedge — the subscription is not draining.
       # (NOT dapr_resiliency_count, which is flat regardless of outcome, nor dapr_resiliency_activations_total,
       # which Dapr 1.18 doesn't emit — both verified live on the cluster.) A healthy transient error retries
-      # then succeeds, so the 15m `for` rides out blips. This rule is SLO-as-code: it evaluates once the OTel
-      # Collector's prometheus receiver scrapes the Dapr sidecars into GreptimeDB (at operator adoption — there
-      # is no bespoke scraper in-chart). Until then dapr_* is simply absent and the rule is inert.
+      # then succeeds, so the 15m `for` rides out blips. NOTE the `_total` suffix: the OTel Collector's
+      # prometheus receiver normalizes counters, so the Dapr `..._count` exposition lands in GreptimeDB as
+      # `..._count_total` (verified live — the un-suffixed name returns nothing). The Collector scrapes the
+      # sidecars into GreptimeDB, so this fires on a real wedge.
       - alert: DaprConsumerWedge
-        expr: sum by (app_id) (rate(dapr_component_pubsub_ingress_count{process_status="retry"}[5m])) > 0
+        expr: sum by (app_id) (rate(dapr_component_pubsub_ingress_count_total{process_status="retry"}[5m])) > 0
         for: 15m
         labels:
           severity: critical

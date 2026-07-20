@@ -8,6 +8,8 @@
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
 	import { tableFromJSON, tableToIPC } from "apache-arrow";
 	import AccessGraph from "./AccessGraph.svelte";
+	import { fetchProducers } from "./api";
+	import { deriveQuality, type QualityBadge } from "./quality";
 	import GrantsPanel from "./GrantsPanel.svelte";
 	import ReadersPanel from "./ReadersPanel.svelte";
 	import {
@@ -82,6 +84,17 @@
 	// #81 the SvelteFlow authorization graph is lazy-mounted (heavy) behind this toggle.
 	let showGraph = $state(false);
 
+	// scope #6 quality gate — the validator's latest dataQualityAssertions verdict for this dataset, from
+	// the lineage service's producing runs (medallion stages record it; a plain catalog table has none).
+	let quality = $state<QualityBadge>(null);
+
+	async function loadQuality(): Promise<void> {
+		const current = table;
+		const res = await fetchProducers(current);
+		if (table !== current) return; // latest-wins
+		quality = deriveQuality(res);
+	}
+
 	const unauthorized = $derived(detail === null && lastStatus === 401);
 	const notInCatalog = $derived(detail === null && lastStatus === 404);
 	const denied = $derived(detail === null && lastStatus === 403);
@@ -141,7 +154,9 @@
 		moveTo = "";
 		newBranch = "";
 		newBranchFrom = "";
+		quality = null;
 		load();
+		loadQuality();
 	});
 
 	function startPolicyEdit(): void {
@@ -676,6 +691,21 @@
 							class="fmt"
 							title="This catalog stores Lance only; format-selecting properties are rejected."
 							>{detail.format.name} · storage v{detail.format.storage_version}</span
+						>
+					{/if}
+					<!-- scope #6 quality gate — the validator's dataQualityAssertions verdict on the latest
+					     producing run (from lineage). A plain catalog table has none, stated honestly. -->
+					{#if quality}
+						<span
+							class="qual {quality.passed ? 'ok' : 'bad'}"
+							title="Validator dataQualityAssertions on the latest producing run (lineage)."
+							>quality {quality.passed ? "passed" : "blocked"}{quality.assertions
+								? ` · ${quality.assertions} check${quality.assertions === 1 ? "" : "s"}`
+								: ""}</span
+						>
+					{:else}
+						<span class="qual none" title="No producing run has recorded dataQualityAssertions."
+							>no quality gate</span
 						>
 					{/if}
 					{#if detail.describe.location}<span class="loc">{detail.describe.location}</span>{/if}
@@ -1244,6 +1274,22 @@
 		border-radius: var(--radius-sm);
 		padding: 0 6px;
 		color: var(--mut);
+	}
+	.qual {
+		border-radius: var(--radius-sm);
+		padding: 0 6px;
+		border: 1px solid var(--line);
+	}
+	.qual.ok {
+		color: var(--ok);
+		border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+	}
+	.qual.bad {
+		color: var(--fail);
+		border-color: color-mix(in srgb, var(--fail) 45%, var(--line));
+	}
+	.qual.none {
+		color: var(--faint);
 	}
 	table {
 		border-collapse: collapse;

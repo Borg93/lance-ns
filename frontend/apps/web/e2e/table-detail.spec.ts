@@ -50,6 +50,8 @@ let gcRan: boolean;
 let compactBody: Record<string, unknown> | null;
 let colPost: { op: string; body: Record<string, unknown> } | null;
 let refPost: { path: string; body: Record<string, unknown> } | null;
+// scope #6 — the latest producing run(s) for the quality badge; the lineage /api proxy is stubbed with this.
+let producersFixture: Array<Record<string, unknown>>;
 
 test.beforeEach(async ({ page }) => {
 	colPost = null;
@@ -62,6 +64,11 @@ test.beforeEach(async ({ page }) => {
 	gcPreviewBody = null;
 	gcRan = false;
 	compactBody = null;
+	producersFixture = []; // default: no quality-bearing runs → honest "no quality gate"
+	// The #6 quality badge reads producing runs through the lineage BFF; stub it to stay hermetic.
+	await page.route("**/api/datasets/**/producers", (route) =>
+		json(route, { producers: producersFixture }),
+	);
 	await page.route("**/capi/**", (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^\/capi/, "");
@@ -308,4 +315,34 @@ test("surfaces the Lance file format badge (#78)", async ({ page }) => {
 	await page.goto("/tables/db1%24t");
 	const stats = page.locator("section", { hasText: "Stats" }).first();
 	await expect(stats).toContainText("Lance · storage v2.2");
+});
+
+test("surfaces the validator quality gate when a run passed it (#82)", async ({ page }) => {
+	producersFixture = [
+		{ run_id: "r1", quality_passed: true, quality_assertions: [{ assertion: "row_count" }] },
+	];
+	await page.goto("/tables/db1%24t");
+	const stats = page.locator("section", { hasText: "Stats" }).first();
+	await expect(stats).toContainText("quality passed · 1 check");
+});
+
+test("surfaces a blocked quality gate (#82)", async ({ page }) => {
+	producersFixture = [
+		{
+			run_id: "r1",
+			quality_passed: false,
+			quality_assertions: [{ assertion: "not_null" }, { assertion: "unique" }],
+		},
+	];
+	await page.goto("/tables/db1%24t");
+	const stats = page.locator("section", { hasText: "Stats" }).first();
+	await expect(stats).toContainText("quality blocked · 2 checks");
+});
+
+test("states 'no quality gate' honestly when no run recorded assertions (#82)", async ({
+	page,
+}) => {
+	await page.goto("/tables/db1%24t"); // producersFixture defaults to []
+	const stats = page.locator("section", { hasText: "Stats" }).first();
+	await expect(stats).toContainText("no quality gate");
 });

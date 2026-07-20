@@ -40,6 +40,7 @@ export type TableDetail = {
 	branches: TableBranches | PartError | null;
 	indexes: TableIndexes | PartError | null;
 	policy: Policy | PartError | null;
+	format?: { name: string; storage_version: string }; // #78 the catalog's fixed Lance file format
 };
 
 /** Compatibility alias — the status-aware Result shape now lives in http.ts, shared with the lineage client. */

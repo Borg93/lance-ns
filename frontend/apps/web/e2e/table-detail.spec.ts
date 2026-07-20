@@ -36,6 +36,7 @@ const DETAIL = {
 		compact_enabled: true,
 		target_rows_per_fragment: 1048576,
 	},
+	format: { name: "Lance", storage_version: "2.2" },
 };
 
 // The writes the interaction tests make; recorded so we can assert the BFF POST fired with the right body.
@@ -301,4 +302,10 @@ test("delete a branch via the chip × (#74)", async ({ page }) => {
 	await section.getByRole("button", { name: "delete branch dev" }).click();
 	await expect.poll(() => refPost?.path).toBe("branches/delete");
 	expect(refPost?.body).toEqual({ name: "dev" });
+});
+
+test("surfaces the Lance file format badge (#78)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const stats = page.locator("section", { hasText: "Stats" }).first();
+	await expect(stats).toContainText("Lance · storage v2.2");
 });

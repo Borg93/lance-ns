@@ -670,6 +670,14 @@
 					<span>{stats?.num_rows ?? "—"} rows</span>
 					<span>{fmtBytes(stats?.total_bytes)}</span>
 					<span>{stats?.num_indices ?? 0} indices</span>
+					<!-- #78 the catalog's fixed file format (Lance columnar, storage 2.2) — never a silent guess. -->
+					{#if detail.format}
+						<span
+							class="fmt"
+							title="This catalog stores Lance only; format-selecting properties are rejected."
+							>{detail.format.name} · storage v{detail.format.storage_version}</span
+						>
+					{/if}
 					{#if detail.describe.location}<span class="loc">{detail.describe.location}</span>{/if}
 				</div>
 			{/if}
@@ -1230,6 +1238,12 @@
 	}
 	.loc {
 		color: var(--faint);
+	}
+	.fmt {
+		border: 1px solid color-mix(in srgb, var(--accent, #ffc14d) 45%, var(--line));
+		border-radius: var(--radius-sm);
+		padding: 0 6px;
+		color: var(--mut);
 	}
 	table {
 		border-collapse: collapse;

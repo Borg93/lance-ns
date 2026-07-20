@@ -54,6 +54,11 @@ export const GET: RequestHandler = async ({ params, fetch, locals }) => {
 			branches,
 			indexes,
 			policy,
+			// #78 format is a fixed property of this catalog: it stores Lance datasets ONLY (columnar,
+			// self-describing, versioned), pinned to storage format 2.2 at create (dataplane.py
+			// data_storage_version="2.2"). Surfaced so the one supported format is discoverable, and the
+			// create path 400s a client that tries to select another (write.format.default / data_source_format).
+			format: { name: "Lance", storage_version: "2.2" },
 		});
 	} catch (err) {
 		console.error(`capi detail proxy upstream failure: ${String(err)}`);

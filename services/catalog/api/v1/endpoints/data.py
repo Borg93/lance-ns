@@ -87,6 +87,25 @@ def _table_exists(ns: LanceNamespace, segments: list[str]) -> bool:
         return False
 
 
+# #78 format-selecting properties an Iceberg / Unity-Catalog client might send, expecting to choose a file
+# format. This catalog stores Lance ONLY (columnar, self-describing, versioned), so honouring them is
+# impossible — echoing them back would let the client believe it got a format it did not.
+_FORMAT_KEYS = ("write.format.default", "data_source_format")
+
+
+def _reject_unsupported_format(properties: object) -> None:
+    """Raise 400 if the create ``properties`` request a non-Lance file format — never a silent no-op."""
+    if not isinstance(properties, dict):
+        return
+    for key in _FORMAT_KEYS:
+        requested = properties.get(key)
+        if requested is not None and str(requested).lower() != "lance":
+            raise InvalidInputError(
+                f"file format {requested!r} ({key}) is not supported — this catalog stores Lance only; "
+                "format-selecting properties are not silently ignored"
+            )
+
+
 @router.post("/{id}/create", response_model_exclude_none=True)
 async def create_table(
     id: str,
@@ -125,6 +144,8 @@ async def create_table(
             parsed_properties = json.loads(properties)
         except json.JSONDecodeError as exc:
             raise InvalidInputError(f"table properties is not valid JSON: {exc}") from exc
+    # #78 format honesty: reject a client that tries to select another file format (see the helper).
+    _reject_unsupported_format(parsed_properties)
     segments = parse_identifier(id, settings.delimiter)
     table_id = fga.canonical_object_id(segments, delimiter=settings.delimiter)
     namespace = fga.parent_namespace_id(segments, delimiter=settings.delimiter) or ""

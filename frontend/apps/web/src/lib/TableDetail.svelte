@@ -220,6 +220,16 @@
 					>,
 				),
 	);
+	// Indexes on the table (#64) — scalar/vector, each over one or more columns.
+	const indexes = $derived(
+		partErrored(detail?.indexes)
+			? []
+			: ((detail?.indexes?.indexes ?? []) as {
+					index_name?: string;
+					columns?: string[];
+					index_type?: string | null;
+				}[]),
+	);
 
 	function typeName(t: unknown): string {
 		if (t && typeof t === "object" && "type" in t) return String((t as { type: unknown }).type);
@@ -315,6 +325,23 @@
 						{/each}
 					</tbody>
 				</table>
+			{/if}
+		</section>
+
+		<section>
+			<h2>Indexes</h2>
+			{#if indexes.length === 0}
+				<p class="mut">No indexes on this table.</p>
+			{:else}
+				<div class="refs">
+					{#each indexes as ix (ix.index_name)}
+						<span class="chip mono"
+							>{ix.index_name}<span class="mut">
+								· {(ix.columns ?? []).join(", ")}{ix.index_type ? ` · ${ix.index_type}` : ""}</span
+							></span
+						>
+					{/each}
+				</div>
 			{/if}
 		</section>
 

@@ -16,6 +16,7 @@ export type TableStats = components["schemas"]["GetTableStatsResponse"];
 export type TableVersions = components["schemas"]["ListTableVersionsResponse"];
 export type TableTags = components["schemas"]["ListTableTagsResponse"];
 export type TableBranches = components["schemas"]["ListTableBranchesResponse"];
+export type TableIndexes = components["schemas"]["ListTableIndicesResponse"];
 export type Policy = components["schemas"]["PolicyResponse"];
 export type PolicyRequest = components["schemas"]["PolicyRequest"];
 export type Warehouse = components["schemas"]["WarehouseResponse"];
@@ -37,6 +38,7 @@ export type TableDetail = {
 	versions: TableVersions | PartError | null;
 	tags: TableTags | PartError | null;
 	branches: TableBranches | PartError | null;
+	indexes: TableIndexes | PartError | null;
 	policy: Policy | PartError | null;
 };
 

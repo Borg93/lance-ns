@@ -24,6 +24,7 @@ const DETAIL = {
 	},
 	tags: { tags: { blessed: { version: 2 } } },
 	branches: { branches: { main: { createAt: 1_700_000_000, manifestSize: 512 } } },
+	indexes: { indexes: [{ index_name: "id_idx", columns: ["id"], index_type: "BTREE" }] },
 	policy: { retention_days: 7, retain_versions: 5, compact_enabled: true },
 };
 
@@ -63,6 +64,10 @@ test("renders the manifest-per-commit version table, branches, and tags (#66)", 
 	// branches row + the tag chip
 	await expect(section).toContainText("main");
 	await expect(section).toContainText("blessed → v2");
+	// indexes section (#64)
+	const indexes = page.locator("section", { hasText: "Indexes" });
+	await expect(indexes).toContainText("id_idx");
+	await expect(indexes).toContainText("BTREE");
 });
 
 test("tag-a-version form posts {tag, version} through the BFF (#64)", async ({ page }) => {

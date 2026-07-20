@@ -54,16 +54,23 @@ environment snag, not an AGE one.
 2. **The ImageVolume infra prerequisites — PROVEN reachable.** Stood up a throwaway kind cluster on **K8s 1.34**
    with **containerd v2.1.3** (≥2.1, the CRI requirement) and the `ImageVolume` feature gate enabled — so a
    real cluster can do the mount.
-3. **The CNPG operator managing a real Cluster — NOT completed on this host.** The CNPG operator (tried 1.30
-   AND 1.28, on kind K8s **1.34 and 1.33**, with a bumped 512Mi limit and a loosened startup probe) would not
-   reach Ready — its `:9443` manager exits 2 a few seconds after "Listening for changes", a **real crash, not
-   a probe/memory timing issue**. This is a **host-environment wall on this dev machine** (the same class of
-   quirk that made the OTel `0.116` collector image fail to `exec` here — kernel 6.17-oem), **not an AGE, a
-   CNPG-config, or a Kubernetes-version issue** — CNPG runs normally on standard managed clusters. So the
-   operator-managed-Cluster step (both the ImageVolume and the bridge path need a working operator) can't be
-   exercised on this box; it needs a normal cluster. Both extension images are built (`age-cnpg-ext:1.7.0-18`,
-   `cnpg-pg16-age:bridge`); combined with (1)+(2), running `deploy/cnpg-age-cluster.yaml` on any conformant
-   cluster closes the last mile.
+3. **The CNPG operator managing a real Cluster — NOT completed on this host** (deep-dived; it's a host
+   gremlin, not AGE). Findings from the investigation, tried across CNPG **1.30 + 1.28** and kind K8s
+   **1.31 / 1.33 / 1.34** (containerd 2.1.x, ImageVolume gate on):
+   - The operator **binary is fine on this host** — run standalone (`docker run … controller` with an admin
+     kubeconfig, as root, `OPERATOR_NAMESPACE=cnpg-system`, no `--leader-elect`) it starts clean and runs.
+   - Three real startup gates were diagnosed from the standalone's full error chain (the in-cluster pod
+     logs only 3 lines then exits, with the error **never flushed** to the container log): (a) `ensurePKI`
+     needs `OPERATOR_NAMESPACE` (else "empty namespace may not be set"); (b) it writes its webhook cert under
+     `/run/secrets`, which the **non-root** operator can't (`mkdir /run/secrets: permission denied`);
+     (c) `--leader-elect` needs the in-cluster SA namespace file — and mounting an emptyDir at `/run/secrets`
+     to fix (b) **hides the SA token** and breaks (c).
+   - Despite fixing all three in-cluster (run as root, don't shadow the SA token, loosen the probe, even
+     grant the SA cluster-admin), the pod still restart-loops with the error unflushed — a residual
+     CNPG-1.30-deployment-on-this-kind issue that resisted reasonable fixes and is **orthogonal to AGE**.
+   CNPG runs normally on standard/managed clusters (it's their own CI substrate). Both extension images are
+   built (`age-cnpg-ext:1.7.0-18`, `cnpg-pg16-age:bridge`); with (1)+(2) proven, running
+   `deploy/cnpg-age-cluster.yaml` on any conformant cluster closes the last mile.
 
 ## Bridge (older clusters without ImageVolume): a custom full image
 If your prod K8s can't do ImageVolume yet, build AGE into a **custom CNPG Postgres image** and point the

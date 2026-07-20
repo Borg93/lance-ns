@@ -9,7 +9,7 @@
 <nav class="navbar">
 	<a
 		href="/"
-		class:active={!/^\/(models|tables|namespaces|warehouses|experiments|pipeline)/.test(
+		class:active={!/^\/(models|tables|namespaces|warehouses|experiments|pipeline|audit)/.test(
 			page.url.pathname,
 		)}>Lineage</a
 	>
@@ -19,6 +19,7 @@
 	<a href="/warehouses" class:active={page.url.pathname === "/warehouses"}>Warehouses</a>
 	<a href="/pipeline" class:active={page.url.pathname === "/pipeline"}>Pipeline</a>
 	<a href="/experiments" class:active={page.url.pathname === "/experiments"}>Experiments</a>
+	<a href="/audit" class:active={page.url.pathname === "/audit"}>Audit</a>
 </nav>
 
 {#if data.authEnabled}

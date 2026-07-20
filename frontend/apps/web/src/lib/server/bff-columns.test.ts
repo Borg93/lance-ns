@@ -35,6 +35,14 @@ describe("column-ops BFF (#74)", () => {
 		expect(d.calls.length).toBe(0);
 	});
 
+	test("a prototype-chain key (toString/constructor) is 404, not a leaked function", async () => {
+		for (const op of ["toString", "constructor", "hasOwnProperty"]) {
+			const d = drive(op, { session: true });
+			expect((await d.run()).status).toBe(404);
+			expect(d.calls.length).toBe(0);
+		}
+	});
+
 	test("auth-on with no session fails closed to 401", async () => {
 		const d = drive("drop", { session: false });
 		expect((await d.run()).status).toBe(401);

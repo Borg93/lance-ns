@@ -19,10 +19,14 @@ const OPS: Record<string, string> = {
 };
 
 export const POST: RequestHandler = async ({ params, request, fetch, locals }) => {
-	const upstream = OPS[params.op];
-	if (!upstream) {
+	// Object.hasOwn, not a bare `OPS[params.op]` truthiness check: a prototype key like `op="toString"`
+	// would otherwise resolve to a Function (truthy) and slip past the 404 guard. Not exploitable (the
+	// result is never placed in the URL — only the allowlisted `upstream` is — so no traversal), but the
+	// allowlist must reject anything outside its OWN keys. (audit 2026-07-20)
+	if (!Object.hasOwn(OPS, params.op)) {
 		return json({ detail: "not found" }, { status: 404 });
 	}
+	const upstream = OPS[params.op];
 	if (locals.authEnabled && !locals.session) {
 		return json({ detail: "sign in to change the schema" }, { status: 401 });
 	}

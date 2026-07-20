@@ -30,6 +30,22 @@ describe("deriveQuality (#82)", () => {
 		expect(q).toEqual({ passed: true, assertions: 0 });
 	});
 
+	test("takes the LATEST run's verdict, not an arbitrary earlier one (event_time DESC)", () => {
+		// An older run PASSED, the newest run was BLOCKED — the badge must show blocked (no false assurance),
+		// regardless of the order AGE returns the rows in (here: passed-run first, as the graph might).
+		const q = deriveQuality(
+			producers([
+				{ event_time: "2026-07-01T00:00:00Z", quality_passed: true, quality_assertions: [] },
+				{
+					event_time: "2026-07-20T00:00:00Z",
+					quality_passed: false,
+					quality_assertions: [{ a: 1 }],
+				},
+			]),
+		);
+		expect(q).toEqual({ passed: false, assertions: 1 });
+	});
+
 	test("no producing runs → null (honest 'no quality gate')", () => {
 		expect(deriveQuality(producers([]))).toBeNull();
 		expect(deriveQuality(null)).toBeNull();

@@ -28,6 +28,10 @@
 			backlog = res.data;
 			lastStatus = 200;
 		} else {
+			// Clear the stale view on failure so the auth/offline state reflects reality — else a session that
+			// expires after a first successful load would keep showing the old event table (the derivations
+			// gate on backlog === null) instead of the sign-in prompt. (audit 2026-07-20)
+			backlog = null;
 			lastStatus = res.status;
 		}
 	}

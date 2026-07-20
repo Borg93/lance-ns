@@ -6,7 +6,17 @@ import type { Producers } from "./types";
 export type QualityBadge = { passed: boolean; assertions: number } | null;
 
 export function deriveQuality(producers: Producers | null | undefined): QualityBadge {
-	const run = producers?.producers?.find((p) => p.quality_passed != null);
-	if (!run || run.quality_passed == null) return null;
-	return { passed: run.quality_passed, assertions: run.quality_assertions?.length ?? 0 };
+	const withVerdict = (producers?.producers ?? []).filter((p) => p.quality_passed != null);
+	if (withVerdict.length === 0) return null;
+	// Take the LATEST run's verdict. The producers feed is unordered (AGE returns rows in physical order,
+	// and neither the Cypher nor the proxy sorts), so `.find`-ing the first non-null verdict could surface a
+	// STALE earlier run — an older `passed` masking the current `blocked`, i.e. false assurance on a table
+	// that failed its most recent gate. Sort by event_time DESC, exactly as the reference UI does.
+	const latest = withVerdict.reduce((a, b) =>
+		(b.event_time ?? "") > (a.event_time ?? "") ? b : a,
+	);
+	return {
+		passed: latest.quality_passed === true,
+		assertions: latest.quality_assertions?.length ?? 0,
+	};
 }

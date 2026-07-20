@@ -355,7 +355,11 @@ _DOWNSTREAM: Final = (
 _PRODUCERS: Final = (
     "MATCH (r:Run)-[w:WROTE]->(d:Dataset {name:$name}) "
     "RETURN r.run_id, r.author, r.event_time, r.event_type, w.version, r.producer, r.error_message, "
-    "w.row_count, w.size_bytes, w.quality_passed, w.quality_assertions, r.operation"
+    "w.row_count, w.size_bytes, w.quality_passed, w.quality_assertions, r.operation "
+    # NEWEST FIRST: AGE returns rows in physical order otherwise, so a consumer taking "the latest run"
+    # (e.g. the #82 quality-gate badge) could read a STALE earlier verdict — an older `passed` masking the
+    # current `blocked`. Sort here so every consumer sees the current run first. (audit 2026-07-20)
+    "ORDER BY r.event_time DESC"
 )
 # Reconcile (#23): the version the graph believes is current = the version on the most-recent
 # *successful* WROTE edge (failed runs carry a WROTE edge with no version, so the IS NOT NULL guard

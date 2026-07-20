@@ -11,11 +11,14 @@
 	import GrantsPanel from "./GrantsPanel.svelte";
 	import ReadersPanel from "./ReadersPanel.svelte";
 	import {
+		addColumn,
 		compactTable,
 		createTableIndex,
 		createTableTag,
 		deleteTablePolicy,
+		dropColumn,
 		dropTableIndex,
+		renameColumn,
 		fetchTableDetail,
 		type GcPreview,
 		insertRows,
@@ -121,6 +124,12 @@
 		gcError = null;
 		gcConfirm = false;
 		compactResult = null;
+		colBusy = false;
+		colError = null;
+		addColName = "";
+		addColExpr = "";
+		renaming = null;
+		renameTo = "";
 		load();
 	});
 
@@ -226,6 +235,70 @@
 			} else gcFail(res.status, res.detail);
 		} finally {
 			gcBusy = false;
+		}
+	}
+
+	// #74 schema evolution — add (name + SQL expr) / rename / drop columns (writer-gated).
+	let colBusy = $state(false);
+	let colError = $state<string | null>(null);
+	let addColName = $state("");
+	let addColExpr = $state("");
+	let renaming = $state<string | null>(null); // the column currently being renamed
+	let renameTo = $state("");
+
+	function colFail(status: number, detail: string): void {
+		if (status === 401) colError = "Sign in to change the schema.";
+		else if (status === 403)
+			colError = "Denied: schema changes need writer access (can_write_data).";
+		else colError = detail;
+	}
+
+	async function runAddColumn(): Promise<void> {
+		const name = addColName.trim();
+		const expr = addColExpr.trim();
+		if (colBusy || !name || !expr) return;
+		colBusy = true;
+		colError = null;
+		try {
+			const res = await addColumn(table, name, expr);
+			if (res.ok) {
+				addColName = "";
+				addColExpr = "";
+				await load();
+			} else colFail(res.status, res.detail);
+		} finally {
+			colBusy = false;
+		}
+	}
+
+	async function runDropColumn(name: string): Promise<void> {
+		if (colBusy) return;
+		colBusy = true;
+		colError = null;
+		try {
+			const res = await dropColumn(table, name);
+			if (res.ok) await load();
+			else colFail(res.status, res.detail);
+		} finally {
+			colBusy = false;
+		}
+	}
+
+	async function runRenameColumn(): Promise<void> {
+		const from = renaming;
+		const to = renameTo.trim();
+		if (colBusy || !from || !to) return;
+		colBusy = true;
+		colError = null;
+		try {
+			const res = await renameColumn(table, from, to);
+			if (res.ok) {
+				renaming = null;
+				renameTo = "";
+				await load();
+			} else colFail(res.status, res.detail);
+		} finally {
+			colBusy = false;
 		}
 	}
 
@@ -362,7 +435,7 @@
 	const policyUnavailable = $derived(partErrored(detail?.policy));
 	const schemaFields = $derived(
 		(detail?.describe.schema?.fields ?? []) as {
-			name?: string;
+			name: string;
 			type?: unknown;
 			nullable?: boolean;
 		}[],
@@ -551,18 +624,82 @@
 				<p class="mut">Schema unavailable for this table.</p>
 			{:else}
 				<table>
-					<thead><tr><th>field</th><th>type</th><th>nullable</th></tr></thead>
+					<thead><tr><th>field</th><th>type</th><th>nullable</th><th></th></tr></thead>
 					<tbody>
 						{#each schemaFields as f (f.name)}
 							<tr>
 								<td class="mono">{f.name}</td>
 								<td class="mono">{typeName(f.type)}</td>
 								<td class="mono">{f.nullable ? "yes" : "no"}</td>
+								<td class="actions">
+									{#if renaming === f.name}
+										<input
+											class="mono rn"
+											bind:value={renameTo}
+											placeholder="new name"
+											aria-label="rename {f.name} to"
+											onkeydown={(e) => e.key === "Enter" && runRenameColumn()}
+										/>
+										<button
+											class="btn ghost"
+											disabled={colBusy || !renameTo.trim()}
+											onclick={runRenameColumn}>save</button
+										>
+										<button class="btn ghost" onclick={() => (renaming = null)}>×</button>
+									{:else}
+										<button
+											class="chip-x"
+											title="rename column"
+											aria-label="rename {f.name}"
+											disabled={colBusy}
+											onclick={() => {
+												renaming = f.name;
+												renameTo = "";
+											}}>✎</button
+										>
+										<button
+											class="chip-x"
+											title="drop column"
+											aria-label="drop {f.name}"
+											disabled={colBusy}
+											onclick={() => runDropColumn(f.name)}>×</button
+										>
+									{/if}
+								</td>
 							</tr>
 						{/each}
 					</tbody>
 				</table>
 			{/if}
+			<!-- #74 add a SQL-expression column (e.g. price * 2, cast(null as int)). Writer-gated. -->
+			<form
+				class="row addcol"
+				onsubmit={(e) => {
+					e.preventDefault();
+					runAddColumn();
+				}}
+			>
+				<input
+					class="mono"
+					bind:value={addColName}
+					placeholder="new column"
+					aria-label="New column name"
+				/>
+				<input
+					class="mono"
+					bind:value={addColExpr}
+					placeholder="SQL expression (e.g. cast(null as int))"
+					aria-label="Column SQL expression"
+				/>
+				<button
+					class="btn"
+					type="submit"
+					disabled={colBusy || !addColName.trim() || !addColExpr.trim()}
+				>
+					Add column
+				</button>
+			</form>
+			{#if colError}<p class="error">{colError}</p>{/if}
 		</section>
 
 		<section>
@@ -1007,6 +1144,22 @@
 		color: var(--faint);
 		font: inherit;
 		cursor: pointer;
+	}
+	td.actions {
+		text-align: right;
+		white-space: nowrap;
+	}
+	.rn {
+		width: 110px;
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 2px 6px;
+	}
+	.addcol {
+		margin-top: 10px;
 	}
 	.chip-x:hover {
 		color: var(--fail);

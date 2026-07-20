@@ -42,8 +42,10 @@ let indexDrop: string | null;
 let gcPreviewBody: Record<string, unknown> | null;
 let gcRan: boolean;
 let compactBody: Record<string, unknown> | null;
+let colPost: { op: string; body: Record<string, unknown> } | null;
 
 test.beforeEach(async ({ page }) => {
+	colPost = null;
 	tagPost = null;
 	restorePost = null;
 	insertPostBytes = 0;
@@ -95,6 +97,13 @@ test.beforeEach(async ({ page }) => {
 		if (path.endsWith("/maintenance/compact")) {
 			compactBody = req.postDataJSON() as Record<string, unknown>;
 			return json(route, { ok: true, fragments_removed: 6, fragments_added: 1 });
+		}
+		if (path.match(/\/columns\/(add|alter|drop)$/) && req.method() === "POST") {
+			colPost = {
+				op: path.split("/").pop() ?? "",
+				body: req.postDataJSON() as Record<string, unknown>,
+			};
+			return json(route, { version: 4 });
 		}
 		return json(route, { detail: "unstubbed" }, 404);
 	});
@@ -211,4 +220,32 @@ test("the policy surfaces the compaction target size (#76)", async ({ page }) =>
 	await page.goto("/tables/db1%24t");
 	const section = page.locator("section", { hasText: "Maintenance policy" });
 	await expect(section).toContainText("target 1048576 rows/frag");
+});
+
+test("add-column posts a SQL-expression column (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Schema" }).first();
+	await section.getByLabel("New column name").fill("doubled");
+	await section.getByLabel("Column SQL expression").fill("id * 2");
+	await section.getByRole("button", { name: "Add column" }).click();
+	await expect.poll(() => colPost?.op).toBe("add");
+	expect(colPost?.body).toEqual({ new_columns: [{ name: "doubled", expression: "id * 2" }] });
+});
+
+test("drop-column via the row × posts {columns} (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Schema" }).first();
+	await section.getByRole("button", { name: "drop id" }).click();
+	await expect.poll(() => colPost?.op).toBe("drop");
+	expect(colPost?.body).toEqual({ columns: ["id"] });
+});
+
+test("rename-column via the row ✎ posts an alter path→rename (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Schema" }).first();
+	await section.getByRole("button", { name: "rename id" }).click();
+	await section.getByLabel("rename id to").fill("identifier");
+	await section.getByRole("button", { name: "save" }).click();
+	await expect.poll(() => colPost?.op).toBe("alter");
+	expect(colPost?.body).toEqual({ alterations: [{ path: "id", rename: "identifier" }] });
 });

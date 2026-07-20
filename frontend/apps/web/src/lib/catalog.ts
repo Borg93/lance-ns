@@ -178,6 +178,28 @@ export const insertRows = (table: string, arrow: Uint8Array) =>
 		body: arrow as BodyInit,
 	});
 
+/** #74 schema evolution — add a SQL-expression column. Writer-gated (can_write_data), session-only BFF. */
+export const addColumn = (table: string, name: string, expression: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/columns/add`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ new_columns: [{ name, expression }] }),
+	});
+/** #74 rename an existing column (alter_columns path→rename). Writer-gated, session-only BFF. */
+export const renameColumn = (table: string, path: string, rename: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/columns/alter`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ alterations: [{ path, rename }] }),
+	});
+/** #74 drop a column. Writer-gated, session-only BFF. */
+export const dropColumn = (table: string, name: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/columns/drop`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ columns: [name] }),
+	});
+
 export type CreateIndexBody = { column: string; index_type: string; distance_type?: string };
 
 /** #73 build an index — `scalar` picks the catalog's create_scalar_index (BTREE/BITMAP/INVERTED …) vs

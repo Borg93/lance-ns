@@ -141,16 +141,17 @@ In the audit's order, one flag at a time, re-asserting pods Ready after each:
      workloads (render-asserted), the second flips the injector env `SIDECAR_DROP_ALL_CAPABILITIES=true`
      so injected sidecars carry `drop:[ALL]`. NOTE this re-rolls the Dapr control plane + every injected
      pod — a prod-values change, not driven on kind (same treatment as L3 NetworkPolicy).
-   - **Vector — a STRUCTURAL blocker no value fixes.** It's a log-collector DaemonSet that inherently
-     mounts hostPath `/var/log/pods`, which `restricted` (and even `baseline`) forbids. Full-namespace
-     enforce is therefore impossible while Vector shares the namespace: give Vector its OWN namespace at
-     `baseline`, or add a `ServiceAccount` PSA exemption in the API-server admission config. This is why
-     full enforce stays **parked-by-design**, like L3 — the chart hardens what it owns; the cluster-policy
-     exemption for Vector is a deploy decision outside the app chart.
+   - **The OTel Collector — a STRUCTURAL blocker no value fixes.** It's a single Deployment whose `filelog`
+     receiver inherently mounts hostPath `/var/log/pods` (to tail the infra pods), which `restricted` (and
+     even `baseline`) forbids. Full-namespace enforce is therefore impossible while the Collector shares the
+     namespace: give it its OWN namespace at `baseline`, or add a `ServiceAccount` PSA exemption in the
+     API-server admission config. This is why full enforce stays **parked-by-design**, like L3 — the chart
+     hardens what it owns; the cluster-policy exemption for the Collector is a deploy decision outside the
+     app chart.
 
    **Current end state (safe):** the namespace carries `warn=baseline` + `audit=baseline` — full
-   visibility, no admission blocking. Promote to `enforce` only after the Dapr flags are set AND Vector is
-   exempted per the bullet above.
+   visibility, no admission blocking. Promote to `enforce` only after the Dapr flags are set AND the OTel
+   Collector is exempted per the bullet above.
 
 ## 6.5 · Dapr resiliency + DLQ (Batch 18 — DEFAULT ON; verify the deployed default)
 
@@ -180,7 +181,7 @@ After `helm upgrade` + a rollout restart of the subscriber pods:
    > `opentelemetry-instrument` with `OTEL_LOGS_EXPORTER=otlp`, so the auto-instrumentation attaches
    > an OTLP handler to the ROOT logger and every app log record ships to **GreptimeDB** instead of
    > stdout; `kubectl logs` carries only uvicorn's access lines (plus the sidecar's own output). This
-   > is the OTLP-direct design working as intended, but it makes every "the app logs X" assert in this
+   > is the OTLP log-export design working as intended, but it makes every "the app logs X" assert in this
    > runbook a Greptime query. Verified 2026-07-13 (port-forward greptime 4000):
    > ```bash
    > curl -s "http://localhost:4000/v1/sql?db=public" --data-urlencode \

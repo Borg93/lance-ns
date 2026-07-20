@@ -149,9 +149,10 @@ dapr:
   # runAsNonRoot + drop:[ALL] + RuntimeDefault); the sidecar is the remaining gap. Turning this on adds the
   # RuntimeDefault seccomp annotation; you MUST ALSO set the injector-wide drop-caps value it can't reach:
   #   --set dapr.sidecarRestricted=true --set dapr.dapr_sidecar_injector.sidecarDropALLCapabilities=true
-  # NOTE full-namespace `restricted` ENFORCE is still blocked on THIS stack by Vector (a log-collector
-  # DaemonSet needs hostPath /var/log/pods — `restricted` forbids it, no value fixes it): give Vector its
-  # own namespace at `baseline`, or a ServiceAccount PSA exemption in the API-server admission config. See
+  # NOTE full-namespace `restricted` ENFORCE is still blocked on THIS stack by the OTel Collector (a single
+  # Deployment whose filelog receiver needs hostPath /var/log/pods — `restricted` forbids it, no value fixes
+  # it): give the Collector its own namespace at `baseline`, or a ServiceAccount PSA exemption in the
+  # API-server admission config. See
   # docs/KIND-RUNBOOK §6.4 — full enforce is parked-by-design (never applied on kind), same as L3.
   sidecarRestricted: false
   # Bound every DaprClient gRPC call (publish_event has no per-call timeout arg, and the SDK's default
@@ -379,15 +380,15 @@ observability:
     webhookUrl: "" # empty → Alertmanager still receives + groups alerts, but pages nowhere (black-hole)
   # Infra-tier metrics (Dapr sidecar :9090 → the DaprConsumerWedge signal) are collected by the OTel
   # Collector's `prometheus` receiver (k8s SD) once the OpenTelemetry operator lands — NOT a bespoke scraper.
-  # An earlier vmagent was removed as a redundant third collector (the estate already has Vector for infra
-  # logs + OTLP-direct for apps; one Collector subsumes all three). The DaprConsumerWedge alert rule
+  # An earlier vmagent was removed as a redundant third collector: the single OTel Collector already tails
+  # infra logs (filelog) AND receives the app OTLP, so it subsumes all three. The DaprConsumerWedge alert rule
   # (chart/alerting/rules.yml) is defined + promtool-proven and evaluates as soon as the Collector feeds
   # dapr_* into GreptimeDB. See docs/OPERATORS.md (the OTel operator row).
   # Edge auth (§5e hardening) — nginx `auth_basic` on the gateway's /perses/ + /greptime/ locations.
   # BOTH are otherwise UNAUTHENTICATED: Perses is the dashboard, and GreptimeDB exposes its RAW SQL/ingest
   # API on :4000 — and in prod the Ingress→gateway proxies both publicly (a wide-open telemetry store +
   # dashboard). This closes that hole AT THE EDGE without touching GreptimeDB's own `auth.enabled` (which
-  # would force EVERY client — the app OTLP exporters, Dapr tracing, the Vector logs sink, the Perses
+  # would force EVERY client — the app OTLP exporters, Dapr tracing, the OTel Collector's exporter, the Perses
   # datasource proxy — to carry credentials; that full GreptimeDB `auth.enabled` + Perses OIDC is the
   # documented follow-on). Default OFF so local dev / `make dashboards` stays unauthenticated + frictionless;
   # values-prod flips it TRUE to close the prod hole. Completion condition (#5e): an unauthenticated request

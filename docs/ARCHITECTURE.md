@@ -265,7 +265,7 @@ event-driven medallion movers (see §7, [`FLOW.md`](FLOW.md)).
 | `project` type + 3-axis governance (teams × projects × layers) | ✅ modeled (`model.fga`: project/warehouse/team/validator) + fga-tested; app-side auto-seed of the full hierarchy is partial (see `DEPLOY.md`) |
 | Orchestration (cron → NATS → Dapr) | ✅ Dapr cron binding (compaction) + NATS/Dapr pub-sub built & deployed; Dapr **Workflow** still deferred |
 | Lineage (OpenLineage ingest + graph queries over Apache AGE; producer-side emitter) | ✅ service built & deployed; read-side authz implemented + SvelteKit UI (see §9, `docs/LINEAGE.md`) |
-| OTel observability (GreptimeDB + Vector + Perses, OTLP-direct) | ✅ built, deployed, `make e2e-obs`-verified |
+| OTel observability (OTel Collector + GreptimeDB + Perses) | ✅ built, deployed, `make e2e-obs`-verified |
 
 ---
 

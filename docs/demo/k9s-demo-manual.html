@@ -261,7 +261,7 @@
       <div class="fix"><div class="n">8</div><div><p class="t">Model-input version pins were emitted then dropped</p><p class="d">280 lineage READ edges held zero versions — the reproducibility pin ("which feature version made this model") was lost at ingest. Now persisted + a new <code class="inl">GET /runs/{id}/inputs</code> API.</p></div></div>
       <div class="fix feat"><div class="n">+</div><div><p class="t">Trainer lineage credential <span class="tag new">feature</span></p><p class="d">training provenance was silently 401'd under auth — all of it lost. Now authenticates as <code class="inl">service-trainer</code> and lands, FGA-bounded. e2e-guarded.</p></div></div>
       <div class="fix feat"><div class="n">+</div><div><p class="t">Media stages now run on Ray <span class="tag new">feature</span></p><p class="d">blob columns forced an in-process fallback. Verified live that lance-ray 0.4.2 strips blob typing, added a pylance round-trip + inline derive. <code class="inl">/ingest-media</code> now runs as a Ray job, blob-v2 preserved.</p></div></div>
-      <div class="fix feat"><div class="n">+</div><div><p class="t">PSA sidecar hardening <span class="tag new">chart</span></p><p class="d">a gated <code class="inl">dapr.sidecarRestricted</code> flag stamps the daprd sidecar for PodSecurity <code class="inl">restricted</code> — render-verified, parked-on-kind (Vector's hostPath structurally blocks full enforce).</p></div></div>
+      <div class="fix feat"><div class="n">+</div><div><p class="t">PSA sidecar hardening <span class="tag new">chart</span></p><p class="d">a gated <code class="inl">dapr.sidecarRestricted</code> flag stamps the daprd sidecar for PodSecurity <code class="inl">restricted</code> — render-verified, parked-on-kind (the OTel Collector's hostPath structurally blocks full enforce).</p></div></div>
     </div>
   </section>
 
@@ -369,10 +369,10 @@
         <div><h3>Observability — one plane, three signals</h3><p>metrics, logs, traces all in GreptimeDB</p></div>
       </div>
       <div class="body">
-        <div class="lane"><div class="lbl k9s">k9s</div><div class="content"><p>filter <code class="inl">greptime</code>, <code class="inl">vector</code>, <code class="inl">perses</code> — the OTLP-direct stack (no Collector). Vector ships pod logs; everything else goes straight to Greptime over OTLP.</p></div></div>
+        <div class="lane"><div class="lbl k9s">k9s</div><div class="content"><p>filter <code class="inl">greptime</code>, <code class="inl">otel-collector</code>, <code class="inl">perses</code> — the OTel Collector is the telemetry hub. Apps export OTLP to it; it tails the infra-pod logs (filelog) and scrapes the Dapr sidecars, then exports everything to Greptime over OTLP.</p></div></div>
         <div class="lane"><div class="lbl see">watch</div><div class="content"><ul>
           <li><b>Perses</b> at <a href="http://localhost:8080">:8080</a> — pre-built dashboards over all three signals</li>
-          <li><b>Greptime</b> at <a href="http://localhost:4000">:4000/dashboard</a> — raw SQL / PromQL; tables <code class="inl">opentelemetry_logs</code>, <code class="inl">opentelemetry_traces</code>, <code class="inl">lance_logs</code></li>
+          <li><b>Greptime</b> at <a href="http://localhost:4000">:4000/dashboard</a> — raw SQL / PromQL; tables <code class="inl">opentelemetry_logs</code>, <code class="inl">opentelemetry_traces</code></li>
           <li>storage is hybrid by design: bulk data on S3 (bucket <code class="inl">lance-observability</code>), WAL on a real PVC</li>
         </ul></div></div>
       </div>
@@ -388,7 +388,7 @@
     <div class="left">
       <div class="leftrow"><div class="t">Model promotion flow<span>candidate → <code class="inl">blessed</code> (validator rung + tag) — the real "→ gold" for models. Designed, not yet driven.</span></div><span class="pill next">next</span></div>
       <div class="leftrow"><div class="t">Experiment tracking<span>route training params/metrics into the OTLP → GreptimeDB → Perses plane you already run. The answer to "tracking" — <b>not</b> MLflow.</span></div><span class="pill next">next</span></div>
-      <div class="leftrow"><div class="t">PSA <code class="inl">restricted</code> full-enforce<span>chart hardens the sidecar; full enforce is structurally blocked by Vector's hostPath — needs a namespace/API-server exemption.</span></div><span class="pill">parked</span></div>
+      <div class="leftrow"><div class="t">PSA <code class="inl">restricted</code> full-enforce<span>chart hardens the sidecar; full enforce is structurally blocked by the OTel Collector's hostPath — needs a namespace/API-server exemption.</span></div><span class="pill">parked</span></div>
       <div class="leftrow"><div class="t">NATS HA<span>via the nats operator + NACK / GitOps — your call, done at the rask merge. Not hand-rolled.</span></div><span class="pill">parked</span></div>
       <div class="leftrow"><div class="t">Query / consumption engine<span>deliberately deferred — future.</span></div><span class="pill">parked</span></div>
     </div>

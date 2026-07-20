@@ -263,7 +263,7 @@ Two halves; the first shipped, the second is a documented decision-gate.
   `data_storage_version`/`enable_stable_row_ids` create-time immutability; note 501 is off-spec.
 - **(e) Auth on GreptimeDB/Perses.** Both open today; prod Ingress→gateway exposes `/greptime/` (raw
   SQL/ingest) + `/perses/` **unauthenticated**. Fix: Perses `enable_auth` (Dex) + GreptimeDB
-  `auth.enabled` (propagate creds to OTLP/Vector/Perses clients) and/or nginx `auth_basic` edge stopgap.
+  `auth.enabled` (propagate creds to the OTLP exporters / the OTel Collector / Perses clients) and/or nginx `auth_basic` edge stopgap.
   Separately: bump `pylance→pylance[otel]` 9.x to light up `instrument_lance_metrics()` (already wired in
   all 5 lifespans). **Done:** an unauthenticated request to either is rejected at the gateway.
 

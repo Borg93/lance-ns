@@ -153,7 +153,7 @@ ingress:
 # `--set observability.edgeAuth.htpasswd=…` sourced from OpenBao / external-secrets (an apr1/bcrypt hash,
 # e.g. `htpasswd -nbB observer <pw>`). The render FAILS CLOSED if enabled with no htpasswd (like the other
 # prod-secret guards). Full GreptimeDB `auth.enabled` (client-cred propagation to the OTLP exporters /
-# Vector / the Perses datasource) + Perses OIDC via Dex are the documented follow-on.
+# the OTel Collector's exporter / the Perses datasource) + Perses OIDC via Dex are the documented follow-on.
 observability:
   edgeAuth:
     enabled: true

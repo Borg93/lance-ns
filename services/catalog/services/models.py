@@ -28,7 +28,6 @@ from lance_namespace import (
     InvalidInputError,
     InvalidTableStateError,
     TableNotFoundError,
-    TableTagNotFoundError,
     TableVersionNotFoundError,
 )
 
@@ -183,12 +182,4 @@ def promote(
         tags.create(tag, version)  # first bless of this model
     else:
         tags.update(tag, version)  # re-bless: move the pointer
-    return version
-
-
-def resolve_blessed_or_404(model_uri: str, storage_options: dict[str, str], *, tag: str = BLESSED_TAG) -> int:
-    """The blessed version, or a 404 if nothing is blessed yet (for the serving read path)."""
-    version = blessed_version(model_uri, storage_options, tag=tag)
-    if version is None:
-        raise TableTagNotFoundError(f"no {tag!r} version for this model")
     return version

@@ -17,7 +17,8 @@ stringData:
 ---
 {{- if and .Values.dapr.enabled (include "lance.otelEnabled" .) }}
 # Dapr tracing Configuration — sidecars annotated with dapr.io/config: lance-tracing. There is NO otel
-# exporter here (mirrors rask: the apps export OTLP-direct to GreptimeDB; Dapr's own sidecar spans can't
+# exporter here (mirrors rask: the apps export OTLP to the OTel Collector, which forwards to GreptimeDB;
+# Dapr's own sidecar spans can't
 # carry GreptimeDB's required db-name/pipeline headers). samplingRate "1" keeps Dapr sampling every
 # request so the W3C trace context always propagates across the pub/sub boundary — which is what makes
 # the app-level distributed trace span catalog → (Dapr/NATS) → lineage end to end. Gated on otelEnabled,

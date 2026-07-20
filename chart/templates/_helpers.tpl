@@ -68,7 +68,7 @@ carry those headers on the app side. */ -}}
 {{- if or $c.externalEndpoint $c.enabled -}}true{{- end -}}
 {{- end -}}
 {{/* Whether the apps should carry the OTel SDK wiring (instrument + otelEnv + the lance-tracing Dapr config).
-Decoupled from `observability.enabled`: that flag deploys the IN-CLUSTER store (GreptimeDB/Vector/Perses), but
+Decoupled from `observability.enabled`: that flag deploys the IN-CLUSTER stack (GreptimeDB/OTel Collector/Perses), but
 telemetry must also flow when it's OFF and `externalOtlpEndpoint` ships OTLP to an external collector (the OTel
 operator path) — otherwise externalize silently emits nothing. Non-empty string = on (helm `if` truthiness). */}}
 {{- define "lance.otelEnabled" -}}
@@ -116,8 +116,9 @@ compliant via lance.securityContext; the sidecar is not by default). RuntimeDefa
 annotation; drop-ALL-caps is the injector-wide `dapr.dapr_sidecar_injector.sidecarDropALLCapabilities` value
 (set it true TOGETHER with this flag — a subchart value can't read this one). OFF by default like
 networkPolicy.enabled: full `restricted` ENFORCE is a prod posture, and on this stack it is additionally
-BLOCKED by Vector — a log-collector DaemonSet that inherently needs hostPath (/var/log/pods), which
-`restricted` forbids and no value fixes. Vector needs its own namespace at `baseline`, or a ServiceAccount
+BLOCKED by the OTel Collector — a single Deployment whose filelog receiver inherently needs hostPath
+(/var/log/pods), which `restricted` forbids and no value fixes. The Collector needs its own namespace at
+`baseline`, or a ServiceAccount
 PSA exemption in the API-server admission config. So: this hardens what the chart owns; full-namespace
 enforce stays parked-by-design (docs/KIND-RUNBOOK §6.4). Live-provable in isolation: flip this + the
 injector value, re-roll, and the daprd container carries drop:[ALL] + RuntimeDefault. */}}

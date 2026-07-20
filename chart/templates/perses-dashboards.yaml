@@ -89,7 +89,7 @@ data:
       "kind": "Dashboard",
       "metadata": { "name": "service-flow", "project": "lance-ns" },
       "spec": {
-        "display": { "name": "Service Flow", "description": "How the event-driven services connect + move data — the medallion cascade edges + per-service activity, from GreptimeDB. (A node-topology graph would need the OTel Collector servicegraph connector; this is the metrics view that fits the rask/OTLP-direct stack.)" },
+        "display": { "name": "Service Flow", "description": "How the event-driven services connect + move data — the medallion cascade edges + per-service activity, from GreptimeDB. (A node-topology graph would need the OTel Collector's servicegraph connector; this is the metrics view over the OTLP signals the Collector exports.)" },
         "duration": "30m",
         "panels": {
           "medallionFlow": {

@@ -35,7 +35,7 @@ into `.localbin/` (gitignored).
 | **Dex** | Deployment | OIDC issuer (authn) |
 | **RustFS** | Deployment | S3-compatible object store for the Lance lakehouse |
 | **OpenBao** | Deployment | secret store (Vault fork), fronted by a Dapr `secretstores.hashicorp.vault` component |
-| **GreptimeDB** | subchart | **one unified store for metrics + logs + traces** (on RustFS S3) — apps export OTLP-direct here |
+| **GreptimeDB** | subchart | **one unified store for metrics + logs + traces** (on RustFS S3) — the OTel Collector exports all signals here |
 | **OTel Collector** | template | Receives app OTLP + tails infra logs (filelog) + scrapes Dapr metrics → GreptimeDB (`opentelemetry_logs`/`_traces`/metrics) |
 | **Perses** | subchart | dashboards-as-code over GreptimeDB's Prometheus API (`/v1/prometheus`) |
 | **Dapr dashboard** | Deployment | web UI for the Dapr stuff (components, subscriptions, configurations) |
@@ -63,12 +63,16 @@ catalog --DaprClient.publish_event--> [daprd sidecar] --pubsub.jetstream--> NATS
   (catalog + compaction).
 - `make verify` publishes a `create_table` event and asserts AGE recorded the creator.
 
-## Observability (GreptimeDB + Vector + Perses — the rask stack)
+## Observability (OTel Collector + GreptimeDB + Perses — the rask stack)
 
 All three OTel signals are **valuable and queryable**, mirroring rask: the apps run under
-`opentelemetry-instrument` and export **OTLP-direct to GreptimeDB** (`:4000/v1/otlp`, `http/protobuf`,
-`x-greptime-*` headers) — **no OTel Collector** in the path. GreptimeDB is one unified store; Perses
-dashboards it over GreptimeDB's Prometheus-compatible API. Verified end-to-end (`make e2e-obs`):
+`opentelemetry-instrument` and export **plain OTLP to a single in-chart OTel Collector**
+(`observability.otelCollector`, `chart/templates/otel-collector.yaml`) — the one telemetry hub. The
+Collector receives the app OTLP, `filelog`-tails the no-SDK infra-pod logs, and scrapes the Dapr
+sidecars' `:9090` via its `prometheus` receiver, then exports all three signals OTLP → GreptimeDB
+(adding the `x-greptime-*` db-name/pipeline headers the apps no longer carry). GreptimeDB is one unified
+store; Perses dashboards it over GreptimeDB's Prometheus-compatible API. Verified end-to-end
+(`make e2e-obs`):
 
 - **Traces** → `opentelemetry_traces`. A **single distributed trace spans catalog → Dapr publish →
   lineage → AGE write** (`opentelemetry-instrumentation-grpc` injects `traceparent` into the gRPC
@@ -78,11 +82,14 @@ dashboards it over GreptimeDB's Prometheus-compatible API. Verified end-to-end (
 - **Metrics** → PromQL. Custom **domain** golden signals `lineage_events_processed_total{lance_lineage_outcome}` +
   `lineage_ingest_duration_seconds_*` (recorded in the consumer), plus FastAPI RED
   (`http_server_duration_milliseconds_*`). Export interval is 5s (`OTEL_METRIC_EXPORT_INTERVAL`).
-- **Logs** → app OTLP logs (`opentelemetry_logs`) **and** Vector pod logs (`lance_logs`).
+- **Logs** → one table, `opentelemetry_logs`: the apps export OTLP logs directly, and the Collector's
+  `filelog` receiver tails the no-SDK infra pods into the **same** table (Vector is gone — there is no
+  more `lance_logs`).
 
 `make e2e-obs` runs `tests/e2e/test_observability_e2e.py` — one catalog table-create, then it asserts the
 graph data landed in AGE, the metric incremented in PromQL, the distributed trace joined catalog+lineage,
-and both log tables are populated. That's the regression guard for "the pipeline works **and** is observable".
+and both the app and infra log paths landed in `opentelemetry_logs`. That's the regression guard for "the
+pipeline works **and** is observable".
 
 **Lance-native IO metrics (pre-wired, activates at pylance 9):** pylance ≥ 9.0 ships
 `lance.otel.instrument_lance_metrics()` (the `pylance[otel]` extra) — Lance's Rust object-store/IO

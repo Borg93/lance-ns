@@ -29,8 +29,10 @@ dependencies:
     version: "0.3.9"
     repository: https://openfga.github.io/helm-charts
     condition: openfga.enabled
-  # Observability — the rask stack: GreptimeDB (unified metrics/logs/traces store) + Vector (pod-log
-  # shipper) + Perses (dashboards-as-code). Apps + Dapr export OTLP-direct to GreptimeDB — no Collector.
+  # Observability — the rask stack: GreptimeDB (unified metrics/logs/traces store) + Perses
+  # (dashboards-as-code). A single in-chart OTel Collector (templates/otel-collector.yaml) is the one
+  # telemetry hub: apps export plain OTLP to it, it filelog-tails infra-pod logs and scrapes the Dapr
+  # sidecars, then exports all three signals OTLP → GreptimeDB.
   - name: greptimedb-standalone
     version: "0.4.5"
     repository: https://greptimeteam.github.io/helm-charts/

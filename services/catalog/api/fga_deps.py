@@ -104,6 +104,11 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         # (user, relation) is the same authz-graph disclosure as enumerating it, so it clears the
         # same owner bar. An unmapped suffix would fall through to writer-tier — never leave it unset.
         "access/check": "can_drop",
+        # #72 grant/revoke: MUTATING the ACL is the highest-privilege act on the object — strictly above
+        # a writer, gated at the owner bar (same as reviewing it). Without this mapping these would fall
+        # through to the writer tier, letting a plain data writer hand out ownership.
+        "access/grant": "can_drop",
+        "access/revoke": "can_drop",
     },
     "namespace": {
         "drop": "can_delete",
@@ -111,6 +116,8 @@ _OWNER_SUFFIX_RELATION: dict[str, dict[str, str]] = {
         "policy/delete": "can_delete",
         "access/list": "can_delete",
         "access/check": "can_delete",
+        "access/grant": "can_delete",
+        "access/revoke": "can_delete",
     },
 }
 

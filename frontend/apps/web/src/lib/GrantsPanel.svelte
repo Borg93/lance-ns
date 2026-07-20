@@ -5,9 +5,20 @@
 	// Collapsed by default: one owner-tier round-trip per dataset, with definitive outcomes (the ACL,
 	// 401/403/501) cached and transient failures (offline, 5xx) retried on the next open.
 	import { ChevronRight, ShieldCheck } from "@lucide/svelte";
-	import { type AccessList, checkTableAccess, fetchTableAccess } from "./catalog";
+	import {
+		type AccessList,
+		checkTableAccess,
+		fetchTableAccess,
+		grantTableAccess,
+		revokeTableAccess,
+	} from "./catalog";
 
 	let { dataset }: { dataset: string } = $props();
+
+	// #72 the base rungs an owner may hand out (owner/writer/reader/validator) — the model's directly
+	// assignable relations, least→most privilege. NOT the can_* actions the review row shows (those are
+	// derived); a grant/revoke writes/deletes a direct base-rung tuple, then the review is re-fetched.
+	const GRANTABLE = ["reader", "writer", "validator", "owner"];
 
 	// Every piece of state is keyed by the dataset it belongs to (no cross-dataset bleed, audit
 	// 2026-07-16: a single un-keyed `loading` let one dataset's in-flight review block another's):
@@ -28,6 +39,13 @@
 	let simVerdict = $state<{ user: string; relation: string; allowed: boolean } | null>(null);
 	let simBusy = $state(false);
 	let simError = $state<string | null>(null);
+
+	// #72 manage-access form — grant/revoke a base rung to a subject. Keyed by dataset like the simulator.
+	let mgUser = $state("");
+	let mgRelation = $state("");
+	let mgBusy = $state(false);
+	let mgFor = $state<string | null>(null);
+	let mgResult = $state<{ tone: "ok" | "fail"; text: string } | null>(null);
 
 	const open = $derived(openedFor === dataset);
 	const shown = $derived(review?.for === dataset ? review : null);
@@ -98,6 +116,40 @@
 			simBusy = false;
 		}
 	}
+
+	// #72 grant or revoke a base rung, then re-fetch the review so the change is visible immediately.
+	async function runManage(grant: boolean): Promise<void> {
+		const user = mgUser.trim();
+		if (mgBusy || !user || !mgRelation) return;
+		mgBusy = true;
+		mgResult = null;
+		const current = dataset;
+		try {
+			const res = grant
+				? await grantTableAccess(current, user, mgRelation)
+				: await revokeTableAccess(current, user, mgRelation);
+			if (dataset !== current) return; // navigated away — drop the stale result
+			mgFor = current;
+			if (res.ok) {
+				const verb = grant ? "granted to" : "revoked from";
+				mgResult = { tone: "ok", text: `${mgRelation} ${verb} ${res.data.user}.` };
+				const refreshed = await fetchTableAccess(current);
+				if (dataset === current && refreshed.ok) {
+					review = { for: current, access: refreshed.data, denied: null };
+				}
+			} else if (res.status === 401 || res.status === 403) {
+				mgResult = { tone: "fail", text: "Managing access needs the owner tier on this table." };
+			} else if (res.status === 400 || res.status === 422) {
+				mgResult = { tone: "fail", text: `${mgRelation} is not a grantable rung here.` };
+			} else {
+				mgResult = { tone: "fail", text: `Failed (HTTP ${res.status}).` };
+			}
+		} finally {
+			mgBusy = false;
+		}
+	}
+
+	const mgResultShown = $derived(mgFor === dataset ? mgResult : null);
 </script>
 
 <div class="grants">
@@ -168,6 +220,44 @@
 						<span class="mono">{simVerdictShown.user}</span>
 						{simVerdictShown.allowed ? "can" : "cannot"}
 						<span class="mono">{simVerdictShown.relation}</span> on this table.
+					</p>
+				{/if}
+			</div>
+
+			<div class="sim">
+				<div class="sim-head">Manage access (grant / revoke)</div>
+				<div class="sim-form">
+					<input
+						class="mono"
+						placeholder="user (e.g. alice), or role:… / team:…#member"
+						bind:value={mgUser}
+					/>
+					<select class="mono" bind:value={mgRelation}>
+						<option value="" disabled>rung…</option>
+						{#each GRANTABLE as r (r)}<option value={r}>{r}</option>{/each}
+					</select>
+					<button
+						class="btn"
+						disabled={mgBusy || !mgUser.trim() || !mgRelation}
+						onclick={() => runManage(true)}
+					>
+						{mgBusy ? "…" : "Grant"}
+					</button>
+					<button
+						class="btn ghost"
+						disabled={mgBusy || !mgUser.trim() || !mgRelation}
+						onclick={() => runManage(false)}
+					>
+						Revoke
+					</button>
+				</div>
+				{#if mgResultShown}
+					<p
+						class="verdict"
+						class:allow={mgResultShown.tone === "ok"}
+						class:deny={mgResultShown.tone === "fail"}
+					>
+						{mgResultShown.text}
 					</p>
 				{/if}
 			</div>
@@ -277,6 +367,10 @@
 		font-size: 12px;
 		padding: 3px 12px;
 		cursor: pointer;
+	}
+	.btn.ghost {
+		background: none;
+		color: var(--mut);
 	}
 	.btn:disabled {
 		opacity: 0.5;

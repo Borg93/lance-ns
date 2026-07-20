@@ -75,6 +75,25 @@ export const checkTableAccess = (table: string, user: string, relation: string) 
 		body: JSON.stringify({ user, relation }),
 	});
 
+export type AccessGrant = components["schemas"]["AccessGrantResponse"];
+
+/** #72 grant a base rung (owner/writer/reader/validator) to a subject on the table. `user` may be a bare
+ * id (`alice`) or a userset (`role:…#assignee` / `team:…#member`). Owner-gated by the catalog (can_drop);
+ * the BFF forwards only the signed-in user's session. */
+export const grantTableAccess = (table: string, user: string, relation: string) =>
+	requestJSON<AccessGrant>(`v1/table/${enc(table)}/access/grant`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ user, relation }),
+	});
+/** #72 revoke a base rung from a subject on the table — the write counterpart of the grant, same gate. */
+export const revokeTableAccess = (table: string, user: string, relation: string) =>
+	requestJSON<AccessGrant>(`v1/table/${enc(table)}/access/revoke`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ user, relation }),
+	});
+
 export type TablesList = components["schemas"]["ListTablesResponse"];
 
 /** The catalog's own table registry (#52) — names in `<ns>$<table>` canonical form. */

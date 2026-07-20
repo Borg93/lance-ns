@@ -70,6 +70,40 @@ class AccessCheckResponse(BaseModel):
     allowed: bool
 
 
+class AccessGrantRequest(BaseModel):
+    """Grant or revoke ONE base rung to a subject. ``user`` may be a bare id (``alice`` → ``user:alice``)
+    or a fully-qualified userset (``role:project_admin#assignee``, ``team:acme#member``); ``relation`` must
+    be a grantable base rung the compiled model defines on the type (owner/writer/reader/validator) — never
+    a derived ``can_*`` action nor the structural ``parent`` edge."""
+
+    user: str
+    relation: str
+
+
+class AccessGrantResponse(BaseModel):
+    object: str
+    user: str
+    relation: str
+    granted: bool  # True after a grant, False after a revoke — the resulting state of the tuple
+
+
+# The base rungs an admin may directly assign. The model defines each as ``[user, role#assignee] or …``
+# (services/common/auth/model.fga) — a real user/userset grant, unlike the derived ``can_*`` actions or the
+# structural ``parent`` edge, neither of which may be hand-granted. Intersected with the model below so a
+# renamed rung drops out (and test_fga_model_contract would catch the drift).
+_GRANTABLE_BASE: tuple[str, ...] = ("owner", "writer", "reader", "validator")
+
+
+@lru_cache
+def _grantable_relations(fga_type: str) -> tuple[str, ...]:
+    """The base rungs grantable on ``fga_type`` — ``_GRANTABLE_BASE`` restricted to what the model defines."""
+    for td in fga.load_model()["type_definitions"]:
+        if td["type"] == fga_type:
+            defined = td.get("relations") or {}
+            return tuple(r for r in _GRANTABLE_BASE if r in defined)
+    return ()
+
+
 @lru_cache
 def _can_relations(fga_type: str) -> tuple[str, ...]:
     """Every ``can_*`` action the compiled model defines on ``fga_type``, sorted.
@@ -186,6 +220,87 @@ async def check_namespace_access(
 ) -> AccessCheckResponse:
     """Simulate 'does <user> hold <relation> on this namespace?' — owner-gated (``can_delete``)."""
     return await _access_check(request, settings, token, "namespace", id, body)
+
+
+async def _access_mutate(
+    request: Request,
+    settings: Settings,
+    token: CurrentToken,
+    fga_type: str,
+    id: str,
+    body: AccessGrantRequest,
+    *,
+    grant: bool,
+) -> AccessGrantResponse:
+    """Grant or revoke one base rung (owner/writer/reader/validator) to a subject on a table/namespace.
+
+    The MUTATE half of the #68 governance surface — the write counterpart of ``access/list`` + ``access/check``.
+    Owner-tier gated by the router (``access/grant`` / ``access/revoke`` → ``can_drop`` / ``can_delete`` in
+    fga_deps) — managing an object's ACL is an owner-privileged act, the same bar as reviewing it. Fail-closed:
+    only a grantable base rung the model defines is accepted (a ``can_*`` action or ``parent`` is a 4xx, not a
+    silently-written junk tuple); an OpenFGA outage is a 503, never a grant/revoke that silently no-ops. Both
+    directions are idempotent (``write_tuples`` swallows a duplicate, ``delete_tuples`` an absent tuple) and
+    audited distinctly (``access_grant`` / ``access_revoke``), carrying the grantee + rung."""
+    if not settings.fga_enabled:
+        raise UnsupportedOperationError("access mutation requires OpenFGA (this stack runs auth-off)")
+    client = getattr(request.app.state, "fga", None)
+    if client is None:  # the router gate already 503s this; kept so the endpoint is safe standalone
+        raise ServiceUnavailableError("authorization service is not available")
+    grantable = _grantable_relations(fga_type)
+    if body.relation not in grantable:
+        raise UnsupportedOperationError(
+            f"{body.relation!r} is not a grantable rung on {fga_type} (one of {', '.join(grantable)})"
+        )
+    segments = parse_identifier(id, settings.delimiter)
+    obj = f"{fga_type}:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}"
+    actor = token.sub if token else "anonymous"
+    # Resolve the grantee to a FULL subject (qualify=False semantics, mirroring access/check): a bare id is a
+    # user; a qualified userset (``role:…#assignee`` / ``team:…#member``) is passed through verbatim.
+    grantee = body.user if ":" in body.user else f"user:{body.user}"
+    tup = fga.ClientTuple(user=grantee, relation=body.relation, object=obj)
+    event = "access_grant" if grant else "access_revoke"
+    try:
+        if grant:
+            await fga.write_tuples(client, [tup])
+        else:
+            await fga.delete_tuples(client, [tup])
+    except ServiceUnavailableError:
+        audit(event, FAILURE, subject=actor, resource=obj, grantee=grantee, relation=body.relation)
+        raise
+    audit(event, SUCCESS, subject=actor, resource=obj, grantee=grantee, relation=body.relation)
+    return AccessGrantResponse(object=obj, user=grantee, relation=body.relation, granted=grant)
+
+
+@table_router.post("/{id}/access/grant")
+async def grant_table_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken, body: AccessGrantRequest
+) -> AccessGrantResponse:
+    """Grant a base rung on the table to a subject — owner-gated by the router (``can_drop``)."""
+    return await _access_mutate(request, settings, token, "table", id, body, grant=True)
+
+
+@table_router.post("/{id}/access/revoke")
+async def revoke_table_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken, body: AccessGrantRequest
+) -> AccessGrantResponse:
+    """Revoke a base rung on the table from a subject — owner-gated by the router (``can_drop``)."""
+    return await _access_mutate(request, settings, token, "table", id, body, grant=False)
+
+
+@namespace_router.post("/{id}/access/grant")
+async def grant_namespace_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken, body: AccessGrantRequest
+) -> AccessGrantResponse:
+    """Grant a base rung on the namespace to a subject — owner-gated by the router (``can_delete``)."""
+    return await _access_mutate(request, settings, token, "namespace", id, body, grant=True)
+
+
+@namespace_router.post("/{id}/access/revoke")
+async def revoke_namespace_access(
+    id: str, request: Request, settings: SettingsDep, token: CurrentToken, body: AccessGrantRequest
+) -> AccessGrantResponse:
+    """Revoke a base rung on the namespace from a subject — owner-gated by the router (``can_delete``)."""
+    return await _access_mutate(request, settings, token, "namespace", id, body, grant=False)
 
 
 # The v1 aggregator includes one ``router`` per module — the table + namespace routers are stitched here.

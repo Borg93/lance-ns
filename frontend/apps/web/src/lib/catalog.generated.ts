@@ -181,6 +181,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/namespace/{id}/access/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant Namespace Access
+         * @description Grant a base rung on the namespace to a subject — owner-gated by the router (``can_delete``).
+         */
+        post: operations["grant_namespace_access_v1_namespace__id__access_grant_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/namespace/{id}/access/list": {
         parameters: {
             query?: never;
@@ -196,6 +216,26 @@ export interface paths {
          *     (``can_delete``).
          */
         post: operations["list_namespace_access_v1_namespace__id__access_list_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/namespace/{id}/access/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Namespace Access
+         * @description Revoke a base rung on the namespace from a subject — owner-gated by the router (``can_delete``).
+         */
+        post: operations["revoke_namespace_access_v1_namespace__id__access_revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -481,6 +521,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/table/{id}/access/grant": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Grant Table Access
+         * @description Grant a base rung on the table to a subject — owner-gated by the router (``can_drop``).
+         */
+        post: operations["grant_table_access_v1_table__id__access_grant_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/table/{id}/access/list": {
         parameters: {
             query?: never;
@@ -495,6 +555,26 @@ export interface paths {
          * @description Effective access on the table, per ``can_*`` action — owner-gated by the router (``can_drop``).
          */
         post: operations["list_table_access_v1_table__id__access_list_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/table/{id}/access/revoke": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Revoke Table Access
+         * @description Revoke a base rung on the table from a subject — owner-gated by the router (``can_drop``).
+         */
+        post: operations["revoke_table_access_v1_table__id__access_revoke_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1716,6 +1796,30 @@ export interface components {
         AccessCheckResponse: {
             /** Allowed */
             allowed: boolean;
+            /** Object */
+            object: string;
+            /** Relation */
+            relation: string;
+            /** User */
+            user: string;
+        };
+        /**
+         * AccessGrantRequest
+         * @description Grant or revoke ONE base rung to a subject. ``user`` may be a bare id (``alice`` → ``user:alice``)
+         *     or a fully-qualified userset (``role:project_admin#assignee``, ``team:acme#member``); ``relation`` must
+         *     be a grantable base rung the compiled model defines on the type (owner/writer/reader/validator) — never
+         *     a derived ``can_*`` action nor the structural ``parent`` edge.
+         */
+        AccessGrantRequest: {
+            /** Relation */
+            relation: string;
+            /** User */
+            user: string;
+        };
+        /** AccessGrantResponse */
+        AccessGrantResponse: {
+            /** Granted */
+            granted: boolean;
             /** Object */
             object: string;
             /** Relation */
@@ -5474,6 +5578,41 @@ export interface operations {
             };
         };
     };
+    grant_namespace_access_v1_namespace__id__access_grant_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGrantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_namespace_access_v1_namespace__id__access_list_post: {
         parameters: {
             query?: never;
@@ -5492,6 +5631,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_namespace_access_v1_namespace__id__access_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGrantResponse"];
                 };
             };
             /** @description Validation Error */
@@ -5937,6 +6111,41 @@ export interface operations {
             };
         };
     };
+    grant_table_access_v1_table__id__access_grant_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGrantResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_table_access_v1_table__id__access_list_post: {
         parameters: {
             query?: never;
@@ -5955,6 +6164,41 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AccessListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_table_access_v1_table__id__access_revoke_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessGrantRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessGrantResponse"];
                 };
             };
             /** @description Validation Error */

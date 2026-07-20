@@ -48,6 +48,53 @@
         "title": "AccessCheckResponse",
         "type": "object"
       },
+      "AccessGrantRequest": {
+        "description": "Grant or revoke ONE base rung to a subject. ``user`` may be a bare id (``alice`` \u2192 ``user:alice``)\nor a fully-qualified userset (``role:project_admin#assignee``, ``team:acme#member``); ``relation`` must\nbe a grantable base rung the compiled model defines on the type (owner/writer/reader/validator) \u2014 never\na derived ``can_*`` action nor the structural ``parent`` edge.",
+        "properties": {
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "relation"
+        ],
+        "title": "AccessGrantRequest",
+        "type": "object"
+      },
+      "AccessGrantResponse": {
+        "properties": {
+          "granted": {
+            "title": "Granted",
+            "type": "boolean"
+          },
+          "object": {
+            "title": "Object",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "object",
+          "user",
+          "relation",
+          "granted"
+        ],
+        "title": "AccessGrantResponse",
+        "type": "object"
+      },
       "AccessListResponse": {
         "properties": {
           "grants": {
@@ -8442,6 +8489,64 @@
         ]
       }
     },
+    "/v1/namespace/{id}/access/grant": {
+      "post": {
+        "description": "Grant a base rung on the namespace to a subject \u2014 owner-gated by the router (``can_delete``).",
+        "operationId": "grant_namespace_access_v1_namespace__id__access_grant_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Grant Namespace Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/namespace/{id}/access/list": {
       "post": {
         "description": "Effective access on the namespace, per ``can_*`` action \u2014 owner-gated by the router\n(``can_delete``).",
@@ -8485,6 +8590,64 @@
           }
         ],
         "summary": "List Namespace Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/v1/namespace/{id}/access/revoke": {
+      "post": {
+        "description": "Revoke a base rung on the namespace from a subject \u2014 owner-gated by the router (``can_delete``).",
+        "operationId": "revoke_namespace_access_v1_namespace__id__access_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Namespace Access",
         "tags": [
           "access"
         ]
@@ -9271,6 +9434,64 @@
         ]
       }
     },
+    "/v1/table/{id}/access/grant": {
+      "post": {
+        "description": "Grant a base rung on the table to a subject \u2014 owner-gated by the router (``can_drop``).",
+        "operationId": "grant_table_access_v1_table__id__access_grant_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Grant Table Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/table/{id}/access/list": {
       "post": {
         "description": "Effective access on the table, per ``can_*`` action \u2014 owner-gated by the router (``can_drop``).",
@@ -9314,6 +9535,64 @@
           }
         ],
         "summary": "List Table Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/v1/table/{id}/access/revoke": {
+      "post": {
+        "description": "Revoke a base rung on the table from a subject \u2014 owner-gated by the router (``can_drop``).",
+        "operationId": "revoke_table_access_v1_table__id__access_revoke_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessGrantRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessGrantResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke Table Access",
         "tags": [
           "access"
         ]

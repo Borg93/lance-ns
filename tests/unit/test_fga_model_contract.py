@@ -318,16 +318,16 @@ def test_all_three_model_copies_agree() -> None:
 
 
 def test_access_disclosure_routes_are_owner_tier() -> None:
-    """CONTRACT (security, #51/#68): the access-DISCLOSURE routes — ``access/list`` (enumerate who holds
-    access) and ``access/check`` (simulate an arbitrary (user, relation)) — must clear the OWNER bar, never
-    the writer fall-through. Both reveal the authz graph, so a mere writer must not reach them.
+    """CONTRACT (security, #51/#68/#72): the access-DISCLOSURE routes — ``access/list`` (enumerate who holds
+    access) and ``access/check`` (simulate an arbitrary (user, relation)) — AND the MUTATE routes
+    ``access/grant`` / ``access/revoke`` must clear the OWNER bar, never the writer fall-through. The reads
+    reveal the authz graph; the writes HAND OUT ownership — a mere writer must not reach any of them.
 
     The pair-existence contract above canNOT catch a downgrade here: dropping a suffix from the owner map
     falls it through to ``can_write_data`` — a real relation, so that test stays green while the gate quietly
     weakens. This asserts the resolved tier directly, so such a refactor fails loudly."""
     from catalog.api.fga_deps import _action_relation
 
-    assert _action_relation("table", "access/list") == "can_drop"
-    assert _action_relation("table", "access/check") == "can_drop"
-    assert _action_relation("namespace", "access/list") == "can_delete"
-    assert _action_relation("namespace", "access/check") == "can_delete"
+    for suffix in ("access/list", "access/check", "access/grant", "access/revoke"):
+        assert _action_relation("table", suffix) == "can_drop", suffix
+        assert _action_relation("namespace", suffix) == "can_delete", suffix

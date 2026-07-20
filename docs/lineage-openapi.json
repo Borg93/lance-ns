@@ -1669,7 +1669,7 @@
     },
     "/admin/dlq/{run_id}/replay": {
       "post": {
-        "description": "Re-ingest one staged event on demand, then drop it \u2014 the manual twin of the reconcile relay's drain.\n\nA replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the\nevent's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The\ningest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop\nis only reached on success \u2014 a failed re-ingest leaves the object staged for the relay to retry. A poison\n(unparseable) object cannot be replayed (422); the relay drops those. Audited on the #41 trail.",
+        "description": "Re-ingest one staged event on demand, then drop it \u2014 the manual twin of the reconcile relay's drain.\n\nA replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the\nevent's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The\ningest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop\nis only reached on success \u2014 a failed re-ingest leaves the object staged for the relay to retry.\n\nNon-disclosure (audit 2026-07-20): replay must not become an oracle for events ``list_dlq`` hid. So a\nrun whose datasets the caller cannot SEE (or an unparseable poison object, which the governed list also\nhides) returns the SAME 404 as a missing run \u2014 never a distinct 422 or a 403 echoing hidden dataset\nnames. Only an event the caller could have listed reaches ``enforce_output_authz``.",
         "operationId": "replay_dlq_admin_dlq__run_id__replay_post",
         "parameters": [
           {

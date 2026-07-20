@@ -592,8 +592,12 @@ export interface paths {
          *     A replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the
          *     event's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The
          *     ingest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop
-         *     is only reached on success — a failed re-ingest leaves the object staged for the relay to retry. A poison
-         *     (unparseable) object cannot be replayed (422); the relay drops those. Audited on the #41 trail.
+         *     is only reached on success — a failed re-ingest leaves the object staged for the relay to retry.
+         *
+         *     Non-disclosure (audit 2026-07-20): replay must not become an oracle for events ``list_dlq`` hid. So a
+         *     run whose datasets the caller cannot SEE (or an unparseable poison object, which the governed list also
+         *     hides) returns the SAME 404 as a missing run — never a distinct 422 or a 403 echoing hidden dataset
+         *     names. Only an event the caller could have listed reaches ``enforce_output_authz``.
          */
         post: operations["replay_dlq_admin_dlq__run_id__replay_post"];
         delete?: never;

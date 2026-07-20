@@ -150,3 +150,16 @@ def test_route_token_match_passes_the_guard(monkeypatch: pytest.MonkeyPatch) -> 
     # Correct token → the guard passes; the handler then runs against the fakes (may 5xx) but is NOT a 403.
     response = _client(monkeypatch).post("/produce", headers={"dapr-api-token": "s3cret"})
     assert response.status_code != 403
+
+
+# ── GET /authorize (#77 audit admin gate): the SAME door, side-effect-free ─────────────────────────
+
+
+def test_authorize_route_rejects_missing_credential(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The web audit BFF relies on this: a non-admin (no credential) must be refused, never 200.
+    assert _client(monkeypatch).get("/authorize").status_code == 403
+
+
+def test_authorize_route_allows_the_admin_door(monkeypatch: pytest.MonkeyPatch) -> None:
+    res = _client(monkeypatch).get("/authorize", headers={"dapr-api-token": "s3cret"})
+    assert res.status_code == 200 and res.json() == {"authorized": True}

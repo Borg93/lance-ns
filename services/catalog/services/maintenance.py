@@ -16,9 +16,16 @@ from typing import Any
 
 def _as_utc(ts: Any) -> datetime:
     """Coerce a version timestamp to an aware UTC datetime; an unknown shape is treated as 'now' so it is
-    never eligible for collection (fail-safe — GC must not remove a version whose age it can't read)."""
+    never eligible for collection (fail-safe — GC must not remove a version whose age it can't read).
+
+    A NAIVE datetime from ``ds.versions()`` is host-LOCAL wall-clock (pylance builds it with
+    ``datetime.fromtimestamp(ns/1e9)`` — no tzinfo), so it must be ``astimezone(UTC)`` (interpret-as-local,
+    convert), NOT ``replace(tzinfo=UTC)`` (relabel local as UTC). On a non-UTC host the relabel skewed the
+    dry-run's age by the host offset, so ``preview_gc`` reported versions as protected that ``run_gc`` — which
+    compares the manifest's true-UTC instant — then reclaimed, breaking the pre-flight. (audit 2026-07-20)
+    """
     if isinstance(ts, datetime):
-        return ts if ts.tzinfo else ts.replace(tzinfo=UTC)
+        return ts if ts.tzinfo else ts.astimezone(UTC)
     return datetime.now(UTC)
 
 

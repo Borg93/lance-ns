@@ -30,17 +30,18 @@ describe("deriveQuality (#82)", () => {
 		expect(q).toEqual({ passed: true, assertions: 0 });
 	});
 
-	test("takes the LATEST run's verdict, not an arbitrary earlier one (event_time DESC)", () => {
-		// An older run PASSED, the newest run was BLOCKED — the badge must show blocked (no false assurance),
-		// regardless of the order AGE returns the rows in (here: passed-run first, as the graph might).
+	test("takes the LATEST run's verdict by event_time, not the array position", () => {
+		// The newest run (blocked, 07-20) is placed FIRST and an older passed run LAST — so this fails for a
+		// naive last-element (or first-non-null `.find`) impl and only passes if deriveQuality actually sorts
+		// by event_time. Guards the load-bearing sort that stops a stale `passed` masking the current `blocked`.
 		const q = deriveQuality(
 			producers([
-				{ event_time: "2026-07-01T00:00:00Z", quality_passed: true, quality_assertions: [] },
 				{
 					event_time: "2026-07-20T00:00:00Z",
 					quality_passed: false,
 					quality_assertions: [{ a: 1 }],
 				},
+				{ event_time: "2026-07-01T00:00:00Z", quality_passed: true, quality_assertions: [] },
 			]),
 		);
 		expect(q).toEqual({ passed: false, assertions: 1 });

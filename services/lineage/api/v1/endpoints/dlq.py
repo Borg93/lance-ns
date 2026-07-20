@@ -18,7 +18,7 @@ from __future__ import annotations
 import logging
 
 from common import audit, outbox
-from common.audit import ALLOW, FAILURE, SUCCESS
+from common.audit import ALLOW, SUCCESS
 from fastapi import APIRouter, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import TransactionNotFoundError, UnauthenticatedError, UnsupportedOperationError
@@ -89,14 +89,19 @@ async def replay_dlq(
     repository: RepositoryDep,
     settings: SettingsDep,
     token: CurrentToken,
+    datasets: FilterDep,
 ) -> DlqReplayResponse:
     """Re-ingest one staged event on demand, then drop it — the manual twin of the reconcile relay's drain.
 
     A replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the
     event's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The
     ingest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop
-    is only reached on success — a failed re-ingest leaves the object staged for the relay to retry. A poison
-    (unparseable) object cannot be replayed (422); the relay drops those. Audited on the #41 trail.
+    is only reached on success — a failed re-ingest leaves the object staged for the relay to retry.
+
+    Non-disclosure (audit 2026-07-20): replay must not become an oracle for events ``list_dlq`` hid. So a
+    run whose datasets the caller cannot SEE (or an unparseable poison object, which the governed list also
+    hides) returns the SAME 404 as a missing run — never a distinct 422 or a 403 echoing hidden dataset
+    names. Only an event the caller could have listed reaches ``enforce_output_authz``.
     """
     if not settings.outbox_uri:
         raise TransactionNotFoundError(f"no staged lineage event for run {run_id}")
@@ -107,8 +112,20 @@ async def replay_dlq(
     try:
         event = RunEvent.model_validate_json(event_json)
     except ValidationError as exc:
-        audit.audit("dlq_replay", FAILURE, subject=token.sub if token else "", resource=f"run:{run_id}")
+        # A poison object is dataset-less, so the governed list_dlq already hides it under FGA — replay must
+        # too: 404 (indistinguishable from missing), no audited existence signal. Auth-off dev keeps the
+        # honest 422 (no disclosure concern when everything is visible).
+        if settings.fga_enabled:
+            raise TransactionNotFoundError(f"no staged lineage event for run {run_id}") from exc
         raise UnsupportedOperationError(f"staged event for run {run_id} is unparseable (poison)") from exc
+    # Visibility gate — mirror list_dlq's governance: you may only replay an event you could have SEEN. An
+    # event referencing a dataset the caller can't read is hidden as a 404, so enforce_output_authz's
+    # dataset-naming 403 can never disclose a dataset the list view withheld.
+    refs = {d.name for d in [*event.outputs, *event.inputs] if d.name}
+    if settings.fga_enabled and refs:
+        visible = await datasets.visible(list(refs))
+        if refs - visible:
+            raise TransactionNotFoundError(f"no staged lineage event for run {run_id}")
     # Same gate as ingest — a caller may only replay a run they were authorized to write in the first place.
     await enforce_output_authz(event, request, settings, token)
     await repository.ingest_event(event)  # idempotent MERGE on run_id

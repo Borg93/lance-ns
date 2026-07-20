@@ -146,11 +146,16 @@ def test_list_filters_events_to_visible_datasets(tmp_path: Path, monkeypatch: py
 # --------------------------------------------------------------------------- #
 
 
+def _replay(s: LineageSettings, run_id: str, repo: Any, token: Any = None) -> Any:
+    flt = _filter(_request(fga=object()), s, token)
+    return dlq.replay_dlq(run_id, _request(fga=object()), repo, s, token, flt)
+
+
 def test_replay_reingests_and_drops(tmp_path: Path) -> None:
     s = _settings(tmp_path)
     _stage(s, "r1", _event_json("r1"))
     repo = _Repo()
-    out = asyncio.run(dlq.replay_dlq("r1", _request(), cast(Any, repo), s, None))
+    out = asyncio.run(_replay(s, "r1", repo))
     assert out.status == "replayed" and out.run_id == "r1"
     assert len(repo.ingested) == 1 and repo.ingested[0].run.run_id == "r1"
     # the staged object is gone (drop only runs on success)
@@ -160,31 +165,68 @@ def test_replay_reingests_and_drops(tmp_path: Path) -> None:
 def test_replay_missing_run_is_404(tmp_path: Path) -> None:
     s = _settings(tmp_path)
     with pytest.raises(TransactionNotFoundError):
-        asyncio.run(dlq.replay_dlq("nope", _request(), cast(Any, _Repo()), s, None))
+        asyncio.run(_replay(s, "nope", _Repo()))
 
 
-def test_replay_poison_is_unsupported_and_not_dropped(tmp_path: Path) -> None:
+def test_replay_poison_is_unsupported_and_not_dropped_dev(tmp_path: Path) -> None:
+    # FGA off (dev): a poison object is honestly a 422, and is NOT destroyed by the failed replay.
     s = _settings(tmp_path)
     _stage(s, "bad", "{not valid json")
     with pytest.raises(UnsupportedOperationError):
-        asyncio.run(dlq.replay_dlq("bad", _request(), cast(Any, _Repo()), s, None))
-    # a poison object is NOT destroyed by a failed replay — it stays for the relay's poison handling
+        asyncio.run(_replay(s, "bad", _Repo()))
     assert outbox.read_event(s.outbox_uri, storage_options(s), "bad") is not None
 
 
-def test_replay_denies_a_non_writer_when_fga_on(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_replay_poison_is_404_under_fga_no_oracle(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # FGA on: a poison object the governed list hides must NOT be distinguishable from missing (404, not 422).
     s = _settings(tmp_path, **_FULL_AUTH)
-    _stage(s, "r1", _event_json("r1", outputs=(("bronze", "bronze$x"),)))
+    _stage(s, "bad", "{not valid json")
 
-    async def deny_all(_client: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
+    async def any_visible(_c: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
+        return {o: True for o in objects}
+
+    monkeypatch.setattr(fga, "batch_check", any_visible)
+    with pytest.raises(TransactionNotFoundError):
+        asyncio.run(_replay(s, "bad", _Repo(), _token()))
+    assert outbox.read_event(s.outbox_uri, storage_options(s), "bad") is not None
+
+
+def test_replay_hidden_event_is_404_not_a_name_disclosing_403(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A caller who can't SEE the event's datasets gets 404 (indistinguishable from missing), NOT a 403 that
+    # echoes 'bronze$secret' — the disclosure gap list_dlq closes, now closed on replay too.
+    s = _settings(tmp_path, **_FULL_AUTH)
+    _stage(s, "r1", _event_json("r1", outputs=(("bronze", "bronze$secret"),)))
+
+    async def deny_all(_c: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
         return {o: False for o in objects}
 
     monkeypatch.setattr(fga, "batch_check", deny_all)
     repo = _Repo()
+    with pytest.raises(TransactionNotFoundError):
+        asyncio.run(_replay(s, "r1", repo, _token()))
+    assert repo.ingested == []
+    assert outbox.read_event(s.outbox_uri, storage_options(s), "r1") is not None
+
+
+def test_replay_seen_but_not_writable_is_403(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A caller who CAN see the dataset (can_get_metadata) but can't WRITE it → 403 (enforce_output_authz);
+    # the name is one they can already see, so no new disclosure. Nothing ingested/dropped.
+    s = _settings(tmp_path, **_FULL_AUTH)
+    _stage(s, "r1", _event_json("r1", outputs=(("bronze", "bronze$x"),)))
+
+    async def see_not_write(
+        _c: object, *, relation: str, objects: list[str], **_kw: object
+    ) -> dict[str, bool]:
+        return {o: relation == "can_get_metadata" for o in objects}
+
+    monkeypatch.setattr(fga, "batch_check", see_not_write)
+    repo = _Repo()
     with pytest.raises(PermissionDeniedError):
-        asyncio.run(dlq.replay_dlq("r1", _request(fga=object()), cast(Any, repo), s, _token()))
-    assert repo.ingested == []  # nothing ingested on a denied replay
-    assert outbox.read_event(s.outbox_uri, storage_options(s), "r1") is not None  # and not dropped
+        asyncio.run(_replay(s, "r1", repo, _token()))
+    assert repo.ingested == []
+    assert outbox.read_event(s.outbox_uri, storage_options(s), "r1") is not None
 
 
 def list_dlq_off(settings: LineageSettings) -> Any:

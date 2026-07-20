@@ -5,6 +5,7 @@
 	// the browser. Governed without a session → 401; no observability stack → 501; auth-off dev → open.
 	import { Select } from "@lance/ui";
 	import { RefreshCw, ScrollText, ShieldAlert } from "@lucide/svelte";
+	import { untrack } from "svelte";
 	import { requestJSON } from "./http";
 
 	type AuditEvent = {
@@ -27,8 +28,11 @@
 	let resource = $state("");
 
 	const unauthorized = $derived(events === null && settled && lastStatus === 401);
+	const forbidden = $derived(events === null && settled && lastStatus === 403);
 	const unavailable = $derived(events === null && settled && lastStatus === 501);
-	const offline = $derived(events === null && settled && ![0, 200, 401, 501].includes(lastStatus));
+	const offline = $derived(
+		events === null && settled && ![0, 200, 401, 403, 501].includes(lastStatus),
+	);
 
 	async function load(): Promise<void> {
 		const seq = ++inflight;
@@ -44,12 +48,18 @@
 			events = res.data.events;
 			lastStatus = 200;
 		} else {
+			// Clear the stale rows on failure so the auth/forbidden/offline state reflects reality — else a
+			// session that expires mid-view would keep showing the old (privileged) trail. (audit 2026-07-20)
+			events = null;
 			lastStatus = res.status;
 		}
 	}
 
+	// Load on mount and when the OUTCOME picker changes (tracked). The text filters are read untracked, so
+	// typing does NOT re-fire a GreptimeDB query per keystroke — those apply on the explicit Search button.
 	$effect(() => {
-		load();
+		void outcome;
+		untrack(() => load());
 	});
 
 	function tone(o: string): string {
@@ -107,6 +117,10 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={15} /> <a href="/auth/login">Sign in</a> to view the audit trail.
+		</div>
+	{:else if forbidden}
+		<div class="empty">
+			<ShieldAlert size={15} /> The audit trail is admin-only — your account isn't a project admin.
 		</div>
 	{:else if unavailable}
 		<div class="empty">The audit viewer needs the observability stack (GreptimeDB).</div>

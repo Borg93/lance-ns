@@ -159,6 +159,13 @@
 		moveTo = "";
 		newBranch = "";
 		newBranchFrom = "";
+		// #73 index-builder editor — reset too, or a column/type/distance (or error) typed on table A pre-fills
+		// B's Build-index form and runCreateIndex(B) would use A's column. (audit 2026-07-20)
+		ixColumn = "";
+		ixType = "BTREE";
+		ixDistance = "cosine";
+		ixBusy = false;
+		ixError = null;
 		quality = null;
 		load();
 		loadQuality();
@@ -489,11 +496,13 @@
 			insertBusy = false;
 			return;
 		}
+		const requested = table; // latest-wins: don't post A's result onto B if the user navigated mid-insert
 		try {
 			// Browser-side Arrow-IPC encode (apache-arrow) → the catalog's Arrow-body insert. The inferred
 			// schema must match the table's — a mismatch is the catalog's honest error, surfaced below.
 			const arrow = tableToIPC(tableFromJSON(rows), "stream");
-			const res = await insertRows(table, arrow);
+			const res = await insertRows(requested, arrow);
+			if (table !== requested) return; // navigated away — A's message must not land on B's page
 			if (res.ok) {
 				insertMsg = {
 					ok: true,

@@ -1,9 +1,12 @@
-// BFF contract (#77): the audit viewer is session-gated (401 when auth on + no session), queries GreptimeDB
-// server-side, and parses opentelemetry_logs rows into audit events — robust to the attribute column names —
-// with server-side outcome/subject filtering.
+// BFF contract (#77): the audit viewer is session-gated (401 when auth on + no session) AND admin-gated
+// (403 when a signed-in caller is not a project admin — via the medallion produce door's GET /authorize),
+// queries GreptimeDB server-side, and parses opentelemetry_logs rows into audit events with server-side
+// outcome/subject filtering.
 import { describe, expect, mock, test } from "bun:test";
 
-mock.module("$env/dynamic/private", () => ({ env: { GREPTIME_API: "http://greptime.test" } }));
+mock.module("$env/dynamic/private", () => ({
+	env: { GREPTIME_API: "http://greptime.test", MEDALLION_API: "http://medallion.test" },
+}));
 
 const { GET } = await import("../../routes/api/audit/+server");
 
@@ -30,11 +33,20 @@ const SQL_RESPONSE = {
 	],
 };
 
-function drive(query: string, opts: { session?: boolean; authEnabled?: boolean } = {}) {
+function drive(
+	query: string,
+	opts: { session?: boolean; authEnabled?: boolean; adminStatus?: number } = {},
+) {
 	let sqlSent = "";
+	let authBearer: string | undefined;
 	const event = {
 		url: new URL(`http://bff/api/audit?${query}`),
 		fetch: async (u: string, init: RequestInit) => {
+			// The admin gate hits medallion /authorize first; GreptimeDB SQL is only reached if it passes.
+			if (String(u).includes("/authorize")) {
+				authBearer = (init.headers as Record<string, string>)?.["authorization"];
+				return new Response("{}", { status: opts.adminStatus ?? 200 });
+			}
 			sqlSent = String(init.body ?? "");
 			return new Response(JSON.stringify(SQL_RESPONSE), {
 				status: 200,
@@ -46,7 +58,11 @@ function drive(query: string, opts: { session?: boolean; authEnabled?: boolean }
 			session: opts.session ? { accessToken: "tok" } : null,
 		},
 	};
-	return { run: () => GET(event as unknown as Parameters<typeof GET>[0]), sqlSent: () => sqlSent };
+	return {
+		run: () => GET(event as unknown as Parameters<typeof GET>[0]),
+		sqlSent: () => sqlSent,
+		authBearer: () => authBearer,
+	};
 }
 
 describe("audit BFF (#77)", () => {
@@ -84,5 +100,25 @@ describe("audit BFF (#77)", () => {
 		const body = (await res.json()) as { events: { subject: string }[] };
 		expect(body.events.length).toBe(1);
 		expect(body.events[0].subject).toBe("user:alice");
+	});
+
+	test("a signed-in NON-admin is 403 and NEVER queries the audit store", async () => {
+		const d = drive("", { session: true, adminStatus: 403 });
+		const res = await d.run();
+		expect(res.status).toBe(403);
+		expect(d.sqlSent()).toBe(""); // the GreptimeDB query is never reached
+	});
+
+	test("the admin gate forwards the user bearer (never a service token)", async () => {
+		const d = drive("", { session: true });
+		await d.run();
+		expect(d.authBearer()).toBe("Bearer tok");
+	});
+
+	test("auth-off dev skips the admin gate and answers openly", async () => {
+		const d = drive("", { session: false, authEnabled: false });
+		const res = await d.run();
+		expect(res.status).toBe(200);
+		expect(d.sqlSent()).toContain("opentelemetry_logs"); // queried without any admin gate
 	});
 });

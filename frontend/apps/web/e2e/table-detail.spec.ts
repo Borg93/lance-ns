@@ -23,7 +23,12 @@ const DETAIL = {
 		],
 	},
 	tags: { tags: { blessed: { version: 2 } } },
-	branches: { branches: { main: { createAt: 1_700_000_000, manifestSize: 512 } } },
+	branches: {
+		branches: {
+			main: { createAt: 1_700_000_000, manifestSize: 512 },
+			dev: { createAt: 1_700_000_100, manifestSize: 1024 },
+		},
+	},
 	indexes: { indexes: [{ index_name: "id_idx", columns: ["id"], index_type: "BTREE" }] },
 	policy: {
 		retention_days: 7,
@@ -43,9 +48,11 @@ let gcPreviewBody: Record<string, unknown> | null;
 let gcRan: boolean;
 let compactBody: Record<string, unknown> | null;
 let colPost: { op: string; body: Record<string, unknown> } | null;
+let refPost: { path: string; body: Record<string, unknown> } | null;
 
 test.beforeEach(async ({ page }) => {
 	colPost = null;
+	refPost = null;
 	tagPost = null;
 	restorePost = null;
 	insertPostBytes = 0;
@@ -104,6 +111,14 @@ test.beforeEach(async ({ page }) => {
 				body: req.postDataJSON() as Record<string, unknown>,
 			};
 			return json(route, { version: 4 });
+		}
+		const ref = path.match(/\/(branches|tags)\/(create|delete|update)$/);
+		if (ref && req.method() === "POST") {
+			refPost = {
+				path: `${ref[1]}/${ref[2]}`,
+				body: req.postDataJSON() as Record<string, unknown>,
+			};
+			return json(route, { version: 5 });
 		}
 		return json(route, { detail: "unstubbed" }, 404);
 	});
@@ -248,4 +263,42 @@ test("rename-column via the row ✎ posts an alter path→rename (#74)", async (
 	await section.getByRole("button", { name: "save" }).click();
 	await expect.poll(() => colPost?.op).toBe("alter");
 	expect(colPost?.body).toEqual({ alterations: [{ path: "id", rename: "identifier" }] });
+});
+
+test("delete a tag via the chip × (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Versions, branches & tags" });
+	await section.getByRole("button", { name: "delete tag blessed" }).click();
+	await expect.poll(() => refPost?.path).toBe("tags/delete");
+	expect(refPost?.body).toEqual({ tag: "blessed" });
+});
+
+test("move a tag to another version (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Versions, branches & tags" });
+	await section.getByRole("button", { name: "move tag blessed" }).click();
+	await section.getByLabel("move blessed to version").click();
+	await page.getByRole("option", { name: "v3", exact: true }).click();
+	await section.getByRole("button", { name: "save" }).click();
+	await expect.poll(() => refPost?.path).toBe("tags/update");
+	expect(refPost?.body).toEqual({ tag: "blessed", version: 3 });
+});
+
+test("create a branch from a version (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Versions, branches & tags" });
+	await section.getByLabel("New branch name").fill("feature");
+	await section.getByLabel("Branch from version").click();
+	await page.getByRole("option", { name: "v2", exact: true }).click();
+	await section.getByRole("button", { name: "Create branch" }).click();
+	await expect.poll(() => refPost?.path).toBe("branches/create");
+	expect(refPost?.body).toEqual({ name: "feature", from_version: 2 });
+});
+
+test("delete a branch via the chip × (#74)", async ({ page }) => {
+	await page.goto("/tables/db1%24t");
+	const section = page.locator("section", { hasText: "Versions, branches & tags" });
+	await section.getByRole("button", { name: "delete branch dev" }).click();
+	await expect.poll(() => refPost?.path).toBe("branches/delete");
+	expect(refPost?.body).toEqual({ name: "dev" });
 });

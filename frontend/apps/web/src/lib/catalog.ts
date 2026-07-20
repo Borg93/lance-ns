@@ -160,6 +160,35 @@ export const createTableTag = (table: string, tag: string, version: number) =>
 		body: JSON.stringify({ tag, version }),
 	});
 
+/** #74 delete a tag (writer-gated). */
+export const deleteTableTag = (table: string, tag: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/tags/delete`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ tag }),
+	});
+/** #74 move a tag to another version (owner-gated can_update_tag). */
+export const moveTableTag = (table: string, tag: string, version: number) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/tags/update`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ tag, version }),
+	});
+/** #74 create a branch from a version (owner-gated can_create_branch). */
+export const createTableBranch = (table: string, name: string, fromVersion?: number | null) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/branches/create`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name, from_version: fromVersion ?? null }),
+	});
+/** #74 delete a branch (writer-gated). */
+export const deleteTableBranch = (table: string, name: string) =>
+	requestJSON<unknown>(`v1/table/${enc(table)}/branches/delete`, {
+		method: "POST",
+		headers: { "content-type": "application/json" },
+		body: JSON.stringify({ name }),
+	});
+
 /** #64 version management — restore the table to a prior version. Restore mints a FRESH version pointing
  * at the restored data (history is never rewritten); owner-gated (can_restore), session-only BFF. */
 export const restoreTableVersion = (table: string, version: number) =>

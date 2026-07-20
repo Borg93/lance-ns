@@ -13,12 +13,17 @@
 	import {
 		addColumn,
 		compactTable,
+		createTableBranch,
 		createTableIndex,
 		createTableTag,
+		deleteTableBranch,
 		deleteTablePolicy,
+		deleteTableTag,
 		dropColumn,
 		dropTableIndex,
+		moveTableTag,
 		renameColumn,
+		type CatalogResult,
 		fetchTableDetail,
 		type GcPreview,
 		insertRows,
@@ -130,6 +135,12 @@
 		addColExpr = "";
 		renaming = null;
 		renameTo = "";
+		refBusy = false;
+		refError = null;
+		movingTag = null;
+		moveTo = "";
+		newBranch = "";
+		newBranchFrom = "";
 		load();
 	});
 
@@ -300,6 +311,52 @@
 		} finally {
 			colBusy = false;
 		}
+	}
+
+	// #74 ref-plane mutations — tag delete/move (owner can_update_tag) + branch create/delete.
+	let refBusy = $state(false);
+	let refError = $state<string | null>(null);
+	let movingTag = $state<string | null>(null); // the tag currently being moved
+	let moveTo = $state(""); // target version (bits-ui Select string)
+	let newBranch = $state("");
+	let newBranchFrom = $state(""); // optional source version (Select string)
+
+	function refFail(status: number, detail: string): void {
+		if (status === 401) refError = "Sign in to manage tags & branches.";
+		else if (status === 403) refError = "Denied: managing refs needs writer/owner access.";
+		else refError = detail;
+	}
+
+	async function refDo(fn: () => Promise<CatalogResult<unknown>>): Promise<void> {
+		if (refBusy) return;
+		refBusy = true;
+		refError = null;
+		try {
+			const res = await fn();
+			if (res.ok) await load();
+			else refFail(res.status, res.detail);
+		} finally {
+			refBusy = false;
+		}
+	}
+
+	const runDeleteTag = (name: string) => refDo(() => deleteTableTag(table, name));
+	const runDeleteBranch = (name: string) => refDo(() => deleteTableBranch(table, name));
+
+	async function runMoveTag(): Promise<void> {
+		if (!movingTag || !moveTo) return;
+		const name = movingTag;
+		await refDo(() => moveTableTag(table, name, Number(moveTo)));
+		movingTag = null;
+		moveTo = "";
+	}
+
+	async function runCreateBranch(): Promise<void> {
+		const name = newBranch.trim();
+		if (!name) return;
+		await refDo(() => createTableBranch(table, name, newBranchFrom ? Number(newBranchFrom) : null));
+		newBranch = "";
+		newBranchFrom = "";
 	}
 
 	// #76 compact-now — merge small fragments (non-destructive), using the policy's target size if set.
@@ -859,27 +916,95 @@
 
 			<div class="refs br">
 				<span class="mut">branches:</span>
-				{#if branches.length === 0}
-					<span class="chip mono">main</span>
-					<span class="mut">(no additional branches)</span>
-				{:else}
-					{#each branches as [name, b] (name)}
-						<span class="chip branch mono"
-							>{name}<span class="mut"> · {fmtBytes(b.manifestSize)}</span></span
-						>
-					{/each}
-				{/if}
+				<span class="chip mono">main</span>
+				{#each branches as [name, b] (name)}
+					<span class="chip branch mono"
+						>{name}<span class="mut"> · {fmtBytes(b.manifestSize)}</span>
+						<button
+							class="chip-x"
+							title="delete branch"
+							aria-label="delete branch {name}"
+							disabled={refBusy}
+							onclick={() => runDeleteBranch(name)}>×</button
+						></span
+					>
+				{/each}
 			</div>
+			<!-- #74 create a branch from a version (owner-gated can_create_branch). -->
+			<form
+				class="row addcol"
+				onsubmit={(e) => {
+					e.preventDefault();
+					runCreateBranch();
+				}}
+			>
+				<input
+					class="mono"
+					bind:value={newBranch}
+					placeholder="new branch"
+					aria-label="New branch name"
+				/>
+				<Select
+					bind:value={newBranchFrom}
+					ariaLabel="Branch from version"
+					placeholder="from version (latest)"
+					options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
+				/>
+				<button class="btn" type="submit" disabled={refBusy || !newBranch.trim()}
+					>Create branch</button
+				>
+			</form>
 
 			<div class="refs">
 				{#if tags.length === 0}
 					<span class="mut">No tags — a promotion pins its version with one (e.g. blessed).</span>
 				{:else}
 					{#each tags as [name, t] (name)}
-						<span class="chip tag mono">{name} → v{t.version}</span>
+						{#if movingTag === name}
+							<span class="chip tag mono">
+								{name} →
+								<span class="movesel">
+									<Select
+										bind:value={moveTo}
+										ariaLabel="move {name} to version"
+										placeholder="version"
+										options={versions.map((v) => ({
+											value: String(v.version),
+											label: `v${v.version}`,
+										}))}
+									/>
+								</span>
+								<button class="chip-x" disabled={refBusy || !moveTo} onclick={runMoveTag}
+									>save</button
+								>
+								<button class="chip-x" onclick={() => (movingTag = null)}>×</button>
+							</span>
+						{:else}
+							<span class="chip tag mono"
+								>{name} → v{t.version}
+								<button
+									class="chip-x"
+									title="move tag"
+									aria-label="move tag {name}"
+									disabled={refBusy}
+									onclick={() => {
+										movingTag = name;
+										moveTo = "";
+									}}>↪</button
+								>
+								<button
+									class="chip-x"
+									title="delete tag"
+									aria-label="delete tag {name}"
+									disabled={refBusy}
+									onclick={() => runDeleteTag(name)}>×</button
+								></span
+							>
+						{/if}
 					{/each}
 				{/if}
 			</div>
+			{#if refError}<p class="error">{refError}</p>{/if}
 
 			{#if versions.length > 0}
 				<div class="refs tagform">

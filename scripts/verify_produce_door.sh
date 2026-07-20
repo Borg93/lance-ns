@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# #64 live proof of the /produce + /train HUMAN trigger door (dual-auth authorize_produce).
+# #64 live proof of the /produce + /train HUMAN trigger door (dual-auth authorize_produce) + #83 DLQ ops.
 #
 # Applies the chart change (medallion OIDC env + web MEDALLION_API) to the live kind `lance` cluster, rolls
-# the already-loaded lance-ray + web images, then drives the door end-to-end against a real Dex token:
+# the already-loaded lance-ray + web + catalog + lineage images (all backend shares lance-rest-catalog:dev,
+# so this one deploy also ships #68 + Phase A + #83), then drives the door end-to-end against a real Dex token:
 #   • a project ADMIN bearer (alice, admin project:acme)      → 202  (the new human door opens)
 #   • a NON-admin bearer     (bob, no grant)                  → 403  (FGA denies, not a silent allow)
 #   • the service app-token  (dapr-api-token)                 → 202  (the unchanged service path)
@@ -21,22 +22,26 @@ trap cleanup EXIT
 step() { echo; echo "━━ $* ━━"; }
 fail() { echo "!! FAIL: $*"; exit 1; }
 
-step "1/6 apply the chart change (medallion OIDC env + web MEDALLION_API)"
+step "1/7 apply the chart change (medallion OIDC env + web MEDALLION_API)"
 # --reuse-values keeps the live release's config; the one NEW key is set explicitly (a new values key would
 # render EMPTY under --reuse-values — the documented helm gotcha, and here it would blank the admin project).
 helm upgrade "$RELEASE" ./chart --reuse-values --set medallion.produceAdminProject=acme --timeout 200s
 
-step "2/6 roll the freshly-loaded images (kind same-tag → delete pods, not just rollout)"
+step "2/7 roll the freshly-loaded images (kind same-tag → delete pods, not just rollout)"
 # catalog too: it carries the #68 access-simulator fix (services/common/fga.py qualify flag) under the same
 # :dev tag, so without an explicit pod delete the running catalog keeps the old double-prefix Check.
 kubectl delete pod -l app.kubernetes.io/component=lance-ray --wait=false
 kubectl delete pod -l app.kubernetes.io/component=web --wait=false
 kubectl delete pod -l app.kubernetes.io/component=catalog --wait=false
+# lineage too: the SAME :dev image carries #83's /admin/dlq ops endpoints (all backend services share
+# lance-rest-catalog:dev), so without rolling lineage the DLQ panel 404s against the old pod.
+kubectl delete pod -l app.kubernetes.io/component=lineage --wait=false
 kubectl rollout status "deploy/$RELEASE-lance-ray" --timeout=150s
 kubectl rollout status "deploy/$RELEASE-web" --timeout=150s
 kubectl rollout status "deploy/$RELEASE-catalog" --timeout=150s
+kubectl rollout status "deploy/$RELEASE-lineage" --timeout=150s
 
-step "3/6 confirm the OIDC door env is live on lance-ray"
+step "3/7 confirm the OIDC door env is live on lance-ray"
 env_val() {
   kubectl get deploy "$RELEASE-lance-ray" \
     -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='$1')].value}"
@@ -48,10 +53,11 @@ webapi="$(kubectl get deploy "$RELEASE-web" -o jsonpath="{.spec.template.spec.co
 [ -n "$webapi" ] || fail "web has no MEDALLION_API"
 echo "   web MEDALLION_API=$webapi"
 
-step "4/6 port-forward dex + lance-ray + openfga"
+step "4/7 port-forward dex + lance-ray + openfga + lineage"
 kubectl port-forward "svc/$RELEASE-dex" 5556:5556 >/tmp/pf-dex.log 2>&1 & PF_PIDS+=($!)
 kubectl port-forward "svc/$RELEASE-lance-ray" 8000:8000 >/tmp/pf-ray.log 2>&1 & PF_PIDS+=($!)
 kubectl port-forward "svc/$RELEASE-openfga" 8081:8080 >/tmp/pf-fga.log 2>&1 & PF_PIDS+=($!)
+kubectl port-forward "svc/$RELEASE-lineage" 8010:8000 >/tmp/pf-lin.log 2>&1 & PF_PIDS+=($!)
 for i in $(seq 1 30); do
   d=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:5556/dex/.well-known/openid-configuration 2>/dev/null || true)
   r=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:8000/livez 2>/dev/null || true)
@@ -60,7 +66,7 @@ for i in $(seq 1 30); do
   sleep 1
 done
 
-step "5/6 mint Dex tokens + seed the admin grant"
+step "5/7 mint Dex tokens + seed the admin grant"
 mint() {
   curl -s -m10 http://localhost:5556/dex/token \
     -d grant_type=password -d client_id=lance-catalog -d client_secret=lance-catalog-secret \
@@ -86,7 +92,7 @@ done
 echo "   user:${SUB:0:12}… is admin on project:acme"
 DAPR_TOKEN="$(kubectl get secret "$RELEASE-dapr-app-token" -o jsonpath='{.data.token}' | base64 -d)"
 
-step "6/6 drive /produce through every door"
+step "6/7 drive /produce through every door"
 code() { curl -s -o /dev/null -w '%{http_code}' -m15 -X POST http://localhost:8000/produce "$@"; }
 admin=$(code -H "authorization: Bearer $ALICE")
 nonadmin=$(code -H "authorization: Bearer $BOB")
@@ -105,3 +111,16 @@ opened "$svc"          || fail "service token path regressed (got $svc)"
 [ "$none" = "403" ]     || fail "missing credential was not fail-closed (got $none)"
 
 echo; echo "✓ produce door PROVEN: admin OIDC opens · non-admin 403 · service opens · anon 403"
+
+step "7/7 prove #83 DLQ ops endpoints are live + fail-closed (lineage)"
+# The new /admin/dlq surface ships in the SAME image on the lineage pod. A 404 here means the lineage pod is
+# still the OLD image (the roll didn't take); 401 without a session proves the endpoint exists + fails closed;
+# 200 for a signed-in user proves the governed read works (empty backlog is fine — depth 0, still 200).
+dlq() { curl -s -o /dev/null -w '%{http_code}' -m10 http://localhost:8010/admin/dlq "$@"; }
+dlq_noauth=$(dlq)
+dlq_alice=$(dlq -H "authorization: Bearer $ALICE")
+echo "   GET /admin/dlq  no cred → $dlq_noauth   (expect 401; 404 = stale lineage image)"
+echo "   GET /admin/dlq  alice   → $dlq_alice   (expect 200; governed view)"
+[ "$dlq_noauth" = "401" ] || fail "#83 DLQ not live / not fail-closed (got $dlq_noauth — 404 = stale image)"
+[ "$dlq_alice" = "200" ] || fail "#83 DLQ governed read failed for a signed-in user (got $dlq_alice)"
+echo; echo "✓ #83 DLQ ops PROVEN: /admin/dlq live · 401 without a session · 200 for a signed-in user"

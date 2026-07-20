@@ -11,7 +11,7 @@ is "flip values at rask's operators", never "deploy operators ourselves".
 | # | Operator | Replaces (ours, hand-rolled) | Why this rank |
 |---|---|---|---|
 | 1 | **KubeRay + Kueue** | raw Ray head Deployment + our submit/re-attach/poll logic | Replaces the WEAKEST thing we own. A `RayJob` CR is the missing *lifecycle owner* the whole TRAIN design (D2 submit-and-ack) works around: the operator watches the job to a terminal state, owns retry policy + TTL cleanup; `RayService` gives rolling cluster upgrades; Kueue adds GPU quota + gang scheduling for training. Already pinned as the rask-merge step (D6). |
-| 2 | **CloudNativePG** | hand-rolled AGE StatefulSet + OpenFGA datastore | Managed Postgres `Cluster` (HA, backups, failover) for the ONLY relational state of record (AGE + OpenFGA). ⚠️ Gated by the AGE-extension decision (stock CNPG images lack AGE): custom image vs separate operand vs Lance-native graph — `RASK-INTEGRATION.md` §Open decisions. |
+| 2 | **CloudNativePG** | hand-rolled AGE StatefulSet + OpenFGA datastore | Managed Postgres `Cluster` (HA, backups, failover) for the ONLY relational state of record (AGE + OpenFGA). The AGE-extension question is **SOLVED + PROVEN**: AGE reached PG18 (v1.7.0), so it mounts as a CNPG **ImageVolume extension** on a STOCK Postgres image — verified locally (`CREATE EXTENSION age`/`create_graph`/cypher all work via `extension_control_path`). Full how-to + the custom-full-image bridge for pre-1.33 clusters: **`docs/CNPG-AGE.md`** (`.docker/cnpg-age-ext.dockerfile`, `deploy/cnpg-age-cluster.yaml`). |
 | 3 | **rustfs-operator** | hand-rolled RustFS Deployment | S3 `Tenant` CR with a declarative `buckets:` list — our lakehouse + observability buckets become list entries. |
 | 4 | **NACK** (NATS operator) — *optional* | the imperative `nats-stream-job.yaml` provision Job | Declarative `Stream` CRDs would replace the shell Job that today creates `LINEAGE` / `MEDALLION` / `TRAINING` (Dapr's jetstream component does not auto-create streams). Nice-to-have: the Job works and is idempotent; NACK removes a boot-ordering foot-gun, nothing more. |
 | 5 | **Secrets operator** (External Secrets Operator, the Vault/OpenBao operator, or bank-vaults) — *interim: no operator, just a values flip* | the `server -dev` in-memory OpenBao + the `openbao-seed` post-upgrade hook | Dev-mode OpenBao (`server -dev`) holds secrets **in memory**: any pod restart wipes `secret/lance`, and the ONLY re-seed path is the helm post-upgrade hook — so an *out-of-band* restart leaves every app's `apply_dapr_secrets` retrying a Dapr `500` on the missing key **forever** (lifespan never completes → pod stuck `0/2` → daprd waits on the app that never listens). **Observed live 2026-07-14** (§5) when an interrupted helm upgrade restarted OpenBao mid-churn. The **acute fix is NOT an operator** — it is `openbao.devMode=false` → `server -config` on the existing PVC, which the chart already supports and which makes secrets survive restarts. The operator earns its place only at prod tier: **auto-unseal** (retire manual `bao operator init`/unseal), **declarative secret sync** (retire the seed Job entirely), plus rotation/PKI. |
@@ -32,9 +32,12 @@ that weren't. Fixed:
 - **External Secrets Operator (#5)** — `externalSecrets.enabled=true` is now exercised by `prod-render-check`
   leg 11 (SecretStore + ExternalSecret CRs render, static Secrets skipped, fail-closed guard satisfied with
   no plaintext `age.password`/`rustfs.secretKey`).
-- **CloudNativePG (#2)** — the AGE-extension decision is the one **headline blocker**: run CNPG with a
-  **custom `imageName` that bundles Apache AGE** (built from the CNPG PG16 base, matching `age.image`'s major),
-  since stock CNPG images can't `LOAD 'age'`. OpenFGA (plain SQL) is unaffected. See RASK-INTEGRATION.md.
+- **CloudNativePG (#2)** — the AGE-extension blocker is **solved + proven** (`docs/CNPG-AGE.md`): AGE now
+  ships for PG18 (v1.7.0), so it mounts as a CNPG **ImageVolume extension** on a stock Postgres image (no
+  fork). Proven locally end-to-end (`.docker/cnpg-age-ext.dockerfile` builds it; a stock PG18 loads it via
+  `extension_control_path` and runs `create_graph`/cypher). Needs K8s 1.33+/containerd 2.1/CNPG 1.27; for
+  older clusters the custom-full-image (PG16) bridge is documented. Physical PITR replaces the pg_dump path
+  (safer for AGE). OpenFGA (plain SQL) is unaffected.
 - **KubeRay (#1)** — the submit seam is already agnostic; the only chart handoff is repointing
   `medallion.rayAddress` at the RayCluster head's dashboard service (an EXTERNALIZE stanza is now shown).
 

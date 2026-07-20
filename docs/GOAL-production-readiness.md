@@ -193,10 +193,13 @@ to main. Never weaken auth/secrets posture.
   but the prod answer — externalize to managed S3 / rustfs-operator — is now documented AND CI-verified: the
   `rustfs.externalEndpoint` handoff is atomic with the GreptimeDB object-store endpoint (`prod-render-check`
   leg 10 fails if either is set without the other — an operator-handoff audit fix). Adopting the operator = flip.
-- [~] **AGE-Postgres single-replica SPOF** (HIGH) — SPOF remains in-chart; the CloudNativePG prod answer is
-  documented (docs/OPERATORS.md #2, RASK-INTEGRATION.md value→CNPG map, the values-prod EXTERNALIZE stanza),
-  gated on the one **headline decision**: CNPG needs a custom image bundling Apache AGE (stock CNPG can't
-  `LOAD 'age'`). `age.externalHost` + the openfga `datastore.uri` handoff renders clean.
+- [~] **AGE-Postgres single-replica SPOF** (HIGH) — SPOF remains in-chart, but the CloudNativePG prod answer
+  is now **documented AND proven** (docs/CNPG-AGE.md): AGE reached PG18 (v1.7.0), so it mounts as a CNPG
+  **ImageVolume extension** on a stock Postgres image — the extension image (`.docker/cnpg-age-ext.dockerfile`)
+  + `Cluster`/`Database` CRs (`deploy/cnpg-age-cluster.yaml`) are built, and AGE was verified end-to-end on
+  PG18 locally (`CREATE EXTENSION`/`create_graph`/cypher via `extension_control_path`). Needs K8s 1.33+ (kind
+  is 1.31, so the CSI mount is the one untested leg); a custom-full-image PG16 bridge is documented for older
+  clusters. CNPG physical PITR supersedes the pg_dump path (safer for AGE). Adopting = flip `age.externalHost`.
 - [ ] **Movers cross-pod lock → scale the event-driven tier** (MED·code) — the single-flight lock is
   process-local, capping each stage at 1 mover; a distributed lock to allow >1 is a larger change — park
   with rationale until throughput demands it.

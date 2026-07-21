@@ -116,4 +116,15 @@ consumers onto the adopted system as each zone is built.
   extends AuthLocals`. VERIFIED: `@rask/api` tsgo clean; 22 in-package tests pass; zones check 10/10; apps/web
   build+check+test(51) green via the shim; lint/fmt both pairs green. (Full typed catalog/lineage/medallion
   clients grow in P3 as each zone moves its routes; the parse+proxy+client seam is in place.)
-- [ ] P3..P8 (build zones from apps/web routes, cross-zone nav, retire apps/web, chart+docs, global gate).
+- [x] **P3 route migration DONE** — all four domain zones built by MOVING routes from apps/web, each a
+  verified green push:
+  - data (`5cf53a6`,`a73b899`,`ef8d646`) — namespaces·warehouses·tables (incl. the 1,569-line TableDetail);
+  - models (`19fcccb`) — registry·experiments·pipeline + the medallion trigger;
+  - lineage (`7d847bd`) — the 1,521-line LineageExplorer graph + provenance;
+  - admin (`888d38b`) — audit·dlq.
+  `@rask/ui` grew every `@lance/ui` primitive it needed (Select, Chip, motion, SearchBar, StatusBoard) so
+  the zones are 100% `@lance/ui`-free. apps/web is now a bare shell (auth + a migrated-root placeholder),
+  still green. All 5 zones + shared packages + apps/web build+check(0/0)+test + lint/fmt green.
+- [ ] P3 tail — per-zone Playwright harness + moved e2e specs.
+- [ ] P4 composition — run all zones behind the microfrontends proxy; cross-zone nav + OIDC persistence live.
+- [ ] P5 — retire apps/web; chart (per-zone/multi-zone images + proxy); DEPLOY docs; global gate.

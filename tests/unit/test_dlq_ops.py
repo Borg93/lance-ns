@@ -12,7 +12,7 @@ import asyncio
 import json
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Any, cast
+from typing import Any
 
 import pytest
 from common import fga, outbox
@@ -183,7 +183,7 @@ def test_replay_poison_is_404_under_fga_no_oracle(tmp_path: Path, monkeypatch: p
     _stage(s, "bad", "{not valid json")
 
     async def any_visible(_c: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
-        return {o: True for o in objects}
+        return dict.fromkeys(objects, True)
 
     monkeypatch.setattr(fga, "batch_check", any_visible)
     with pytest.raises(TransactionNotFoundError):
@@ -200,7 +200,7 @@ def test_replay_hidden_event_is_404_not_a_name_disclosing_403(
     _stage(s, "r1", _event_json("r1", outputs=(("bronze", "bronze$secret"),)))
 
     async def deny_all(_c: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
-        return {o: False for o in objects}
+        return dict.fromkeys(objects, False)
 
     monkeypatch.setattr(fga, "batch_check", deny_all)
     repo = _Repo()
@@ -219,7 +219,7 @@ def test_replay_seen_but_not_writable_is_403(tmp_path: Path, monkeypatch: pytest
     async def see_not_write(
         _c: object, *, relation: str, objects: list[str], **_kw: object
     ) -> dict[str, bool]:
-        return {o: relation == "can_get_metadata" for o in objects}
+        return dict.fromkeys(objects, relation == "can_get_metadata")
 
     monkeypatch.setattr(fga, "batch_check", see_not_write)
     repo = _Repo()

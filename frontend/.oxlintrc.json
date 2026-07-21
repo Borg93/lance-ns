@@ -1,4 +1,13 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"ignorePatterns": ["apps/web/src/lib/api.generated.ts", "apps/web/src/lib/catalog.generated.ts"]
+	"ignorePatterns": [
+		"apps/web/src/lib/api.generated.ts",
+		"apps/web/src/lib/catalog.generated.ts",
+		"components/frontends/**",
+		"packages/api/**",
+		"packages/rask-ui/**",
+		"eslint.config.js",
+		"eslint-rules/**",
+		"patches/**"
+	]
 }

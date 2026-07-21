@@ -1,11 +1,17 @@
 {
 	"$schema": "https://turborepo.com/schema.json",
+	"ui": "tui",
 	"tasks": {
 		"build": {
 			"dependsOn": ["^build"],
-			"outputs": ["build/**", ".svelte-kit/**"]
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"outputs": ["build/**", ".svelte-kit/**", "dist/**"]
 		},
 		"check": {
+			"dependsOn": ["^build"],
+			"outputs": []
+		},
+		"check:tsgo": {
 			"dependsOn": ["^build"],
 			"outputs": []
 		},
@@ -16,6 +22,11 @@
 			"dependsOn": ["build"],
 			"cache": false,
 			"outputs": []
+		},
+		"dev": {
+			"dependsOn": ["^build"],
+			"cache": false,
+			"persistent": true
 		},
 		"//#lint": {
 			"cache": false

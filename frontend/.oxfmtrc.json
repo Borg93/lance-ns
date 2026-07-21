@@ -6,6 +6,12 @@
 		"apps/web/src/lib/api.generated.ts",
 		"apps/web/src/lib/catalog.generated.ts",
 		"apps/web/openapi.json",
-		"bun.lock"
+		"bun.lock",
+		"components/frontends/**",
+		"packages/api/**",
+		"packages/rask-ui/**",
+		"eslint.config.js",
+		"eslint-rules/**",
+		"patches/**"
 	]
 }

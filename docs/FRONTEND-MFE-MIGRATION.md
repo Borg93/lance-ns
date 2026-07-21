@@ -86,5 +86,16 @@ consumers onto the adopted system as each zone is built.
 
 - [x] rask studied (zones, AppShell, `@rask/api` seam, microfrontends.json, cross-zone-reload, TS7/tsgo).
 - [x] Decomposition locked (data/lineage/models/admin zones); plan doc; branch `feat/frontend-mfe`.
-- [ ] P0 workspace scaffold + P1 adopt rask `packages/ui` + P2 adopt/extend `packages/api` — NEXT.
-- [ ] P3..P8 (build zones, cross-zone nav, retire apps/web, chart+docs, global gate).
+- [x] **P0 foundation DONE** — `frontend/` restructured to rask layout ALONGSIDE apps/web (coexistence
+  proven). bun workspaces += `components/frontends/*`; MERGED turbo.json (+`check:tsgo`/`dev`, kept
+  `test:e2e`/`//#lint`/`//#fmt:check`); `@rask/api` (tsgo seam) + `@rask/ui` at `packages/rask-ui` (minimal
+  AppShell/Button + rask tokens.css) + 5 zone apps (`home` default + `data`/`lineage`/`models`/`admin`
+  stubs, svelte-adapter-bun@1.0.1 patched, `paths.base`, tailwind-4 per-zone, strictPorts) +
+  `microfrontends.json` + `eslint.config.js` + `eslint-rules/cross-zone-reload`. Toolchains scoped apart
+  (oxlint/oxfmt = lance side; eslint/prettier = MFE dirs). VERIFIED: bun install clean (patch applied); TS6
+  root / TS5 nested for apps/web; `turbo run build` 7✓, `check` 10✓ (svelte-check 0/0), `check:tsgo` @rask/api
+  ✓; apps/web+@lance/ui green contract unchanged; microfrontends.json ports match; lint/fmt both pairs green;
+  tests green (incl the cross-zone-reload unit test).
+- [ ] P1 adopt full rask `@rask/ui` design system + nav-config (4 domains) + nav-user(OIDC).
+- [ ] P2 fold OIDC BFF + catalog/lineage/medallion clients into `@rask/api`.
+- [ ] P3..P8 (build zones from apps/web routes, cross-zone nav, retire apps/web, chart+docs, global gate).

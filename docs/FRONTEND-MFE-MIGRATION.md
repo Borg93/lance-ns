@@ -96,6 +96,13 @@ consumers onto the adopted system as each zone is built.
   root / TS5 nested for apps/web; `turbo run build` 7✓, `check` 10✓ (svelte-check 0/0), `check:tsgo` @rask/api
   ✓; apps/web+@lance/ui green contract unchanged; microfrontends.json ports match; lint/fmt both pairs green;
   tests green (incl the cross-zone-reload unit test).
-- [ ] P1 adopt full rask `@rask/ui` design system + nav-config (4 domains) + nav-user(OIDC).
+- [x] **P1 DONE** — adopted rask's full `@rask/ui` shadcn-svelte design system verbatim into
+  `packages/rask-ui` (18 bits-ui components + the shell AppShell/app-sidebar/nav-main/nav-user/
+  project-switcher/breadcrumb + hooks + utils; storybook/stories excluded). `nav-config.ts` swapped to the
+  4 lance domains (Data/Lineage/Models/Admin, each with collapsible leaves + active-match); `nav-user`
+  already threads a `NavUser` prop (the OIDC session value flows in P3). VERIFIED: `@rask/ui` svelte-check
+  0/0; build (svelte-package→dist) ✓; `@rask/ui` tests 13 pass incl. nav-config (4 domains + active-match);
+  all 5 zones SSR-build with the full AppShell (render smoke); apps/web green (bits-ui@1.8 nested vs @rask/ui
+  bits-ui@2.18); both linter pairs green.
 - [ ] P2 fold OIDC BFF + catalog/lineage/medallion clients into `@rask/api`.
 - [ ] P3..P8 (build zones from apps/web routes, cross-zone nav, retire apps/web, chart+docs, global gate).

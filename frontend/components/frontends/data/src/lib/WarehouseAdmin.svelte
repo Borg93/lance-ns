@@ -3,15 +3,15 @@
 	// physical tenancy), activate/deactivate lifecycle, namespace binding, and provisioning. Reads
 	// are session-forwarded; writes are project-admin gated by the catalog (can_create_warehouse /
 	// can_administer) — a non-admin sees the denial banner, never a silent no-op.
-	import { Select } from "@lance/ui";
-	import { RefreshCw, ShieldAlert, Warehouse as WarehouseIcon } from "@lucide/svelte";
+	import { Select } from '@rask/ui/select';
+	import { RefreshCw, ShieldAlert, Warehouse as WarehouseIcon } from '@lucide/svelte';
 	import {
 		bindWarehouseNamespace,
 		createWarehouse,
 		fetchWarehouses,
 		setWarehouseActive,
 		type Warehouse,
-	} from "./catalog";
+	} from './catalog';
 
 	const POLL_MS = 5000;
 
@@ -19,11 +19,11 @@
 	let lastStatus = $state(0);
 	let settled = $state(false);
 	let busy = $state(false);
-	let banner = $state<{ tone: "ok" | "fail"; text: string } | null>(null);
-	let draft = $state({ id: "", project: "", bucket: "" });
+	let banner = $state<{ tone: 'ok' | 'fail'; text: string } | null>(null);
+	let draft = $state({ id: '', project: '', bucket: '' });
 	let bindDraft = $state<{ warehouse: string; namespace: string }>({
-		warehouse: "",
-		namespace: "",
+		warehouse: '',
+		namespace: '',
 	});
 
 	const unauthorized = $derived(warehouses === null && lastStatus === 401);
@@ -32,7 +32,7 @@
 	// A pre-lifecycle warehouse (provisioned before the activate/deactivate feature) has no `status`
 	// field — treat that as active, so it renders active with the correct toggle direction.
 	function statusOf(w: Warehouse): string {
-		return w.status ?? "active";
+		return w.status ?? 'active';
 	}
 
 	async function load(): Promise<void> {
@@ -54,12 +54,12 @@
 
 	function fail(status: number, detail: string): void {
 		if (status === 401)
-			banner = { tone: "fail", text: "Sign in — warehouse admin is a per-user action." };
+			banner = { tone: 'fail', text: 'Sign in — warehouse admin is a per-user action.' };
 		else if (status === 403 || status === 404)
 			// The lifecycle ops hide existence from non-admins (a denied deactivate is a 404, not a 403),
 			// so both map to the same admin-required message.
-			banner = { tone: "fail", text: "Denied: warehouse admin needs the project-admin rung." };
-		else banner = { tone: "fail", text: detail };
+			banner = { tone: 'fail', text: 'Denied: warehouse admin needs the project-admin rung.' };
+		else banner = { tone: 'fail', text: detail };
 	}
 
 	async function provision(): Promise<void> {
@@ -74,10 +74,10 @@
 			});
 			if (res.ok) {
 				banner = {
-					tone: "ok",
+					tone: 'ok',
 					text: `warehouse ${res.data.id} provisioned (${res.data.root_uri})`,
 				};
-				draft = { id: "", project: "", bucket: "" };
+				draft = { id: '', project: '', bucket: '' };
 				await load();
 			} else {
 				fail(res.status, res.detail);
@@ -92,7 +92,7 @@
 		busy = true;
 		banner = null;
 		try {
-			const res = await setWarehouseActive(w.id, statusOf(w) !== "active");
+			const res = await setWarehouseActive(w.id, statusOf(w) !== 'active');
 			if (res.ok) await load();
 			else fail(res.status, res.detail);
 		} finally {
@@ -108,10 +108,10 @@
 			const res = await bindWarehouseNamespace(bindDraft.warehouse, bindDraft.namespace.trim());
 			if (res.ok) {
 				banner = {
-					tone: "ok",
+					tone: 'ok',
 					text: `namespace ${bindDraft.namespace} bound to ${bindDraft.warehouse}`,
 				};
-				bindDraft = { warehouse: "", namespace: "" };
+				bindDraft = { warehouse: '', namespace: '' };
 			} else {
 				fail(res.status, res.detail);
 			}
@@ -129,7 +129,7 @@
 	</header>
 
 	{#if banner}
-		<div class="banner" class:ok={banner.tone === "ok"} class:fail={banner.tone === "fail"}>
+		<div class="banner" class:ok={banner.tone === 'ok'} class:fail={banner.tone === 'fail'}>
 			{banner.text}
 		</div>
 	{/if}
@@ -161,12 +161,12 @@
 							<td class="mono">{w.project}</td>
 							<td class="mono">{w.bucket}</td>
 							<td
-								><span class="chip mono" class:off={statusOf(w) !== "active"}>{statusOf(w)}</span
+								><span class="chip mono" class:off={statusOf(w) !== 'active'}>{statusOf(w)}</span
 								></td
 							>
 							<td class="actions">
 								<button class="btn ghost" disabled={busy} onclick={() => toggleActive(w)}>
-									{statusOf(w) === "active" ? "deactivate" : "activate"}
+									{statusOf(w) === 'active' ? 'deactivate' : 'activate'}
 								</button>
 							</td>
 						</tr>

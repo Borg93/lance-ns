@@ -109,6 +109,18 @@ SCHEME-DERIVED from the issuer (2026-07-12): a plain-http issuer (the in-cluster
 https issuer (any real IdP) keeps the verifier's HTTPS guard enforced — never hardcoded open. OpenFGA's schema migrates against the AGE
 Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `ag_catalog`).
 
+**Per-user UI login (2026-07-21, opt-in `web.oidc.enabled`).** By default the web pod runs auth-OFF even
+when the backends are governed: it reads lineage as `web.serviceIdentity`, and catalog control-plane
+surfaces show "sign in" with no way to sign in — because per-user OIDC login needs a **browser-reachable
+IdP**, which the in-cluster `dex.issuer` is not. In prod the IdP is external, so set `web.oidc.enabled=true`
+with `web.oidc.publicIssuer` (the external Dex/Keycloak/Auth0 issuer), `web.oidc.publicOrigin` (the browser
+URL that forms the `…/auth/callback` redirect), and `web.oidc.sessionSecret` (≥32 chars; seals the session
+cookie AES-256-GCM via a Secret — required, render fails without it). The BFF then forwards each signed-in
+user's OWN bearer to the governed backends (per-user authz), and the `/auth/login` flow redirects to the
+external IdP — provider-agnostic via OIDC discovery, no code change. The bundled Dex also registers the web
+callback for demo/ingress use. NOTE: the audit viewer's admin gate calls `MEDALLION_API`, so keep
+`medallion.enabled=true` when `web.oidc.enabled` (else `/audit` fails closed to 503).
+
 ## Notable engineering notes
 
 - **Dapr JetStream consumers** are split BY RECOVERY STORY (2026-07-06/12): the LINEAGE ingest stays

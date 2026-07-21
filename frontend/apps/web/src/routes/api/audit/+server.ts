@@ -65,6 +65,28 @@ function pick(row: Record<string, unknown>, ...keys: string[]): string {
 	return "";
 }
 
+// GreptimeDB's OTLP logs table nests attributes in a `log_attributes` JSON column (keys `audit.action`,
+// `audit.outcome`, …) — NOT flat top-level columns. Merge that JSON (parsed object or string) up into the
+// row lookup so `pick("audit.action")` finds it; else every field renders "—" (the real-browser bug of
+// 2026-07-21, which the flat-column test mock had hidden). resource_/scope_attributes are merged too, low
+// priority, in case an attribute lands there across OTLP-collector versions.
+function flattenRow(o: Record<string, unknown>): Record<string, unknown> {
+	const merged: Record<string, unknown> = {};
+	for (const col of ["resource_attributes", "scope_attributes", "log_attributes"]) {
+		const raw = o[col];
+		let obj: unknown = raw;
+		if (typeof raw === "string") {
+			try {
+				obj = JSON.parse(raw);
+			} catch {
+				obj = null;
+			}
+		}
+		if (obj && typeof obj === "object") Object.assign(merged, obj);
+	}
+	return { ...o, ...merged };
+}
+
 export const GET: RequestHandler = async ({ url, fetch, locals }) => {
 	if (locals.authEnabled && !locals.session) {
 		return json({ detail: "sign in to view the audit trail" }, { status: 401 });
@@ -100,8 +122,9 @@ export const GET: RequestHandler = async ({ url, fetch, locals }) => {
 		const cols = (records?.schema?.column_schemas ?? []).map((c) => c.name);
 		const rows = records?.rows ?? [];
 		let events: AuditEvent[] = rows.map((r) => {
-			const o: Record<string, unknown> = {};
-			cols.forEach((c, i) => (o[c] = r[i]));
+			const raw: Record<string, unknown> = {};
+			cols.forEach((c, i) => (raw[c] = r[i]));
+			const o = flattenRow(raw); // lift `log_attributes` JSON so the audit.* keys are reachable
 			return {
 				timestamp: pick(o, "timestamp", "time"),
 				action: pick(o, "audit.action", "action"),

@@ -10,23 +10,38 @@ mock.module("$env/dynamic/private", () => ({
 
 const { GET } = await import("../../routes/api/audit/+server");
 
+// The REAL GreptimeDB shape (confirmed live 2026-07-21): OTLP attributes are nested in a `log_attributes`
+// JSON column, NOT flat `audit.*` columns. The old mock used flat columns, so it passed while production
+// rendered every field as "—". This mock now pins the actual nesting so the flatten step is load-bearing.
 const SQL_RESPONSE = {
 	output: [
 		{
 			records: {
 				schema: {
-					column_schemas: [
-						{ name: "timestamp" },
-						{ name: "body" },
-						{ name: "audit.action" },
-						{ name: "audit.outcome" },
-						{ name: "audit.subject" },
-						{ name: "audit.resource" },
-					],
+					column_schemas: [{ name: "timestamp" }, { name: "body" }, { name: "log_attributes" }],
 				},
 				rows: [
-					["2026-07-20T10:00:00Z", "audit", "can_drop", "DENY", "user:bob", "table:db1$t"],
-					["2026-07-20T09:00:00Z", "audit", "can_read_data", "ALLOW", "user:alice", "table:db1$t"],
+					[
+						"2026-07-20T10:00:00Z",
+						"audit",
+						{
+							"audit.action": "can_drop",
+							"audit.outcome": "DENY",
+							"audit.subject": "user:bob",
+							"audit.resource": "table:db1$t",
+						},
+					],
+					[
+						"2026-07-20T09:00:00Z",
+						"audit",
+						// a producer that serialized log_attributes as a JSON STRING — flatten must parse it too
+						JSON.stringify({
+							"audit.action": "can_read_data",
+							"audit.outcome": "ALLOW",
+							"audit.subject": "user:alice",
+							"audit.resource": "table:db1$t",
+						}),
+					],
 				],
 			},
 		},

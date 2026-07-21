@@ -350,6 +350,10 @@ async def insert_into_table(
     """Append Arrow-IPC rows — ``insert_into_table``; emits an INSERT lineage event.
     ``branch`` targets a non-main branch (spec 0.9 query param for Arrow-IPC-body ops)."""
     segments = parse_identifier(id, settings.delimiter)
+    # Cast the incoming rows to the table's schema first, so a client that infers loose Arrow types (a
+    # browser infers float64 for every JS number) can append to int64 columns — else the native append 500s
+    # on the mismatch. A genuinely incompatible payload becomes a clean 400 here, not a 500 downstream.
+    data = await run_in_threadpool(dataplane.coerce_insert_arrow, ns, so, segments, data)
     req = InsertIntoTableRequest(id=segments, mode=mode, branch=branch)
     response: InsertIntoTableResponse = await run_in_threadpool(
         native.call, ns, "insert_into_table", req, data

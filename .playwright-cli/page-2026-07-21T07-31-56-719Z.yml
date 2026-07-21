@@ -1,0 +1,159 @@
+- generic [ref=f1e2]:
+  - navigation [ref=f1e3]:
+    - link "Lineage" [ref=f1e4] [cursor=pointer]:
+      - /url: /
+    - link "Models" [ref=f1e5] [cursor=pointer]:
+      - /url: /models
+    - link "Tables" [ref=f1e6] [cursor=pointer]:
+      - /url: /tables
+    - link "Namespaces" [ref=f1e7] [cursor=pointer]:
+      - /url: /namespaces
+    - link "Warehouses" [ref=f1e8] [cursor=pointer]:
+      - /url: /warehouses
+    - link "Pipeline" [ref=f1e9] [cursor=pointer]:
+      - /url: /pipeline
+    - link "Experiments" [ref=f1e10] [cursor=pointer]:
+      - /url: /experiments
+    - link "Audit" [ref=f1e11] [cursor=pointer]:
+      - /url: /audit
+    - link "DLQ" [ref=f1e12] [cursor=pointer]:
+      - /url: /dlq
+  - generic [ref=f1e13]:
+    - generic "alice@example.com" [ref=f1e14]: alice
+    - button "Sign out" [ref=f1e16] [cursor=pointer]
+  - generic [ref=f1e17]:
+    - banner [ref=f1e18]:
+      - heading "hunt$t" [level=1] [ref=f1e23]
+      - generic [ref=f1e26]: v1
+    - generic [ref=f1e27]:
+      - heading "Stats" [level=2] [ref=f1e28]
+      - generic [ref=f1e29]:
+        - generic [ref=f1e30]: 3 rows
+        - generic [ref=f1e31]: 100 B
+        - generic [ref=f1e32]: 0 indices
+        - generic "This catalog stores Lance only; format-selecting properties are rejected." [ref=f1e33]: Lance · storage v2.2
+        - generic "No producing run has recorded dataQualityAssertions." [ref=f1e34]: no quality gate
+        - generic [ref=f1e35]: s3://lance-catalog/1165c708_hunt$t
+    - generic [ref=f1e36]:
+      - heading "Schema" [level=2] [ref=f1e37]
+      - table [ref=f1e38]:
+        - rowgroup [ref=f1e39]:
+          - row [ref=f1e40]:
+            - columnheader "field" [ref=f1e41]
+            - columnheader "type" [ref=f1e42]
+            - columnheader "nullable" [ref=f1e43]
+            - columnheader [ref=f1e44]
+        - rowgroup [ref=f1e45]:
+          - row [ref=f1e46]:
+            - cell "id" [ref=f1e47]
+            - cell "int64" [ref=f1e48]
+            - cell "yes" [ref=f1e49]
+            - cell [ref=f1e50]:
+              - button "rename id" [ref=f1e51] [cursor=pointer]: ✎
+              - button "re-type id" [ref=f1e52] [cursor=pointer]: ⇄
+              - button "drop id" [ref=f1e53] [cursor=pointer]: ×
+          - row [ref=f1e54]:
+            - cell "score" [ref=f1e55]
+            - cell "int32" [ref=f1e56]
+            - cell "yes" [ref=f1e57]
+            - cell [ref=f1e58]:
+              - generic [ref=f1e59]:
+                - button "re-type score to" [active] [ref=f1e60] [cursor=pointer]:
+                  - generic [ref=f1e61]: int64
+                - button "save" [ref=f1e63] [cursor=pointer]
+                - button "×" [ref=f1e64] [cursor=pointer]
+          - row [ref=f1e65]:
+            - cell "label" [ref=f1e66]
+            - cell "utf8" [ref=f1e67]
+            - cell "yes" [ref=f1e68]
+            - cell [ref=f1e69]:
+              - button "rename label" [ref=f1e70] [cursor=pointer]: ✎
+              - button "re-type label" [ref=f1e71] [cursor=pointer]: ⇄
+              - button "drop label" [ref=f1e72] [cursor=pointer]: ×
+      - generic [ref=f1e73]:
+        - textbox "New column name" [ref=f1e74]:
+          - /placeholder: new column
+        - textbox "Column SQL expression" [ref=f1e75]:
+          - /placeholder: SQL expression (e.g. cast(null as int))
+        - button "Add column" [disabled] [ref=f1e76]
+    - generic [ref=f1e77]:
+      - heading "Properties" [level=2] [ref=f1e78]
+      - heading "Table properties" [level=3] [ref=f1e79]
+      - paragraph [ref=f1e80]: Schema-level key/value metadata. Saving replaces the whole map.
+      - generic [ref=f1e81]:
+        - button "+ add row" [ref=f1e82] [cursor=pointer]
+        - button "Save properties" [ref=f1e83] [cursor=pointer]
+      - heading "Column properties" [level=3] [ref=f1e84]
+      - paragraph [ref=f1e85]: Per-field metadata, merged by key (delete removes just that key).
+      - button "Column for properties" [ref=f1e87] [cursor=pointer]:
+        - generic [ref=f1e88]: pick a column
+    - generic [ref=f1e90]:
+      - heading "Insert rows" [level=2] [ref=f1e91]
+      - paragraph [ref=f1e92]: Append rows as a JSON array of objects whose keys match the schema.
+      - 'textbox "[{ \"id\": 1, \"name\": \"a\" }]" [ref=f1e93]'
+      - button "Insert" [disabled] [ref=f1e95]
+    - generic [ref=f1e96]:
+      - heading "Blob preview" [level=2] [ref=f1e97]
+      - paragraph [ref=f1e98]: No blob columns on this table.
+    - generic [ref=f1e99]:
+      - heading "Indexes" [level=2] [ref=f1e100]
+      - paragraph [ref=f1e101]: No indexes on this table.
+      - generic [ref=f1e102]:
+        - textbox "Index column" [ref=f1e103]:
+          - /placeholder: column
+        - button "Index type" [ref=f1e104] [cursor=pointer]:
+          - generic [ref=f1e105]: scalar · BTREE
+        - button "Build index" [disabled] [ref=f1e107]
+    - generic [ref=f1e108]:
+      - heading "Versions, branches & tags" [level=2] [ref=f1e109]
+      - paragraph [ref=f1e110]: "1 version — most recent first, one Lance manifest per commit:"
+      - table [ref=f1e111]:
+        - rowgroup [ref=f1e112]:
+          - row [ref=f1e113]:
+            - columnheader "version" [ref=f1e114]
+            - columnheader "committed" [ref=f1e115]
+            - columnheader "manifest" [ref=f1e116]
+            - columnheader [ref=f1e117]
+        - rowgroup [ref=f1e118]:
+          - row [ref=f1e119]:
+            - cell "v1" [ref=f1e120]
+            - cell "2026-07-21 07:31Z" [ref=f1e121]
+            - cell "736 B" [ref=f1e122]
+            - cell [ref=f1e123]:
+              - button "restore" [ref=f1e124] [cursor=pointer]
+      - generic [ref=f1e125]:
+        - generic [ref=f1e126]: "branches:"
+        - generic [ref=f1e127]: main
+      - generic [ref=f1e128]:
+        - textbox "New branch name" [ref=f1e129]:
+          - /placeholder: new branch
+        - button "Branch from version" [ref=f1e130] [cursor=pointer]:
+          - generic [ref=f1e131]: from version (latest)
+        - button "Create branch" [disabled] [ref=f1e133]
+      - generic [ref=f1e134]: No tags — a promotion pins its version with one (e.g. blessed).
+      - generic [ref=f1e136]:
+        - textbox "tag name (e.g. blessed)" [ref=f1e137]
+        - button "Version to tag" [ref=f1e138] [cursor=pointer]:
+          - generic [ref=f1e139]: version…
+        - button "Tag version" [disabled] [ref=f1e141]
+    - generic [ref=f1e142]:
+      - heading "Maintenance policy" [level=2] [ref=f1e143]
+      - paragraph [ref=f1e144]:
+        - text: No policy — the sweep applies the global defaults.
+        - button "Set policy" [ref=f1e145] [cursor=pointer]
+      - generic [ref=f1e146]:
+        - heading "Garbage collection" [level=3] [ref=f1e147]
+        - generic [ref=f1e148]:
+          - generic [ref=f1e149]:
+            - text: older than (days)
+            - spinbutton "older than (days)" [ref=f1e150]
+          - generic [ref=f1e151]:
+            - text: keep last
+            - spinbutton "keep last" [ref=f1e152]
+          - button "Preview" [disabled] [ref=f1e153]
+        - button "Compact now" [ref=f1e155] [cursor=pointer]
+    - generic [ref=f1e156]:
+      - heading "Access" [level=2] [ref=f1e157]
+      - button "Access review" [ref=f1e159] [cursor=pointer]
+      - button "Read by" [ref=f1e165] [cursor=pointer]
+      - button "Show authorization graph" [ref=f1e170] [cursor=pointer]

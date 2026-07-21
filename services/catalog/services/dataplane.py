@@ -949,6 +949,35 @@ def read_schema_metadata(ns: LanceNamespace, so: StorageOptions, table_id: list[
     return out
 
 
+def coerce_insert_arrow(ns: LanceNamespace, so: StorageOptions, table_id: list[str], data: bytes) -> bytes:
+    """Align Arrow-IPC insert rows to the table's schema before the native append.
+
+    A client that INFERS types loosely — most importantly the browser's apache-arrow, which infers
+    ``float64`` for every JS number — otherwise hits the native ``insert_into_table`` with a ``float64``
+    batch against an ``int64`` column, which raises a bare **500** ("Internal Server Error"). That is both
+    a broken insert AND the wrong status for a client-side mismatch (browser-driven find 2026-07-21). Here we
+    select the table's columns BY NAME (extra columns dropped; a missing one is a 400) and cast each to its
+    real column type — so ``4.0 → 4`` just works — turning a genuinely incompatible payload (e.g. ``4.5`` →
+    ``int``, or a non-castable type) into a clean ``400``, never a 500. Blocking IO (opens the dataset for the
+    live schema); the caller runs it in a threadpool.
+    """
+    incoming = pa.ipc.open_stream(data).read_all()
+    target = open_dataset(ns, so, table_id).schema
+    present = set(incoming.column_names)
+    missing = [f.name for f in target if f.name not in present]
+    if missing:
+        raise InvalidInputError(f"insert rows are missing column(s): {', '.join(missing)}")
+    try:
+        selected = pa.table({f.name: incoming.column(f.name) for f in target})
+        aligned = selected.cast(pa.schema([pa.field(f.name, f.type, f.nullable) for f in target]))
+    except (pa.ArrowInvalid, pa.ArrowTypeError, pa.ArrowNotImplementedError) as exc:
+        raise InvalidInputError(f"insert rows don't match the table schema: {exc}") from exc
+    sink = pa.BufferOutputStream()
+    with pa.ipc.new_stream(sink, aligned.schema) as writer:
+        writer.write_table(aligned)
+    return sink.getvalue().to_pybytes()
+
+
 def update_field_metadata(
     ns: LanceNamespace, so: StorageOptions, table_id: list[str], updates: list[dict[str, Any]]
 ) -> UpdateFieldMetadataResponse:

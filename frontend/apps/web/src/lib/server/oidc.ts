@@ -10,9 +10,11 @@
  * helpers live in `./oidc-core` (no `$env` import, so they're unit-tested under `bun test`); this module
  * adds only `oidcConfig()`, which reads `$env`, and re-exports the rest.
  *
- * Demo-grade session: the cookie is httpOnly + sameSite so the browser can't read it and XSS can't
- * exfiltrate it, but it is NOT encrypted/signed — a production BFF would seal it (e.g. AES-GCM with a
- * server key) and add refresh-token rotation. Documented, not hidden.
+ * Session cookie: httpOnly + sameSite so the browser can't read it and XSS can't exfiltrate it, and — when
+ * `SESSION_SECRET` is set — SEALED with AES-256-GCM (`v1.` prefix, tamper-evident) via `encodeSession` /
+ * `decodeSession` in `./oidc-core`. Unset in dev → an unsealed base64 cookie (documented). The one
+ * demo-grade limitation that remains is no refresh-token rotation (the cookie lifetime is bounded to the
+ * id_token's exp; the session dies with the token).
  */
 import { env } from "$env/dynamic/private";
 

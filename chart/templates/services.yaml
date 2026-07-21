@@ -379,15 +379,20 @@ spec:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
             - { name: LINEAGE_SERVICE_ID, value: {{ .Values.web.serviceIdentity | quote }} }
             {{- if .Values.web.oidc.enabled }}
-            # Per-user OIDC login (opt-in; needs a browser-reachable IdP — see values web.oidc). The 3 vars
+            # Per-user OIDC login (opt-in; needs a browser-reachable IdP — see values web.oidc). The vars
             # flip the BFF to authEnabled: /auth/login redirects to publicIssuer, the callback lands on
-            # publicOrigin, and each user's own bearer is forwarded to the governed backends. Public client
-            # (PKCE) → no client secret. SESSION_SECRET seals the cookie (via a Secret, never plaintext env).
+            # publicOrigin, and each user's own bearer is forwarded to the governed backends. The BFF is a
+            # CONFIDENTIAL client — the dex.clientId client carries a secret (shared with the password-grant
+            # path), so the server-side token exchange must present it (Dex rejects a bare PKCE request with
+            # "missing client_secret"). Both secrets ride a Secret via secretKeyRef, never plaintext env.
             {{- if not .Values.web.oidc.sessionSecret }}{{ fail "web.oidc.enabled requires web.oidc.sessionSecret (>=32 chars) to seal the session cookie" }}{{- end }}
             {{- if not .Values.web.oidc.publicIssuer }}{{ fail "web.oidc.enabled requires web.oidc.publicIssuer (a browser-reachable IdP)" }}{{- end }}
             {{- if not .Values.web.oidc.publicOrigin }}{{ fail "web.oidc.enabled requires web.oidc.publicOrigin (the browser-reachable web origin)" }}{{- end }}
             - { name: OIDC_ISSUER, value: {{ .Values.web.oidc.publicIssuer | quote }} }
             - { name: OIDC_CLIENT_ID, value: {{ .Values.dex.clientId | quote }} }
+            - name: OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-web-session, key: clientSecret }
             - { name: OIDC_REDIRECT_URI, value: "{{ .Values.web.oidc.publicOrigin | trimSuffix "/" }}/auth/callback" }
             - name: SESSION_SECRET
               valueFrom:
@@ -423,5 +428,8 @@ metadata:
 type: Opaque
 data:
   secret: {{ .Values.web.oidc.sessionSecret | b64enc | quote }}
+  # The Dex client secret the BFF presents at the confidential token exchange (dex.clientId is not a public
+  # client — it carries a secret for the password-grant path). Via a Secret so the zero-plaintext check holds.
+  clientSecret: {{ .Values.dex.clientSecret | b64enc | quote }}
 {{- end }}
 {{- end }}

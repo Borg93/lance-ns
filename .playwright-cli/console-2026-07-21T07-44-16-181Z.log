@@ -1,2 +1,0 @@
-[     160ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:8090/api/datasets/hunt%24t/producers:0
-[  668204ms] [ERROR] Failed to load resource: the server responded with a status of 401 (Unauthorized) @ http://localhost:8090/api/datasets/hunt%24t/producers:0

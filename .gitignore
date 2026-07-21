@@ -19,3 +19,6 @@ lakekeeper-ref/
 rask/
 # Locally-downloaded cluster tooling (kind/kubectl/k9s/tilt) — not committed
 .localbin/
+
+# playwright-cli skill scratch logs (tool artifacts, not source)
+.playwright-cli/

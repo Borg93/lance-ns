@@ -6,10 +6,7 @@
 	let { children, data }: { children: import("svelte").Snippet; data: LayoutServerData } = $props();
 </script>
 
-<nav class="navbar">
-	<a href="/audit" class:active={page.url.pathname === "/audit"}>Audit</a>
-	<a href="/dlq" class:active={page.url.pathname === "/dlq"}>DLQ</a>
-</nav>
+<nav class="navbar"></nav>
 
 {#if data.authEnabled}
 	<div class="authbar">

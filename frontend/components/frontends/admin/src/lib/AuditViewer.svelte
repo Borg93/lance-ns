@@ -3,10 +3,10 @@
 	// `lance.audit` logger → OTLP → GreptimeDB (`opentelemetry_logs`); the /api/audit BFF queries them
 	// server-side and returns parsed {timestamp, action, outcome, subject, resource}. No credential reaches
 	// the browser. Governed without a session → 401; no observability stack → 501; auth-off dev → open.
-	import { Select } from "@lance/ui";
-	import { RefreshCw, ScrollText, ShieldAlert } from "@lucide/svelte";
-	import { untrack } from "svelte";
-	import { requestJSON } from "./http";
+	import { Select } from '@rask/ui/select';
+	import { RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
+	import { untrack } from 'svelte';
+	import { requestJSON } from './http';
 
 	type AuditEvent = {
 		timestamp: string;
@@ -22,10 +22,10 @@
 	let inflight = 0;
 
 	// Filters (applied server-side by the BFF over the returned columns).
-	let outcome = $state("");
-	let action = $state("");
-	let subject = $state("");
-	let resource = $state("");
+	let outcome = $state('');
+	let action = $state('');
+	let subject = $state('');
+	let resource = $state('');
 
 	const unauthorized = $derived(events === null && settled && lastStatus === 401);
 	const forbidden = $derived(events === null && settled && lastStatus === 403);
@@ -37,11 +37,11 @@
 	async function load(): Promise<void> {
 		const seq = ++inflight;
 		const q = new URLSearchParams();
-		if (outcome) q.set("outcome", outcome);
-		if (action.trim()) q.set("action", action.trim());
-		if (subject.trim()) q.set("subject", subject.trim());
-		if (resource.trim()) q.set("resource", resource.trim());
-		const res = await requestJSON<{ events: AuditEvent[] }>("/api", `audit?${q}`);
+		if (outcome) q.set('outcome', outcome);
+		if (action.trim()) q.set('action', action.trim());
+		if (subject.trim()) q.set('subject', subject.trim());
+		if (resource.trim()) q.set('resource', resource.trim());
+		const res = await requestJSON<{ events: AuditEvent[] }>('/api', `audit?${q}`);
 		if (seq !== inflight) return; // latest-wins
 		settled = true;
 		if (res.ok) {
@@ -63,9 +63,9 @@
 	});
 
 	function tone(o: string): string {
-		if (o === "DENY" || o === "FAILURE") return "deny";
-		if (o === "ALLOW" || o === "SUCCESS") return "allow";
-		return "";
+		if (o === 'DENY' || o === 'FAILURE') return 'deny';
+		if (o === 'ALLOW' || o === 'SUCCESS') return 'allow';
+		return '';
 	}
 	function when(ts: string): string {
 		const d = new Date(ts);
@@ -86,11 +86,11 @@
 			ariaLabel="Outcome filter"
 			placeholder="any outcome"
 			options={[
-				{ value: "", label: "any outcome" },
-				{ value: "ALLOW", label: "ALLOW" },
-				{ value: "DENY", label: "DENY" },
-				{ value: "SUCCESS", label: "SUCCESS" },
-				{ value: "FAILURE", label: "FAILURE" },
+				{ value: '', label: 'any outcome' },
+				{ value: 'ALLOW', label: 'ALLOW' },
+				{ value: 'DENY', label: 'DENY' },
+				{ value: 'SUCCESS', label: 'SUCCESS' },
+				{ value: 'FAILURE', label: 'FAILURE' },
 			]}
 		/>
 		<input
@@ -142,10 +142,10 @@
 				{#each events as e, i (e.timestamp + e.action + e.subject + i)}
 					<tr>
 						<td class="mono when">{when(e.timestamp)}</td>
-						<td class="mono">{e.action || "—"}</td>
-						<td class="mono {tone(e.outcome)}">{e.outcome || "—"}</td>
-						<td class="mono">{e.subject || "—"}</td>
-						<td class="mono">{e.resource || "—"}</td>
+						<td class="mono">{e.action || '—'}</td>
+						<td class="mono {tone(e.outcome)}">{e.outcome || '—'}</td>
+						<td class="mono">{e.subject || '—'}</td>
+						<td class="mono">{e.resource || '—'}</td>
 					</tr>
 				{/each}
 			</tbody>

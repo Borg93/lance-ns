@@ -5,9 +5,9 @@
 	// an operator replay one on demand (re-ingest + drop) instead of waiting for the next tick. The list is
 	// governed per-dataset by the service; replay forwards the signed-in user's bearer through a session-only
 	// BFF route (never the service token). Governed without a session → 401.
-	import { fetchDlq, replayDlq } from "./api";
-	import type { DlqBacklog, DlqEvent } from "./types";
-	import { RefreshCw, RotateCcw, ShieldAlert, Inbox } from "@lucide/svelte";
+	import { fetchDlq, replayDlq } from './api';
+	import type { DlqBacklog, DlqEvent } from './types';
+	import { RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
 
 	let backlog = $state<DlqBacklog | null>(null);
 	let lastStatus = $state(0);
@@ -46,7 +46,7 @@
 				msg = { ok: true, text: `Replayed ${e.run_id}.` };
 				await load();
 			} else if (res.status === 401) {
-				msg = { ok: false, text: "Sign in to replay a lineage event." };
+				msg = { ok: false, text: 'Sign in to replay a lineage event.' };
 			} else if (res.status === 403) {
 				msg = { ok: false, text: "Denied: replay needs writer access on the event's outputs." };
 			} else {
@@ -82,7 +82,7 @@
 			<span class="depth mono" class:warn={backlog.depth > 0}>
 				depth {backlog.depth}{backlog.depth > 0
 					? ` · oldest ${age(backlog.oldest_age_seconds)}`
-					: ""}
+					: ''}
 			</span>
 		{/if}
 		{#if msg}<span class="msg" class:okmsg={msg.ok} class:error={!msg.ok}>{msg.text}</span>{/if}
@@ -110,10 +110,10 @@
 				{#each backlog.events as e (e.run_id)}
 					<tr class:poison={!e.parseable}>
 						<td class="mono run">{e.run_id}</td>
-						<td class="mono">{e.parseable ? (e.event_type ?? "—") : "poison"}</td>
-						<td class="mono">{e.job ?? "—"}</td>
-						<td class="mono">{(e.outputs ?? []).join(", ") || "—"}</td>
-						<td class="mono">{(e.inputs ?? []).join(", ") || "—"}</td>
+						<td class="mono">{e.parseable ? (e.event_type ?? '—') : 'poison'}</td>
+						<td class="mono">{e.job ?? '—'}</td>
+						<td class="mono">{(e.outputs ?? []).join(', ') || '—'}</td>
+						<td class="mono">{(e.inputs ?? []).join(', ') || '—'}</td>
 						<td class="actions">
 							{#if e.parseable}
 								<button
@@ -121,7 +121,7 @@
 									disabled={busy !== null}
 									aria-label="Replay {e.run_id}"
 									onclick={() => replay(e)}
-									><RotateCcw size={12} /> {busy === e.run_id ? "…" : "Replay"}</button
+									><RotateCcw size={12} /> {busy === e.run_id ? '…' : 'Replay'}</button
 								>
 							{:else}
 								<span

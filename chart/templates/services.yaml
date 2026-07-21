@@ -378,6 +378,21 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
             - { name: LINEAGE_SERVICE_ID, value: {{ .Values.web.serviceIdentity | quote }} }
+            {{- if .Values.web.oidc.enabled }}
+            # Per-user OIDC login (opt-in; needs a browser-reachable IdP — see values web.oidc). The 3 vars
+            # flip the BFF to authEnabled: /auth/login redirects to publicIssuer, the callback lands on
+            # publicOrigin, and each user's own bearer is forwarded to the governed backends. Public client
+            # (PKCE) → no client secret. SESSION_SECRET seals the cookie (via a Secret, never plaintext env).
+            {{- if not .Values.web.oidc.sessionSecret }}{{ fail "web.oidc.enabled requires web.oidc.sessionSecret (>=32 chars) to seal the session cookie" }}{{- end }}
+            {{- if not .Values.web.oidc.publicIssuer }}{{ fail "web.oidc.enabled requires web.oidc.publicIssuer (a browser-reachable IdP)" }}{{- end }}
+            {{- if not .Values.web.oidc.publicOrigin }}{{ fail "web.oidc.enabled requires web.oidc.publicOrigin (the browser-reachable web origin)" }}{{- end }}
+            - { name: OIDC_ISSUER, value: {{ .Values.web.oidc.publicIssuer | quote }} }
+            - { name: OIDC_CLIENT_ID, value: {{ .Values.dex.clientId | quote }} }
+            - { name: OIDC_REDIRECT_URI, value: "{{ .Values.web.oidc.publicOrigin | trimSuffix "/" }}/auth/callback" }
+            - name: SESSION_SECRET
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-web-session, key: secret }
+            {{- end }}
             {{- end }}
           ports: [{ name: http, containerPort: 3000 }]
           {{- include "lance.tcpProbes" "http" | nindent 10 }}
@@ -395,4 +410,18 @@ metadata:
 spec:
   ports: [{ name: http, port: 3000, targetPort: http }]
   selector: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }
+{{- if .Values.web.oidc.enabled }}
+---
+# The session-cookie sealing key (AES-256-GCM). A Secret, not a plaintext env var, so prod-render's
+# zero-plaintext-secrets check holds; the web pod reads it via secretKeyRef. Operator-provided + stable
+# (a rotated value logs everyone out), so it is NOT Helm-generated.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-web-session
+  labels: {{- include "lance.labels" . | nindent 4 }}
+type: Opaque
+data:
+  secret: {{ .Values.web.oidc.sessionSecret | b64enc | quote }}
+{{- end }}
 {{- end }}

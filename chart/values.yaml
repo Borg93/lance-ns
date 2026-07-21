@@ -515,6 +515,19 @@ web:
   # LINEAGE_SERVICE_SUBJECTS (rendered on lineage when auth.enabled). Lets the read-only UI show the graph
   # without a per-user browser login; per-user OIDC login still takes precedence when a user IS signed in.
   serviceIdentity: service-web
+  # Per-user OIDC LOGIN for the UI (opt-in). The demo default is OFF: the web reads lineage as
+  # serviceIdentity, and catalog control-plane surfaces show "sign in" (no login is possible). Turn ON only
+  # with a BROWSER-REACHABLE IdP + web origin — an ingress with real DNS, or a port-forward + /etc/hosts —
+  # because the browser is redirected to the IdP's authorize endpoint and back to publicOrigin/auth/callback;
+  # the in-cluster `dex.issuer` is NOT browser-reachable. When on, the BFF forwards each signed-in user's OWN
+  # bearer to the governed backends (per-user authz) and the session cookie is sealed (sessionSecret). The
+  # client is public (PKCE), so no client secret is wired. Provider-agnostic: point publicIssuer at Dex,
+  # Keycloak, Auth0, etc. — the frontend uses OIDC discovery, no code change.
+  oidc:
+    enabled: false
+    publicIssuer: "" # browser-reachable IdP issuer, e.g. https://auth.example.com/dex or a Keycloak realm URL
+    publicOrigin: "" # browser-reachable web origin, e.g. https://app.example.com (forms the redirect URI)
+    sessionSecret: "" # >=32 random chars; seals the session cookie (AES-256-GCM). REQUIRED when enabled.
 
 # --- HA: PodDisruptionBudget + (optional) HPA for the stateless request-serving services. Off by default
 # (single-node kind); the prod overlay turns the PDB on. Stateful stores (AGE/RustFS) get HA from their

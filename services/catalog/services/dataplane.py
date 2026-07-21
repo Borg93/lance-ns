@@ -930,6 +930,25 @@ def drop_columns(
     return AlterTableDropColumnsResponse(version=_version(ns, so, table_id))
 
 
+def read_schema_metadata(ns: LanceNamespace, so: StorageOptions, table_id: list[str]) -> dict[str, str]:
+    """The table's schema-level metadata as ``{str: str}`` — the read twin of ``schema_metadata/update``.
+
+    pylance 8.0.0's ``describe_table`` leaves ``DescribeTableResponse.metadata`` unpopulated, so the #74
+    Table Properties UI could WRITE a property but never SEE it back (the editor always seeded empty — found
+    by driving the real UI in a browser, 2026-07-21). The catalog fills the gap: read ``schema.metadata``
+    (Arrow bytes keys/values → str) directly. Internal ``lineage.*`` bookkeeping keys are excluded — they're
+    not user properties, and the update path MERGES, so hiding them never drops them on a UI save.
+    """
+    meta = open_dataset(ns, so, table_id).schema.metadata or {}
+    out: dict[str, str] = {}
+    for k, v in meta.items():
+        key = k.decode() if isinstance(k, bytes) else str(k)
+        if key.startswith("lineage."):
+            continue
+        out[key] = v.decode() if isinstance(v, bytes) else str(v)
+    return out
+
+
 def update_field_metadata(
     ns: LanceNamespace, so: StorageOptions, table_id: list[str], updates: list[dict[str, Any]]
 ) -> UpdateFieldMetadataResponse:

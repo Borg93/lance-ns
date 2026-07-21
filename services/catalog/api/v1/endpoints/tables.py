@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Annotated
 
 from common import fga
@@ -53,6 +54,7 @@ from catalog.core.lineage_emit import (
 )
 from catalog.services import dataplane, native
 
+log = logging.getLogger(__name__)
 router = APIRouter(prefix="/v1/table", tags=["table"])
 
 
@@ -165,6 +167,17 @@ def describe_table(
         version=version,
     )
     response: DescribeTableResponse = native.call(ns, "describe_table", req)
+
+    # pylance 8.0.0 leaves `metadata` empty even with load_detailed_metadata — so the #74 Table Properties
+    # UI could write a property but never read it back (browser-driven find 2026-07-21). Fill it from the
+    # dataset's schema metadata (best-effort: a read failure must never break describe).
+    if load_detailed_metadata and not response.metadata:
+        try:
+            schema_meta = dataplane.read_schema_metadata(ns, so, segments)
+            if schema_meta:
+                response.metadata = schema_meta
+        except Exception:  # noqa: BLE001 — describe must not fail on a best-effort metadata read
+            log.warning("describe_schema_metadata_read_failed", extra={"table": "/".join(segments)})
 
     if vend_credentials and response.location:
         if settings.multibase_data_base_list and _has_external_bases(response.location, so):

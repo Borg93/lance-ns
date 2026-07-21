@@ -30,7 +30,7 @@ import json
 import logging
 import uuid
 from datetime import UTC, datetime
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, NamedTuple, Protocol, runtime_checkable
 
 import httpx
 from common import dapr_publish, fga
@@ -44,6 +44,7 @@ from common.openlineage import (
 from common.schema import SchemaFields
 from dapr.aio.clients import DaprClient
 from opentelemetry import metrics
+from pydantic import BaseModel
 
 log = logging.getLogger(__name__)
 
@@ -116,6 +117,42 @@ _VERSION_FACET_SCHEMA = VERSION_FACET_SCHEMA_URL
 _DATASOURCE_FACET_SCHEMA = DATASOURCE_FACET_SCHEMA_URL
 
 
+class InputPin(BaseModel):
+    """A source dataset an emitted write derives from, with the EXACT version it consumed (or ``None``).
+
+    The API-surface shape (catalog ``segments``, as any ``{id}`` route uses); ``emit_write_event`` resolves
+    it to the canonical lineage/FGA id. A pinned ``version`` becomes a ``DatasetVersionDatasetFacet`` on the
+    input edge — the reproducibility handshake a derived write (a mover's merge_insert from ``source@N``)
+    needs so its provenance names the precise input version, not just the dataset.
+    """
+
+    segments: list[str]
+    version: int | None = None
+
+
+class InputRef(NamedTuple):
+    """A resolved input edge for the wire builder: canonical ``(namespace, name)`` + pinned version."""
+
+    namespace: str
+    name: str
+    version: int | None
+
+
+def _input_dataset(ref: InputRef) -> dict[str, Any]:
+    """An OpenLineage INPUT dataset, carrying the standard ``DatasetVersionDatasetFacet`` when a source
+    version is pinned."""
+    dataset: dict[str, Any] = {"namespace": ref.namespace, "name": ref.name}
+    if ref.version is not None:
+        dataset["facets"] = {
+            "version": {
+                "_producer": _PRODUCER,
+                "_schemaURL": _VERSION_FACET_SCHEMA,
+                "datasetVersion": str(ref.version),
+            }
+        }
+    return dataset
+
+
 def build_write_event(
     *,
     table_id: str,
@@ -128,7 +165,8 @@ def build_write_event(
     job_namespace: str,
     source_uri: str | None = None,
     schema_fields: SchemaFields | None = None,
-    inputs: list[tuple[str, str]] | None = None,
+    inputs: list[InputRef] | None = None,
+    extra_run_facets: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Build the OpenLineage ``RunEvent`` (wire JSON) for any catalog write to a table.
 
@@ -151,6 +189,11 @@ def build_write_event(
     run_facets: dict[str, Any] = {"lance": custom_facet(_PRODUCER, **lance_fields)}
     if author is not None:
         run_facets["author"] = custom_facet(_PRODUCER, name=author, sub=author)
+    # Caller-supplied run facets (e.g. a `params` training-params facet on a merge). Already spec-shaped
+    # (each is a custom_facet with _producer/_schemaURL), merged verbatim so the catalog stays un-opinionated
+    # about their content — the producer decides what training/run metadata rides the event.
+    if extra_run_facets:
+        run_facets.update(extra_run_facets)
     output: dict[str, Any] = {"namespace": namespace, "name": table_id}
     facets: dict[str, Any] = {}
     if version is not None:
@@ -186,7 +229,7 @@ def build_write_event(
         # to anyone who can see ANY of those tables. Per-table keeps the Job's output set — its access
         # handle — scoped to the one table it wrote.
         "job": {"namespace": job_namespace, "name": f"{operation}.{table_id}"},
-        "inputs": [{"namespace": ns, "name": name} for ns, name in (inputs or [])],
+        "inputs": [_input_dataset(ref) for ref in (inputs or [])],
         "outputs": [output],
     }
 
@@ -220,7 +263,8 @@ class LineageEmitter(Protocol):
         authorization: str | None = None,
         source_uri: str | None = None,
         schema_fields: SchemaFields | None = None,
-        inputs: list[tuple[str, str]] | None = None,
+        inputs: list[InputRef] | None = None,
+        extra_run_facets: dict[str, Any] | None = None,
     ) -> None: ...
 
 
@@ -253,7 +297,8 @@ class NoopEmitter:
         authorization: str | None = None,
         source_uri: str | None = None,
         schema_fields: SchemaFields | None = None,
-        inputs: list[tuple[str, str]] | None = None,
+        inputs: list[InputRef] | None = None,
+        extra_run_facets: dict[str, Any] | None = None,
     ) -> None:
         return None
 
@@ -303,7 +348,8 @@ class _BaseLineageEmitter:
         authorization: str | None = None,
         source_uri: str | None = None,
         schema_fields: SchemaFields | None = None,
-        inputs: list[tuple[str, str]] | None = None,
+        inputs: list[InputRef] | None = None,
+        extra_run_facets: dict[str, Any] | None = None,
     ) -> None:
         event = build_write_event(
             table_id=table_id,
@@ -319,6 +365,7 @@ class _BaseLineageEmitter:
             source_uri=source_uri,
             schema_fields=schema_fields,
             inputs=inputs,
+            extra_run_facets=extra_run_facets,
         )
         await self._send(event, operation=operation, table_id=table_id, authorization=authorization)
 
@@ -428,7 +475,8 @@ async def emit_write_event(
     authorization: str | None,
     schema_fields: SchemaFields | None = None,
     source_uri: str | None = None,
-    input_segments: list[list[str]] | None = None,
+    inputs: list[InputPin] | None = None,
+    extra_run_facets: dict[str, Any] | None = None,
 ) -> None:
     """Publish a best-effort lineage ``WROTE`` event for a catalog mutation, awaited INLINE in the handler.
 
@@ -439,16 +487,17 @@ async def emit_write_event(
     MERGE-on-``run_id`` give the at-least-once delivery. ``version=None`` records the run without a version.
     ``source_uri`` attaches the standard dataSource facet (the physical storage URI) so #23 reconcile can
     find the on-disk file — passed by ops that (re)attach a location, e.g. ``register``/``declare``.
-    ``input_segments`` names the source table(s) this write is DERIVED FROM (a rename passes its source), so
-    the graph keeps the provenance chain instead of the destination appearing as an orphan.
-    Ids come from ``fga`` so the lineage Dataset == the OpenFGA object == the catalog table id.
+    ``inputs`` names the source dataset(s) this write is DERIVED FROM, each optionally version-pinned (a
+    rename passes its source; a mover's merge passes ``source@N``); ``extra_run_facets`` rides caller-supplied
+    run facets (e.g. training params). Ids come from ``fga`` so the lineage Dataset == the OpenFGA object.
     """
-    inputs = [
-        (
-            fga.parent_namespace_id(src, delimiter=delimiter) or "",
-            fga.canonical_object_id(src, delimiter=delimiter),
+    refs = [
+        InputRef(
+            fga.parent_namespace_id(pin.segments, delimiter=delimiter) or "",
+            fga.canonical_object_id(pin.segments, delimiter=delimiter),
+            pin.version,
         )
-        for src in (input_segments or [])
+        for pin in (inputs or [])
     ]
     await emitter.emit_write(
         table_id=fga.canonical_object_id(segments, delimiter=delimiter),
@@ -460,5 +509,6 @@ async def emit_write_event(
         authorization=authorization,
         source_uri=source_uri,
         schema_fields=schema_fields,
-        inputs=inputs or None,
+        inputs=refs or None,
+        extra_run_facets=extra_run_facets,
     )

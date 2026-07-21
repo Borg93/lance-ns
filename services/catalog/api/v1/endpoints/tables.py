@@ -50,6 +50,7 @@ from catalog.core.lineage_emit import (
     DROP_TABLE,
     REGISTER_TABLE,
     RESTORE_TABLE,
+    InputPin,
     emit_write_event,
 )
 from catalog.services import dataplane, native
@@ -372,7 +373,7 @@ async def rename_table(
         # input — otherwise the rename severs the provenance chain and the renamed table appears in the graph
         # as an orphan with no history (audit 2026-07-14). The source's DROP marker above ends its own line;
         # this input edge stitches the destination onto it.
-        input_segments=[segments],
+        inputs=[InputPin(segments=segments)],
     )
     return RenameTableResponse()
 

@@ -4,8 +4,9 @@ lineage.
 
 This is **demo instrumentation, not core lineage**. It is mounted only when
 ``LINEAGE_DEMO_DATA_ENABLED`` is set, reads object storage directly with pylance (the same library
-the catalog uses), and never touches the AGE graph. Endpoints are plain ``def`` so FastAPI runs the
-blocking Lance I/O in its threadpool.
+the catalog uses), and never touches the AGE graph. The handler is ``async def`` (it awaits the
+``require_metadata_access`` governance gate), so the blocking pylance/S3 reads are dispatched via
+``run_in_threadpool`` — never run directly on the event loop.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ from typing import Any
 import lance
 from common import schema
 from fastapi import APIRouter, Request
+from fastapi.concurrency import run_in_threadpool
 from lance_namespace import PermissionDeniedError
 
 from lineage.api.dependencies import SettingsDep
@@ -146,5 +148,9 @@ async def demo_datasets(request: Request, settings: SettingsDep, token: CurrentT
             await require_metadata_access(name, request, settings, token)  # 401/503 propagate; 403 → skip
         except PermissionDeniedError:
             continue
-        out.append(_read_dataset(name, f"s3://{bucket}/{path}", opts, settings.demo_max_versions))
+        out.append(
+            await run_in_threadpool(
+                _read_dataset, name, f"s3://{bucket}/{path}", opts, settings.demo_max_versions
+            )
+        )
     return DemoDatasets(datasets=out)

@@ -16,6 +16,7 @@ is off (dev/tests). Every replay is audited on the ``lance.audit`` trail (#41).
 from __future__ import annotations
 
 import logging
+from typing import Annotated
 
 from common import audit, outbox
 from common.audit import ALLOW, SUCCESS
@@ -59,7 +60,7 @@ async def list_dlq(
     settings: SettingsDep,
     token: CurrentToken,
     datasets: FilterDep,
-    limit: int = Query(default=100, ge=1, le=500),
+    limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> DlqBacklog:
     """The outbox saturation snapshot + the visible at-risk events (oldest first, capped at ``limit``).
 

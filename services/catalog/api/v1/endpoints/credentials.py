@@ -29,29 +29,15 @@ from lance_namespace import (
     ServiceUnavailableError,
     UnauthenticatedError,
 )
-from pydantic import BaseModel
 
 from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep, VendorDep
 from catalog.api.security import CurrentToken, RawBearerToken
 from catalog.core.identifiers import parse_identifier
-from catalog.core.vending import Tier, VendedCredentials
+from catalog.core.vending import Tier
+from catalog.schemas import CredentialResponse
 from catalog.services import native
 
 router = APIRouter(prefix="/v1/table", tags=["credentials"])
-
-
-class CredentialResponse(BaseModel):
-    """The vending result. ``mode="direct"`` carries scoped ``credentials``; ``mode="server_mediated"``
-    means no credential was issued (Mode B / unknown bucket) — the client uses the data endpoints.
-
-    ``location`` + ``read_version`` give a client-direct writer its write TARGET and the optimistic-commit
-    BASE version in one round-trip (#2): the client writes fragments to ``location`` then commits them via
-    ``POST /{id}/commit`` at ``read_version`` — no second ``describe`` needed."""
-
-    mode: str
-    credentials: VendedCredentials | None = None
-    location: str | None = None
-    read_version: int | None = None
 
 
 @router.post("/{id}/credentials", response_model_exclude_none=True)

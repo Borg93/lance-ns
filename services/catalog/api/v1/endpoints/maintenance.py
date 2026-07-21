@@ -8,59 +8,16 @@ work (open dataset, list versions, cleanup) runs in a threadpool so the event lo
 
 from __future__ import annotations
 
-from typing import Self
-
 from fastapi import APIRouter
 from fastapi.concurrency import run_in_threadpool
-from pydantic import BaseModel, Field, model_validator
 
 from catalog.api.dependencies import NamespaceDep, SettingsDep, StorageOptionsDep
 from catalog.core.identifiers import parse_identifier
 from catalog.core.namespace import open_dataset
+from catalog.schemas import CompactRequest, CompactResult, GcPreview, GcRequest, GcRunResult
 from catalog.services import maintenance
 
 router = APIRouter(prefix="/v1/table", tags=["maintenance"])
-
-
-class GcRequest(BaseModel):
-    """The GC bounds — a version is reclaimable only if it clears BOTH given bounds (older than
-    ``retention_days`` AND outside the most-recent ``retain_versions``). At least one is required."""
-
-    retention_days: int | None = Field(default=None, ge=1, le=3650)
-    retain_versions: int | None = Field(default=None, ge=1, le=10000)
-
-    @model_validator(mode="after")
-    def _one_bound(self) -> Self:
-        if self.retention_days is None and self.retain_versions is None:
-            raise ValueError("provide retention_days and/or retain_versions")
-        return self
-
-
-class GcPreview(BaseModel):
-    current_version: int
-    total_versions: int
-    eligible_versions: list[int]
-    protected_tags: dict[str, int]
-    retention_days: int | None
-    retain_versions: int | None
-
-
-class GcRunResult(BaseModel):
-    ok: bool
-    old_versions_removed: int
-    bytes_removed: int
-
-
-class CompactRequest(BaseModel):
-    """Optional #76 target-size override for a one-off compaction (None → Lance's default fragment sizing)."""
-
-    target_rows_per_fragment: int | None = Field(default=None, ge=1024, le=10_000_000)
-
-
-class CompactResult(BaseModel):
-    ok: bool
-    fragments_removed: int
-    fragments_added: int
 
 
 @router.post("/{id}/maintenance/preview")

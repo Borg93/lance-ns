@@ -23,62 +23,16 @@ from lance_namespace import (
     NamespaceNotFoundError,
     TableNotFoundError,
 )
-from pydantic import BaseModel, Field, model_validator
 
 from catalog.api.dependencies import NamespaceDep, SettingsDep
 from catalog.core.identifiers import parse_identifier
+from catalog.schemas import PolicyDeleteResponse, PolicyRequest, PolicyResponse
 from catalog.services import native
 
 log = logging.getLogger(__name__)
 
 table_router = APIRouter(prefix="/v1/table", tags=["policy"])
 namespace_router = APIRouter(prefix="/v1/namespace", tags=["policy"])
-
-
-class PolicyRequest(BaseModel):
-    """The maintenance policy for one table or namespace — every field optional-with-defaults.
-
-    ``retention_days`` / ``retain_versions`` override the sweep's global old-version cleanup (Lance
-    keeps tag-pinned versions regardless); ``compact_enabled=False`` opts the target out of maintenance
-    entirely; ``compact_interval_hours`` bounds how often the sweep maintains it.
-    """
-
-    retention_days: int | None = Field(default=None, ge=1, le=3650)
-    retain_versions: int | None = Field(default=None, ge=1, le=100_000)
-    compact_enabled: bool = True
-    compact_interval_hours: int | None = Field(default=None, ge=1, le=8760)
-    # #76 compaction target-size tuning: the target rows per compacted fragment the sweep passes to
-    # `compact_files` (Lance's `delta.targetFileSize` analog). None → Lance's default fragment sizing.
-    target_rows_per_fragment: int | None = Field(default=None, ge=1024, le=10_000_000)
-
-    @model_validator(mode="after")
-    def _not_empty(self) -> PolicyRequest:
-        # Gate on what was PROVIDED, not on value-equality with defaults: an explicit
-        # ``{"compact_enabled": true}`` is meaningful (a table-level re-enable under a disabled
-        # namespace policy — the exact-table match shadows the namespace record), so only a body
-        # that sets nothing at all is refused.
-        if not self.model_fields_set:
-            raise ValueError("an empty policy changes nothing — set a field or delete the policy")
-        return self
-
-
-class PolicyResponse(BaseModel):
-    # The policy fields must mirror PolicyRequest — model_validate ignores extras, so a request field
-    # missing here would be silently dropped from every response.
-    kind: str
-    id: str
-    path: str
-    retention_days: int | None = None
-    retain_versions: int | None = None
-    compact_enabled: bool = True
-    compact_interval_hours: int | None = None
-    target_rows_per_fragment: int | None = None
-
-
-class PolicyDeleteResponse(BaseModel):
-    status: str
-    kind: str
-    id: str
 
 
 def _canonical(segments: list[str], delimiter: str) -> str:

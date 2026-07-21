@@ -17,19 +17,25 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Annotated, Any
+from typing import Annotated
 
 from common import fga
 from fastapi import APIRouter, Header, Query
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import InvalidInputError, TableNotFoundError
-from pydantic import BaseModel, ConfigDict, Field
 
 from catalog.api import fga_deps
 from catalog.api.dependencies import FgaClientDep, LineageEmitterDep, SettingsDep, StorageOptionsDep
 from catalog.api.security import CurrentToken
 from catalog.core.config import Settings
 from catalog.core.lineage_emit import PROMOTE_MODEL, emit_write_event
+from catalog.schemas import (
+    ModelDescribeResponse,
+    ModelsListResponse,
+    ModelSummary,
+    PromoteRequest,
+    PromoteResponse,
+)
 from catalog.services import models as registry
 
 log = logging.getLogger(__name__)
@@ -52,45 +58,6 @@ def _segments(model: str) -> list[str]:
     if not _MODEL_RE.fullmatch(model):
         raise InvalidInputError(f"invalid model name: {model!r}")
     return [_MODELS_NAMESPACE, model]
-
-
-class PromoteRequest(BaseModel):
-    """Bless a candidate model version (candidate→blessed). ``version`` is the model/Lance version to bless;
-    ``min_metrics`` is the fail-closed gate — each named metric must be present AND >= its threshold."""
-
-    version: int = Field(ge=1)
-    min_metrics: dict[str, float] = Field(default_factory=dict)
-    tag: str = Field(default=registry.BLESSED_TAG, min_length=1, max_length=64)
-
-
-class PromoteResponse(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    model: str
-    blessed_version: int
-    tag: str
-
-
-class ModelDescribeResponse(BaseModel):
-    model_config = ConfigDict(protected_namespaces=())
-    model: str
-    latest_version: int
-    blessed_version: int | None
-    candidate_metrics: dict[str, Any] | None
-    blessed_metrics: dict[str, Any] | None
-
-
-class ModelSummary(BaseModel):
-    """One registry entry in the list view. Versions are ``None`` only for a registry directory that is
-    not (yet) a readable Lance dataset — surfaced, not hidden, so an interrupted first publish is visible."""
-
-    model_config = ConfigDict(protected_namespaces=())
-    model: str
-    latest_version: int | None
-    blessed_version: int | None
-
-
-class ModelsListResponse(BaseModel):
-    models: list[ModelSummary]
 
 
 def _summaries(settings: Settings, so: dict[str, str], names: list[str]) -> list[ModelSummary]:

@@ -35,13 +35,17 @@ from lance_namespace import (
     UnsupportedOperationError,
 )
 from openfga_sdk import OpenFgaClient
-from pydantic import BaseModel
 
 from catalog.api import fga_deps
 from catalog.api.dependencies import FgaClientDep, SettingsDep, _namespace_for_root
 from catalog.api.security import CurrentToken
 from catalog.core.config import Settings
 from catalog.core.identifiers import parse_identifier
+from catalog.schemas import (
+    CreateWarehouseNamespaceRequest,
+    CreateWarehouseRequest,
+    WarehouseResponse,
+)
 from catalog.services import native, warehouses
 
 log = logging.getLogger(__name__)
@@ -51,25 +55,6 @@ router = APIRouter(prefix="/v1/warehouses", tags=["warehouse"])
 # A bucket/warehouse id must be a DNS-safe S3 bucket name fragment (lowercase alnum + hyphen, 3-63 chars) —
 # validated here so a malformed id can't produce an un-createable bucket or a path-traversing registry key.
 _ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$")
-
-
-class CreateWarehouseRequest(BaseModel):
-    id: str
-    project: str
-    bucket: str | None = None  # defaults to the id (a warehouse = one bucket)
-
-
-class WarehouseResponse(BaseModel):
-    id: str
-    bucket: str
-    root_uri: str
-    project: str
-    status: str | None = None  # "active" / "deactivated" (P2.3 lifecycle); absent on pre-lifecycle records
-    created_at: str | None = None
-
-
-class CreateWarehouseNamespaceRequest(BaseModel):
-    namespace: str  # a single TOP-LEVEL namespace name to create in + bind to this warehouse
 
 
 def _require_enabled(settings: Settings) -> None:

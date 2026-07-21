@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Annotated, Any
+from typing import Annotated
 
 from common import fga
 from fastapi import APIRouter, Body, Header, Query
@@ -33,7 +33,6 @@ from lance_namespace import (
     UpdateTableRequest,
     UpdateTableResponse,
 )
-from pydantic import BaseModel
 
 from catalog.api import fga_deps, lineage_deps
 from catalog.api.dependencies import (
@@ -48,6 +47,7 @@ from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE
 from catalog.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
 from catalog.core.serialization import dump
+from catalog.schemas import CommitFragmentsRequest, CommitFragmentsResponse
 from catalog.services import dataplane, native
 
 log = logging.getLogger(__name__)
@@ -273,20 +273,6 @@ async def create_table(
         schema_fields=schema_fields,
     )
     return response
-
-
-class CommitFragmentsRequest(BaseModel):
-    """A client-direct APPEND commit (#2): the serialized Lance ``FragmentMetadata`` the client wrote
-    DIRECTLY to object storage (``[fragment.to_json() for fragment in write_fragments(...)]``), plus the
-    ``read_version`` those fragments were built against (optimistic concurrency)."""
-
-    fragments: list[dict[str, Any]]
-    read_version: int
-
-
-class CommitFragmentsResponse(BaseModel):
-    version: int
-    row_count: int
 
 
 @router.post("/{id}/commit", response_model_exclude_none=True)

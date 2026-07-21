@@ -23,6 +23,8 @@ from catalog.core.lineage_emit import (
     REGISTER_TABLE,
     DaprEmitter,
     HttpLineageEmitter,
+    InputPin,
+    InputRef,
     LineageEmitter,
     NoopEmitter,
     build_write_event,
@@ -286,8 +288,9 @@ def test_build_write_event_records_derived_from_inputs() -> None:
         run_id="r1",
         event_time="2026-07-15T00:00:00Z",
         job_namespace="catalog",
-        inputs=[("db1", "db1$orig")],
+        inputs=[InputRef("db1", "db1$orig", None)],
     )
+    # An unversioned input edge carries no version facet — just the (namespace, name) source node.
     assert event["inputs"] == [{"namespace": "db1", "name": "db1$orig"}]
     assert event["outputs"][0]["name"] == "db1$renamed"
 
@@ -306,9 +309,10 @@ def test_build_write_event_default_has_no_inputs() -> None:
     assert event["inputs"] == []  # a fresh write is derived from nothing
 
 
-def test_emit_write_event_maps_input_segments_to_canonical_dataset_ids() -> None:
-    # The rename handler passes the SOURCE segments; emit_write_event must resolve them to the SAME canonical
-    # (namespace, id) the rest of the graph keys on, so the DERIVED_FROM edge points at the real source node.
+def test_emit_write_event_maps_input_pins_to_canonical_dataset_ids() -> None:
+    # The rename handler passes the SOURCE segments as an InputPin; emit_write_event must resolve them to the
+    # SAME canonical (namespace, id) the rest of the graph keys on, so the DERIVED_FROM edge points at the
+    # real source node. An unpinned source carries version=None (no reproducibility facet).
     em = _RecordingEmitter()
     asyncio.run(
         emit_write_event(
@@ -319,10 +323,11 @@ def test_emit_write_event_maps_input_segments_to_canonical_dataset_ids() -> None
             version=None,
             operation="register_table",
             authorization=None,
-            input_segments=[["db1", "src"]],
+            inputs=[InputPin(segments=["db1", "src"])],
         )
     )
-    assert em.writes[0]["inputs"] == [("db1", "db1$src")]  # (parent namespace, canonical id) of the source
+    # (parent namespace, canonical id, pinned version) of the source, as a resolved InputRef.
+    assert em.writes[0]["inputs"] == [InputRef("db1", "db1$src", None)]
 
 
 def test_emit_write_event_root_table_has_empty_namespace() -> None:

@@ -31,60 +31,25 @@ from common import fga
 from common.audit import FAILURE, SUCCESS, audit
 from fastapi import APIRouter, Request
 from lance_namespace import ServiceUnavailableError, UnsupportedOperationError
-from pydantic import BaseModel
 
 from catalog.api.dependencies import SettingsDep
 from catalog.api.security import CurrentToken
 from catalog.core.config import Settings
 from catalog.core.identifiers import parse_identifier
+from catalog.schemas import (
+    AccessCheckRequest,
+    AccessCheckResponse,
+    AccessGrantRequest,
+    AccessGrantResponse,
+    AccessGraphResponse,
+    AccessListResponse,
+    GraphEdge,
+    GraphNode,
+    RelationGrants,
+)
 
 table_router = APIRouter(prefix="/v1/table", tags=["access"])
 namespace_router = APIRouter(prefix="/v1/namespace", tags=["access"])
-
-
-class RelationGrants(BaseModel):
-    """One ``can_*`` action and every user subject holding it (``"*"`` = a public wildcard grant)."""
-
-    relation: str
-    users: list[str]
-
-
-class AccessListResponse(BaseModel):
-    object: str
-    grants: list[RelationGrants]
-
-
-class AccessCheckRequest(BaseModel):
-    """A simulated authorization question — does ``user`` hold ``relation`` on this object? The
-    ``user`` may be a bare subject (``alice``, taken as ``user:alice``) or a fully-qualified userset
-    (``role:project_admin``, ``team:acme#member``)."""
-
-    user: str
-    relation: str
-
-
-class AccessCheckResponse(BaseModel):
-    object: str
-    user: str
-    relation: str
-    allowed: bool
-
-
-class AccessGrantRequest(BaseModel):
-    """Grant or revoke ONE base rung to a subject. ``user`` may be a bare id (``alice`` → ``user:alice``)
-    or a fully-qualified userset (``role:project_admin#assignee``, ``team:acme#member``); ``relation`` must
-    be a grantable base rung the compiled model defines on the type (owner/writer/reader/validator) — never
-    a derived ``can_*`` action nor the structural ``parent`` edge."""
-
-    user: str
-    relation: str
-
-
-class AccessGrantResponse(BaseModel):
-    object: str
-    user: str
-    relation: str
-    granted: bool  # True after a grant, False after a revoke — the resulting state of the tuple
 
 
 # The base rungs an admin may directly assign. The model defines each as ``[user, role#assignee] or …``
@@ -301,30 +266,6 @@ async def revoke_namespace_access(
 ) -> AccessGrantResponse:
     """Revoke a base rung on the namespace from a subject — owner-gated by the router (``can_delete``)."""
     return await _access_mutate(request, settings, token, "namespace", id, body, grant=False)
-
-
-class GraphNode(BaseModel):
-    """One node in the authorization graph — an FGA object or subject. ``type`` is the FGA type
-    (user/role/team/table/namespace/warehouse/project), ``label`` the id without its ``type:`` prefix."""
-
-    id: str
-    type: str
-    label: str
-
-
-class GraphEdge(BaseModel):
-    """A relation edge: ``source`` holds ``relation`` on ``target`` (a grant), or an object's ``parent``
-    edge pointing at its container (``target`` is the parent object)."""
-
-    source: str
-    target: str
-    relation: str
-
-
-class AccessGraphResponse(BaseModel):
-    object: str
-    nodes: list[GraphNode]
-    edges: list[GraphEdge]
 
 
 def _graph_node(node_id: str) -> GraphNode:

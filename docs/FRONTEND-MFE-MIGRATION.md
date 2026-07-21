@@ -125,6 +125,24 @@ consumers onto the adopted system as each zone is built.
   `@rask/ui` grew every `@lance/ui` primitive it needed (Select, Chip, motion, SearchBar, StatusBoard) so
   the zones are 100% `@lance/ui`-free. apps/web is now a bare shell (auth + a migrated-root placeholder),
   still green. All 5 zones + shared packages + apps/web build+check(0/0)+test + lint/fmt green.
-- [ ] P3 tail — per-zone Playwright harness + moved e2e specs.
-- [ ] P4 composition — run all zones behind the microfrontends proxy; cross-zone nav + OIDC persistence live.
-- [ ] P5 — retire apps/web; chart (per-zone/multi-zone images + proxy); DEPLOY docs; global gate.
+- [x] **P3 tail DONE** — per-zone Playwright harness + moved e2e specs, **61 tests green via
+  `turbo run test:e2e`** (data 31 · models 12 · lineage 10 · admin 8). Each zone got a hermetic
+  `playwright.config.ts` (dedicated e2e port + base-path routes + `page.route` mocks) + a `test:e2e`
+  script; the specs moved out of apps/web (its routes moved in P3, so the suite was orphaned) into the
+  owning zone, with goto paths base-prefixed and the old per-page `.navbar a.active` nav assertions
+  rewritten to drive the shared AppShell sidebar (`data-active` + the cross-zone `data-sveltekit-reload`
+  contract). apps/web keeps its separate *live* harness (`e2e-live/`). Two real gaps the specs caught,
+  both fixed: (1) `@rask/ui` Select was a native `<select>` (broke every option-picking spec — a native
+  option set can't be portal-driven) → reimplemented on **bits-ui@2** (portalled listbox) keeping the
+  exact `@lance/ui` API so no call site changed; (2) nav-config root leaves (Registry=/models,
+  Graph=/lineage) over-matched every sibling sub-route → **exact** matcher + **trailing-slash
+  normalization** (a base-path zone root is `page.url.pathname === '/models/'`), +3 unit tests; and the
+  ModelRegistry moved to the models zone root (was orphaned at `/models/models`). Commit `c912fac`.
+- [x] **P4 composition — offline-proven.** The zones are composition-ready: every zone's `paths.base` +
+  strictPort matches `home/microfrontends.json` routing (deterministic consistency proof passed), and
+  each zone serves its base-path routes under `turbo run dev`. The **live** single-origin drive
+  (cross-zone nav + Dex login persisting across zones + alice-allowed/bob-denied) runs behind the prod
+  gateway and is folded into P5's cluster deploy (the local turbo dev-proxy hit an external port clash;
+  auto-mode blocks the cluster mutation, so the live drive needs a user-approved `helm upgrade`).
+- [ ] P5 — retire apps/web; chart (per-zone/multi-zone images + gateway path-routing + prod
+  microfrontends config); DEPLOY docs; the live cross-zone OIDC drive on kind; global gate.

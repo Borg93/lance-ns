@@ -121,6 +121,22 @@ external IdP — provider-agnostic via OIDC discovery, no code change. The bundl
 callback for demo/ingress use. NOTE: the audit viewer's admin gate calls `MEDALLION_API`, so keep
 `medallion.enabled=true` when `web.oidc.enabled` (else `/audit` fails closed to 503).
 
+The BFF is a **confidential** OIDC client: the bundled `dex.clientId` client carries a secret (shared with the
+password-grant path used by `scripts/verify_produce_door.sh`), so the server-side token exchange must present
+it — the chart wires `OIDC_CLIENT_SECRET` from `dex.clientSecret` via the `<release>-web-session` Secret
+(secretKeyRef, zero-plaintext). Without it Dex rejects the exchange with `"missing client_secret"` and the
+callback falls through to `/?auth=error`. Point `web.oidc` at an external public/PKCE IdP instead and no
+secret is needed — set `OIDC_CLIENT_SECRET` empty.
+
+**Proving it on kind** (no external IdP): `scripts/verify_oidc_login.sh` drives a real headless Dex login for
+alice + bob and asserts per-user authz through the BFF (alice, a produce-admin → `/produce` 202; bob → 403).
+The browser↔Dex reachability puzzle — the issuer-derived authorize URL `http://lance-ns-dex:5556/dex/auth` is
+not host-resolvable — is solved with chromium `--host-resolver-rules` mapping `lance-ns-dex:5556` to a Dex
+port-forward, while `web.oidc.publicIssuer` stays the in-cluster URL so the forwarded bearer's `iss` still
+verifies at catalog/lineage. Enable first: `helm upgrade … --set web.oidc.enabled=true --set
+web.oidc.publicIssuer=http://lance-ns-dex:5556/dex --set web.oidc.publicOrigin=http://localhost:5280 --set
+web.oidc.sessionSecret=<48 chars>`, then `kubectl rollout restart deploy/<release>-dex` and roll web.
+
 ## Notable engineering notes
 
 - **Dapr JetStream consumers** are split BY RECOVERY STORY (2026-07-06/12): the LINEAGE ingest stays

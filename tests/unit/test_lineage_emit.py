@@ -13,6 +13,7 @@ import json
 from typing import Any, cast
 
 import httpx
+import pytest
 from catalog.core.lineage_emit import (
     CREATE_TABLE,
     DECLARE_TABLE,
@@ -30,6 +31,7 @@ from catalog.core.lineage_emit import (
     build_write_event,
     emit_write_event,
     make_emitter,
+    shape_run_facets,
 )
 from lineage.models import RunEvent
 from lineage.services.repository import _CREATE_OPS
@@ -309,6 +311,94 @@ def test_build_write_event_default_has_no_inputs() -> None:
     assert event["inputs"] == []  # a fresh write is derived from nothing
 
 
+def test_merge_insert_event_carries_version_pinned_input_and_passed_run_facet() -> None:
+    # Phase 2: a mover's merge from source@N emits training-shaped OpenLineage — a version-PINNED INPUT
+    # (the standard DatasetVersionDatasetFacet, i.e. the reproducibility pin the lineage service reads via
+    # input_version) plus a caller-supplied run facet the catalog carries VERBATIM (un-opinionated: it only
+    # stamps it spec-legal, it does not interpret the payload).
+    facets = shape_run_facets({"params": {"lr": 0.01, "epochs": 5}})
+    event = build_write_event(
+        table_id="db$gold",
+        namespace="db",
+        author="alice",
+        version=7,
+        operation=MERGE_INSERT,
+        run_id="r1",
+        event_time="2026-07-21T00:00:00Z",
+        job_namespace="catalog",
+        inputs=[InputRef("db", "db$silver", 4)],
+        extra_run_facets=facets,
+    )
+    # The INPUT dataset carries the standard DatasetVersionDatasetFacet pinning the consumed source version.
+    assert len(event["inputs"]) == 1
+    source = event["inputs"][0]
+    assert source["namespace"] == "db" and source["name"] == "db$silver"
+    version_facet = source["facets"]["version"]
+    assert version_facet["datasetVersion"] == "4"
+    assert version_facet["_producer"] and version_facet["_schemaURL"].endswith("DatasetVersionDatasetFacet")
+    # The passed run facet rides verbatim on the run, stamped spec-legal (custom_facet _producer/_schemaURL).
+    params = event["run"]["facets"]["params"]
+    assert params["lr"] == 0.01 and params["epochs"] == 5
+    assert params["_producer"] and params["_schemaURL"]
+    # Adversarial round-trip: the lineage RunEvent model reads the pin back off the standard facet, so the
+    # graph really can answer "which exact source version produced this merge?" (#115 reproducibility).
+    parsed = RunEvent.model_validate(event)
+    assert parsed.input_version("db$silver") == "4"
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"author": {"name": "admin", "sub": "admin"}},  # forge the verified principal
+        {"lance": {"operation": "create_table"}},  # forge the op → a false CREATED edge
+        {"errorMessage": {"message": "x"}},  # forge run state the consumer trusts
+        {"progress": {"percent": 100}},
+        {"parent": {"run": {}}},
+        {"": {"k": "v"}},  # a nameless facet
+    ],
+)
+def test_shape_run_facets_rejects_reserved_facet_names(raw: dict[str, Any]) -> None:
+    # A producer may NOT set a catalog-owned / consumer-trusted facet name — else it forges the author, the
+    # operation (a false CREATED edge), or run state on the governed graph (the Phase 2 audit blocker).
+    with pytest.raises(ValueError, match="reserved"):
+        shape_run_facets(raw)
+
+
+def test_shape_run_facets_rejects_reserved_payload_keys_and_non_objects() -> None:
+    # The catalog owns the spec's _-prefixed fields AND custom_facet's `producer` positional (a `producer`
+    # key would raise a bare TypeError → a 500); each payload must be a JSON object. All fail-fast as 4xx.
+    with pytest.raises(ValueError, match="reserved"):
+        shape_run_facets({"params": {"_producer": "evil"}})
+    with pytest.raises(ValueError, match="reserved"):
+        shape_run_facets({"params": {"producer": "evil"}})  # would otherwise be a TypeError → 500
+    with pytest.raises(ValueError, match="JSON object"):
+        shape_run_facets({"params": ["not", "an", "object"]})
+
+
+def test_build_write_event_catalog_facets_win_over_caller_facets() -> None:
+    # Defense in depth: even if a caller-supplied `lance`/`author` facet reached build_write_event (past
+    # shape_run_facets), the catalog's stamp is applied AFTER and MUST win — no author/operation forgery.
+    forged = {
+        "lance": {"_producer": "x", "_schemaURL": "x", "operation": "create_table", "version": 999},
+        "author": {"_producer": "x", "_schemaURL": "x", "name": "admin", "sub": "admin"},
+    }
+    event = build_write_event(
+        table_id="db$t",
+        namespace="db",
+        author="mallory",
+        version=3,
+        operation=MERGE_INSERT,
+        run_id="r1",
+        event_time="2026-07-21T00:00:00Z",
+        job_namespace="catalog",
+        extra_run_facets=forged,
+    )
+    assert event["run"]["facets"]["lance"]["operation"] == "merge_insert"  # catalog op wins, not create_table
+    assert event["run"]["facets"]["author"]["sub"] == "mallory"  # verified principal wins, not admin
+    parsed = RunEvent.model_validate(event)
+    assert parsed.operation == "merge_insert" and parsed.author == "mallory"
+
+
 def test_emit_write_event_maps_input_pins_to_canonical_dataset_ids() -> None:
     # The rename handler passes the SOURCE segments as an InputPin; emit_write_event must resolve them to the
     # SAME canonical (namespace, id) the rest of the graph keys on, so the DERIVED_FROM edge points at the
@@ -328,6 +418,26 @@ def test_emit_write_event_maps_input_pins_to_canonical_dataset_ids() -> None:
     )
     # (parent namespace, canonical id, pinned version) of the source, as a resolved InputRef.
     assert em.writes[0]["inputs"] == [InputRef("db1", "db1$src", None)]
+
+
+def test_emit_write_event_carries_the_pinned_source_version_through() -> None:
+    # The #115 reproducibility seam: an InputPin with a concrete version must resolve to an InputRef carrying
+    # that SAME version (found-live 2026-07-13: pins emitted then dropped → READ edges with no version). This
+    # is the version!=None twin of the test above, so a refactor that drops pin.version reddens here.
+    em = _RecordingEmitter()
+    asyncio.run(
+        emit_write_event(
+            cast(LineageEmitter, em),
+            ["db1", "dest"],
+            delimiter="$",
+            author="alice",
+            version=9,
+            operation=MERGE_INSERT,
+            authorization=None,
+            inputs=[InputPin(segments=["db1", "src"], version=5)],
+        )
+    )
+    assert em.writes[0]["inputs"] == [InputRef("db1", "db1$src", 5)]  # the pin survives resolution
 
 
 def test_emit_write_event_root_table_has_empty_namespace() -> None:

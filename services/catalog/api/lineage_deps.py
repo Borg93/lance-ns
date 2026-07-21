@@ -16,12 +16,14 @@ Ops that emit a versionless marker with no read-back (drop/deregister/declare/re
 
 from __future__ import annotations
 
+from typing import Any
+
 from common.oidc import IDToken
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import LanceNamespace
 
 from catalog.core.config import Settings
-from catalog.core.lineage_emit import LineageEmitter, emit_write_event
+from catalog.core.lineage_emit import InputPin, LineageEmitter, emit_write_event
 from catalog.services import dataplane
 from catalog.services.dataplane import StorageOptions
 
@@ -37,12 +39,18 @@ async def emit_measured_write(
     operation: str,
     authorization: str | None,
     pin_version: int | None = None,
+    inputs: list[InputPin] | None = None,
+    extra_run_facets: dict[str, Any] | None = None,
 ) -> None:
     """Read back ``(version, schema)`` in one pinned open, then emit the best-effort WROTE event.
 
     ``pin_version`` is the version the write's response reported (add/alter/drop columns, update, delete,
     merge_insert); ``None`` for ops whose response carries only a ``transaction_id`` (insert, index
     build/drop, restore, schema-metadata) — those read the current snapshot instead.
+
+    ``inputs`` names the version-pinned source dataset(s) this write DERIVED FROM (a mover's merge from
+    ``source@N``); ``extra_run_facets`` rides caller-supplied run facets (e.g. training ``params``) —
+    both threaded verbatim to :func:`emit_write_event`, so the catalog stays un-opinionated about them.
     """
     version, schema_fields = await run_in_threadpool(
         dataplane.read_version_and_schema, ns, so, segments, pin_version
@@ -56,4 +64,6 @@ async def emit_measured_write(
         operation=operation,
         authorization=authorization,
         schema_fields=schema_fields,
+        inputs=inputs,
+        extra_run_facets=extra_run_facets,
     )

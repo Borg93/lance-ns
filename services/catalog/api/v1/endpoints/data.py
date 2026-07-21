@@ -6,7 +6,7 @@ import json
 import logging
 import re
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from common import fga
 from fastapi import APIRouter, Body, Header, Query
@@ -44,7 +44,7 @@ from catalog.api.dependencies import (
 )
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier, reconcile_body_id
-from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE
+from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE, InputPin, shape_run_facets
 from catalog.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
 from catalog.core.serialization import dump
 from catalog.schemas import CommitFragmentsRequest, CommitFragmentsResponse
@@ -359,6 +359,48 @@ async def insert_into_table(
     return response
 
 
+def _merge_source_pin(source: str | None, source_version: int | None, delimiter: str) -> InputPin | None:
+    """The optional version-pinned source dataset a merge DERIVED FROM → an ``InputPin`` (or ``None``).
+
+    A blank/absent ``source`` yields no pin; a ``source_version`` with no ``source`` is meaningless (there
+    is nothing to pin) → a fail-fast 4xx, not a silently dropped pin. An empty/delimiter-only ``source`` is
+    rejected too — otherwise it would forge a nameless input vertex (or, on the HTTP transport, drop the
+    whole event). The pin makes the merge reproducible: its provenance names the exact source version
+    consumed, surfaced on the lineage READ edge (``input_version``)."""
+    if not source or not source.strip():
+        if source_version is not None:
+            raise InvalidInputError("source_version requires source")
+        return None
+    segments = parse_identifier(source, delimiter)
+    if not segments or any(not segment for segment in segments):
+        raise InvalidInputError(f"source is not a valid dataset id: {source!r}")
+    return InputPin(segments=segments, version=source_version)
+
+
+def _parse_run_facets(raw_json: str | None) -> dict[str, Any] | None:
+    """Parse + spec-shape the optional ``X-Lance-Run-Facets`` header (a JSON object ``{facet: {payload}}``).
+
+    The Arrow-IPC body carries the merge data, so a producer's run metadata (e.g. training ``params``)
+    rides this header instead. The catalog stays un-opinionated about the payload (:func:`shape_run_facets`
+    only stamps each facet spec-legal + rejects reserved facet names); malformed JSON, a non-object shape,
+    or a reserved name/key fail-fast as a 4xx (never a 500)."""
+    if not raw_json:
+        return None
+    try:
+        parsed = json.loads(raw_json)
+    except (ValueError, RecursionError) as exc:
+        # JSONDecodeError ⊂ ValueError, but json.loads also raises a BARE ValueError for an integer literal
+        # past the 4300-digit int-string-conversion limit, and RecursionError for a deeply-nested payload —
+        # both a malformed producer header (a 4xx, never a 500). (Phase 2 re-audit, 2026-07-21.)
+        raise InvalidInputError("X-Lance-Run-Facets must be valid JSON") from exc
+    if not isinstance(parsed, dict):
+        raise InvalidInputError("X-Lance-Run-Facets must be a JSON object of {facet: {payload}}")
+    try:
+        return shape_run_facets(parsed)
+    except (ValueError, TypeError) as exc:  # TypeError: belt-and-suspenders for a payload kwarg collision
+        raise InvalidInputError(str(exc)) from exc
+
+
 @router.post("/{id}/merge_insert", response_model_exclude_none=True)
 async def merge_insert_into_table(
     id: str,
@@ -367,6 +409,7 @@ async def merge_insert_into_table(
     so: StorageOptionsDep,
     token: CurrentToken,
     emitter: LineageEmitterDep,
+    client: FgaClientDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     on: str | None = None,
     when_matched_update_all: bool | None = None,
@@ -377,10 +420,18 @@ async def merge_insert_into_table(
     timeout: str | None = None,
     use_index: bool | None = None,
     branch: str | None = None,
+    source: str | None = None,
+    source_version: Annotated[int | None, Query(ge=1)] = None,
+    run_facets_json: Annotated[str | None, Header(alias="X-Lance-Run-Facets")] = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> MergeInsertIntoTableResponse:
     """Upsert Arrow-IPC rows — ``merge_insert_into_table``; emits a MERGE_INSERT lineage event.
     The ``*_filt`` SQL filters, ``timeout``, ``use_index`` and ``branch`` are spec-0.9 query params.
+
+    Training-shaped lineage (optional, catalog stays un-opinionated): ``source`` + ``source_version``
+    record the version-pinned upstream this merge DERIVED FROM (a mover's merge from ``source@N`` — the
+    reproducibility pin surfaced on the lineage READ edge), and the ``X-Lance-Run-Facets`` header carries
+    producer run metadata (e.g. training ``params``) verbatim onto the emitted RunEvent.
 
     IMPLICIT DDL (§4): after the merge commits, a best-effort BTREE index is ensured on the ``on``
     key (pylance's ``use_index`` only helps *if an index exists*, and nothing else ever builds one —
@@ -392,6 +443,18 @@ async def merge_insert_into_table(
     ``response.version + 1`` while the MERGE_INSERT lineage points at ``response.version`` — a
     version gap, not a lost write."""
     segments = parse_identifier(id, settings.delimiter)
+    # Validate the optional lineage metadata BEFORE the write — a malformed pin/facet is a 4xx, not a
+    # committed merge whose provenance then silently drops.
+    source_pin = _merge_source_pin(source, source_version, settings.delimiter)
+    extra_run_facets = _parse_run_facets(run_facets_json)
+    if source_pin is not None:
+        # The caller named a source to record as a merge INPUT. The catalog is the TRUSTED stamper on the
+        # Dapr transport (the lineage ingest input-authz guard runs only on the HTTP path), so a named source
+        # the caller can't READ would forge a cross-tenant DERIVED_FROM/READ edge — or a phantom vertex for a
+        # nonexistent one. Mirror the ingest guard here: require can_get_metadata on the source, fail-closed
+        # (no-op when FGA is off). A denial 4xx never distinguishes "hidden" from "absent" (both → no tuple).
+        await fga_deps.require_can_get_metadata(client, settings, token, segments=source_pin.segments)
+    inputs = [source_pin] if source_pin is not None else None
     req = MergeInsertIntoTableRequest(
         id=segments,
         on=on,
@@ -419,6 +482,8 @@ async def merge_insert_into_table(
         operation=MERGE_INSERT,
         authorization=authorization,
         pin_version=response.version,
+        inputs=inputs,
+        extra_run_facets=extra_run_facets,
     )
     # AFTER the merge and the emit (matching the emit pattern; §0 forbids BackgroundTasks): ensure the
     # merge key is BTREE-indexed so subsequent upserts stop full-scanning. Best-effort inside — no

@@ -186,14 +186,15 @@ def build_write_event(
     lance_fields: dict[str, Any] = {"operation": operation}
     if version is not None:
         lance_fields["version"] = version
-    run_facets: dict[str, Any] = {"lance": custom_facet(_PRODUCER, **lance_fields)}
+    # Caller-supplied run facets FIRST (e.g. a `params` training-params facet on a merge), already spec-shaped
+    # by shape_run_facets, so the catalog stays un-opinionated about their content. The catalog-OWNED `lance`
+    # (operation/version) and `author` facets are stamped AFTER — they always win a name collision, so a
+    # producer can never forge the operation (a false CREATED edge) or the author on the trusted transport,
+    # even if a reserved name slipped past shape_run_facets' denylist (defense in depth).
+    run_facets: dict[str, Any] = dict(extra_run_facets) if extra_run_facets else {}
+    run_facets["lance"] = custom_facet(_PRODUCER, **lance_fields)
     if author is not None:
         run_facets["author"] = custom_facet(_PRODUCER, name=author, sub=author)
-    # Caller-supplied run facets (e.g. a `params` training-params facet on a merge). Already spec-shaped
-    # (each is a custom_facet with _producer/_schemaURL), merged verbatim so the catalog stays un-opinionated
-    # about their content — the producer decides what training/run metadata rides the event.
-    if extra_run_facets:
-        run_facets.update(extra_run_facets)
     output: dict[str, Any] = {"namespace": namespace, "name": table_id}
     facets: dict[str, Any] = {}
     if version is not None:
@@ -232,6 +233,39 @@ def build_write_event(
         "inputs": [_input_dataset(ref) for ref in (inputs or [])],
         "outputs": [output],
     }
+
+
+#: Run-facet names a producer may NOT set through the passthrough: the ones the catalog STAMPS itself
+#: (``lance`` = operation/version, ``author`` = the verified principal) and the ones the lineage consumer
+#: TRUSTS off the wire (``errorMessage`` / ``progress`` run state, ``parent`` run hierarchy). Left open, a
+#: caller-named ``author``/``lance`` facet would forge the principal or the operation — minting a false
+#: ``(:User)-[:CREATED]->(:Dataset)`` edge — on the Dapr transport, which trusts the catalog's stamp
+#: wholesale (there is no ``enforce_author`` on that internal channel). Rejected here as a clean 4xx.
+_RESERVED_RUN_FACETS = frozenset({"lance", "author", "errorMessage", "progress", "parent"})
+
+
+def shape_run_facets(raw: dict[str, Any]) -> dict[str, Any]:
+    """Wrap caller-supplied run-facet payloads with the spec-required ``_producer`` / ``_schemaURL``.
+
+    The catalog stays un-opinionated about a producer's run metadata (e.g. a mover's merge carrying
+    training ``params``): it does not interpret the payload, it only stamps each named facet spec-legal
+    via :func:`custom_facet` so a strict OpenLineage consumer accepts the event. ``raw`` maps a facet
+    name to its payload object. Guarded fail-closed: the facet NAME may not be a reserved catalog-owned /
+    consumer-trusted facet (:data:`_RESERVED_RUN_FACETS`) nor empty; the payload must be a JSON object; and
+    its keys may not shadow the spec's ``_``-prefixed fields nor ``producer`` (all of which
+    :func:`custom_facet` owns — ``producer`` is its positional arg, so a ``producer`` key would raise a bare
+    ``TypeError``). Raises ``ValueError`` on any violation so the caller boundary can translate it to a 4xx.
+    """
+    shaped: dict[str, Any] = {}
+    for name, payload in raw.items():
+        if not name or name in _RESERVED_RUN_FACETS:
+            raise ValueError(f"run facet {name!r} is reserved and cannot be set by a producer")
+        if not isinstance(payload, dict):
+            raise ValueError(f"run facet {name!r} must be a JSON object")
+        if any(key.startswith("_") or key == "producer" for key in payload):
+            raise ValueError(f"run facet {name!r} may not set a reserved field (_-prefixed or 'producer')")
+        shaped[name] = custom_facet(_PRODUCER, **payload)
+    return shaped
 
 
 @runtime_checkable

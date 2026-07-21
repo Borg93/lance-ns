@@ -103,7 +103,9 @@ def test_create_namespace_routes_with_body_and_id(client: TestClient, fake_ns: M
 def test_describe_table_maps_query_params(client: TestClient, fake_ns: MagicMock) -> None:
     fake_ns.describe_table.return_value = DescribeTableResponse(location="s3://x")
     client.post("/v1/table/db$t/describe?with_table_uri=true&load_detailed_metadata=true")
-    req = fake_ns.describe_table.call_args.args[0]
+    # The #74 metadata fallback (empty response.metadata + load_detailed_metadata) opens the dataset, which
+    # issues a SECOND describe_table (open_dataset) without the flags — so assert on the FIRST (primary) call.
+    req = fake_ns.describe_table.call_args_list[0].args[0]
     assert req.with_table_uri is True
     assert req.load_detailed_metadata is True
 
@@ -325,6 +327,9 @@ def test_insert_stamps_the_real_version_on_lineage(
     dataset = MagicMock()
     dataset.version = 7
     monkeypatch.setattr("catalog.services.dataplane.open_dataset", lambda *a, **k: dataset)
+    # Schema coercion (real Arrow parse + live-schema open) is orthogonal to lineage version-stamping and
+    # has its own coverage (test_insert_coerce.py); pass the placeholder bytes through to the mocked native.
+    monkeypatch.setattr("catalog.services.dataplane.coerce_insert_arrow", lambda _ns, _so, _seg, data: data)
     captured = _capture_measured_emit(monkeypatch)
 
     resp = client.post("/v1/table/db$t/insert", content=b"ARROWSTREAM", headers=ARROW_STREAM)
@@ -384,6 +389,126 @@ def test_add_columns_emits_pinned_schema_evolution_lineage(
     assert captured["operation"] == "add_columns"
     assert captured["version"] == 4
     assert captured["schema_fields"] == [{"name": "x", "type": "int64"}]  # post-evolution schema rides along
+
+
+def test_merge_insert_emits_version_pinned_source_and_run_facets(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # Phase 2: a mover's merge from source@N. The `source` + `source_version` query params and the
+    # `X-Lance-Run-Facets` header must reach the emit trailer as a version-pinned InputPin + spec-shaped
+    # run facets — training-shaped OpenLineage, with the catalog un-opinionated about the facet payload.
+    from catalog.core.lineage_emit import InputPin, shape_run_facets
+
+    fake_ns.merge_insert_into_table.return_value = MergeInsertIntoTableResponse(version=2)
+    monkeypatch.setattr(
+        "catalog.services.dataplane.read_version_and_schema",
+        lambda *a, **k: (2, [{"name": "id", "type": "int64"}]),
+    )
+    # The implicit BTREE build opens the real dataset — orthogonal to lineage; stub it out.
+    monkeypatch.setattr("catalog.services.dataplane.ensure_merge_key_index", lambda *a, **k: None)
+    captured = _capture_measured_emit(monkeypatch)
+
+    resp = client.post(
+        "/v1/table/db$t/merge_insert?on=id&when_matched_update_all=true&source=db$src&source_version=4",
+        content=b"A",
+        headers={**ARROW_STREAM, "X-Lance-Run-Facets": '{"params": {"lr": 0.01, "epochs": 5}}'},
+    )
+    assert resp.status_code == 200
+    assert captured["operation"] == "merge_insert"
+    assert captured["inputs"] == [InputPin(segments=["db", "src"], version=4)]  # the version-pinned source
+    # The header payload is carried verbatim onto the run, stamped spec-legal by the catalog (custom_facet
+    # _producer/_schemaURL) — exactly what shape_run_facets produces from the same JSON.
+    assert captured["extra_run_facets"] == shape_run_facets({"params": {"lr": 0.01, "epochs": 5}})
+
+
+def test_merge_insert_rejects_source_version_without_source(client: TestClient, fake_ns: MagicMock) -> None:
+    # A pin with nothing to pin is a fail-fast 400 (before the merge commits), not a silently dropped version.
+    resp = client.post(
+        "/v1/table/db$t/merge_insert?on=id&source_version=4", content=b"A", headers=ARROW_STREAM
+    )
+    assert resp.status_code == 400, resp.text
+
+
+def test_merge_insert_authz_checks_the_source_before_recording_it(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # The named source must be READ-authorized by the caller (mirrors the lineage ingest input guard) so it
+    # can't forge a cross-tenant DERIVED_FROM/READ edge on the trusted Dapr transport. Assert the handler runs
+    # require_can_get_metadata against the SOURCE's segments (not the merged table's).
+    from catalog.api import fga_deps
+
+    seen: dict[str, object] = {}
+
+    async def _cap(_client, _settings, _token, *, segments):
+        seen["segments"] = segments
+
+    monkeypatch.setattr(fga_deps, "require_can_get_metadata", _cap)
+    monkeypatch.setattr("catalog.services.dataplane.read_version_and_schema", lambda *a, **k: (2, []))
+    monkeypatch.setattr("catalog.services.dataplane.ensure_merge_key_index", lambda *a, **k: None)
+    fake_ns.merge_insert_into_table.return_value = MergeInsertIntoTableResponse(version=2)
+
+    resp = client.post(
+        "/v1/table/db$t/merge_insert?on=id&source=up$stream&source_version=3",
+        content=b"A",
+        headers=ARROW_STREAM,
+    )
+    assert resp.status_code == 200
+    assert seen["segments"] == ["up", "stream"]  # the SOURCE, not the merged table db$t
+
+
+def test_merge_insert_denies_when_source_not_readable(
+    client: TestClient, fake_ns: MagicMock, monkeypatch
+) -> None:
+    # Fail-closed: a source the caller can't read is a 403 BEFORE the merge — never a silent forged edge.
+    from catalog.api import fga_deps
+    from lance_namespace import PermissionDeniedError
+
+    async def _deny(*_a, **_k):
+        raise PermissionDeniedError("can_get_metadata required")
+
+    monkeypatch.setattr(fga_deps, "require_can_get_metadata", _deny)
+    resp = client.post(
+        "/v1/table/db$t/merge_insert?on=id&source=secret$pii&source_version=1",
+        content=b"A",
+        headers=ARROW_STREAM,
+    )
+    assert resp.status_code == 403, resp.text
+    fake_ns.merge_insert_into_table.assert_not_called()  # denied before the write
+
+
+def test_merge_insert_rejects_malformed_or_reserved_run_facets(
+    client: TestClient, fake_ns: MagicMock
+) -> None:
+    # A malformed / reserved-name / reserved-key X-Lance-Run-Facets header is a fail-fast 400 (never a 500),
+    # before the merge — the run-facet forgery + 500-from-header findings. The last two are the re-audit
+    # catch: json.loads raises a bare ValueError past the 4300-digit int limit, and RecursionError on deep
+    # nesting; neither is a JSONDecodeError, so the original narrow except missed them (→ 500).
+    bad_headers = [
+        "{not json",
+        '"a string"',
+        '{"author": {"sub": "admin"}}',
+        '{"params": {"producer": "x"}}',
+        '{"params": {"n": ' + "9" * 4400 + "}}",  # >4300-digit int → bare ValueError, not JSONDecodeError
+        "[" * 60000 + "]" * 60000,  # deep nesting → RecursionError
+    ]
+    for bad in bad_headers:
+        resp = client.post(
+            "/v1/table/db$t/merge_insert?on=id",
+            content=b"A",
+            headers={**ARROW_STREAM, "X-Lance-Run-Facets": bad},
+        )
+        assert resp.status_code == 400, f"{bad[:40]!r} -> {resp.status_code}: {resp.text[:200]}"
+    fake_ns.merge_insert_into_table.assert_not_called()
+
+
+def test_merge_insert_rejects_blank_source_with_version(client: TestClient, fake_ns: MagicMock) -> None:
+    # An empty source can't carry a version pin — 400, not a nameless forged input vertex bypassing the guard.
+    resp = client.post(
+        "/v1/table/db$t/merge_insert?on=id&source=&source_version=4", content=b"A", headers=ARROW_STREAM
+    )
+    assert resp.status_code == 400, resp.text
+    fake_ns.merge_insert_into_table.assert_not_called()
+    fake_ns.merge_insert_into_table.assert_not_called()  # rejected before the write
 
 
 def test_create_index_emits_lineage_at_readback_version(

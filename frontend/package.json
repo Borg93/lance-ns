@@ -16,8 +16,8 @@
 		"lint": "oxlint --deny-warnings .",
 		"fmt": "oxfmt .",
 		"fmt:check": "oxfmt --check .",
-		"lint:mfe": "prettier --check '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore && eslint components/frontends/home components/frontends/data components/frontends/lineage components/frontends/models components/frontends/admin packages/api packages/rask-ui",
-		"format:mfe": "prettier --write '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore"
+		"lint:mfe": "prettier --check '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore && eslint components/frontends/home components/frontends/data components/frontends/lineage components/frontends/models components/frontends/admin packages/api packages/rask-ui",
+		"format:mfe": "prettier --write '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.1.0",

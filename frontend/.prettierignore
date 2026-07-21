@@ -1,0 +1,4 @@
+**/*.generated.ts
+**/build/
+**/.svelte-kit/
+**/dist/

@@ -4,8 +4,8 @@
 	// needs a parent id), so we derive the namespaces from the tables the catalog lists: every namespace
 	// that holds at least one table, with its tables linked into the detail view. Same stack-mode states
 	// as the tables page — governed without a session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data.
-	import { Boxes, RefreshCw, ShieldAlert } from "@lucide/svelte";
-	import { fetchTables } from "./catalog";
+	import { Boxes, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { fetchTables } from './catalog';
 
 	const POLL_MS = 5000;
 
@@ -20,7 +20,7 @@
 	const groups = $derived.by(() => {
 		const m = new Map<string, string[]>();
 		for (const t of tables ?? []) {
-			const ns = t.includes("$") ? t.slice(0, t.indexOf("$")) : t;
+			const ns = t.includes('$') ? t.slice(0, t.indexOf('$')) : t;
 			const arr = m.get(ns);
 			if (arr) arr.push(t);
 			else m.set(ns, [t]);
@@ -73,7 +73,7 @@
 				<div class="ns-head">
 					<Boxes size={13} />
 					<span class="mono ns-name">{ns}</span>
-					<span class="count">{members.length} table{members.length === 1 ? "" : "s"}</span>
+					<span class="count">{members.length} table{members.length === 1 ? '' : 's'}</span>
 				</div>
 				<ul class="list">
 					{#each members as t (t)}

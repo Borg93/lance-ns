@@ -29,6 +29,7 @@ export default defineConfig(
 			'**/.svelte-kit/',
 			'**/build/',
 			'**/dist/',
+			'**/*.generated.ts',
 			'storybook-static/',
 		],
 	},

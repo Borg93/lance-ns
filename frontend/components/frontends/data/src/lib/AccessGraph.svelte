@@ -3,41 +3,42 @@
 	// visual upgrade of the #68 who-can-do-what form. One hop: the focus object, every subject directly
 	// granted a rung (edges subject→object labelled owner/writer/reader/validator), and the parent/project
 	// container edge. Click a subject to prefill the grant form; grant/revoke re-fetches so the graph
-	// reflects the change. SvelteFlow (reusing the LineageExplorer pattern) + @lance/ui Select + GSAP.
-	import AccessNode, { type AccessNodeType } from "$lib/AccessNode.svelte";
-	import type { NodeTypes } from "@xyflow/svelte";
+	// reflects the change. SvelteFlow (reusing the LineageExplorer pattern) + @rask/ui Select + GSAP.
+	import AccessNode, { type AccessNodeType } from '$lib/AccessNode.svelte';
+	import type { NodeTypes } from '@xyflow/svelte';
 
 	// svelte-flow rule 5: register node components ONCE at module scope, not inline.
 	const nodeTypes: NodeTypes = { access: AccessNode };
 </script>
 
 <script lang="ts">
-	import { Select, enter } from "@lance/ui";
-	import { Network, ShieldAlert } from "@lucide/svelte";
-	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from "@xyflow/svelte";
-	import "@xyflow/svelte/dist/style.css";
+	import { Select } from '@rask/ui/select';
+	import { enter } from '@rask/ui/motion';
+	import { Network, ShieldAlert } from '@lucide/svelte';
+	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from '@xyflow/svelte';
+	import '@xyflow/svelte/dist/style.css';
 	import {
 		type AccessGraph,
 		fetchAccessGraph,
 		grantTableAccess,
 		revokeTableAccess,
-	} from "./catalog";
-	import FlowAutoFit from "./FlowAutoFit.svelte";
+	} from './catalog';
+	import FlowAutoFit from './FlowAutoFit.svelte';
 
 	let { dataset }: { dataset: string } = $props();
 
-	const GRANTABLE = ["reader", "writer", "validator", "owner"];
+	const GRANTABLE = ['reader', 'writer', 'validator', 'owner'];
 
 	let nodes = $state.raw<AccessNodeType[]>([]);
 	let edges = $state.raw<Edge[]>([]);
 	let graph = $state<AccessGraph | null>(null);
 	let selectedId = $state<string | null>(null);
 	let fitKey = $state(0);
-	let status = $state<"loading" | "ok" | "denied" | "offline">("loading");
-	let mgUser = $state("");
-	let mgRelation = $state("");
+	let status = $state<'loading' | 'ok' | 'denied' | 'offline'>('loading');
+	let mgUser = $state('');
+	let mgRelation = $state('');
 	let mgBusy = $state(false);
-	let mgResult = $state<{ tone: "ok" | "fail"; text: string } | null>(null);
+	let mgResult = $state<{ tone: 'ok' | 'fail'; text: string } | null>(null);
 
 	function rebuild(g: AccessGraph): void {
 		const obj = g.object;
@@ -45,10 +46,10 @@
 		const outbound = g.edges.filter((e) => e.source === obj); // container: obj → parent
 		const byId = new Map(g.nodes.map((n) => [n.id, n]));
 		const mk = (id: string, x: number, y: number): AccessNodeType => {
-			const n = byId.get(id) ?? { id, type: id.split(":")[0] || "unknown", label: id };
+			const n = byId.get(id) ?? { id, type: id.split(':')[0] || 'unknown', label: id };
 			return {
 				id,
-				type: "access",
+				type: 'access',
 				position: { x, y },
 				data: {
 					fgaId: id,
@@ -69,7 +70,7 @@
 			source: e.source,
 			target: e.target,
 			label: e.relation,
-			animated: e.relation !== "parent" && e.relation !== "project",
+			animated: e.relation !== 'parent' && e.relation !== 'project',
 		}));
 		fitKey++;
 	}
@@ -80,18 +81,18 @@
 		if (dataset !== current) return; // navigated away — drop stale
 		if (res.ok) {
 			graph = res.data;
-			status = "ok";
+			status = 'ok';
 			rebuild(res.data);
 		} else if (res.status === 401 || res.status === 403) {
-			status = "denied";
+			status = 'denied';
 		} else {
-			status = "offline";
+			status = 'offline';
 		}
 	}
 
 	$effect(() => {
 		void dataset;
-		status = "loading";
+		status = 'loading';
 		graph = null;
 		selectedId = null;
 		load();
@@ -99,10 +100,10 @@
 
 	function selectNode(e: { node: { id: string; data: unknown } }): void {
 		selectedId = e.node.id;
-		const t = (e.node.data as { fgaType?: string }).fgaType ?? "";
+		const t = (e.node.data as { fgaType?: string }).fgaType ?? '';
 		// clicking a subject prefills the grant form (drop the bare user: prefix for a plain user)
-		if (["user", "role", "team"].includes(t)) {
-			mgUser = e.node.id.startsWith("user:") ? e.node.id.slice("user:".length) : e.node.id;
+		if (['user', 'role', 'team'].includes(t)) {
+			mgUser = e.node.id.startsWith('user:') ? e.node.id.slice('user:'.length) : e.node.id;
 		}
 		if (graph) rebuild(graph);
 	}
@@ -120,14 +121,14 @@
 			if (dataset !== current) return;
 			if (res.ok) {
 				mgResult = {
-					tone: "ok",
-					text: `${mgRelation} ${grant ? "granted to" : "revoked from"} ${res.data.user}.`,
+					tone: 'ok',
+					text: `${mgRelation} ${grant ? 'granted to' : 'revoked from'} ${res.data.user}.`,
 				};
 				await load(); // the graph now reflects the change
 			} else if (res.status === 401 || res.status === 403) {
-				mgResult = { tone: "fail", text: "Managing access needs the owner tier on this table." };
+				mgResult = { tone: 'fail', text: 'Managing access needs the owner tier on this table.' };
 			} else {
-				mgResult = { tone: "fail", text: `Failed (HTTP ${res.status}).` };
+				mgResult = { tone: 'fail', text: `Failed (HTTP ${res.status}).` };
 			}
 		} finally {
 			mgBusy = false;
@@ -142,11 +143,11 @@
 		<span class="sub mono">who holds which rung · click a subject to grant/revoke</span>
 	</header>
 
-	{#if status === "denied"}
+	{#if status === 'denied'}
 		<div class="empty"><ShieldAlert size={15} /> Owner access is required to view the graph.</div>
-	{:else if status === "offline"}
+	{:else if status === 'offline'}
 		<div class="empty">Graph unavailable right now — reopen to retry.</div>
-	{:else if status === "loading"}
+	{:else if status === 'loading'}
 		<div class="empty">Loading the authorization graph…</div>
 	{:else}
 		<div class="canvas">
@@ -181,7 +182,7 @@
 				disabled={mgBusy || !mgUser.trim() || !mgRelation}
 				onclick={() => runManage(true)}
 			>
-				{mgBusy ? "…" : "Grant"}
+				{mgBusy ? '…' : 'Grant'}
 			</button>
 			<button
 				class="btn ghost"
@@ -191,7 +192,7 @@
 				Revoke
 			</button>
 			{#if mgResult}
-				<span class="res" class:ok={mgResult.tone === "ok"} class:fail={mgResult.tone === "fail"}
+				<span class="res" class:ok={mgResult.tone === 'ok'} class:fail={mgResult.tone === 'fail'}
 					>{mgResult.text}</span
 				>
 			{/if}

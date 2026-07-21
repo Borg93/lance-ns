@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { Node, NodeProps } from "@xyflow/svelte";
+	import type { Node, NodeProps } from '@xyflow/svelte';
 
 	export type AccessData = {
 		fgaId: string; // the full FGA id, e.g. user:alice / table:db1$t / role:eng#assignee
@@ -8,11 +8,11 @@
 		focus: boolean; // the object the graph is centred on
 		selected: boolean;
 	};
-	export type AccessNodeType = Node<AccessData, "access">;
+	export type AccessNodeType = Node<AccessData, 'access'>;
 </script>
 
 <script lang="ts">
-	import { Handle, Position } from "@xyflow/svelte";
+	import { Handle, Position } from '@xyflow/svelte';
 	import {
 		Boxes,
 		Database,
@@ -21,8 +21,8 @@
 		User,
 		Users,
 		Warehouse as WarehouseIcon,
-	} from "@lucide/svelte";
-	import { pop } from "@lance/ui";
+	} from '@lucide/svelte';
+	import { pop } from '@rask/ui/motion';
 
 	let { data }: NodeProps<AccessNodeType> = $props();
 
@@ -38,14 +38,14 @@
 	};
 	const Icon = $derived(ICONS[data.fgaType] ?? Database);
 	const kind = $derived(
-		["user", "role", "team"].includes(data.fgaType)
-			? "subject"
+		['user', 'role', 'team'].includes(data.fgaType)
+			? 'subject'
 			: data.focus
-				? "focus"
-				: "container",
+				? 'focus'
+				: 'container',
 	);
 	const accent = $derived(
-		kind === "subject" ? "#6aa9ff" : kind === "focus" ? "var(--amber, #ffc14d)" : "#8aa0bd",
+		kind === 'subject' ? '#6aa9ff' : kind === 'focus' ? 'var(--amber, #ffc14d)' : '#8aa0bd',
 	);
 </script>
 

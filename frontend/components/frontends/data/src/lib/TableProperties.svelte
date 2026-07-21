@@ -3,9 +3,9 @@
 	// (schema_metadata/update replaces it), so we edit a full local copy and PUT it; per-column metadata is
 	// MERGED per key (update_field_metadata), a `null` value deleting a key. Both are writer-gated at the
 	// catalog and reach it only through the session-only /capi columns BFF (the signed-in user's bearer).
-	import { Select } from "@lance/ui";
-	import { untrack } from "svelte";
-	import { setFieldMetadata, setTableProperties, type CatalogResult } from "./catalog";
+	import { Select } from '@rask/ui/select';
+	import { untrack } from 'svelte';
+	import { setFieldMetadata, setTableProperties, type CatalogResult } from './catalog';
 
 	type Field = { name: string; metadata?: Record<string, string> };
 	let {
@@ -26,9 +26,9 @@
 	let savedMsg = $state<string | null>(null);
 
 	// Per-column properties.
-	let selectedCol = $state("");
-	let colKey = $state("");
-	let colValue = $state("");
+	let selectedCol = $state('');
+	let colKey = $state('');
+	let colValue = $state('');
 
 	// Seed the editable table-props rows from the current metadata, keyed ONLY on the table id (tableMeta is
 	// read untracked). A post-save reload changes tableMeta but not the table, so it must NOT re-run — that
@@ -40,9 +40,9 @@
 			rows = Object.entries(tableMeta).map(([key, value]) => ({ key, value }));
 			error = null;
 			savedMsg = null;
-			selectedCol = "";
-			colKey = "";
-			colValue = "";
+			selectedCol = '';
+			colKey = '';
+			colValue = '';
 		});
 	});
 
@@ -50,9 +50,9 @@
 	const colEntries = $derived(Object.entries(selectedField?.metadata ?? {}));
 
 	function fail(status: number, detail: string): void {
-		if (status === 401) error = "Sign in to edit properties.";
+		if (status === 401) error = 'Sign in to edit properties.';
 		else if (status === 403)
-			error = "Denied: editing properties needs writer access (can_write_data).";
+			error = 'Denied: editing properties needs writer access (can_write_data).';
 		else error = detail;
 	}
 
@@ -82,7 +82,7 @@
 		}
 		run(
 			() => setTableProperties(table, map),
-			() => (savedMsg = "Saved."),
+			() => (savedMsg = 'Saved.'),
 		);
 	}
 
@@ -93,8 +93,8 @@
 		run(
 			() => setFieldMetadata(table, path, { [key]: colValue }),
 			() => {
-				colKey = "";
-				colValue = "";
+				colKey = '';
+				colValue = '';
 			},
 		);
 	}
@@ -135,7 +135,7 @@
 		{/each}
 	</div>
 	<div class="row">
-		<button class="btn ghost" onclick={() => (rows = [...rows, { key: "", value: "" }])}
+		<button class="btn ghost" onclick={() => (rows = [...rows, { key: '', value: '' }])}
 			>+ add row</button
 		>
 		<button class="btn" disabled={busy} onclick={saveTableProps}>Save properties</button>

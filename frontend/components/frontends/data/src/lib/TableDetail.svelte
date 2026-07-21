@@ -4,14 +4,14 @@
 	// round-trip through the /capi detail BFF aggregate; policy writes go through their own narrow
 	// session-only routes. A dataset the catalog does not register (e.g. a storage-managed medallion
 	// zone) renders the honest not-in-catalog state instead of a broken page.
-	import { Select } from "@lance/ui";
-	import { Database, RefreshCw, ShieldAlert, Trash2 } from "@lucide/svelte";
-	import { tableFromJSON, tableToIPC } from "apache-arrow";
-	import AccessGraph from "./AccessGraph.svelte";
-	import { fetchProducers } from "./api";
-	import { deriveQuality, type QualityBadge } from "./quality";
-	import GrantsPanel from "./GrantsPanel.svelte";
-	import ReadersPanel from "./ReadersPanel.svelte";
+	import { Select } from '@rask/ui/select';
+	import { Database, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
+	import { tableFromJSON, tableToIPC } from 'apache-arrow';
+	import AccessGraph from './AccessGraph.svelte';
+	import { fetchProducers } from './api';
+	import { deriveQuality, type QualityBadge } from './quality';
+	import GrantsPanel from './GrantsPanel.svelte';
+	import ReadersPanel from './ReadersPanel.svelte';
 	import {
 		addColumn,
 		compactTable,
@@ -40,8 +40,8 @@
 		retypeColumn,
 		runMaintenance,
 		setTablePolicy,
-	} from "./catalog";
-	import TableProperties from "./TableProperties.svelte";
+	} from './catalog';
+	import TableProperties from './TableProperties.svelte';
 
 	let { table }: { table: string } = $props();
 
@@ -62,8 +62,8 @@
 	}>({ retention_days: null, retain_versions: null, interval: null, target: null, enabled: true });
 
 	// #64 version management — name (tag) a Lance version (writer-gated). Reset on table change below.
-	let tagName = $state("");
-	let tagVersion = $state(""); // the bits-ui Select value is a string; parsed to a number on submit
+	let tagName = $state('');
+	let tagVersion = $state(''); // the bits-ui Select value is a string; parsed to a number on submit
 	let tagBusy = $state(false);
 	let tagError = $state<string | null>(null);
 
@@ -74,13 +74,13 @@
 
 	// #64 blob preview — the credential-less read of a blob cell (GET /blobs?column=&row=), session-gated
 	// by the catch-all BFF (reader-tier can_read_data). Only offered for binary/blob-typed columns.
-	let blobCol = $state("");
+	let blobCol = $state('');
 	let blobRow = $state<number | null>(null);
 	let blobSrc = $state<string | null>(null);
 	let blobFailed = $state(false);
 
 	// #64 data-plane row insert — append JSON rows, browser-encoded to Arrow via apache-arrow. Writer-gated.
-	let insertJson = $state("");
+	let insertJson = $state('');
 	let insertBusy = $state(false);
 	let insertMsg = $state<{ ok: boolean; text: string } | null>(null);
 
@@ -126,16 +126,16 @@
 		editingPolicy = false;
 		policyError = null;
 		busy = false;
-		tagName = "";
-		tagVersion = "";
+		tagName = '';
+		tagVersion = '';
 		tagError = null;
 		restoreConfirm = null;
 		restoreError = null;
-		blobCol = "";
+		blobCol = '';
 		blobRow = null;
 		blobSrc = null;
 		blobFailed = false;
-		insertJson = "";
+		insertJson = '';
 		insertMsg = null;
 		showGraph = false;
 		gcDays = null;
@@ -147,23 +147,23 @@
 		compactResult = null;
 		colBusy = false;
 		colError = null;
-		addColName = "";
-		addColExpr = "";
+		addColName = '';
+		addColExpr = '';
 		renaming = null;
-		renameTo = "";
+		renameTo = '';
 		retyping = null;
-		retypeTo = "";
+		retypeTo = '';
 		refBusy = false;
 		refError = null;
 		movingTag = null;
-		moveTo = "";
-		newBranch = "";
-		newBranchFrom = "";
+		moveTo = '';
+		newBranch = '';
+		newBranchFrom = '';
 		// #73 index-builder editor — reset too, or a column/type/distance (or error) typed on table A pre-fills
 		// B's Build-index form and runCreateIndex(B) would use A's column. (audit 2026-07-20)
-		ixColumn = "";
-		ixType = "BTREE";
-		ixDistance = "cosine";
+		ixColumn = '';
+		ixType = 'BTREE';
+		ixDistance = 'cosine';
 		ixBusy = false;
 		ixError = null;
 		quality = null;
@@ -184,8 +184,8 @@
 	}
 
 	function policyFail(status: number, detailText: string): void {
-		if (status === 401) policyError = "Sign in to edit the maintenance policy.";
-		else if (status === 403) policyError = "Denied: policy changes need the owner rung (can_drop).";
+		if (status === 401) policyError = 'Sign in to edit the maintenance policy.';
+		else if (status === 403) policyError = 'Denied: policy changes need the owner rung (can_drop).';
 		else policyError = detailText;
 	}
 
@@ -235,9 +235,9 @@
 	const gcHasBound = $derived(gcDays != null || gcKeep != null);
 
 	function gcFail(status: number, detail: string): void {
-		if (status === 401) gcError = "Sign in to run garbage collection.";
-		else if (status === 403) gcError = "Denied: GC needs the owner rung (can_drop).";
-		else if (status === 422) gcError = "Set a retention-days and/or keep-last bound first.";
+		if (status === 401) gcError = 'Sign in to run garbage collection.';
+		else if (status === 403) gcError = 'Denied: GC needs the owner rung (can_drop).';
+		else if (status === 422) gcError = 'Set a retention-days and/or keep-last bound first.';
 		else gcError = detail;
 	}
 
@@ -279,17 +279,17 @@
 	// #74 schema evolution — add (name + SQL expr) / rename / drop columns (writer-gated).
 	let colBusy = $state(false);
 	let colError = $state<string | null>(null);
-	let addColName = $state("");
-	let addColExpr = $state("");
+	let addColName = $state('');
+	let addColExpr = $state('');
 	let renaming = $state<string | null>(null); // the column currently being renamed
-	let renameTo = $state("");
+	let renameTo = $state('');
 	let retyping = $state<string | null>(null); // the column currently being re-typed (#74 tail)
-	let retypeTo = $state(""); // the target scalar Arrow type (bits-ui Select string)
+	let retypeTo = $state(''); // the target scalar Arrow type (bits-ui Select string)
 
 	function colFail(status: number, detail: string): void {
-		if (status === 401) colError = "Sign in to change the schema.";
+		if (status === 401) colError = 'Sign in to change the schema.';
 		else if (status === 403)
-			colError = "Denied: schema changes need writer access (can_write_data).";
+			colError = 'Denied: schema changes need writer access (can_write_data).';
 		else colError = detail;
 	}
 
@@ -302,8 +302,8 @@
 		try {
 			const res = await addColumn(table, name, expr);
 			if (res.ok) {
-				addColName = "";
-				addColExpr = "";
+				addColName = '';
+				addColExpr = '';
 				await load();
 			} else colFail(res.status, res.detail);
 		} finally {
@@ -334,7 +334,7 @@
 			const res = await renameColumn(table, from, to);
 			if (res.ok) {
 				renaming = null;
-				renameTo = "";
+				renameTo = '';
 				await load();
 			} else colFail(res.status, res.detail);
 		} finally {
@@ -352,7 +352,7 @@
 			const res = await retypeColumn(table, path, type);
 			if (res.ok) {
 				retyping = null;
-				retypeTo = "";
+				retypeTo = '';
 				await load();
 			} else colFail(res.status, res.detail);
 		} finally {
@@ -364,13 +364,13 @@
 	let refBusy = $state(false);
 	let refError = $state<string | null>(null);
 	let movingTag = $state<string | null>(null); // the tag currently being moved
-	let moveTo = $state(""); // target version (bits-ui Select string)
-	let newBranch = $state("");
-	let newBranchFrom = $state(""); // optional source version (Select string)
+	let moveTo = $state(''); // target version (bits-ui Select string)
+	let newBranch = $state('');
+	let newBranchFrom = $state(''); // optional source version (Select string)
 
 	function refFail(status: number, detail: string): void {
-		if (status === 401) refError = "Sign in to manage tags & branches.";
-		else if (status === 403) refError = "Denied: managing refs needs writer/owner access.";
+		if (status === 401) refError = 'Sign in to manage tags & branches.';
+		else if (status === 403) refError = 'Denied: managing refs needs writer/owner access.';
 		else refError = detail;
 	}
 
@@ -395,15 +395,15 @@
 		const name = movingTag;
 		await refDo(() => moveTableTag(table, name, Number(moveTo)));
 		movingTag = null;
-		moveTo = "";
+		moveTo = '';
 	}
 
 	async function runCreateBranch(): Promise<void> {
 		const name = newBranch.trim();
 		if (!name) return;
 		await refDo(() => createTableBranch(table, name, newBranchFrom ? Number(newBranchFrom) : null));
-		newBranch = "";
-		newBranchFrom = "";
+		newBranch = '';
+		newBranchFrom = '';
 	}
 
 	// #76 compact-now — merge small fragments (non-destructive), using the policy's target size if set.
@@ -434,13 +434,13 @@
 		try {
 			const res = await createTableTag(table, name, Number(tagVersion));
 			if (res.ok) {
-				tagName = "";
-				tagVersion = "";
+				tagName = '';
+				tagVersion = '';
 				await load(); // pull the new tag into the tags row
 			} else if (res.status === 401) {
-				tagError = "Sign in to tag a version.";
+				tagError = 'Sign in to tag a version.';
 			} else if (res.status === 403) {
-				tagError = "Denied: tagging a version needs writer access (can_create_tag).";
+				tagError = 'Denied: tagging a version needs writer access (can_create_tag).';
 			} else {
 				tagError = res.detail;
 			}
@@ -459,9 +459,9 @@
 				restoreConfirm = null;
 				await load(); // restore mints a fresh current version — refresh to show it
 			} else if (res.status === 401) {
-				restoreError = "Sign in to restore a version.";
+				restoreError = 'Sign in to restore a version.';
 			} else if (res.status === 403) {
-				restoreError = "Denied: restoring a version needs the owner tier (can_restore).";
+				restoreError = 'Denied: restoring a version needs the owner tier (can_restore).';
 			} else {
 				restoreError = res.detail;
 			}
@@ -485,7 +485,7 @@
 		try {
 			const parsed: unknown = JSON.parse(insertJson);
 			if (!Array.isArray(parsed) || parsed.length === 0) {
-				throw new Error("expected a non-empty JSON array of row objects");
+				throw new Error('expected a non-empty JSON array of row objects');
 			}
 			rows = parsed as Record<string, unknown>[];
 		} catch (e) {
@@ -500,22 +500,22 @@
 		try {
 			// Browser-side Arrow-IPC encode (apache-arrow) → the catalog's Arrow-body insert. The inferred
 			// schema must match the table's — a mismatch is the catalog's honest error, surfaced below.
-			const arrow = tableToIPC(tableFromJSON(rows), "stream");
+			const arrow = tableToIPC(tableFromJSON(rows), 'stream');
 			const res = await insertRows(requested, arrow);
 			if (table !== requested) return; // navigated away — A's message must not land on B's page
 			if (res.ok) {
 				insertMsg = {
 					ok: true,
-					text: `Inserted ${rows.length} row${rows.length === 1 ? "" : "s"}.`,
+					text: `Inserted ${rows.length} row${rows.length === 1 ? '' : 's'}.`,
 				};
-				insertJson = "";
+				insertJson = '';
 				await load(); // the insert bumped the version — refresh stats + versions
 			} else if (res.status === 401) {
-				insertMsg = { ok: false, text: "Sign in to insert rows." };
+				insertMsg = { ok: false, text: 'Sign in to insert rows.' };
 			} else if (res.status === 403) {
 				insertMsg = {
 					ok: false,
-					text: "Denied: inserting rows needs writer access (can_write_data).",
+					text: 'Denied: inserting rows needs writer access (can_write_data).',
 				};
 			} else {
 				insertMsg = { ok: false, text: res.detail };
@@ -595,18 +595,18 @@
 	);
 
 	function typeName(t: unknown): string {
-		if (t && typeof t === "object" && "type" in t) return String((t as { type: unknown }).type);
-		return String(t ?? "—");
+		if (t && typeof t === 'object' && 'type' in t) return String((t as { type: unknown }).type);
+		return String(t ?? '—');
 	}
 
 	// #73 index management — build (scalar / vector) + drop. Vector indexes (IVF/HNSW) are the Lance
 	// differentiator neither Iceberg nor Unity has; a rebuild is a create with the same column (Lance
 	// replaces). The catalog gates all three at the writer tier (can_write_data).
-	const SCALAR_TYPES = ["BTREE", "BITMAP", "INVERTED", "NGRAM"];
-	const VECTOR_TYPES = ["IVF_PQ", "IVF_HNSW_SQ"];
-	let ixColumn = $state("");
-	let ixType = $state("BTREE");
-	let ixDistance = $state("cosine");
+	const SCALAR_TYPES = ['BTREE', 'BITMAP', 'INVERTED', 'NGRAM'];
+	const VECTOR_TYPES = ['IVF_PQ', 'IVF_HNSW_SQ'];
+	let ixColumn = $state('');
+	let ixType = $state('BTREE');
+	let ixDistance = $state('cosine');
 	let ixBusy = $state(false);
 	let ixError = $state<string | null>(null);
 	const ixScalar = $derived(SCALAR_TYPES.includes(ixType));
@@ -622,12 +622,12 @@
 				: { column, index_type: ixType, distance_type: ixDistance };
 			const res = await createTableIndex(table, body, ixScalar);
 			if (res.ok) {
-				ixColumn = "";
+				ixColumn = '';
 				await load(); // pull the new index into the list (the build bumps the version too)
 			} else if (res.status === 401) {
-				ixError = "Sign in to build an index.";
+				ixError = 'Sign in to build an index.';
 			} else if (res.status === 403) {
-				ixError = "Denied: building an index needs writer access (can_write_data).";
+				ixError = 'Denied: building an index needs writer access (can_write_data).';
 			} else {
 				ixError = res.detail;
 			}
@@ -645,9 +645,9 @@
 			if (res.ok) {
 				await load();
 			} else if (res.status === 401) {
-				ixError = "Sign in to drop an index.";
+				ixError = 'Sign in to drop an index.';
 			} else if (res.status === 403) {
-				ixError = "Denied: dropping an index needs writer access (can_write_data).";
+				ixError = 'Denied: dropping an index needs writer access (can_write_data).';
 			} else {
 				ixError = res.detail;
 			}
@@ -657,8 +657,8 @@
 	}
 
 	function fmtBytes(n: number | null | undefined): string {
-		if (n == null) return "—";
-		const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+		if (n == null) return '—';
+		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
 		let v = n;
 		let u = 0;
 		while (v >= 1024 && u < units.length - 1) {
@@ -669,10 +669,10 @@
 	}
 
 	// version manifest timestamps arrive in ms; branch createAt in seconds — normalise to one UTC string.
-	function fmtEpoch(value: number | null | undefined, unit: "ms" | "s"): string {
-		if (value == null) return "—";
-		const ms = unit === "s" ? value * 1000 : value;
-		return `${new Date(ms).toISOString().replace("T", " ").slice(0, 16)}Z`;
+	function fmtEpoch(value: number | null | undefined, unit: 'ms' | 's'): string {
+		if (value == null) return '—';
+		const ms = unit === 's' ? value * 1000 : value;
+		return `${new Date(ms).toISOString().replace('T', ' ').slice(0, 16)}Z`;
 	}
 </script>
 
@@ -720,7 +720,7 @@
 				<p class="mut">Stats unavailable right now.</p>
 			{:else}
 				<div class="stats mono">
-					<span>{stats?.num_rows ?? "—"} rows</span>
+					<span>{stats?.num_rows ?? '—'} rows</span>
 					<span>{fmtBytes(stats?.total_bytes)}</span>
 					<span>{stats?.num_indices ?? 0} indices</span>
 					<!-- #78 the catalog's fixed file format (Lance columnar, storage 2.2) — never a silent guess. -->
@@ -737,9 +737,9 @@
 						<span
 							class="qual {quality.passed ? 'ok' : 'bad'}"
 							title="Validator dataQualityAssertions on the latest producing run (lineage)."
-							>quality {quality.passed ? "passed" : "blocked"}{quality.assertions
-								? ` · ${quality.assertions} check${quality.assertions === 1 ? "" : "s"}`
-								: ""}</span
+							>quality {quality.passed ? 'passed' : 'blocked'}{quality.assertions
+								? ` · ${quality.assertions} check${quality.assertions === 1 ? '' : 's'}`
+								: ''}</span
 						>
 					{:else}
 						<span class="qual none" title="No producing run has recorded dataQualityAssertions."
@@ -763,7 +763,7 @@
 							<tr>
 								<td class="mono">{f.name}</td>
 								<td class="mono">{typeName(f.type)}</td>
-								<td class="mono">{f.nullable ? "yes" : "no"}</td>
+								<td class="mono">{f.nullable ? 'yes' : 'no'}</td>
 								<td class="actions">
 									{#if renaming === f.name}
 										<input
@@ -771,7 +771,7 @@
 											bind:value={renameTo}
 											placeholder="new name"
 											aria-label="rename {f.name} to"
-											onkeydown={(e) => e.key === "Enter" && runRenameColumn()}
+											onkeydown={(e) => e.key === 'Enter' && runRenameColumn()}
 										/>
 										<button
 											class="btn ghost"
@@ -804,7 +804,7 @@
 											disabled={colBusy}
 											onclick={() => {
 												renaming = f.name;
-												renameTo = "";
+												renameTo = '';
 											}}>✎</button
 										>
 										<button
@@ -814,7 +814,7 @@
 											disabled={colBusy}
 											onclick={() => {
 												retyping = f.name;
-												retypeTo = "";
+												retypeTo = '';
 											}}>⇄</button
 										>
 										<button
@@ -872,7 +872,7 @@
 			></textarea>
 			<div class="ins-row">
 				<button class="btn" disabled={insertBusy || !insertJson.trim()} onclick={runInsert}>
-					{insertBusy ? "…" : "Insert"}
+					{insertBusy ? '…' : 'Insert'}
 				</button>
 				{#if insertMsg}<span class="ins-msg" class:okmsg={insertMsg.ok} class:error={!insertMsg.ok}
 						>{insertMsg.text}</span
@@ -923,7 +923,7 @@
 					{#each indexes as ix (ix.index_name)}
 						<span class="chip mono"
 							>{ix.index_name}<span class="mut">
-								· {(ix.columns ?? []).join(", ")}{ix.index_type ? ` · ${ix.index_type}` : ""}</span
+								· {(ix.columns ?? []).join(', ')}{ix.index_type ? ` · ${ix.index_type}` : ''}</span
 							>
 							<button
 								class="chip-x"
@@ -958,14 +958,14 @@
 						bind:value={ixDistance}
 						ariaLabel="Distance type"
 						options={[
-							{ value: "cosine", label: "cosine" },
-							{ value: "l2", label: "l2" },
-							{ value: "dot", label: "dot" },
+							{ value: 'cosine', label: 'cosine' },
+							{ value: 'l2', label: 'l2' },
+							{ value: 'dot', label: 'dot' },
 						]}
 					/>
 				{/if}
 				<button class="btn" type="submit" disabled={ixBusy || !ixColumn.trim()}>
-					{ixBusy ? "…" : "Build index"}
+					{ixBusy ? '…' : 'Build index'}
 				</button>
 			</form>
 			{#if ixError}<p class="error">{ixError}</p>{/if}
@@ -977,7 +977,7 @@
 				<p class="mut">No version history available.</p>
 			{:else}
 				<p class="mut">
-					{versions.length} version{versions.length === 1 ? "" : "s"} — most recent first, one Lance manifest
+					{versions.length} version{versions.length === 1 ? '' : 's'} — most recent first, one Lance manifest
 					per commit:
 				</p>
 				<table>
@@ -986,7 +986,7 @@
 						{#each versions.slice().reverse().slice(0, 10) as v (v.version)}
 							<tr>
 								<td class="mono">v{v.version}</td>
-								<td class="mono">{fmtEpoch(v.timestamp_millis, "ms")}</td>
+								<td class="mono">{fmtEpoch(v.timestamp_millis, 'ms')}</td>
 								<td class="mono">{fmtBytes(v.manifest_size)}</td>
 								<td class="act">
 									{#if restoreConfirm === v.version}
@@ -995,7 +995,7 @@
 											disabled={restoreBusy}
 											onclick={() => runRestore(v.version)}
 										>
-											{restoreBusy ? "…" : "confirm restore"}
+											{restoreBusy ? '…' : 'confirm restore'}
 										</button>
 										<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}>
 											cancel
@@ -1095,7 +1095,7 @@
 									disabled={refBusy}
 									onclick={() => {
 										movingTag = name;
-										moveTo = "";
+										moveTo = '';
 									}}>↪</button
 								>
 								<button
@@ -1122,7 +1122,7 @@
 						options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
 					/>
 					<button class="btn" disabled={tagBusy || !tagName.trim() || !tagVersion} onclick={runTag}>
-						{tagBusy ? "…" : "Tag version"}
+						{tagBusy ? '…' : 'Tag version'}
 					</button>
 					{#if tagError}<span class="error">{tagError}</span>{/if}
 				</div>
@@ -1242,16 +1242,16 @@
 				{#if gcPreview}
 					<p class="mut">
 						{gcPreview.eligible_versions.length} version{gcPreview.eligible_versions.length === 1
-							? ""
-							: "s"} reclaimable
+							? ''
+							: 's'} reclaimable
 						{#if gcPreview.eligible_versions.length}(v{gcPreview.eligible_versions.join(
-								", v",
+								', v',
 							)}){/if}
 						· {gcPreview.total_versions} total, current v{gcPreview.current_version}.
 						{#if Object.keys(gcPreview.protected_tags).length}
 							Protected by tags: {Object.entries(gcPreview.protected_tags)
 								.map(([t, v]) => `${t}→v${v}`)
-								.join(", ")}.
+								.join(', ')}.
 						{/if}
 					</p>
 					{#if gcPreview.eligible_versions.length}
@@ -1276,7 +1276,7 @@
 				<!-- #76 compact-now: merge small fragments (non-destructive), using the policy's target size. -->
 				<div class="row gc-compact">
 					<button class="btn ghost" disabled={compactBusy} onclick={runCompact}>
-						{compactBusy ? "compacting…" : "Compact now"}
+						{compactBusy ? 'compacting…' : 'Compact now'}
 					</button>
 					{#if compactResult}<span class="mut">{compactResult}</span>{/if}
 				</div>
@@ -1290,7 +1290,7 @@
 			<ReadersPanel dataset={table} />
 			<!-- #81 the relationship graph is heavy (SvelteFlow) — lazy-mount behind a toggle. -->
 			<button class="btn ghost graphtoggle" onclick={() => (showGraph = !showGraph)}>
-				{showGraph ? "Hide" : "Show"} authorization graph
+				{showGraph ? 'Hide' : 'Show'} authorization graph
 			</button>
 			{#if showGraph}<AccessGraph dataset={table} />{/if}
 		</section>
@@ -1466,8 +1466,8 @@
 		align-items: center;
 		gap: 6px;
 	}
-	.policy-edit input[type="number"],
-	.gc input[type="number"] {
+	.policy-edit input[type='number'],
+	.gc input[type='number'] {
 		width: 110px;
 		background: var(--panel-2);
 		border: 1px solid var(--line);

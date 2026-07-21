@@ -82,6 +82,8 @@
         "@rask/ui": "workspace:*",
         "@sveltejs/kit": "^2.67.0",
         "@tailwindcss/vite": "^4.3.1",
+        "@xyflow/svelte": "^1.0.0",
+        "apache-arrow": "^21.1.0",
         "mode-watcher": "^1.1.0",
         "svelte-sonner": "^1.1.1",
         "tailwindcss": "^4.3.1",

@@ -5,6 +5,7 @@
 	// that holds at least one table, with its tables linked into the detail view. Same stack-mode states
 	// as the tables page — governed without a session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data.
 	import { Boxes, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { base } from '$app/paths';
 	import { fetchTables } from './catalog';
 
 	const POLL_MS = 5000;
@@ -77,7 +78,7 @@
 				</div>
 				<ul class="list">
 					{#each members as t (t)}
-						<li><a class="row mono" href={`/tables/${encodeURIComponent(t)}`}>{t}</a></li>
+						<li><a class="row mono" href={`${base}/tables/${encodeURIComponent(t)}`}>{t}</a></li>
 					{/each}
 				</ul>
 			</section>

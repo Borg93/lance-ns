@@ -80,6 +80,10 @@
 		"./select": {
 			"types": "./dist/components/select/index.d.ts",
 			"svelte": "./dist/components/select/index.js"
+		},
+		"./motion": {
+			"types": "./dist/motion.d.ts",
+			"default": "./dist/motion.js"
 		}
 	},
 	"scripts": {

@@ -2,8 +2,9 @@
 	// `/tables` — the catalog table registry (#52): every table the catalog's own backend lists,
 	// linking into the detail view. Same stack-mode states as the models page: governed without a
 	// session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data or the honest empty state.
-	import { RefreshCw, ShieldAlert } from "@lucide/svelte";
-	import { fetchTables } from "./catalog";
+	import { base } from '$app/paths';
+	import { RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { fetchTables } from './catalog';
 
 	const POLL_MS = 5000;
 
@@ -58,7 +59,7 @@
 	{:else}
 		<ul class="list">
 			{#each tables as t (t)}
-				<li><a class="row mono" href={`/tables/${encodeURIComponent(t)}`}>{t}</a></li>
+				<li><a class="row mono" href={`${base}/tables/${encodeURIComponent(t)}`}>{t}</a></li>
 			{/each}
 		</ul>
 	{/if}

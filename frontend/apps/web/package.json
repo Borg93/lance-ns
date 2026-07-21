@@ -19,6 +19,7 @@
 	"dependencies": {
 		"@lance/ui": "workspace:*",
 		"@lucide/svelte": "^1.21.0",
+		"@rask/api": "workspace:*",
 		"@xyflow/svelte": "^1.0.0",
 		"apache-arrow": "^21.1.0",
 		"bits-ui": "^1.0.0",

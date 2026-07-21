@@ -44,6 +44,9 @@ export default defineConfig(
 			// typescript-eslint owns this; the base rule false-positives in TS projects.
 			'no-undef': 'off',
 			'@typescript-eslint/no-explicit-any': 'warn',
+			// `interface Locals extends AuthLocals {}` (each zone's app.d.ts augments App.Locals from the
+			// shared @rask/api seam) is the idiomatic SvelteKit pattern — allow a single-extends empty interface.
+			'@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
 			'@typescript-eslint/no-unused-vars': [
 				'error',
 				{

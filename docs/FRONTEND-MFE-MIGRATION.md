@@ -104,5 +104,16 @@ consumers onto the adopted system as each zone is built.
   0/0; build (svelte-package→dist) ✓; `@rask/ui` tests 13 pass incl. nav-config (4 domains + active-match);
   all 5 zones SSR-build with the full AppShell (render smoke); apps/web green (bits-ui@1.8 nested vs @rask/ui
   bits-ui@2.18); both linter pairs green.
-- [ ] P2 fold OIDC BFF + catalog/lineage/medallion clients into `@rask/api`.
+- [x] **P2 DONE** — folded the OIDC BFF into `@rask/api` (the cross-cutting auth seam, single-sourced like
+  the backend services). Moved apps/web's env-free `oidc-core` (PKCE + AES-256-GCM sealed cookie) →
+  `@rask/api/oidc` (server-only subpath; the client-safe `.` entry stays crypto-free) + its unit test →
+  in-package (retargeted bun:test→vitest). New `@rask/api/bff` = `makeOidcConfig(env)` + `makeSessionHandle`
+  (per-request session hydration + stale-drop) + `makeBackendProxy` (bearer-forward with the READ-only
+  service-cred fallback / confused-deputy guard) — env-free (config passed in). `@rask/api/parse` = the
+  valibot parse-don't-validate boundary. apps/web's `oidc-core.ts` is now a re-export shim of `@rask/api/oidc`
+  (its many importers stay green; one source of truth). Each zone's `hooks.server.ts` is 3 lines:
+  `makeSessionHandle(makeOidcConfig(env))` + `makeGatewayHandleFetch(...)`; `app.d.ts` = `interface Locals
+  extends AuthLocals`. VERIFIED: `@rask/api` tsgo clean; 22 in-package tests pass; zones check 10/10; apps/web
+  build+check+test(51) green via the shim; lint/fmt both pairs green. (Full typed catalog/lineage/medallion
+  clients grow in P3 as each zone moves its routes; the parse+proxy+client seam is in place.)
 - [ ] P3..P8 (build zones from apps/web routes, cross-zone nav, retire apps/web, chart+docs, global gate).

@@ -1,5 +1,10 @@
-// See https://svelte.dev/docs/kit/types#app
+// See https://svelte.dev/docs/kit/types#app.d.ts
+import type { AuthLocals } from '@rask/api/bff';
+
 declare global {
-	namespace App {}
+	namespace App {
+		interface Locals extends AuthLocals {}
+	}
 }
+
 export {};

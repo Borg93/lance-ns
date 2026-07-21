@@ -29,6 +29,7 @@
       "dependencies": {
         "@lance/ui": "workspace:*",
         "@lucide/svelte": "^1.21.0",
+        "@rask/api": "workspace:*",
         "@xyflow/svelte": "^1.0.0",
         "apache-arrow": "^21.1.0",
         "bits-ui": "^1.0.0",
@@ -171,6 +172,8 @@
         "valibot": "^1.4.1",
       },
       "devDependencies": {
+        "@sveltejs/kit": "^2.67.0",
+        "@types/node": "^22.0.0",
         "vitest": "^4.1.9",
       },
     },

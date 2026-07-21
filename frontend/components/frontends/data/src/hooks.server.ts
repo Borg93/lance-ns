@@ -1,10 +1,11 @@
-import type { HandleFetch } from '@sveltejs/kit';
 import { env } from '$env/dynamic/private';
 import { makeGatewayHandleFetch } from '@rask/api';
+import { makeOidcConfig, makeSessionHandle } from '@rask/api/bff';
 
-// Single-sourced SSR gateway rewrite (see @rask/api/gateway). Dev defaults to the
-// local gateway; the chart sets LANCE_GATEWAY_URL in-cluster. P2 folds the OIDC
-// session handle + FGA bearer-forwarding into the same @rask/api seam.
-export const handleFetch: HandleFetch = makeGatewayHandleFetch(
-	env.LANCE_GATEWAY_URL ?? 'http://localhost:8001',
-);
+// Per-request session hydration from the sealed OIDC cookie (single-sourced in @rask/api/bff); no-op when
+// OIDC is unconfigured (the zone runs auth-off). Login/callback routes + per-user proxies land in P3.
+export const handle = makeSessionHandle(makeOidcConfig(env));
+
+// SSR /api/* → the in-cluster gateway (single-sourced in @rask/api/gateway). The chart sets
+// LANCE_GATEWAY_URL in-cluster; dev defaults to the local gateway.
+export const handleFetch = makeGatewayHandleFetch(env.LANCE_GATEWAY_URL ?? 'http://localhost:8001');

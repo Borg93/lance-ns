@@ -4,12 +4,15 @@
  *
  * The pure pieces (PKCE, state, authorize-URL, token-request body, JWT-claims decode, session codec)
  * are unit-tested in `oidc-core.test.ts`; `discover` / `exchangeCode` take an injectable `fetch` so the
- * exchange is testable against a fake token endpoint too.
+ * exchange is testable against a fake token endpoint too. `node:crypto` is a builtin (server-only file, and
+ * bun supports it), so the sealed-session codec is unit-testable too.
  */
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 export const SESSION_COOKIE = "lance_session";
 export const VERIFIER_COOKIE = "oidc_verifier";
 export const STATE_COOKIE = "oidc_state";
+const SEALED_PREFIX = "v1."; // marks an AES-256-GCM sealed cookie vs the legacy/dev base64 form
 
 export type OidcConfig = {
 	issuer: string;
@@ -17,6 +20,8 @@ export type OidcConfig = {
 	clientSecret: string | null;
 	redirectUri: string;
 	scopes: string;
+	/** 32-byte AES key derived from `SESSION_SECRET`, or `null` in dev — the cookie is then base64 (unsealed). */
+	sessionKey: Buffer | null;
 };
 
 export type Session = {
@@ -104,14 +109,46 @@ export function sessionFromTokens(idToken: string, accessToken: string): Session
 	};
 }
 
-/** Serialize / parse the session for the httpOnly cookie (base64url JSON — see oidc.ts header on sealing). */
-export function encodeSession(session: Session): string {
-	return base64url(new TextEncoder().encode(JSON.stringify(session)));
+/** A 32-byte AES-256 key from the server `SESSION_SECRET` (SHA-256, so any secret length works). */
+export function deriveSessionKey(secret: string): Buffer {
+	return createHash("sha256").update(secret).digest();
 }
 
-export function decodeSession(raw: string): Session | null {
+/** Serialize the session into the httpOnly cookie. With a key: AES-256-GCM sealed (confidential + tamper-
+ * evident) as ``v1.base64url(iv[12]||tag[16]||ciphertext)``. Without a key (dev): base64url JSON, unsealed —
+ * documented demo-grade. */
+export function encodeSession(session: Session, key: Buffer | null = null): string {
+	const plain = new TextEncoder().encode(JSON.stringify(session));
+	if (!key) return base64url(plain);
+	const iv = randomBytes(12);
+	const cipher = createCipheriv("aes-256-gcm", key, iv);
+	const ct = Buffer.concat([cipher.update(Buffer.from(plain)), cipher.final()]);
+	return SEALED_PREFIX + base64url(Buffer.concat([iv, cipher.getAuthTag(), ct]));
+}
+
+/** Parse the session cookie. When a key is configured (production) ONLY a valid sealed cookie is accepted —
+ * an unsealed or tampered cookie returns ``null``, so a forged base64 cookie can't impersonate a user. In
+ * dev (no key) the legacy base64 form is read. Returns ``null`` on any malformed/invalid input. */
+export function decodeSession(raw: string, key: Buffer | null = null): Session | null {
 	try {
-		const obj = JSON.parse(base64urlDecode(raw)) as Session;
+		let json: string;
+		if (key) {
+			if (!raw.startsWith(SEALED_PREFIX)) return null; // prod: reject anything not sealed by us
+			const buf = Buffer.from(
+				raw.slice(SEALED_PREFIX.length).replace(/-/g, "+").replace(/_/g, "/"),
+				"base64",
+			);
+			const iv = buf.subarray(0, 12);
+			const tag = buf.subarray(12, 28);
+			const ct = buf.subarray(28);
+			const decipher = createDecipheriv("aes-256-gcm", key, iv);
+			decipher.setAuthTag(tag);
+			json = Buffer.concat([decipher.update(ct), decipher.final()]).toString("utf8");
+		} else {
+			if (raw.startsWith(SEALED_PREFIX)) return null; // sealed cookie but no key → can't read
+			json = base64urlDecode(raw);
+		}
+		const obj = JSON.parse(json) as Session;
 		if (!obj.sub || !obj.accessToken) return null;
 		return obj;
 	} catch {

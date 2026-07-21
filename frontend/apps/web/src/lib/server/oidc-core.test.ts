@@ -13,6 +13,7 @@ import {
 	buildAuthorizeUrl,
 	decodeJwtClaims,
 	decodeSession,
+	deriveSessionKey,
 	encodeSession,
 	exchangeCode,
 	isExpired,
@@ -28,6 +29,7 @@ const CFG: OidcConfig = {
 	clientSecret: null,
 	redirectUri: "https://app.example.com/auth/callback",
 	scopes: "openid profile email",
+	sessionKey: null,
 };
 
 /** A JWT with the given claims payload (header/sig are throwaway — we never verify the sig in the BFF). */
@@ -122,11 +124,40 @@ describe("JWT + session", () => {
 		expect(sessionFromTokens(jwtWith({ sub: "u3" }), "AT").name).toBe("u3");
 	});
 
-	test("encode/decode session round-trips; a tampered/empty cookie decodes to null", () => {
+	test("encode/decode session round-trips (dev base64); a tampered/empty cookie decodes to null", () => {
 		const s: Session = { sub: "u1", name: "Dee", email: null, accessToken: "AT", expiresAt: 0 };
 		expect(decodeSession(encodeSession(s))).toEqual(s);
 		expect(decodeSession("@@not-base64@@")).toBeNull();
 		expect(decodeSession(base64url(new TextEncoder().encode("{}")))).toBeNull(); // no sub/token
+	});
+
+	test("a session key SEALS the cookie (AES-256-GCM): round-trips, tamper → null, wrong key → null", () => {
+		const s: Session = { sub: "u1", name: "Dee", email: null, accessToken: "AT", expiresAt: 0 };
+		const key = deriveSessionKey("server-secret");
+		const sealed = encodeSession(s, key);
+		expect(sealed.startsWith("v1.")).toBe(true); // sealed form, not raw base64
+		expect(sealed).not.toContain("AT"); // the access token is NOT readable in the cookie
+		expect(decodeSession(sealed, key)).toEqual(s); // round-trip with the right key
+		expect(decodeSession(sealed, deriveSessionKey("other-secret"))).toBeNull(); // wrong key → GCM fails
+		expect(decodeSession(sealed.slice(0, -4) + "AAAA", key)).toBeNull(); // tampered ciphertext → null
+	});
+
+	test("with a key, an UNSEALED (forged base64) cookie is rejected — no impersonation", () => {
+		const s: Session = {
+			sub: "attacker",
+			name: "x",
+			email: null,
+			accessToken: "forged",
+			expiresAt: 0,
+		};
+		const key = deriveSessionKey("server-secret");
+		const forged = encodeSession(s, null); // plain base64, no key
+		expect(decodeSession(forged, key)).toBeNull(); // prod (key set) must not accept it
+	});
+
+	test("a sealed cookie is unreadable without the key (fail closed)", () => {
+		const s: Session = { sub: "u1", name: "Dee", email: null, accessToken: "AT", expiresAt: 0 };
+		expect(decodeSession(encodeSession(s, deriveSessionKey("k")), null)).toBeNull();
 	});
 
 	test("isExpired honors exp; exp=0 (no claim) is treated as live", () => {

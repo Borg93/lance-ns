@@ -32,7 +32,7 @@ export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	try {
 		const { token_endpoint } = await discover(cfg, fetch);
 		const session = await exchangeCode(cfg, token_endpoint, code, verifier, fetch);
-		cookies.set(SESSION_COOKIE, encodeSession(session), {
+		cookies.set(SESSION_COOKIE, encodeSession(session, cfg.sessionKey), {
 			path: "/",
 			httpOnly: true,
 			sameSite: "lax",

@@ -16,7 +16,7 @@
  */
 import { env } from "$env/dynamic/private";
 
-import type { OidcConfig } from "./oidc-core";
+import { deriveSessionKey, type OidcConfig } from "./oidc-core";
 
 export * from "./oidc-core";
 
@@ -32,5 +32,8 @@ export function oidcConfig(): OidcConfig | null {
 		clientSecret: env.OIDC_CLIENT_SECRET || null,
 		redirectUri,
 		scopes: env.OIDC_SCOPES || "openid profile email",
+		// SESSION_SECRET seals the session cookie (AES-256-GCM). Unset in dev → base64 (unsealed, documented);
+		// production sets it so a forged cookie can't impersonate a user.
+		sessionKey: env.SESSION_SECRET ? deriveSessionKey(env.SESSION_SECRET) : null,
 	};
 }

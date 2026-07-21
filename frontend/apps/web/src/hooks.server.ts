@@ -7,13 +7,14 @@ import type { Handle } from "@sveltejs/kit";
 import { SESSION_COOKIE, decodeSession, isExpired, oidcConfig } from "$lib/server/oidc";
 
 export const handle: Handle = async ({ event, resolve }) => {
-	const authEnabled = oidcConfig() !== null;
+	const cfg = oidcConfig();
+	const authEnabled = cfg !== null;
 	event.locals.authEnabled = authEnabled;
 	event.locals.session = null;
 
 	const raw = event.cookies.get(SESSION_COOKIE);
-	if (authEnabled && raw) {
-		const session = decodeSession(raw);
+	if (cfg && raw) {
+		const session = decodeSession(raw, cfg.sessionKey);
 		if (session && !isExpired(session, Math.floor(Date.now() / 1000))) {
 			event.locals.session = session;
 		} else {

@@ -36,4 +36,32 @@ describe('navMain', () => {
 		expect(tables.match('/data/tables/x')).toBe(true);
 		expect(tables.match('/data/namespaces')).toBe(false);
 	});
+
+	it('active-match: a root leaf (href == domain href) matches ONLY its exact path, not siblings', () => {
+		// Registry (=/models) and Graph (=/lineage) sit at their zone root; `seg` would keep them lit on
+		// every sub-route (e.g. Registry on /models/pipeline). They must match exactly so only one leaf
+		// highlights per route.
+		const registry = navMain()
+			.find((d) => d.title === 'Models')!
+			.items!.find((l) => l.title === 'Registry')!;
+		expect(registry.match('/models')).toBe(true);
+		expect(registry.match('/models/pipeline')).toBe(false);
+		expect(registry.match('/models/experiments')).toBe(false);
+
+		const graph = navMain()
+			.find((d) => d.title === 'Lineage')!
+			.items!.find((l) => l.title === 'Graph')!;
+		expect(graph.match('/lineage')).toBe(true);
+		expect(graph.match('/lineage/runs')).toBe(false);
+	});
+
+	it('active-match: tolerates a trailing slash on the zone root (base-path pathname)', () => {
+		// A zone served under a base path reports its root as `/models/` (trailing slash). The root leaf
+		// and its domain must still match, or nothing lights up on the landing.
+		const models = navMain().find((d) => d.title === 'Models')!;
+		const registry = models.items!.find((l) => l.title === 'Registry')!;
+		expect(models.match('/models/')).toBe(true);
+		expect(registry.match('/models/')).toBe(true);
+		expect(registry.match('/models/pipeline')).toBe(false);
+	});
 });

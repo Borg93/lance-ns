@@ -28,13 +28,21 @@ export type Project = { name: string; subtitle?: string };
 /** The footer profile identity — populated from the OIDC session (per-zone +layout). */
 export type NavUser = { name: string; email?: string; initials?: string };
 
+/** Drop a single trailing slash (except on root "/"). A zone served under a base path reports its ROOT
+ *  as `page.url.pathname === '/models/'` (trailing slash), which would fail an exact compare against
+ *  '/models'; normalizing here makes every matcher trailing-slash-robust. */
+const norm = (p: string) => (p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p);
 /** prefix-segment match: active when the path equals the href or is nested under it. */
-const seg = (href: string) => (p: string) => p === href || p.startsWith(href + '/');
+const seg = (href: string) => (p: string) => norm(p) === href || norm(p).startsWith(href + '/');
+/** exact match: active ONLY on this exact path. Used for a root leaf whose href equals its own
+ *  domain's href (e.g. Registry=/models, Graph=/lineage) — `seg` there would over-match every sibling
+ *  sub-route (/models/pipeline would light up Registry too), so those leaves match exactly. */
+const exact = (href: string) => (p: string) => norm(p) === href;
 /** domain match: active when the path is under any of the given prefixes. */
 const under =
 	(...prefixes: string[]) =>
 	(p: string) =>
-		prefixes.some((pre) => p === pre || p.startsWith(pre + '/'));
+		prefixes.some((pre) => norm(p) === pre || norm(p).startsWith(pre + '/'));
 
 /**
  * The lance micro-frontend zones (cohesion, low coupling). Each domain is a SEPARATE
@@ -63,7 +71,7 @@ export function navMain(): NavItem[] {
 			href: `${b}/lineage`,
 			match: under(`${b}/lineage`),
 			items: [
-				{ title: 'Graph', href: `${b}/lineage`, match: seg(`${b}/lineage`) },
+				{ title: 'Graph', href: `${b}/lineage`, match: exact(`${b}/lineage`) },
 				{ title: 'Runs', href: `${b}/lineage/runs`, match: seg(`${b}/lineage/runs`) },
 				{ title: 'Events', href: `${b}/lineage/events`, match: seg(`${b}/lineage/events`) },
 			],
@@ -74,7 +82,7 @@ export function navMain(): NavItem[] {
 			href: `${b}/models`,
 			match: under(`${b}/models`),
 			items: [
-				{ title: 'Registry', href: `${b}/models`, match: seg(`${b}/models`) },
+				{ title: 'Registry', href: `${b}/models`, match: exact(`${b}/models`) },
 				{
 					title: 'Experiments',
 					href: `${b}/models/experiments`,

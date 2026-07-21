@@ -5,9 +5,9 @@
 	// state, never the log. Collapsed by default and lazy: the read-audit is off by default, so most opens
 	// return an empty log — no reason to fire an owner-tier round-trip on every dataset click. Definitive
 	// outcomes (the log, 401/403) cache per dataset; transient failures (offline/5xx) retry on the next open.
-	import { ChevronRight, Eye } from "@lucide/svelte";
-	import { fetchReaders } from "./api";
-	import type { ReaderInfo } from "./types";
+	import { ChevronRight, Eye } from '@lucide/svelte';
+	import { fetchReaders } from './api';
+	import type { ReaderInfo } from './types';
 
 	let { dataset }: { dataset: string } = $props();
 
@@ -44,8 +44,8 @@
 			} else if (res.status === 401 || res.status === 403) {
 				const denied =
 					res.status === 401
-						? "Sign in to view the access log."
-						: "Owner access required to see who read this dataset.";
+						? 'Sign in to view the access log.'
+						: 'Owner access required to see who read this dataset.';
 				log = { for: current, readers: null, denied };
 			} else {
 				failedFor = current; // offline / 5xx: shown but not cached, so the next open retries
@@ -79,7 +79,7 @@
 							<span class="who mono">{r.reader}</span>
 							<span class="meta mono">
 								{r.reads}
-								{r.reads === 1 ? "read" : "reads"}{#if r.last_read}
+								{r.reads === 1 ? 'read' : 'reads'}{#if r.last_read}
 									· last {r.last_read.slice(0, 19)}{/if}
 							</span>
 						</li>

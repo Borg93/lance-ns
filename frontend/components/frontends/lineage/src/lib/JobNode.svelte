@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { Node, NodeProps } from "@xyflow/svelte";
+	import type { Node, NodeProps } from '@xyflow/svelte';
 
 	export type JobData = {
 		id: string;
@@ -9,20 +9,20 @@
 		failed: boolean;
 		selected: boolean;
 	};
-	export type JobNodeType = Node<JobData, "job">;
+	export type JobNodeType = Node<JobData, 'job'>;
 </script>
 
 <script lang="ts">
-	import { Handle, Position } from "@xyflow/svelte";
-	import { Cpu } from "@lucide/svelte";
-	import { pop } from "@lance/ui";
+	import { Handle, Position } from '@xyflow/svelte';
+	import { Cpu } from '@lucide/svelte';
+	import { pop } from '@rask/ui/motion';
 
 	let { data }: NodeProps<JobNodeType> = $props();
 
-	const failed = $derived(data.failed || /FAIL|ABORT/i.test(data.state ?? ""));
-	const done = $derived(data.state === "COMPLETE");
-	const ring = $derived(failed ? "var(--fail)" : done ? "var(--ok)" : "var(--amber)");
-	const stateKey = $derived(data.state ?? "");
+	const failed = $derived(data.failed || /FAIL|ABORT/i.test(data.state ?? ''));
+	const done = $derived(data.state === 'COMPLETE');
+	const ring = $derived(failed ? 'var(--fail)' : done ? 'var(--ok)' : 'var(--amber)');
+	const stateKey = $derived(data.state ?? '');
 </script>
 
 <div class="job-node" class:selected={data.selected} style:--ring={ring} {@attach pop(stateKey)}>
@@ -31,11 +31,11 @@
 	<div class="body">
 		<div class="name"><Cpu size={13} /> {data.id}</div>
 		<div class="meta">
-			{data.author ?? "—"}{#if data.state}
+			{data.author ?? '—'}{#if data.state}
 				· {data.state}{/if}
 		</div>
 		{#if data.outputs.length}
-			<div class="out mono">→ {data.outputs.join(", ")}</div>
+			<div class="out mono">→ {data.outputs.join(', ')}</div>
 		{/if}
 	</div>
 	<Handle type="source" position={Position.Right} />

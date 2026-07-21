@@ -7,7 +7,6 @@
 </script>
 
 <nav class="navbar">
-	<a href="/" class:active={!/^\/(audit|dlq)/.test(page.url.pathname)}>Lineage</a>
 	<a href="/audit" class:active={page.url.pathname === "/audit"}>Audit</a>
 	<a href="/dlq" class:active={page.url.pathname === "/dlq"}>DLQ</a>
 </nav>

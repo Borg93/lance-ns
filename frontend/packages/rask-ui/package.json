@@ -88,6 +88,14 @@
 		"./chip": {
 			"types": "./dist/components/chip/index.d.ts",
 			"svelte": "./dist/components/chip/index.js"
+		},
+		"./search-bar": {
+			"types": "./dist/components/search-bar/index.d.ts",
+			"svelte": "./dist/components/search-bar/index.js"
+		},
+		"./status-board": {
+			"types": "./dist/components/status-board/index.d.ts",
+			"svelte": "./dist/components/status-board/index.js"
 		}
 	},
 	"scripts": {

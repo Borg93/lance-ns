@@ -7,3 +7,5 @@ export * from './utils/index.js';
 export * from './components/select/index.js';
 export * from './motion.js';
 export * from './components/chip/index.js';
+export * from './components/search-bar/index.js';
+export * from './components/status-board/index.js';

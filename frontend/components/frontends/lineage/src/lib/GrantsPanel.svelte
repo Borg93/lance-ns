@@ -4,22 +4,22 @@
 	// catalog gates the enumeration on can_drop, so a non-owner sees the denial state, never the ACL.
 	// Collapsed by default: one owner-tier round-trip per dataset, with definitive outcomes (the ACL,
 	// 401/403/501) cached and transient failures (offline, 5xx) retried on the next open.
-	import { Select } from "@lance/ui";
-	import { ChevronRight, ShieldCheck } from "@lucide/svelte";
+	import { Select } from '@rask/ui/select';
+	import { ChevronRight, ShieldCheck } from '@lucide/svelte';
 	import {
 		type AccessList,
 		checkTableAccess,
 		fetchTableAccess,
 		grantTableAccess,
 		revokeTableAccess,
-	} from "./catalog";
+	} from './catalog';
 
 	let { dataset }: { dataset: string } = $props();
 
 	// #72 the base rungs an owner may hand out (owner/writer/reader/validator) — the model's directly
 	// assignable relations, least→most privilege. NOT the can_* actions the review row shows (those are
 	// derived); a grant/revoke writes/deletes a direct base-rung tuple, then the review is re-fetched.
-	const GRANTABLE = ["reader", "writer", "validator", "owner"];
+	const GRANTABLE = ['reader', 'writer', 'validator', 'owner'];
 
 	// Every piece of state is keyed by the dataset it belongs to (no cross-dataset bleed, audit
 	// 2026-07-16: a single un-keyed `loading` let one dataset's in-flight review block another's):
@@ -34,19 +34,19 @@
 
 	// #68 access-check simulator — probe an arbitrary (user, relation) against THIS dataset. Owner-gated
 	// server-side (the same can_drop bar as the review). Keyed by dataset so a verdict never bleeds across nav.
-	let simUser = $state("");
-	let simRelation = $state("");
+	let simUser = $state('');
+	let simRelation = $state('');
 	let simFor = $state<string | null>(null);
 	let simVerdict = $state<{ user: string; relation: string; allowed: boolean } | null>(null);
 	let simBusy = $state(false);
 	let simError = $state<string | null>(null);
 
 	// #72 manage-access form — grant/revoke a base rung to a subject. Keyed by dataset like the simulator.
-	let mgUser = $state("");
-	let mgRelation = $state("");
+	let mgUser = $state('');
+	let mgRelation = $state('');
 	let mgBusy = $state(false);
 	let mgFor = $state<string | null>(null);
-	let mgResult = $state<{ tone: "ok" | "fail"; text: string } | null>(null);
+	let mgResult = $state<{ tone: 'ok' | 'fail'; text: string } | null>(null);
 
 	const open = $derived(openedFor === dataset);
 	const shown = $derived(review?.for === dataset ? review : null);
@@ -72,10 +72,10 @@
 			} else if (res.status === 401 || res.status === 403 || res.status === 501) {
 				const denied =
 					res.status === 401
-						? "Sign in to review access."
+						? 'Sign in to review access.'
 						: res.status === 403
-							? "Owner access required to review who can reach this table."
-							: "This stack runs auth-off — there are no grants to review.";
+							? 'Owner access required to review who can reach this table.'
+							: 'This stack runs auth-off — there are no grants to review.';
 				review = { for: current, access: null, denied };
 			} else {
 				failedFor = current; // offline / 5xx: shown but not cached, so the next open retries
@@ -109,7 +109,7 @@
 				};
 				simFor = current;
 			} else if (res.status === 401 || res.status === 403) {
-				simError = "Simulating access needs the owner tier on this table.";
+				simError = 'Simulating access needs the owner tier on this table.';
 			} else {
 				simError = `Check failed (HTTP ${res.status}).`;
 			}
@@ -132,18 +132,18 @@
 			if (dataset !== current) return; // navigated away — drop the stale result
 			mgFor = current;
 			if (res.ok) {
-				const verb = grant ? "granted to" : "revoked from";
-				mgResult = { tone: "ok", text: `${mgRelation} ${verb} ${res.data.user}.` };
+				const verb = grant ? 'granted to' : 'revoked from';
+				mgResult = { tone: 'ok', text: `${mgRelation} ${verb} ${res.data.user}.` };
 				const refreshed = await fetchTableAccess(current);
 				if (dataset === current && refreshed.ok) {
 					review = { for: current, access: refreshed.data, denied: null };
 				}
 			} else if (res.status === 401 || res.status === 403) {
-				mgResult = { tone: "fail", text: "Managing access needs the owner tier on this table." };
+				mgResult = { tone: 'fail', text: 'Managing access needs the owner tier on this table.' };
 			} else if (res.status === 400 || res.status === 422) {
-				mgResult = { tone: "fail", text: `${mgRelation} is not a grantable rung here.` };
+				mgResult = { tone: 'fail', text: `${mgRelation} is not a grantable rung here.` };
 			} else {
-				mgResult = { tone: "fail", text: `Failed (HTTP ${res.status}).` };
+				mgResult = { tone: 'fail', text: `Failed (HTTP ${res.status}).` };
 			}
 		} finally {
 			mgBusy = false;
@@ -178,8 +178,8 @@
 								<td class="mono rel">{grant.relation}</td>
 								<td>
 									{#each grant.users as user (user)}
-										<span class="who mono" class:wild={user === "*"}
-											>{user === "*" ? "everyone (*)" : user}</span
+										<span class="who mono" class:wild={user === '*'}
+											>{user === '*' ? 'everyone (*)' : user}</span
 										>
 									{/each}
 								</td>
@@ -196,7 +196,7 @@
 						class="mono"
 						placeholder="user (e.g. alice), or role:… / team:…#member"
 						bind:value={simUser}
-						onkeydown={(e) => e.key === "Enter" && runCheck()}
+						onkeydown={(e) => e.key === 'Enter' && runCheck()}
 					/>
 					<Select
 						bind:value={simRelation}
@@ -209,7 +209,7 @@
 						disabled={simBusy || !simUser.trim() || !simRelation}
 						onclick={runCheck}
 					>
-						{simBusy ? "…" : "Check"}
+						{simBusy ? '…' : 'Check'}
 					</button>
 				</div>
 				{#if simError}
@@ -221,7 +221,7 @@
 						class:deny={!simVerdictShown.allowed}
 					>
 						<span class="mono">{simVerdictShown.user}</span>
-						{simVerdictShown.allowed ? "can" : "cannot"}
+						{simVerdictShown.allowed ? 'can' : 'cannot'}
 						<span class="mono">{simVerdictShown.relation}</span> on this table.
 					</p>
 				{/if}
@@ -246,7 +246,7 @@
 						disabled={mgBusy || !mgUser.trim() || !mgRelation}
 						onclick={() => runManage(true)}
 					>
-						{mgBusy ? "…" : "Grant"}
+						{mgBusy ? '…' : 'Grant'}
 					</button>
 					<button
 						class="btn ghost"
@@ -259,8 +259,8 @@
 				{#if mgResultShown}
 					<p
 						class="verdict"
-						class:allow={mgResultShown.tone === "ok"}
-						class:deny={mgResultShown.tone === "fail"}
+						class:allow={mgResultShown.tone === 'ok'}
+						class:deny={mgResultShown.tone === 'fail'}
 					>
 						{mgResultShown.text}
 					</p>

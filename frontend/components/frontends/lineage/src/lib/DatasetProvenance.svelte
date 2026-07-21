@@ -6,9 +6,9 @@
 	// selector fed by the dataset's producing-run versions so the user can step back through the history.
 	// All state is keyed by the dataset it belongs to (mirrors GrantsPanel) — no reset effect, no cross-
 	// dataset bleed: a stale fetch for a clicked-away dataset never lands (latest-wins by derivation).
-	import { ChevronRight, Table2, UserRound } from "@lucide/svelte";
-	import { fetchCreator, fetchSchema } from "./api";
-	import type { SchemaField } from "./types";
+	import { ChevronRight, Table2, UserRound } from '@lucide/svelte';
+	import { fetchCreator, fetchSchema } from './api';
+	import type { SchemaField } from './types';
 
 	// `versions` = the distinct Lance versions this dataset was written at (newest-first), from its runs.
 	let { dataset, versions }: { dataset: string; versions: string[] } = $props();

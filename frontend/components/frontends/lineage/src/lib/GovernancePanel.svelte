@@ -3,16 +3,16 @@
 	// description, with the last-writer attribution the backend stamps. Self-contained: fetches
 	// /datasets/{name}/governance itself (latest-wins on dataset switches) and refetches after writes,
 	// so LineageExplorer only mounts it with the selected dataset name.
-	import { Plus, X } from "@lucide/svelte";
-	import { addDatasetTag, fetchGovernance, removeDatasetTag, setDatasetDescription } from "./api";
-	import type { DatasetGovernance } from "./types";
+	import { Plus, X } from '@lucide/svelte';
+	import { addDatasetTag, fetchGovernance, removeDatasetTag, setDatasetDescription } from './api';
+	import type { DatasetGovernance } from './types';
 
 	let { dataset }: { dataset: string } = $props();
 
 	let governance = $state<DatasetGovernance | null>(null);
-	let newTag = $state("");
+	let newTag = $state('');
 	let editingDescription = $state(false);
-	let draftDescription = $state("");
+	let draftDescription = $state('');
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let unavailable = $state(false);
@@ -32,8 +32,8 @@
 	});
 
 	function fail(status: number, detail: string): void {
-		if (status === 401) error = "Sign in to edit governance metadata.";
-		else if (status === 403) error = "Denied: editing needs write access (can_write_data).";
+		if (status === 401) error = 'Sign in to edit governance metadata.';
+		else if (status === 403) error = 'Denied: editing needs write access (can_write_data).';
 		else error = detail;
 	}
 
@@ -46,7 +46,7 @@
 			const res = await addDatasetTag(dataset, tag);
 			if (res.ok) {
 				governance = res.data;
-				newTag = "";
+				newTag = '';
 			} else {
 				fail(res.status, res.detail);
 			}
@@ -86,7 +86,7 @@
 	}
 
 	function startEditing(): void {
-		draftDescription = governance?.description ?? "";
+		draftDescription = governance?.description ?? '';
 		editingDescription = true;
 	}
 </script>

@@ -3,9 +3,9 @@
 	// version it READ — the answer to "which feature versions produced this output". The producing-runs list
 	// shows each run's WROTE version; this adds the READ side. Lazy + per-run: the endpoint is deliberately
 	// kept off the hot /runs board (an N+1 READ-edge fetch), so it loads only when the user expands one run.
-	import { ArrowDownLeft, ChevronRight } from "@lucide/svelte";
-	import { fetchRunInputs } from "./api";
-	import type { RunInput } from "./types";
+	import { ArrowDownLeft, ChevronRight } from '@lucide/svelte';
+	import { fetchRunInputs } from './api';
+	import type { RunInput } from './types';
 
 	let { runId }: { runId: string } = $props();
 

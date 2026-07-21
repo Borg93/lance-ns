@@ -1,8 +1,8 @@
 <script lang="ts" module>
-	import MedallionNode, { type MedallionNodeType } from "$lib/MedallionNode.svelte";
-	import JobNode, { type JobNodeType } from "$lib/JobNode.svelte";
-	import ColumnNode, { type ColumnNodeType } from "$lib/ColumnNode.svelte";
-	import type { NodeTypes } from "@xyflow/svelte";
+	import MedallionNode, { type MedallionNodeType } from '$lib/MedallionNode.svelte';
+	import JobNode, { type JobNodeType } from '$lib/JobNode.svelte';
+	import ColumnNode, { type ColumnNodeType } from '$lib/ColumnNode.svelte';
+	import type { NodeTypes } from '@xyflow/svelte';
 
 	// svelte-flow rule 5: register node components ONCE at module scope, not inline.
 	const nodeTypes: NodeTypes = { medallion: MedallionNode, job: JobNode, column: ColumnNode };
@@ -10,7 +10,7 @@
 </script>
 
 <script lang="ts">
-	import { untrack } from "svelte";
+	import { untrack } from 'svelte';
 	import {
 		SvelteFlow,
 		Background,
@@ -18,29 +18,31 @@
 		Controls,
 		MiniMap,
 		Panel,
-	} from "@xyflow/svelte";
-	import "@xyflow/svelte/dist/style.css";
-	import { Tabs } from "bits-ui";
-	import { Radio, Boxes, Cpu, Columns3, ShieldAlert } from "@lucide/svelte";
-	import FlowAutoFit from "$lib/FlowAutoFit.svelte";
-	import GovernancePanel from "$lib/GovernancePanel.svelte";
-	import GrantsPanel from "$lib/GrantsPanel.svelte";
-	import DatasetProvenance from "$lib/DatasetProvenance.svelte";
-	import ReadersPanel from "$lib/ReadersPanel.svelte";
-	import RunInputs from "$lib/RunInputs.svelte";
-	import { LineageState } from "$lib/store.svelte";
-	import { SearchBar, StatusBoard, enter, stagger, countUp } from "@lance/ui";
-	import { fetchSearch } from "$lib/api";
-	import { LAYER, type ColumnEdge, type ColumnRef, type DemoDataset } from "$lib/types";
+	} from '@xyflow/svelte';
+	import '@xyflow/svelte/dist/style.css';
+	import { Tabs } from 'bits-ui';
+	import { Radio, Boxes, Cpu, Columns3, ShieldAlert } from '@lucide/svelte';
+	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
+	import GovernancePanel from '$lib/GovernancePanel.svelte';
+	import GrantsPanel from '$lib/GrantsPanel.svelte';
+	import DatasetProvenance from '$lib/DatasetProvenance.svelte';
+	import ReadersPanel from '$lib/ReadersPanel.svelte';
+	import RunInputs from '$lib/RunInputs.svelte';
+	import { LineageState } from '$lib/store.svelte';
+	import { SearchBar } from '@rask/ui/search-bar';
+	import { StatusBoard } from '@rask/ui/status-board';
+	import { enter, stagger, countUp } from '@rask/ui/motion';
+	import { fetchSearch } from '$lib/api';
+	import { LAYER, type ColumnEdge, type ColumnRef, type DemoDataset } from '$lib/types';
 
 	const store = new LineageState();
 
 	// Which graph plane is shown — Datasets / Jobs (like Marquez) + Columns (field-to-field, #24).
-	let graphView = $state<"datasets" | "jobs" | "columns">("datasets");
+	let graphView = $state<'datasets' | 'jobs' | 'columns'>('datasets');
 	// Browse (GOAL 4 A3): filter the governed /datasets catalog by name / namespace / tag, then click a
 	// row to focus that dataset — the browsable entry point that replaces the hardcoded name list.
-	let browseQuery = $state("");
-	let nsFilter = $state(""); // '' = all namespaces (fed by the governed /namespaces list)
+	let browseQuery = $state('');
+	let nsFilter = $state(''); // '' = all namespaces (fed by the governed /namespaces list)
 
 	// Derived primitives so the count-up labels only re-animate when the number actually changes.
 	const datasetCount = $derived(store.nodes.length);
@@ -74,7 +76,7 @@
 		const hits = serverHits && serverHits.q.toLowerCase() === q ? serverHits.names : null;
 		const localMatch = (d: (typeof scoped)[number]): boolean =>
 			d.name.toLowerCase().includes(q) ||
-			(d.namespace ?? "").toLowerCase().includes(q) ||
+			(d.namespace ?? '').toLowerCase().includes(q) ||
 			(d.tags ?? []).some((t) => t.toLowerCase().includes(q));
 		// The server hit UNIONs with the local match — it can only add rows the local filter misses
 		// (column / deep matches), never hide a locally-visible one that a capped/paged server answer
@@ -95,13 +97,13 @@
 		}[]
 	>([]);
 	// Re-fit the viewport only when the node-set or the view changes (not on every data poll).
-	const fitKey = $derived(graphView + "|" + nodes.map((n) => n.id).join(","));
+	const fitKey = $derived(graphView + '|' + nodes.map((n) => n.id).join(','));
 
 	// Current run-state per dataset: the latest run (by updated_at) that lists it as an output.
 	const runStateByDataset = $derived.by(() => {
 		const m: Record<string, string> = {};
 		const ordered = [...store.runs].sort((a, b) =>
-			(a.updated_at ?? "").localeCompare(b.updated_at ?? ""),
+			(a.updated_at ?? '').localeCompare(b.updated_at ?? ''),
 		);
 		for (const r of ordered) {
 			if (!r.state) continue;
@@ -118,7 +120,7 @@
 
 	// In Columns view, keep the selected dataset's field-to-field graph fresh on its own poll.
 	$effect(() => {
-		if (graphView !== "columns" || !store.selected) return;
+		if (graphView !== 'columns' || !store.selected) return;
 		const name = store.selected;
 		// Focusing a new dataset (or (re)entering Columns) drops any open field panel — a field from the
 		// previous root has no place in the new subgraph. This effect does NOT track selectedColumn (only
@@ -133,7 +135,7 @@
 	// Re-runs when the focused column changes (tracks store.selectedColumn); the neighbor fetches are
 	// latest-wins guarded in the store so a mid-flight switch can't apply a stale field's result.
 	$effect(() => {
-		if (graphView !== "columns" || !store.selectedColumn) return;
+		if (graphView !== 'columns' || !store.selectedColumn) return;
 		const { dataset, field } = store.selectedColumn;
 		store.loadColumnNeighbors(dataset, field);
 		const t = setInterval(() => store.loadColumnNeighbors(dataset, field), 2000);
@@ -147,7 +149,7 @@
 		// `nodes` here (the var we reassign below) would make this effect retrigger itself → infinite loop.
 		const prev = new Map(untrack(() => nodes).map((node) => [node.id, node]));
 
-		if (graphView === "columns") {
+		if (graphView === 'columns') {
 			// Columns plane (#24): the selected dataset's field-to-field lineage. Columns are laid out by
 			// their owning dataset's medallion layer (x) and stacked (y); edges carry the transformation kind.
 			const cg = store.columnGraph;
@@ -169,7 +171,7 @@
 				const id = `${c.dataset}::${c.field}`;
 				return {
 					id,
-					type: "column" as const,
+					type: 'column' as const,
 					position: prev.get(id)?.position ?? { x: 20 + layer * 230, y: 24 + row * 76 },
 					data: {
 						dataset: c.dataset,
@@ -189,15 +191,15 @@
 					source: s,
 					target: t,
 					animated: true,
-					type: "smoothstep",
-					label: e.transformation_subtype || e.transformation_type || "",
-					class: e.masking ? "masked-edge" : "",
+					type: 'smoothstep',
+					label: e.transformation_subtype || e.transformation_type || '',
+					class: e.masking ? 'masked-edge' : '',
 				};
 			});
 			return;
 		}
 
-		if (graphView === "jobs") {
+		if (graphView === 'jobs') {
 			// Jobs plane (like Marquez's job lineage): one node per job; an edge producing-job → consuming
 			// job whenever a job's input dataset was written by another job.
 			const jobs = new Map<
@@ -222,7 +224,7 @@
 				};
 				j.author = ev.author ?? j.author;
 				j.state = ev.event_type ?? j.state;
-				if (/FAIL|ABORT/i.test(ev.event_type ?? "")) j.failed = true;
+				if (/FAIL|ABORT/i.test(ev.event_type ?? '')) j.failed = true;
 				for (const o of ev.outputs ?? []) {
 					j.outputs.add(o);
 					if (!producedBy.has(o)) producedBy.set(o, new Set());
@@ -237,10 +239,10 @@
 				const row = (perCol[layer] = (perCol[layer] ?? 0) + 1) - 1;
 				return {
 					id: job,
-					type: "job" as const,
+					type: 'job' as const,
 					position: prev.get(job)?.position ?? { x: 30 + layer * 280, y: 40 + row * 130 },
 					data: {
-						id: job.replace(/^ray-jobs\//, ""),
+						id: job.replace(/^ray-jobs\//, ''),
 						author: j.author,
 						state: j.state,
 						outputs: [...j.outputs],
@@ -261,7 +263,7 @@
 							source: pj,
 							target: job,
 							animated: true,
-							type: "smoothstep",
+							type: 'smoothstep',
 						});
 					}
 				}
@@ -279,12 +281,12 @@
 			const versions = [
 				...new Set(runs.map((r) => r.dataset_version).filter(Boolean) as string[]),
 			].sort();
-			const failed = runs.some((r) => /FAIL|ABORT/i.test(r.event_type ?? ""));
+			const failed = runs.some((r) => /FAIL|ABORT/i.test(r.event_type ?? ''));
 			const layer = LAYER[n.id] ?? 4;
 			const row = (perLayer[layer] = (perLayer[layer] ?? 0) + 1) - 1;
 			return {
 				id: n.id,
-				type: "medallion" as const,
+				type: 'medallion' as const,
 				position: prev.get(n.id)?.position ?? { x: 30 + layer * 300, y: 150 + row * 130 },
 				data: {
 					id: n.id,
@@ -303,7 +305,7 @@
 			source: e.target,
 			target: e.source,
 			animated: true,
-			type: "smoothstep",
+			type: 'smoothstep',
 		}));
 	});
 
@@ -312,26 +314,26 @@
 		const id = ev.node?.id ?? ev.targetNode?.id ?? null;
 		if (!id) return;
 		// Datasets plane: a node id IS a dataset id → drive the dataset-scoped Details/upstream panels.
-		if (graphView === "datasets") {
+		if (graphView === 'datasets') {
 			store.selected = id;
 			return;
 		}
 		// Columns plane (#24): a node id is `${dataset}::${field}` → open the field-level provenance/impact
 		// panel WITHOUT touching store.selected (a column id would pollute the dataset panels). A Job-node id
 		// (Jobs view) is neither, so it selects nothing (bug hunt 2026-07-13).
-		if (graphView === "columns") {
-			const sep = id.indexOf("::");
+		if (graphView === 'columns') {
+			const sep = id.indexOf('::');
 			if (sep < 0) return;
 			store.selectedColumn = { dataset: id.slice(0, sep), field: id.slice(sep + 2) };
 		}
 	}
 
 	const stateColor = (s?: string | null) =>
-		/FAIL|ABORT/i.test(s ?? "") ? "var(--fail)" : s === "COMPLETE" ? "var(--ok)" : "var(--mut)";
+		/FAIL|ABORT/i.test(s ?? '') ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : 'var(--mut)';
 
 	function fmtBytes(n: number | null | undefined): string {
-		if (n == null) return "";
-		const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+		if (n == null) return '';
+		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
 		let v = n;
 		let u = 0;
 		while (v >= 1024 && u < units.length - 1) {
@@ -367,7 +369,7 @@
 	const focusedColumn = $derived(store.selectedColumn);
 	const colUpstream = $derived(store.columnUpstream?.related ?? []);
 	const colDownstream = $derived(store.columnDownstream?.related ?? []);
-	const shortDs = (ds: string) => ds.split("$").at(-1) ?? ds;
+	const shortDs = (ds: string) => ds.split('$').at(-1) ?? ds;
 
 	// The direct field-to-field edge between two columns (if the subgraph carries it), for its
 	// transformation label + masking cue. Transitive (multi-hop) neighbors have no direct edge → no label.
@@ -381,7 +383,7 @@
 		);
 	}
 	const transformLabel = (e: ColumnEdge | undefined) =>
-		e ? e.transformation_subtype || e.transformation_type || "derived" : "";
+		e ? e.transformation_subtype || e.transformation_type || 'derived' : '';
 
 	// Per-version column evolution, marking columns added since the previous Lance version.
 	function evolution(ds: DemoDataset) {
@@ -411,8 +413,8 @@
 			(raw OpenLineage), and the <b>Lance tables</b> below evolve.
 		</p>
 		<div class="status">
-			<Radio size={13} class={store.online ? "live-ic on" : "live-ic"} />
-			<span class="state-word" class:live={store.online}>{store.online ? "live" : "waiting"}</span>
+			<Radio size={13} class={store.online ? 'live-ic on' : 'live-ic'} />
+			<span class="state-word" class:live={store.online}>{store.online ? 'live' : 'waiting'}</span>
 			<span class="sep">·</span>
 			<span class="num mono" {@attach countUp(datasetCount)}>0</span> datasets
 			<span class="sep">·</span>
@@ -446,46 +448,46 @@
 					<div class="viewtoggle" role="tablist" aria-label="Graph view">
 						<button
 							class="vt"
-							class:on={graphView === "datasets"}
+							class:on={graphView === 'datasets'}
 							role="tab"
-							aria-selected={graphView === "datasets"}
-							onclick={() => (graphView = "datasets")}
+							aria-selected={graphView === 'datasets'}
+							onclick={() => (graphView = 'datasets')}
 						>
 							<Boxes size={13} /> Datasets
 						</button>
 						<button
 							class="vt"
-							class:on={graphView === "jobs"}
+							class:on={graphView === 'jobs'}
 							role="tab"
-							aria-selected={graphView === "jobs"}
-							onclick={() => (graphView = "jobs")}
+							aria-selected={graphView === 'jobs'}
+							onclick={() => (graphView = 'jobs')}
 						>
 							<Cpu size={13} /> Jobs
 						</button>
 						<button
 							class="vt"
-							class:on={graphView === "columns"}
+							class:on={graphView === 'columns'}
 							role="tab"
-							aria-selected={graphView === "columns"}
-							onclick={() => (graphView = "columns")}
+							aria-selected={graphView === 'columns'}
+							onclick={() => (graphView = 'columns')}
 						>
 							<Columns3 size={13} /> Columns
 						</button>
 					</div>
 				</Panel>
 			</SvelteFlow>
-			{#if graphView === "columns" && !store.selected}
+			{#if graphView === 'columns' && !store.selected}
 				<div class="empty">
 					<b>Pick a dataset first.</b><br />
 					Select a node in <b>Datasets</b>, then switch back to <b>Columns</b> to see its field-to-field
 					lineage.
 				</div>
-			{:else if graphView === "columns" && (store.columnGraph?.columns?.length ?? 0) === 0}
+			{:else if graphView === 'columns' && (store.columnGraph?.columns?.length ?? 0) === 0}
 				<div class="empty">
 					<b>No field lineage for {store.selected} yet.</b><br />
 					Run the cascade to populate the <code>columnLineage</code> facet.
 				</div>
-			{:else if graphView !== "columns" && store.nodes.length === 0}
+			{:else if graphView !== 'columns' && store.nodes.length === 0}
 				<div class="empty">
 					<b>Nothing yet — you trigger it.</b><br />
 					<code>uv run scripts/medallion_demo.py --step 1</code> → bronze appears.<br />
@@ -494,7 +496,7 @@
 				</div>
 			{/if}
 
-			{#if graphView === "columns" && focusedColumn}
+			{#if graphView === 'columns' && focusedColumn}
 				<!-- Field-level provenance/impact (#24): click a column node → its direct upstream (what it was
 				     derived from) and downstream (what derives from it), each with the transformation kind and,
 				     for a masking derivation, the same red PII cue the masked edges use. -->
@@ -516,7 +518,7 @@
 						<span class="rel-label">Provenance · derived from</span>
 						{#if colUpstream.length}
 							<ul class="fp-list">
-								{#each colUpstream as r (r.dataset + "::" + r.field)}
+								{#each colUpstream as r (r.dataset + '::' + r.field)}
 									{@const e = edgeFor(r, focusedColumn)}
 									<li class="fp-row" class:masked={e?.masking}>
 										<button
@@ -543,7 +545,7 @@
 						<span class="rel-label">Impact · feeds</span>
 						{#if colDownstream.length}
 							<ul class="fp-list">
-								{#each colDownstream as r (r.dataset + "::" + r.field)}
+								{#each colDownstream as r (r.dataset + '::' + r.field)}
 									{@const e = edgeFor(focusedColumn, r)}
 									<li class="fp-row" class:masked={e?.masking}>
 										<button
@@ -650,9 +652,9 @@
 									>{ev.event_type}</span
 								>
 								<span class="mono job">{ev.job}</span>
-								<span class="out mono">{(ev.outputs ?? []).join(", ")}</span>
+								<span class="out mono">{(ev.outputs ?? []).join(', ')}</span>
 							</summary>
-							<div class="who">{ev.author ?? "—"} · {ev.event_time}</div>
+							<div class="who">{ev.author ?? '—'} · {ev.event_time}</div>
 							<pre class="mono json">{JSON.stringify(ev.event, null, 2)}</pre>
 						</details>
 					{/each}
@@ -664,7 +666,7 @@
 						you may see every dataset it wrote.
 					</p>
 					<ul class="browse-list job-list">
-						{#each store.jobs as j (j.namespace + "/" + j.name)}
+						{#each store.jobs as j (j.namespace + '/' + j.name)}
 							<li>
 								<div class="job-row">
 									<span class="job-name mono">{j.name}</span>
@@ -711,7 +713,7 @@
 										{/each}
 									</div>
 								{/if}
-								<button class="rel-cols" onclick={() => (graphView = "columns")}>
+								<button class="rel-cols" onclick={() => (graphView = 'columns')}>
 									<Columns3 size={12} /> View column lineage
 								</button>
 							</div>
@@ -720,7 +722,7 @@
 						{#each selectedRuns as r (r.run_id)}
 							<div
 								class="run"
-								class:fail={/FAIL|ABORT/i.test(r.event_type ?? "")}
+								class:fail={/FAIL|ABORT/i.test(r.event_type ?? '')}
 								{@attach enter({ y: 6 })}
 							>
 								<div class="run-top">
@@ -728,7 +730,7 @@
 										{r.dataset_version ? `v${r.dataset_version}` : r.event_type}
 									</span>
 									{#if r.operation}<span class="op mono">{r.operation}</span>{/if}
-									<span class="who">{r.author ?? "—"}</span>
+									<span class="who">{r.author ?? '—'}</span>
 								</div>
 								<div class="who">{r.event_time}</div>
 								{#if r.row_count != null || r.size_bytes != null}
@@ -746,9 +748,9 @@
 											class:pass={r.quality_passed}
 											class:block={!r.quality_passed}
 										>
-											quality {r.quality_passed ? "passed" : "blocked"}{r.quality_assertions?.length
-												? ` · ${r.quality_assertions.length} check${r.quality_assertions.length === 1 ? "" : "s"}`
-												: ""}
+											quality {r.quality_passed ? 'passed' : 'blocked'}{r.quality_assertions?.length
+												? ` · ${r.quality_assertions.length} check${r.quality_assertions.length === 1 ? '' : 's'}`
+												: ''}
 										</span>
 									</div>
 								{/if}
@@ -981,7 +983,7 @@
 	:global(.tab:hover) {
 		color: var(--ink);
 	}
-	:global(.tab[data-state="active"]) {
+	:global(.tab[data-state='active']) {
 		color: var(--ink);
 		box-shadow: inset 0 -2px 0 var(--accent);
 	}

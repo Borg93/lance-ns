@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { Node, NodeProps } from "@xyflow/svelte";
+	import type { Node, NodeProps } from '@xyflow/svelte';
 
 	export type ColumnData = {
 		dataset: string;
@@ -9,17 +9,17 @@
 		masked: boolean;
 		isRoot: boolean;
 	};
-	export type ColumnNodeType = Node<ColumnData, "column">;
+	export type ColumnNodeType = Node<ColumnData, 'column'>;
 
 	// Same medallion palette as the dataset plane, so a column reads as belonging to its layer.
-	const COLORS = ["#ff9457", "#cd7f32", "#9fb6cf", "#ffc14d", "#8aa0bd"];
+	const COLORS = ['#ff9457', '#cd7f32', '#9fb6cf', '#ffc14d', '#8aa0bd'];
 	// A column's short dataset label (drop the namespace$ prefix that the table id carries).
-	const shortDs = (ds: string) => ds.split("$").at(-1) ?? ds;
+	const shortDs = (ds: string) => ds.split('$').at(-1) ?? ds;
 </script>
 
 <script lang="ts">
-	import { Handle, Position } from "@xyflow/svelte";
-	import { Columns3, ShieldAlert } from "@lucide/svelte";
+	import { Handle, Position } from '@xyflow/svelte';
+	import { Columns3, ShieldAlert } from '@lucide/svelte';
 
 	let { data }: NodeProps<ColumnNodeType> = $props();
 	const color = $derived(COLORS[data.layer] ?? COLORS[4]);

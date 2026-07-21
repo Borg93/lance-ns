@@ -10,7 +10,7 @@ import {
 	fetchNamespaces,
 	fetchProducers,
 	fetchRuns,
-} from "./api";
+} from './api';
 import {
 	KNOWN,
 	type ColumnGraph,
@@ -23,7 +23,7 @@ import {
 	type GraphNode,
 	type ProducerInfo,
 	type RunStatus,
-} from "./types";
+} from './types';
 
 /** Concurrency cap for the per-dataset fan-outs — the catalog can list up to 500 datasets, and an
  * unbounded Promise.all would fire them ALL at once every 2s tick (and the browser's per-host
@@ -50,7 +50,7 @@ export class LineageState {
 	runs = $state<RunStatus[]>([]);
 	jobs = $state<JobSummary[]>([]);
 	namespaceList = $state<string[]>([]);
-	lastUpdated = $state("");
+	lastUpdated = $state('');
 	online = $state(false);
 	selected = $state<string | null>(null);
 	columnGraph = $state<ColumnGraph | null>(null);
@@ -167,8 +167,10 @@ export class LineageState {
 				this.producers = producers;
 				this.nodes = [...nodeMap.values()];
 				this.edges = [...edgeSet].map((key) => {
-					const [source, target] = key.split("|");
-					return { source, target, kind: "derived_from" };
+					// key is `${source}|${target}` (always two parts); `?? ''` satisfies
+					// noUncheckedIndexedAccess (the zone's tsconfig) — the empty fallback is unreachable.
+					const [source = '', target = ''] = key.split('|');
+					return { source, target, kind: 'derived_from' };
 				});
 			}
 

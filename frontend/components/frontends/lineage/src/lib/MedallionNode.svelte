@@ -1,5 +1,5 @@
 <script lang="ts" module>
-	import type { Node, NodeProps } from "@xyflow/svelte";
+	import type { Node, NodeProps } from '@xyflow/svelte';
 
 	export type MedallionData = {
 		id: string;
@@ -11,15 +11,15 @@
 		selected: boolean;
 		runState?: string | null;
 	};
-	export type MedallionNodeType = Node<MedallionData, "medallion">;
+	export type MedallionNodeType = Node<MedallionData, 'medallion'>;
 
-	const COLORS = ["#ff9457", "#cd7f32", "#9fb6cf", "#ffc14d", "#8aa0bd"];
+	const COLORS = ['#ff9457', '#cd7f32', '#9fb6cf', '#ffc14d', '#8aa0bd'];
 </script>
 
 <script lang="ts">
-	import { Handle, Position } from "@xyflow/svelte";
-	import { Boxes, Database, Layers, Gem } from "@lucide/svelte";
-	import { pulse, pop } from "@lance/ui";
+	import { Handle, Position } from '@xyflow/svelte';
+	import { Boxes, Database, Layers, Gem } from '@lucide/svelte';
+	import { pulse, pop } from '@rask/ui/motion';
 
 	let { data }: NodeProps<MedallionNodeType> = $props();
 
@@ -29,12 +29,12 @@
 	const color = $derived(COLORS[data.layer] ?? COLORS[4]);
 	// Derived *primitives* so the continuous pulse only re-inits when the value actually flips,
 	// not on every 2s poll (which reassigns `data`).
-	const running = $derived(/START|RUNNING/i.test(data.runState ?? ""));
-	const done = $derived(data.runState === "COMPLETE");
-	const failedRun = $derived(/FAIL|ABORT/i.test(data.runState ?? ""));
-	const stateKey = $derived(data.runState ?? "");
+	const running = $derived(/START|RUNNING/i.test(data.runState ?? ''));
+	const done = $derived(data.runState === 'COMPLETE');
+	const failedRun = $derived(/FAIL|ABORT/i.test(data.runState ?? ''));
+	const stateKey = $derived(data.runState ?? '');
 	const ring = $derived(
-		failedRun ? "var(--fail)" : done ? "var(--ok)" : running ? "var(--amber)" : color,
+		failedRun ? 'var(--fail)' : done ? 'var(--ok)' : running ? 'var(--amber)' : color,
 	);
 </script>
 
@@ -44,13 +44,13 @@
 	style:--accent={color}
 	style:--ring={ring}
 	{@attach pop(stateKey)}
-	{@attach pulse(running, "255, 193, 77")}
+	{@attach pulse(running, '255, 193, 77')}
 >
 	<Handle type="target" position={Position.Left} />
 	<div class="bar"></div>
 	<div class="body">
 		<div class="name"><LayerIcon size={13} {color} /> {data.id}</div>
-		<div class="uri">{data.source_uri ?? "(pending)"}</div>
+		<div class="uri">{data.source_uri ?? '(pending)'}</div>
 		<div class="chips">
 			{#each data.versions as v (v)}
 				<span class="chip ok">v{v}</span>

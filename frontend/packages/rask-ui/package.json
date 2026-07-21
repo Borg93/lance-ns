@@ -84,6 +84,10 @@
 		"./motion": {
 			"types": "./dist/motion.d.ts",
 			"default": "./dist/motion.js"
+		},
+		"./chip": {
+			"types": "./dist/components/chip/index.d.ts",
+			"svelte": "./dist/components/chip/index.js"
 		}
 	},
 	"scripts": {

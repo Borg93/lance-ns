@@ -3,27 +3,27 @@
 	// run (/train) from the UI. Both are admin-gated by lance-ray (can_administer on the project); the BFF
 	// forwards ONLY the signed-in user's bearer, so an anonymous visitor sees the sign-in banner and a
 	// non-admin the denial banner — never a silent no-op. The service-to-service app-token path is unchanged.
-	import { GitBranch, Play, ShieldAlert } from "@lucide/svelte";
-	import { triggerProduce, triggerTrain } from "./medallion";
+	import { GitBranch, Play, ShieldAlert } from '@lucide/svelte';
+	import { triggerProduce, triggerTrain } from './medallion';
 
 	let busy = $state(false);
-	let banner = $state<{ tone: "ok" | "fail"; text: string } | null>(null);
-	let train = $state({ model: "", features: "" });
+	let banner = $state<{ tone: 'ok' | 'fail'; text: string } | null>(null);
+	let train = $state({ model: '', features: '' });
 
 	function fail(status: number, detail: string): void {
 		if (status === 401)
 			banner = {
-				tone: "fail",
-				text: "Sign in — triggering the pipeline is a per-user admin action.",
+				tone: 'fail',
+				text: 'Sign in — triggering the pipeline is a per-user admin action.',
 			};
 		else if (status === 403)
 			banner = {
-				tone: "fail",
-				text: "Denied: firing the pipeline needs the project-admin rung (can_administer).",
+				tone: 'fail',
+				text: 'Denied: firing the pipeline needs the project-admin rung (can_administer).',
 			};
 		else if (status === 409)
-			banner = { tone: "fail", text: "Train head not configured on this stack (needs Ray + S3)." };
-		else banner = { tone: "fail", text: detail };
+			banner = { tone: 'fail', text: 'Train head not configured on this stack (needs Ray + S3).' };
+		else banner = { tone: 'fail', text: detail };
 	}
 
 	async function produce(): Promise<void> {
@@ -33,7 +33,7 @@
 		try {
 			const res = await triggerProduce();
 			if (res.ok)
-				banner = { tone: "ok", text: `Cascade fired — run token ${res.data.token ?? "(none)"}.` };
+				banner = { tone: 'ok', text: `Cascade fired — run token ${res.data.token ?? '(none)'}.` };
 			else fail(res.status, res.detail);
 		} finally {
 			busy = false;
@@ -54,10 +54,10 @@
 			const res = await triggerTrain(train.model.trim(), features);
 			if (res.ok) {
 				banner = {
-					tone: "ok",
-					text: `Training requested for ${res.data.model ?? train.model} — token ${res.data.token ?? "(none)"}.`,
+					tone: 'ok',
+					text: `Training requested for ${res.data.model ?? train.model} — token ${res.data.token ?? '(none)'}.`,
 				};
-				train = { model: "", features: "" };
+				train = { model: '', features: '' };
 			} else fail(res.status, res.detail);
 		} finally {
 			busy = false;
@@ -73,7 +73,7 @@
 	</header>
 
 	{#if banner}
-		<div class="banner" class:ok={banner.tone === "ok"} class:fail={banner.tone === "fail"}>
+		<div class="banner" class:ok={banner.tone === 'ok'} class:fail={banner.tone === 'fail'}>
 			{banner.text}
 		</div>
 	{/if}

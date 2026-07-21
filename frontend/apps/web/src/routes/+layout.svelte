@@ -7,12 +7,7 @@
 </script>
 
 <nav class="navbar">
-	<a href="/" class:active={!/^\/(models|experiments|pipeline|audit|dlq)/.test(page.url.pathname)}
-		>Lineage</a
-	>
-	<a href="/models" class:active={page.url.pathname === "/models"}>Models</a>
-	<a href="/pipeline" class:active={page.url.pathname === "/pipeline"}>Pipeline</a>
-	<a href="/experiments" class:active={page.url.pathname === "/experiments"}>Experiments</a>
+	<a href="/" class:active={!/^\/(audit|dlq)/.test(page.url.pathname)}>Lineage</a>
 	<a href="/audit" class:active={page.url.pathname === "/audit"}>Audit</a>
 	<a href="/dlq" class:active={page.url.pathname === "/dlq"}>DLQ</a>
 </nav>

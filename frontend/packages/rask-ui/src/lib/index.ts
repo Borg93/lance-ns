@@ -6,3 +6,4 @@ export * from './components/sort-header/index.js';
 export * from './utils/index.js';
 export * from './components/select/index.js';
 export * from './motion.js';
+export * from './components/chip/index.js';

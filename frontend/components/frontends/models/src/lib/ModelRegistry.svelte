@@ -3,15 +3,15 @@
 	// and blessed versions, a per-model metrics comparison, and the candidate→blessed promote action.
 	// Data comes through the /capi BFF (catalog is OIDC-only — see routes/capi/[...path]/+server.ts):
 	// signed-out on a governed stack ⇒ 401 ⇒ the sign-in state below, never a broken table.
-	import { Chip } from "@lance/ui";
-	import { Award, RefreshCw, ShieldAlert } from "@lucide/svelte";
+	import { Chip } from '@rask/ui/chip';
+	import { Award, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import {
 		fetchModel,
 		fetchModels,
 		type ModelDescribe,
 		type ModelSummary,
 		promoteModel,
-	} from "./catalog";
+	} from './catalog';
 
 	const POLL_MS = 5000;
 
@@ -20,7 +20,7 @@
 	let selected = $state<string | null>(null);
 	let detail = $state<ModelDescribe | null>(null);
 	let promoting = $state(false);
-	let banner = $state<{ tone: "ok" | "fail"; text: string } | null>(null);
+	let banner = $state<{ tone: 'ok' | 'fail'; text: string } | null>(null);
 	let polling = false;
 
 	// 401 before ANY successful load = governed stack without a session; a poll-tick blip after a
@@ -76,16 +76,16 @@
 		try {
 			const res = await promoteModel(model, version);
 			if (res.ok) {
-				banner = { tone: "ok", text: `${model} v${res.data.blessed_version} is now blessed` };
+				banner = { tone: 'ok', text: `${model} v${res.data.blessed_version} is now blessed` };
 			} else if (res.status === 401) {
-				banner = { tone: "fail", text: "Sign in to promote — promotion is a per-user action." };
+				banner = { tone: 'fail', text: 'Sign in to promote — promotion is a per-user action.' };
 			} else if (res.status === 403) {
 				banner = {
-					tone: "fail",
-					text: "Denied: promotion needs the validator rung (can_promote).",
+					tone: 'fail',
+					text: 'Denied: promotion needs the validator rung (can_promote).',
 				};
 			} else {
-				banner = { tone: "fail", text: res.detail };
+				banner = { tone: 'fail', text: res.detail };
 			}
 			await Promise.all([
 				fetchModels().then((r) => {
@@ -105,9 +105,9 @@
 	}
 
 	function fmt(value: unknown): string {
-		if (typeof value === "number")
+		if (typeof value === 'number')
 			return Number.isInteger(value) ? String(value) : value.toFixed(4);
-		return value == null ? "—" : String(value);
+		return value == null ? '—' : String(value);
 	}
 </script>
 
@@ -118,7 +118,7 @@
 	</header>
 
 	{#if banner}
-		<div class="banner" class:ok={banner.tone === "ok"} class:fail={banner.tone === "fail"}>
+		<div class="banner" class:ok={banner.tone === 'ok'} class:fail={banner.tone === 'fail'}>
 			{banner.text}
 		</div>
 	{/if}
@@ -150,8 +150,8 @@
 					{@const blessed = m.blessed_version ?? null}
 					<tr class:active={selected === m.model} onclick={() => select(m.model)}>
 						<td class="mono name">{m.model}</td>
-						<td class="mono">{latest === null ? "—" : `v${latest}`}</td>
-						<td class="mono">{blessed === null ? "—" : `v${blessed}`}</td>
+						<td class="mono">{latest === null ? '—' : `v${latest}`}</td>
+						<td class="mono">{blessed === null ? '—' : `v${blessed}`}</td>
 						<td>
 							{#if blessed !== null && blessed === latest}
 								<Chip label="blessed" tone="accent" />
@@ -196,7 +196,7 @@
 													<th
 														>blessed {detail.blessed_version
 															? `v${detail.blessed_version}`
-															: "—"}</th
+															: '—'}</th
 													>
 												</tr>
 											</thead>

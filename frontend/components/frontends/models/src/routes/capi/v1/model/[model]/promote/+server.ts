@@ -1,8 +1,8 @@
-import { env } from "$env/dynamic/private";
-import { json } from "@sveltejs/kit";
-import type { RequestHandler } from "./$types";
+import { env } from '$env/dynamic/private';
+import { json } from '@sveltejs/kit';
+import type { RequestHandler } from './$types';
 
-const CATALOG_API = env.CATALOG_API ?? "http://localhost:2333";
+const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
 
 // The one catalog write the UI performs, deliberately its own narrow route instead of a POST on the
 // generic /capi proxy: a promote carries only the signed-in user's bearer — never any service
@@ -15,24 +15,24 @@ export const POST: RequestHandler = async ({ params, request, fetch, locals }) =
 	// governed kind stack whose Dex is not browser-reachable) the request goes through unauthenticated
 	// and the catalog decides — open stack: accepted; governed stack: its own 401.
 	if (locals.authEnabled && !locals.session) {
-		return json({ detail: "sign in to promote a model" }, { status: 401 });
+		return json({ detail: 'sign in to promote a model' }, { status: 401 });
 	}
 	const headers: Record<string, string> = {
-		"content-type": request.headers.get("content-type") ?? "application/json",
+		'content-type': request.headers.get('content-type') ?? 'application/json',
 	};
 	if (locals.session) {
-		headers["authorization"] = `Bearer ${locals.session.accessToken}`;
+		headers['authorization'] = `Bearer ${locals.session.accessToken}`;
 	}
 	const target = `${CATALOG_API}/v1/model/${encodeURIComponent(params.model)}/promote`;
 	try {
 		const upstream = await fetch(target, {
-			method: "POST",
+			method: 'POST',
 			headers,
 			body: await request.text(),
 		});
 		return new Response(upstream.body, {
 			status: upstream.status,
-			headers: { "content-type": upstream.headers.get("content-type") ?? "application/json" },
+			headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/json' },
 		});
 	} catch (err) {
 		console.error(`capi proxy upstream failure: ${String(err)}`);

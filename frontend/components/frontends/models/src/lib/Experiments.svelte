@@ -5,8 +5,8 @@
 	// exact PromQL queries server-side against GreptimeDB's Prometheus endpoint — no credential ever
 	// reaches the browser. Governed without a session → 401 (sign-in state); no observability → 501
 	// (unavailable state); auth-off dev → open data. Each renders its honest state below.
-	import { BarChart3, ExternalLink, RefreshCw, ShieldAlert } from "@lucide/svelte";
-	import { requestJSON } from "./http";
+	import { BarChart3, ExternalLink, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { requestJSON } from './http';
 
 	const POLL_MS = 5000;
 
@@ -24,7 +24,7 @@
 
 	async function load(): Promise<void> {
 		const seq = ++inflight;
-		const res = await requestJSON<Dashboard>("/api", "experiments");
+		const res = await requestJSON<Dashboard>('/api', 'experiments');
 		if (seq !== inflight) return; // a newer poll superseded this one
 		settled = true;
 		if (res.ok) {

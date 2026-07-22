@@ -13,6 +13,34 @@ import {
 
 type Env = Record<string, string | undefined>;
 
+/** The identity the shared AppShell's nav-user renders — structurally the `@rask/ui` shell's `NavUser`
+ *  (name/email/initials), produced here (the data seam) and consumed there (the view), no cross-package dep. */
+export interface SessionUser {
+	name: string;
+	email?: string;
+	initials?: string;
+}
+
+/** Up-to-two-letter initials for the avatar fallback: first letter of the first two words, else the first
+ *  two characters — always uppercased. */
+function initialsOf(name: string): string {
+	const words = name.trim().split(/\s+/).filter(Boolean);
+	const letters =
+		words.length >= 2 ? words[0]![0]! + words[1]![0]! : (words[0] ?? name).slice(0, 2);
+	return letters.toUpperCase();
+}
+
+/** Project the OIDC session onto the shell identity, or `null` when signed out. Single-sourced so every
+ *  zone's `+layout.server.ts` derives the same `user` — the "auth is identical in every MFE" seam. */
+export function sessionToUser(session: Session | null): SessionUser | null {
+	if (!session) return null;
+	const name = session.name || session.email || session.sub;
+	const user: SessionUser = { name, initials: initialsOf(name) };
+	// exactOptionalPropertyTypes: only set `email` when present (never assign an explicit undefined).
+	if (session.email) user.email = session.email;
+	return user;
+}
+
 /** The auth fields the shared handle/proxy read on `event.locals`. Each zone's `app.d.ts` declares
  *  `interface Locals extends AuthLocals {}` so its RequestEvent carries them. */
 export interface AuthLocals {

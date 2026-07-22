@@ -12,10 +12,12 @@
 		pathname = '',
 		project,
 		user,
+		authEnabled = false,
 	}: {
 		pathname?: string;
 		project?: Project;
-		user?: NavUserData;
+		user?: NavUserData | null;
+		authEnabled?: boolean;
 	} = $props();
 </script>
 
@@ -27,7 +29,7 @@
 		<NavMain {pathname} />
 	</Sidebar.Content>
 	<Sidebar.Footer>
-		<NavUser {user} />
+		<NavUser {user} {authEnabled} {pathname} />
 	</Sidebar.Footer>
 	<Sidebar.Rail />
 </Sidebar.Root>

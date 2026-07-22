@@ -38,11 +38,14 @@
 		pathname = '',
 		project = { name: 'Default', subtitle: 'Project' },
 		user = { name: 'rask', email: 'local', initials: 'RA' },
+		authEnabled = false,
 		children,
 	}: {
 		pathname?: string;
 		project?: Project;
-		user?: NavUser;
+		// `null` = auth-on but signed out (nav-user shows "Sign in"); the default identity is the auth-off local placeholder.
+		user?: NavUser | null;
+		authEnabled?: boolean;
 		children: Snippet;
 	} = $props();
 
@@ -61,7 +64,7 @@
 </script>
 
 <Sidebar.Provider class="h-svh overflow-hidden">
-	<AppSidebar {pathname} project={sidebarProject} {user} />
+	<AppSidebar {pathname} project={sidebarProject} {user} {authEnabled} />
 	<Sidebar.Inset class="flex min-w-0 flex-col overflow-hidden">
 		<!-- Integrated top bar (sidebar-07): no border, h-16 → h-12 when the sidebar is
 		     icon-collapsed. Trigger + breadcrumb; theme/profile live in the footer. -->

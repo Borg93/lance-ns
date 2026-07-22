@@ -299,7 +299,12 @@ spec:
             # RunEvent 401'd under auth and ALL training provenance was lost (live 2026-07-13). Only the
             # trainer is listed: the allowlist is what stops an app-token holder speaking as a human, and
             # its outputs are still FGA-checked as `service-trainer`, so D5's rung still bounds it.
-            - { name: LINEAGE_SERVICE_SUBJECTS, value: "{{ .Values.medallion.train.trainerIdentity }},{{ .Values.web.serviceIdentity }}" }
+            # The service subjects allowed to speak app-to-app to lineage: the trainer, the (retiring) web
+            # pod, and the P5 micro-frontend zones (frontend.serviceIdentity) — the zones read lineage as a
+            # SERVICE on the no-login governed path, so their identity MUST be allowlisted or every zone's
+            # read fails closed (403). web + frontend default to the same subject; listed explicitly so the
+            # web retirement (dropping web.serviceIdentity) leaves the zones' path intact.
+            - { name: LINEAGE_SERVICE_SUBJECTS, value: "{{ .Values.medallion.train.trainerIdentity }},{{ .Values.web.serviceIdentity }},{{ .Values.frontend.serviceIdentity }}" }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}

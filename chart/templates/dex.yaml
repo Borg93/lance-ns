@@ -41,6 +41,11 @@ data:
           # demo/ingress that still uses the bundled Dex.
           - {{ .Values.web.oidc.publicOrigin | trimSuffix "/" }}/auth/callback
           {{- end }}
+          {{- if and .Values.frontend.enabled .Values.frontend.oidc.enabled .Values.frontend.oidc.publicOrigin }}
+          # The micro-frontend zones' OIDC callback (the home zone owns /auth/callback; every zone shares this
+          # one origin-wide redirect). Same demo/ingress-with-bundled-Dex rationale as the web callback above.
+          - {{ .Values.frontend.oidc.publicOrigin | trimSuffix "/" }}/auth/callback
+          {{- end }}
 ---
 apiVersion: v1
 kind: Service

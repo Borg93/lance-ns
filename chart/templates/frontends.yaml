@@ -1,0 +1,87 @@
+{{- if .Values.frontend.enabled }}
+{{- $root := . -}}
+{{- $fe := .Values.frontend -}}
+# SvelteKit SSR micro-frontend zones (P5). One Deployment + Service per .Values.frontend.apps entry, built
+# from the ONE parametrized .docker/frontend.dockerfile (image lance-<name>:tag). The catch-all `home`
+# serves "/"; each domain zone is pinned to its base path /<name> in svelte.config.js and is TCP-probed (a
+# domain zone's "/" is a 404 under its base, so no httpGet). Mirrors rask/chart/templates/frontends.yaml.
+# The Ingress path-routes /<name> → this Service (ingress.yaml); the nginx gateway stays backend-only.
+# Every zone shares one env (lance.frontendEnv) — the "auth/secret similar in every MFE" seam.
+#
+# NAMING: k8s objects are named/labelled `web-<name>` (NOT the bare zone name) — the bare `<name>` would
+# collide with backend services that share a name (e.g. a `lineage` zone vs the backend lineage
+# Deployment/Service `lance-lineage` + `component: lineage`): duplicate object names make the release
+# undeployable, and a shared component selector cross-wires the backend Service onto SvelteKit pods. The
+# `web-` prefix keeps the frontend tier disjoint from every backend component. (Image name is unaffected —
+# it stays lance-<name>:tag.)
+{{- range $fe.apps }}
+{{- $comp := printf "web-%s" .name }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "lance.fullname" $root }}-{{ $comp }}
+  labels:
+    {{- include "lance.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $comp }}
+spec:
+  replicas: {{ $fe.replicas | default 1 }}
+  selector:
+    matchLabels: { app.kubernetes.io/component: {{ $comp }}, app.kubernetes.io/instance: {{ $root.Release.Name }} }
+  template:
+    metadata:
+      labels:
+        {{- include "lance.labels" $root | nindent 8 }}
+        app.kubernetes.io/component: {{ $comp }}
+    spec:
+      terminationGracePeriodSeconds: {{ $root.Values.lifecycle.terminationGracePeriodSeconds }}
+      {{- if $root.Values.podDisruptionBudget.enabled }}
+      {{- include "lance.spreadConstraints" $comp | nindent 6 }}
+      {{- end }}
+      {{- if $root.Values.security.serviceAccounts.enabled }}
+      serviceAccountName: {{ include "lance.fullname" $root }}-sa-web
+      {{- end }}
+      containers:
+        - name: {{ .name }}
+          image: "{{ include "lance.frontendImage" (list $root .name) }}"
+          imagePullPolicy: {{ $root.Values.image.pullPolicy }}
+          {{- include "lance.securityContext" $root | nindent 10 }}
+          {{- include "lance.preStop" $root | nindent 10 }}
+          env:
+            {{- include "lance.frontendEnv" $root | nindent 12 }}
+          ports: [{ name: http, containerPort: 3000 }]
+          {{- include "lance.tcpProbes" "http" | nindent 10 }}
+          resources: {{- toYaml $root.Values.resources.default | nindent 12 }}
+          volumeMounts:
+            {{- include "lance.tmpMount" $root | nindent 12 }}
+      volumes:
+        {{- include "lance.tmpVolume" $root | nindent 8 }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "lance.fullname" $root }}-{{ $comp }}
+  labels:
+    {{- include "lance.labels" $root | nindent 4 }}
+    app.kubernetes.io/component: {{ $comp }}
+spec:
+  ports: [{ name: http, port: {{ $fe.service.port }}, targetPort: http }]
+  selector: { app.kubernetes.io/component: {{ $comp }}, app.kubernetes.io/instance: {{ $root.Release.Name }} }
+{{- end }}
+{{- if and $fe.oidc.enabled $root.Values.auth.enabled }}
+---
+# The session-cookie sealing key (AES-256-GCM) + the confidential Dex client secret, shared by every zone
+# (they all read the origin-wide cookie; home also exchanges the code). A Secret, not plaintext env, so
+# prod-render's zero-plaintext check holds. Operator-provided + stable (rotating logs everyone out). Gated
+# on auth.enabled too — the consuming OIDC env only renders under auth.enabled, so no orphan Secret.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-frontend-session
+  labels: {{- include "lance.labels" . | nindent 4 }}
+type: Opaque
+data:
+  secret: {{ $fe.oidc.sessionSecret | b64enc | quote }}
+  clientSecret: {{ .Values.dex.clientSecret | b64enc | quote }}
+{{- end }}
+{{- end }}

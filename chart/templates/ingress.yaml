@@ -1,11 +1,16 @@
-{{- if and .Values.ingress.enabled .Values.gateway.enabled }}
-# The north-south edge in prod: routes inbound traffic to the gateway Service (the nginx reverse proxy
-# that path-routes to every in-cluster service — same routing table the port-forward demo used). On kind
-# there's no Ingress controller, so the default is ingress.enabled=false + a port-forward to the gateway.
+{{- if and .Values.ingress.enabled (or .Values.frontend.enabled .Values.gateway.enabled) }}
+{{- $root := . -}}
+# The north-south edge in prod: path-routes the micro-frontend ZONES (P5), mirroring rask's ingress. Each
+# domain zone owns its base path (/data,/lineage,/models,/admin → that zone's Service); the catch-all `home`
+# owns "/". Longest-prefix-first, so the domain rules win over "/". The nginx gateway is NOT in the frontend
+# path — the zones' BFF proxies reach the backend directly (CATALOG_API/LINEAGE_API/… env); the gateway
+# stays a backend/observability edge reached by a port-forward to its Service (make dashboards), unchanged.
+# On kind there's no Ingress controller by default (ingress.enabled=false) — install ingress-nginx for the
+# live cross-zone drive, or port-forward the zone Services.
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "lance.fullname" . }}-gateway
+  name: {{ include "lance.fullname" . }}-frontend
   labels: {{- include "lance.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations: {{- toYaml . | nindent 4 }}
@@ -20,6 +25,35 @@ spec:
   rules:
     - http:
         paths:
+          {{- if .Values.frontend.enabled }}
+          {{- /* Domain zones first (each pinned to /<name>); the controller matches longest-prefix, so
+                 these win over the catch-all "/" → home below. */}}
+          {{- range .Values.frontend.apps }}
+          {{- if not .catchAll }}
+          - path: {{ .path }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" $root }}-web-{{ .name }}
+                port:
+                  number: {{ $root.Values.frontend.service.port }}
+          {{- end }}
+          {{- end }}
+          {{- /* The catch-all home zone LAST: "/" (and anything not a domain zone). */}}
+          {{- range .Values.frontend.apps }}
+          {{- if .catchAll }}
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" $root }}-web-{{ .name }}
+                port:
+                  number: {{ $root.Values.frontend.service.port }}
+          {{- end }}
+          {{- end }}
+          {{- else if .Values.gateway.enabled }}
+          {{- /* Frontend off (headless stack): fall back to the gateway at "/" so the edge still resolves —
+                 only when the gateway is actually deployed (else the Ingress would dangle to an absent Service). */}}
           - path: /
             pathType: Prefix
             backend:
@@ -27,6 +61,7 @@ spec:
                 name: {{ include "lance.fullname" . }}-gateway
                 port:
                   number: {{ .Values.gateway.port }}
+          {{- end }}
       {{- with .Values.ingress.host }}
       host: {{ . | quote }}
       {{- end }}

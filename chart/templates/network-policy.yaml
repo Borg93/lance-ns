@@ -200,8 +200,10 @@ spec:
       ports:
         - { protocol: TCP, port: {{ .Values.rustfs.port }} }
 ---
-# The front door: gateway + web accept ingress from ANYWHERE (NodePort/Ingress/port-forward) —
-# they are the intended entry points and carry their own L7 guards (OIDC on the apps behind).
+# The front door: gateway + web + the P5 micro-frontend zones accept ingress from ANYWHERE
+# (NodePort/Ingress/port-forward) — they are the intended entry points and carry their own L7 guards (OIDC
+# on the apps behind). The zones are the north-south edge now (the Ingress path-routes /<zone> → web-<zone>),
+# so they MUST be admitted here or a policy-enforcing CNI (prod) drops all Ingress→zone traffic.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -210,7 +212,16 @@ metadata:
 spec:
   podSelector:
     matchExpressions:
-      - { key: app.kubernetes.io/component, operator: In, values: [gateway, web] }
+      - key: app.kubernetes.io/component
+        operator: In
+        values:
+          - gateway
+          - web
+          {{- if .Values.frontend.enabled }}
+          {{- range .Values.frontend.apps }}
+          - web-{{ .name }}
+          {{- end }}
+          {{- end }}
   policyTypes: [Ingress]
   ingress:
     - {}

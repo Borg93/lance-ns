@@ -92,12 +92,12 @@ deps: ## Add subchart repos + vendor chart deps into chart/charts/
 	@helm repo update >/dev/null && helm dependency build ./chart >/dev/null
 	@echo "✓ chart deps vendored"
 
-images: ## Build the catalog (catalog+lineage) + web images
+images: frontend-images ## Build the catalog (catalog+lineage) + web + the 5 MFE zone images
 	docker build $(BUILD_ARGS) -f .docker/rest-catalog.dockerfile -t $(CATALOG_IMG) .
 	docker build $(BUILD_ARGS) -f .docker/web.dockerfile -t $(WEB_IMG) .
 
-load: ## Side-load the app images into kind
-	kind load docker-image $(CATALOG_IMG) $(WEB_IMG) --name $(CLUSTER)
+load: ## Side-load the app + zone images into kind
+	kind load docker-image $(CATALOG_IMG) $(WEB_IMG) $(foreach z,$(ZONES),lance-$(z):dev) --name $(CLUSTER)
 
 frontend-images: ## Build all micro-frontend zone images (lance-<zone>:dev) from the parametrized frontend.dockerfile
 	@for z in $(ZONES); do \

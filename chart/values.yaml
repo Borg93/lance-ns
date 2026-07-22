@@ -529,6 +529,39 @@ web:
     publicOrigin: "" # browser-reachable web origin, e.g. https://app.example.com (forms the redirect URI)
     sessionSecret: "" # >=32 random chars; seals the session cookie (AES-256-GCM). REQUIRED when enabled.
 
+# --- Micro-frontend zones (P5): the SvelteKit SSR zones deployed from the ONE parametrized
+# frontend.dockerfile (image lance-<name>:tag; `make frontend-images`). The catch-all `home` owns "/"; each
+# domain zone is pinned to its base path /<name> in svelte.config.js and gets an Ingress rule
+# (templates/ingress.yaml). Every zone shares one env (lance.frontendEnv) — the cross-cutting auth/session
+# seam. Supersedes the single `web` pod above (retired in the same P5 pass). ----------------------------
+frontend:
+  enabled: true
+  replicas: 1
+  image:
+    tag: dev # shared tag; the image per zone is lance-<name>:<tag>
+  service:
+    port: 3000
+  # The bare FGA subject the zones' BFF names when reading lineage as a SERVICE (no user session) — must be
+  # READER on the warehouse (seed_medallion_fga.sh) + allowlisted in LINEAGE_SERVICE_SUBJECTS. The same
+  # identity the retired web pod used, so the seeded grants carry over unchanged.
+  serviceIdentity: service-web
+  # The zones (mirror rask's frontend.apps). home = the catch-all "/"; each domain zone is pinned to /<name>.
+  apps:
+    - { name: home, catchAll: true }
+    - { name: data, path: /data }
+    - { name: lineage, path: /lineage }
+    - { name: models, path: /models }
+    - { name: admin, path: /admin }
+  # Per-user OIDC login (opt-in), shared across ALL zones — one origin, one sealed cookie, so a login on any
+  # zone is a login on every zone. Same knobs as the web block: needs a BROWSER-REACHABLE IdP + origin.
+  # REQUIRED when enabled: sessionSecret (seals the cookie), publicIssuer, publicOrigin (forms the home
+  # zone's /auth/callback redirect URI). The confidential Dex client secret rides dex.clientSecret.
+  oidc:
+    enabled: false
+    publicIssuer: "" # browser-reachable IdP issuer, e.g. https://auth.example.com/dex
+    publicOrigin: "" # browser-reachable origin, e.g. https://app.example.com (forms the redirect URI)
+    sessionSecret: "" # >=32 random chars; seals the session cookie (AES-256-GCM). REQUIRED when enabled.
+
 # --- HA: PodDisruptionBudget + (optional) HPA for the stateless request-serving services. Off by default
 # (single-node kind); the prod overlay turns the PDB on. Stateful stores (AGE/RustFS) get HA from their
 # operators in rask (CNPG / rustfs-operator), NOT from here. ----------------------------------------

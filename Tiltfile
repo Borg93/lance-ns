@@ -39,7 +39,10 @@ docker_build(
 helm_resource(
     'lance-ns',
     'chart',
-    flags=['--timeout=300s'],
+    # The P5 micro-frontend zones default on (frontend.enabled), but Tilt builds only catalog+web (below);
+    # disable the zones here so `tilt ci` doesn't wait on 5 never-built zone images. Tilt keeps the single
+    # `web` pod for the dev loop until the zone-in-Tilt migration lands.
+    flags=['--timeout=300s', '--set', 'frontend.enabled=false'],
     image_deps=['lance-rest-catalog', 'lance-lineage-web'],
     image_keys=[
         ('image.catalog.repository', 'image.catalog.tag'),

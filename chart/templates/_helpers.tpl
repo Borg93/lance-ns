@@ -27,6 +27,53 @@ later (InvalidImageName), bricking the pod with no obvious signal. */}}
 {{- $i := .Values.image.web -}}
 {{- printf "%s:%s" $i.repository (required "image.web.tag must be set (a release tag in prod; `dev` locally)" $i.tag) -}}
 {{- end -}}
+{{/* A micro-frontend zone image: lance-<zone>:<tag> (built from the ONE parametrized frontend.dockerfile
+via --build-arg APP=<zone>; `make frontend-images`). Call: include "lance.frontendImage" (list $root "data"). */}}
+{{- define "lance.frontendImage" -}}
+{{- $root := index . 0 -}}{{- $name := index . 1 -}}
+{{- printf "lance-%s:%s" $name (required "frontend.image.tag must be set (a release tag in prod; `dev` locally)" $root.Values.frontend.image.tag) -}}
+{{- end -}}
+
+{{/* The SHARED env every micro-frontend zone gets — the cross-cutting "auth/secret similar in every MFE"
+seam (mirrors the retired web pod's env, single-sourced here). Backend URLs the zones' BFF proxies target
+directly (CATALOG_API/LINEAGE_API/MEDALLION_API/GREPTIME_API), the in-cluster gateway for the SSR /api
+rewrite, and — auth-on — the service-cred READ fallback + (oidc-on) the OIDC config so EVERY zone reads the
+shared origin-wide session cookie (home additionally exchanges the code). Emit under a container `env:`. */}}
+{{- define "lance.frontendEnv" -}}
+- { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }
+- { name: CATALOG_API, value: "http://{{ include "lance.fullname" . }}-catalog:{{ .Values.services.catalog.port }}" }
+{{- if .Values.medallion.enabled }}
+- { name: MEDALLION_API, value: "http://{{ include "lance.fullname" . }}-lance-ray:{{ .Values.medallion.port }}" }
+{{- end }}
+- { name: GREPTIME_API, value: "http://{{ include "lance.greptimeHost" . }}:4000" }
+- { name: LANCE_GATEWAY_URL, value: "http://{{ include "lance.fullname" . }}-gateway:{{ .Values.gateway.port }}" }
+- { name: PORT, value: "3000" }
+{{- if .Values.auth.enabled }}
+# Governed READ fallback: with no user session the BFF authenticates to lineage as a SERVICE (bounded by
+# frontend.serviceIdentity's FGA READER rung), so the read-only UI works without a per-user browser login.
+- name: LINEAGE_SERVICE_TOKEN
+  valueFrom:
+    secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
+- { name: LINEAGE_SERVICE_ID, value: {{ .Values.frontend.serviceIdentity | quote }} }
+{{- if .Values.frontend.oidc.enabled }}
+# Per-user OIDC login (opt-in; needs a browser-reachable IdP). Every zone reads the sealed session cookie
+# (ISSUER+CLIENT_ID+REDIRECT_URI make authEnabled true; SESSION_SECRET decodes it); the home zone also
+# presents the confidential client secret at the token exchange. Secrets ride a Secret via secretKeyRef.
+{{- if not .Values.frontend.oidc.sessionSecret }}{{ fail "frontend.oidc.enabled requires frontend.oidc.sessionSecret (>=32 chars) to seal the session cookie" }}{{- end }}
+{{- if not .Values.frontend.oidc.publicIssuer }}{{ fail "frontend.oidc.enabled requires frontend.oidc.publicIssuer (a browser-reachable IdP)" }}{{- end }}
+{{- if not .Values.frontend.oidc.publicOrigin }}{{ fail "frontend.oidc.enabled requires frontend.oidc.publicOrigin (the browser-reachable origin)" }}{{- end }}
+- { name: OIDC_ISSUER, value: {{ .Values.frontend.oidc.publicIssuer | quote }} }
+- { name: OIDC_CLIENT_ID, value: {{ .Values.dex.clientId | quote }} }
+- name: OIDC_CLIENT_SECRET
+  valueFrom:
+    secretKeyRef: { name: {{ .Release.Name }}-frontend-session, key: clientSecret }
+- { name: OIDC_REDIRECT_URI, value: "{{ .Values.frontend.oidc.publicOrigin | trimSuffix "/" }}/auth/callback" }
+- name: SESSION_SECRET
+  valueFrom:
+    secretKeyRef: { name: {{ .Release.Name }}-frontend-session, key: secret }
+{{- end }}
+{{- end }}
+{{- end -}}
 
 {{/* CONSUMER endpoints — return the EXTERNAL override when set (the in-cluster component is then usually
 disabled, e.g. a managed S3 / Postgres / Vault / collector in prod), else the in-cluster address. The

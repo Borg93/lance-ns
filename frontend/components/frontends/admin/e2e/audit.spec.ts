@@ -48,7 +48,7 @@ test('renders the audit trail rows', async ({ page }) => {
 test('the outcome filter re-queries the BFF', async ({ page }) => {
 	await page.goto('/admin/audit');
 	await expect(page.locator('table')).toContainText('can_read_data');
-	// the outcome picker is the @lance/ui Select (bits-ui)
+	// the outcome picker is the @rask/ui Select (bits-ui)
 	await page.getByLabel('Outcome filter').click();
 	await page.getByRole('option', { name: 'DENY', exact: true }).click();
 	await expect.poll(() => lastQuery).toContain('outcome=DENY');

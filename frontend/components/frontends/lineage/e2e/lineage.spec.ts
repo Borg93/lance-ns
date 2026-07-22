@@ -387,7 +387,7 @@ test('columns view: clicking a field opens its provenance/impact panel with the 
 	await expect(panel.locator('.fp-field')).toHaveText('pii_email');
 });
 
-test('status board renders live runs from the workspace lib (@lance/ui StatusBoard)', async ({
+test('status board renders live runs from the workspace lib (@rask/ui StatusBoard)', async ({
 	page,
 }) => {
 	// ASSERTS (Batch 14): the EXTRACTED StatusBoard renders real rows under the host app — the

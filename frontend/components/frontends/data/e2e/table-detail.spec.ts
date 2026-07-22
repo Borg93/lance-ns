@@ -161,7 +161,7 @@ test('tag-a-version form posts {tag, version} through the BFF (#64)', async ({ p
 	await page.goto('/data/tables/db1%24t');
 	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
 	await section.getByPlaceholder('tag name (e.g. blessed)').fill('release-1');
-	// the version picker is the @lance/ui Select (bits-ui) — open it, then click the option
+	// the version picker is the @rask/ui Select (bits-ui) — open it, then click the option
 	await section.getByLabel('Version to tag').click();
 	await page.getByRole('option', { name: 'v3', exact: true }).click();
 	await section.getByRole('button', { name: 'Tag version' }).click();
@@ -283,7 +283,7 @@ test('re-type-column via the row ⇄ posts an alter path→data_type (#74 tail)'
 	await page.goto('/data/tables/db1%24t');
 	const section = page.locator('section', { hasText: 'Schema' }).first();
 	await section.getByRole('button', { name: 're-type id' }).click();
-	// the target type is the @lance/ui Select (bits-ui) — open it, pick float32
+	// the target type is the @rask/ui Select (bits-ui) — open it, pick float32
 	await section.getByLabel('re-type id to').click();
 	await page.getByRole('option', { name: 'float32', exact: true }).click();
 	await section.getByRole('button', { name: 'save' }).click();

@@ -34,6 +34,9 @@ FGA_V       := 0.6.4
 CATALOG_IMG := lance-rest-catalog:dev
 RAY_IMG     := ray-lance:dev
 WEB_IMG     := lance-lineage-web:dev
+# The micro-frontend zones (P5): the catch-all `home` + the four domain zones. Each builds from the ONE
+# parametrized .docker/frontend.dockerfile via --build-arg APP=<zone>, image lance-<zone>:dev.
+ZONES       := home data lineage models admin
 MEDALLION_PORT := 8000
 # OCI label provenance — supplied to every image build (BUILD_DATE rfc3339, VCS_REF full SHA, VERSION).
 BUILD_DATE  := $(shell date -u +%FT%TZ)
@@ -95,6 +98,15 @@ images: ## Build the catalog (catalog+lineage) + web images
 
 load: ## Side-load the app images into kind
 	kind load docker-image $(CATALOG_IMG) $(WEB_IMG) --name $(CLUSTER)
+
+frontend-images: ## Build all micro-frontend zone images (lance-<zone>:dev) from the parametrized frontend.dockerfile
+	@for z in $(ZONES); do \
+	  echo "→ building lance-$$z:dev"; \
+	  docker build $(BUILD_ARGS) --build-arg APP=$$z -f .docker/frontend.dockerfile -t lance-$$z:dev . || exit 1; \
+	done
+
+frontend-load: ## Side-load the zone images into kind
+	kind load docker-image $(foreach z,$(ZONES),lance-$(z):dev) --name $(CLUSTER)
 
 deploy: ## helm upgrade --install the whole stack, then ensure sidecar injection
 	helm upgrade --install $(RELEASE) ./chart --timeout 240s

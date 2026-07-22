@@ -169,8 +169,11 @@ consumers onto the adopted system as each zone is built.
   - VERIFIED offline: all 5 zones' e2e green (`turbo run test:e2e`), turbo build/check(0/0)/check:tsgo/test
     + eslint-rules + oxlint/oxfmt + eslint/prettier green, `helm template` (web-free) + `make
     prod-render-check` green, all 5 zone images build (`make frontend-images`), grep-clean of apps/web.
-- [ ] **P5 live drive (cluster-gated hand-off).** The one remaining condition: build+load the zone images,
-  install ingress-nginx on kind, `helm upgrade` OIDC-on + ingress-on, then `bash
-  scripts/verify_cross_zone_oidc.sh` — alice signs in on `/data` and is still signed in on `/admin` (one
-  origin, one cookie), alice 2xx / bob 403. Exact `!`-run steps in `docs/DEPLOY.md` ("the cross-zone
-  drive"). Auto-mode blocks the cluster mutation, so this needs a user-run `helm upgrade`.
+- [x] **P5 live drive — PROVEN on kind (2026-07-22).** Built+loaded the 5 zone images, installed
+  ingress-nginx, `helm upgrade` OIDC-on + ingress-on + `produceAdminProject=acme`, then
+  `scripts/verify_cross_zone_oidc.sh` (seeds alice=admin, drives a headless Dex login through the ingress
+  origin). Captured output: all 5 zones **Ready**; the Ingress path-routed each zone (`/`→home 200,
+  `/data`/`/lineage`/`/models`/`/admin`→their zone SSR); **alice signed in on `/data` was still signed in on
+  `/admin`** (the shared origin-wide cookie — cross-zone login); alice's cascade opened the produce door
+  (**2xx**, run token `a834300f91f1`); **bob 403** (`needs the project-admin rung`). Cross-zone OIDC +
+  per-user authz proven end-to-end. **P5 COMPLETE — all seven goal conditions hold.**

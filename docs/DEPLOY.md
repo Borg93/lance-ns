@@ -138,20 +138,28 @@ Ingress controller. These steps mutate the cluster — run them yourself (or `!`
 !kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/kind/deploy.yaml
 !kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 
-# 3. deploy governed + zones OIDC-on + ingress-on (publicOrigin = the forwarded ingress origin)
+# 3. deploy governed + zones OIDC-on + ingress-on (publicOrigin = the forwarded ingress origin;
+#    produceAdminProject=acme so alice's admin grant opens the produce door)
 !helm upgrade --install lance-ns ./chart --timeout 300s \
-   --set auth.enabled=true --set medallion.enabled=true --set ingress.enabled=true \
+   --set auth.enabled=true --set medallion.enabled=true --set medallion.produceAdminProject=acme \
+   --set ingress.enabled=true \
    --set frontend.oidc.enabled=true \
    --set frontend.oidc.publicIssuer=http://lance-ns-dex:5556/dex \
    --set frontend.oidc.publicOrigin=http://localhost:8090 \
    --set frontend.oidc.sessionSecret=$(head -c48 /dev/urandom | base64 | tr -d '/+=' | head -c48)
-!kubectl rollout restart deploy/lance-ns-dex
+!kubectl rollout restart deploy/lance-ns-dex deploy/lance-ns-lance-ray
 
-# 4. port-forward the ingress (one origin for all zones) + Dex, then drive the cross-zone login + authz
-!kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8090:80 &
-!kubectl port-forward svc/lance-ns-dex 5556:5556 &
-!bash scripts/verify_cross_zone_oidc.sh   # alice signs in on /data → still signed-in on /admin; alice 2xx / bob 403
+# 4. drive the cross-zone login + authz (the script does its own ingress/dex/openfga port-forwards +
+#    seeds alice=admin project:acme, then runs the headless browser through the ingress origin)
+!bash scripts/verify_cross_zone_oidc.sh
+#    → alice signs in on /data → still signed-in on /admin (one origin, shared cookie); alice 2xx / bob 403
 ```
+
+**Proven live on kind (2026-07-22):** all 5 zones rolled out Ready; the Ingress path-routed each zone
+(`/`→home 200, `/data`/`/lineage`/`/models`/`/admin`→their zone SSR); `verify_cross_zone_oidc.sh` drove a
+real Dex login — alice signed in on `/data` was still signed in on `/admin` (the shared origin-wide cookie),
+her cascade opened the produce door (2xx, run token), and bob was 403-denied (`needs the project-admin
+rung`). Cross-zone OIDC + per-user authz proven end-to-end.
 
 `scripts/verify_cross_zone_oidc.sh` drives a real headless Dex login through the Ingress origin and asserts
 the shared cookie carries across zones + per-user authz. The browser↔Dex reachability puzzle (the

@@ -144,5 +144,33 @@ consumers onto the adopted system as each zone is built.
   (cross-zone nav + Dex login persisting across zones + alice-allowed/bob-denied) runs behind the prod
   gateway and is folded into P5's cluster deploy (the local turbo dev-proxy hit an external port clash;
   auto-mode blocks the cluster mutation, so the live drive needs a user-approved `helm upgrade`).
-- [ ] P5 — retire apps/web; chart (per-zone/multi-zone images + gateway path-routing + prod
-  microfrontends config); DEPLOY docs; the live cross-zone OIDC drive on kind; global gate.
+- [x] **P5 — zones deployed + apps/web retired (offline-complete; the live drive is the cluster-gated
+  hand-off).** Built in reversible, individually-green, adversarially-reviewed commits:
+  - **auth in every MFE** (`a8568e2`): `/auth/{login,callback,logout}` relocated into the `home` zone
+    (origin-root catch-all → the sealed session cookie at path `/` is shared across every path-routed zone
+    = cross-zone login); a single-sourced `@rask/api` `sessionToUser` feeds the shared AppShell's Sign
+    in/out; per-zone `+layout.server.ts` + nav-user wiring. +unit + home/admin auth e2e.
+  - **parametrized `frontend.dockerfile`** (`be168f8`): one image per zone (`--build-arg APP=<zone>`,
+    mirror rask); built + ran + served SSR.
+  - **base-path-aware BFF fetches** (`781ee0b`): the composed-deploy bug the mocks hid — client calls
+    fetched bare `/capi` (404 under a base path); now base-prefixed (proven: bare→404, `/data/capi`→502),
+    +a regression lock.
+  - **chart deploys the zones** (`7f2ec2f`): `frontends.yaml` (Deployment+Service per zone, single-sourced
+    `lance.frontendEnv`) + `ingress.yaml` rask-style zone routing (`/data`→web-data, …, `/`→web-home) +
+    dex callback + values. **The nginx gateway stays backend-only** (the Ingress path-routes zones). An
+    adversarial-verify Workflow (2 rounds, 35 agents) caught a BLOCKER — the `lineage` zone collided with
+    the backend lineage Service (byte-identical `lance-lineage` objects + a cross-wired selector) → fixed
+    with the `web-<zone>` object/label scheme — plus 4 real lower-severity issues (headless/`tilt ci`
+    ImagePullBackOff; empty-paths Ingress; lineage allow-list; front-door NetworkPolicy), all fixed.
+  - **retire apps/web** (`c417fac`): deleted apps/web + every dangling ref (workspaces, turbo/oxlint/oxfmt/
+    eslint, the chart `web` block + helper + values + dex + netpol + ha, `.docker/web.dockerfile`,
+    docker-compose, Makefile, `.dagger`, `ci.yml`, Tiltfile); retired the web-pod OIDC drive for the new
+    `scripts/verify_cross_zone_oidc.{sh,mjs}`.
+  - VERIFIED offline: all 5 zones' e2e green (`turbo run test:e2e`), turbo build/check(0/0)/check:tsgo/test
+    + eslint-rules + oxlint/oxfmt + eslint/prettier green, `helm template` (web-free) + `make
+    prod-render-check` green, all 5 zone images build (`make frontend-images`), grep-clean of apps/web.
+- [ ] **P5 live drive (cluster-gated hand-off).** The one remaining condition: build+load the zone images,
+  install ingress-nginx on kind, `helm upgrade` OIDC-on + ingress-on, then `bash
+  scripts/verify_cross_zone_oidc.sh` — alice signs in on `/data` and is still signed in on `/admin` (one
+  origin, one cookie), alice 2xx / bob 403. Exact `!`-run steps in `docs/DEPLOY.md` ("the cross-zone
+  drive"). Auto-mode blocks the cluster mutation, so this needs a user-run `helm upgrade`.

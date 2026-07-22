@@ -1,11 +1,13 @@
 {{- /*
-HA for the stateless request-serving services (catalog, lineage, gateway, web). Off by default
-(single-node kind); the prod overlay enables the PDB after bumping replicas. The stateful stores
-(AGE/RustFS) get HA from their operators in rask (CNPG / rustfs-operator), NOT from here. The event-driven
-movers/producer are intentionally excluded — eviction is safe (Dapr redelivers; ingest is idempotent).
+HA for the stateless request-serving services (catalog, lineage, gateway). Off by default (single-node
+kind); the prod overlay enables the PDB after bumping replicas. The stateful stores (AGE/RustFS) get HA from
+their operators in rask (CNPG / rustfs-operator), NOT from here. The event-driven movers/producer are
+intentionally excluded — eviction is safe (Dapr redelivers; ingest is idempotent). The P5 micro-frontend
+zones default to 1 replica, so they get NO PDB (a single-replica minAvailable=1 PDB would block every
+voluntary drain); a prod overlay that bumps frontend.replicas should add zone PDBs alongside.
 */ -}}
 {{- if .Values.podDisruptionBudget.enabled }}
-{{- range $c := list "catalog" "lineage" "gateway" "web" }}
+{{- range $c := list "catalog" "lineage" "gateway" }}
 ---
 apiVersion: policy/v1
 kind: PodDisruptionBudget

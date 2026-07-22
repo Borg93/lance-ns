@@ -19,11 +19,10 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
 export default defineConfig(
 	includeIgnoreFile(gitignorePath),
-	// eslint/prettier govern ONLY the rask-style MFE dirs; the lance side (apps/web,
-	// packages/ui=@lance/ui, packages/config) is owned by oxlint/oxfmt — never traverse it.
+	// eslint/prettier govern ONLY the rask-style MFE dirs; the remaining lance side
+	// (packages/ui=@lance/ui, packages/config) is owned by oxlint/oxfmt — never traverse it.
 	{
 		ignores: [
-			'apps/web/',
 			'packages/ui/',
 			'packages/config/',
 			'**/.svelte-kit/',

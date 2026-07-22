@@ -24,10 +24,10 @@ into `.localbin/` (gitignored).
 | --------- | ---- | ---- |
 | **catalog** | app (FastAPI) + daprd sidecar | **producer** — creates Lance tables on S3; publishes OpenLineage events via Dapr |
 | **lineage** | app (FastAPI) + daprd sidecar | **consumer** — Dapr subscription ingests events into Apache AGE; serves the lineage API |
-| **web** | app (SvelteKit) | the UI (datasets / jobs / columns DAG) |
+| **frontend zones** | 5 apps (SvelteKit SSR) | the UI as rask-style micro-frontend **zones** — `home` (catch-all `/`) + `data` (`/data`) + `lineage` (`/lineage`) + `models` (`/models`) + `admin` (`/admin`). One parametrized `frontend.dockerfile` (`lance-<zone>:tag`); the **Ingress** path-routes each zone (`ingress.yaml`); every zone shares one env seam (`lance.frontendEnv`) + reads one origin-wide OIDC session cookie (the `home` zone owns `/auth/*`). Replaces the retired single `web` pod. |
 | **medallion** | 4 apps + sidecars | event-driven pipeline: `lance-ray` producer + raw→bronze→silver→gold movers (see [MEDALLION.md](MEDALLION.md)) |
 | **compaction** | app + sidecar | compaction/GC service triggered by a Dapr **cron binding** (`bindings.cron`) — compacts Lance fragments + GCs old versions |
-| **gateway** | nginx + sidecar | single entry point — clean-URL edge that routes app traffic via **Dapr service invocation** (`/v1.0/invoke/...`); `/`→web, `/lineage/`,`/catalog/`,`/produce` (values-gated: `medallion.producer.expose`, off in prod — it's the unauthenticated demo entry),`/perses/`,`/greptime/`. Dapr-delivered routes (lineage ingest + the reconcile cron binding) are **403-blocked** from one source (`lance.lineageSidecarOnlyRoutes`) — the sidecar is their only legitimate caller |
+| **gateway** | nginx + sidecar | **backend** clean-URL edge that routes API traffic via **Dapr service invocation** (`/v1.0/invoke/...`): `/lineage/`,`/catalog/`,`/produce` (values-gated: `medallion.producer.expose`, off in prod — it's the unauthenticated demo entry),`/perses/`,`/greptime/`. Reached by a port-forward to its Service (`make dashboards`); it is **out of the frontend path** now (the zones' BFF proxies reach the backend directly, and the Ingress routes the zones). Dapr-delivered routes (lineage ingest + the reconcile cron binding) are **403-blocked** from one source (`lance.lineageSidecarOnlyRoutes`) — the sidecar is their only legitimate caller |
 | **Dapr** | subchart | control plane + sidecar injection + pub/sub + secret-store + tracing config |
 | **NATS** | subchart | JetStream — the durable event bus behind Dapr pub/sub |
 | **Apache AGE Postgres** | StatefulSet | the lineage graph (`lineage`) **and** OpenFGA's datastore (`openfga` db) |
@@ -109,33 +109,56 @@ SCHEME-DERIVED from the issuer (2026-07-12): a plain-http issuer (the in-cluster
 https issuer (any real IdP) keeps the verifier's HTTPS guard enforced — never hardcoded open. OpenFGA's schema migrates against the AGE
 Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `ag_catalog`).
 
-**Per-user UI login (2026-07-21, opt-in `web.oidc.enabled`).** By default the web pod runs auth-OFF even
-when the backends are governed: it reads lineage as `web.serviceIdentity`, and catalog control-plane
-surfaces show "sign in" with no way to sign in — because per-user OIDC login needs a **browser-reachable
-IdP**, which the in-cluster `dex.issuer` is not. In prod the IdP is external, so set `web.oidc.enabled=true`
-with `web.oidc.publicIssuer` (the external Dex/Keycloak/Auth0 issuer), `web.oidc.publicOrigin` (the browser
-URL that forms the `…/auth/callback` redirect), and `web.oidc.sessionSecret` (≥32 chars; seals the session
-cookie AES-256-GCM via a Secret — required, render fails without it). The BFF then forwards each signed-in
-user's OWN bearer to the governed backends (per-user authz), and the `/auth/login` flow redirects to the
-external IdP — provider-agnostic via OIDC discovery, no code change. The bundled Dex also registers the web
-callback for demo/ingress use. NOTE: the audit viewer's admin gate calls `MEDALLION_API`, so keep
-`medallion.enabled=true` when `web.oidc.enabled` (else `/audit` fails closed to 503).
+**Per-user UI login across the zones (opt-in `frontend.oidc.enabled`).** By default the zones run auth-OFF
+even when the backends are governed: each reads lineage as `frontend.serviceIdentity` (allow-listed in
+`LINEAGE_SERVICE_SUBJECTS`), and catalog control-plane surfaces show "sign in" with no way to sign in —
+because per-user OIDC login needs a **browser-reachable IdP**, which the in-cluster `dex.issuer` is not. Turn
+it on with `frontend.oidc.enabled=true` + `frontend.oidc.publicIssuer` (the external Dex/Keycloak/Auth0
+issuer) + `frontend.oidc.publicOrigin` (the browser origin that forms the `…/auth/callback` redirect) +
+`frontend.oidc.sessionSecret` (≥32 chars; seals the session cookie AES-256-GCM via a Secret — required,
+render fails without it).
 
-The BFF is a **confidential** OIDC client: the bundled `dex.clientId` client carries a secret (shared with the
-password-grant path used by `scripts/verify_produce_door.sh`), so the server-side token exchange must present
-it — the chart wires `OIDC_CLIENT_SECRET` from `dex.clientSecret` via the `<release>-web-session` Secret
-(secretKeyRef, zero-plaintext). Without it Dex rejects the exchange with `"missing client_secret"` and the
-callback falls through to `/?auth=error`. Point `web.oidc` at an external public/PKCE IdP instead and no
-secret is needed — set `OIDC_CLIENT_SECRET` empty.
+**Cross-zone login is one origin, one cookie.** The `home` zone owns `/auth/{login,callback,logout}`; the
+sealed session cookie is set at path `/`, so because the Ingress path-routes every zone under one origin, a
+login on `data` is a login on `admin` too. Every zone's `hooks.server.ts` reads the same cookie
+(`makeSessionHandle`) and its BFF forwards the signed-in user's OWN bearer to the governed backends (per-user
+authz). The BFF is a **confidential** OIDC client — the bundled `dex.clientId` carries a secret, wired as
+`OIDC_CLIENT_SECRET` from `dex.clientSecret` via the `<release>-frontend-session` Secret (secretKeyRef,
+zero-plaintext); the bundled Dex registers the zones' `…/auth/callback`. NOTE: the audit viewer's admin gate
+calls `MEDALLION_API`, so keep `medallion.enabled=true` when `frontend.oidc.enabled`.
 
-**Proving it on kind** (no external IdP): `scripts/verify_oidc_login.sh` drives a real headless Dex login for
-alice + bob and asserts per-user authz through the BFF (alice, a produce-admin → `/produce` 202; bob → 403).
-The browser↔Dex reachability puzzle — the issuer-derived authorize URL `http://lance-ns-dex:5556/dex/auth` is
-not host-resolvable — is solved with chromium `--host-resolver-rules` mapping `lance-ns-dex:5556` to a Dex
-port-forward, while `web.oidc.publicIssuer` stays the in-cluster URL so the forwarded bearer's `iss` still
-verifies at catalog/lineage. Enable first: `helm upgrade … --set web.oidc.enabled=true --set
-web.oidc.publicIssuer=http://lance-ns-dex:5556/dex --set web.oidc.publicOrigin=http://localhost:5280 --set
-web.oidc.sessionSecret=<48 chars>`, then `kubectl rollout restart deploy/<release>-dex` and roll web.
+**Proving it live on kind (the cross-zone drive).** The composition needs the Ingress, so kind needs an
+Ingress controller. These steps mutate the cluster — run them yourself (or `!`-prefix each):
+
+```bash
+# 1. build + side-load the 5 zone images into kind
+!make frontend-images && make frontend-load
+
+# 2. one-time: an Ingress controller on kind (ingress-nginx)
+!kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.11.2/deploy/static/provider/kind/deploy.yaml
+!kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+
+# 3. deploy governed + zones OIDC-on + ingress-on (publicOrigin = the forwarded ingress origin)
+!helm upgrade --install lance-ns ./chart --timeout 300s \
+   --set auth.enabled=true --set medallion.enabled=true --set ingress.enabled=true \
+   --set frontend.oidc.enabled=true \
+   --set frontend.oidc.publicIssuer=http://lance-ns-dex:5556/dex \
+   --set frontend.oidc.publicOrigin=http://localhost:8090 \
+   --set frontend.oidc.sessionSecret=$(head -c48 /dev/urandom | base64 | tr -d '/+=' | head -c48)
+!kubectl rollout restart deploy/lance-ns-dex
+
+# 4. port-forward the ingress (one origin for all zones) + Dex, then drive the cross-zone login + authz
+!kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8090:80 &
+!kubectl port-forward svc/lance-ns-dex 5556:5556 &
+!bash scripts/verify_cross_zone_oidc.sh   # alice signs in on /data → still signed-in on /admin; alice 2xx / bob 403
+```
+
+`scripts/verify_cross_zone_oidc.sh` drives a real headless Dex login through the Ingress origin and asserts
+the shared cookie carries across zones + per-user authz. The browser↔Dex reachability puzzle (the
+issuer-derived authorize URL `http://lance-ns-dex:5556/dex/auth` isn't host-resolvable) is solved with
+chromium `--host-resolver-rules` mapping `lance-ns-dex:5556` to the Dex port-forward, while
+`frontend.oidc.publicIssuer` stays the in-cluster URL so the forwarded bearer's `iss` still verifies at
+catalog/lineage.
 
 ## Notable engineering notes
 

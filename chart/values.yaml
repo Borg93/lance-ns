@@ -5,7 +5,6 @@
 # repository/tag so Tilt can inject each built image independently (image_keys). ------------------
 image:
   catalog: { repository: lance-rest-catalog, tag: dev } # catalog (catalog.main:app) + lineage (lineage.main:app)
-  web: { repository: lance-lineage-web, tag: dev }
   pullPolicy: IfNotPresent
 
 # --- Governance (Dex OIDC + OpenFGA). Off → open dev mode; on → the full governed demo. ------------
@@ -504,31 +503,6 @@ services:
     ageStatementTimeoutSeconds: 30
 
 # Web (SvelteKit UI) replica count — stateless. (Demo scaffolding; rask supplies the real frontends.)
-web:
-  # Deploy the SvelteKit UI. Default true = the current behavior (it always deployed, ungated). A headless
-  # stack turns it OFF: `scripts/e2e_stack.sh` needs that, and until this key existed its --set was a silent
-  # no-op — the web pod deployed, could not pull its (never-built) image, and blocked `helm --wait` forever.
-  enabled: true
-  replicas: 1
-  # The bare FGA subject the BFF names when it reads lineage as a SERVICE on the auth-on stack (no user
-  # session). Must be READER on the warehouse (seed_medallion_fga.sh) + allowlisted in
-  # LINEAGE_SERVICE_SUBJECTS (rendered on lineage when auth.enabled). Lets the read-only UI show the graph
-  # without a per-user browser login; per-user OIDC login still takes precedence when a user IS signed in.
-  serviceIdentity: service-web
-  # Per-user OIDC LOGIN for the UI (opt-in). The demo default is OFF: the web reads lineage as
-  # serviceIdentity, and catalog control-plane surfaces show "sign in" (no login is possible). Turn ON only
-  # with a BROWSER-REACHABLE IdP + web origin — an ingress with real DNS, or a port-forward + /etc/hosts —
-  # because the browser is redirected to the IdP's authorize endpoint and back to publicOrigin/auth/callback;
-  # the in-cluster `dex.issuer` is NOT browser-reachable. When on, the BFF forwards each signed-in user's OWN
-  # bearer to the governed backends (per-user authz) and the session cookie is sealed (sessionSecret). The
-  # client is public (PKCE), so no client secret is wired. Provider-agnostic: point publicIssuer at Dex,
-  # Keycloak, Auth0, etc. — the frontend uses OIDC discovery, no code change.
-  oidc:
-    enabled: false
-    publicIssuer: "" # browser-reachable IdP issuer, e.g. https://auth.example.com/dex or a Keycloak realm URL
-    publicOrigin: "" # browser-reachable web origin, e.g. https://app.example.com (forms the redirect URI)
-    sessionSecret: "" # >=32 random chars; seals the session cookie (AES-256-GCM). REQUIRED when enabled.
-
 # --- Micro-frontend zones (P5): the SvelteKit SSR zones deployed from the ONE parametrized
 # frontend.dockerfile (image lance-<name>:tag; `make frontend-images`). The catch-all `home` owns "/"; each
 # domain zone is pinned to its base path /<name> in svelte.config.js and gets an Ingress rule

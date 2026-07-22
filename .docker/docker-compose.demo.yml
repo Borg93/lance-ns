@@ -16,22 +16,3 @@ services:
       LINEAGE_S3_REGION: us-east-1
       LINEAGE_S3_BUCKET: lakehouse
 
-  # The SvelteKit UI (Svelte Flow + bits-ui) — proxies /api/* to the lineage service in-cluster.
-  web:
-    image: lance-lineage-web:dev
-    build:
-      context: ..
-      dockerfile: .docker/web.dockerfile
-    container_name: lance-lineage-web
-    init: true
-    read_only: true
-    tmpfs:
-      - /tmp
-    depends_on:
-      lineage-api:
-        condition: service_healthy
-    environment:
-      LINEAGE_API: http://lineage-api:8000
-      PORT: "3000"
-    ports:
-      - "${DEMO_WEB_PORT:-5173}:3000"

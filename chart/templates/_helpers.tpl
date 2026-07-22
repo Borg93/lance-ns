@@ -23,10 +23,6 @@ later (InvalidImageName), bricking the pod with no obvious signal. */}}
 {{- $i := .Values.image.catalog -}}
 {{- printf "%s:%s" $i.repository (required "image.catalog.tag must be set (a release tag in prod; `dev` locally)" $i.tag) -}}
 {{- end -}}
-{{- define "lance.webImage" -}}
-{{- $i := .Values.image.web -}}
-{{- printf "%s:%s" $i.repository (required "image.web.tag must be set (a release tag in prod; `dev` locally)" $i.tag) -}}
-{{- end -}}
 {{/* A micro-frontend zone image: lance-<zone>:<tag> (built from the ONE parametrized frontend.dockerfile
 via --build-arg APP=<zone>; `make frontend-images`). Call: include "lance.frontendImage" (list $root "data"). */}}
 {{- define "lance.frontendImage" -}}

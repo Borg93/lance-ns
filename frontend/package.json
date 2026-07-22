@@ -2,7 +2,6 @@
 	"name": "lance-frontend",
 	"private": true,
 	"workspaces": [
-		"apps/*",
 		"packages/*",
 		"components/frontends/*"
 	],
@@ -12,7 +11,7 @@
 		"check:tsgo": "turbo run check:tsgo",
 		"dev": "turbo run dev",
 		"test": "turbo run test && vitest run eslint-rules",
-		"test:e2e": "turbo run test:e2e --filter=lance-lineage-web",
+		"test:e2e": "turbo run test:e2e",
 		"lint": "oxlint --deny-warnings .",
 		"fmt": "oxfmt .",
 		"fmt:check": "oxfmt --check .",

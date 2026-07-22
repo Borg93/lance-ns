@@ -12,7 +12,7 @@ OUT="$(mktemp)"
 trap 'rm -f "$OUT"' EXIT
 
 helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
-  --set image.catalog.tag=v0 --set image.web.tag=v0 \
+  --set image.catalog.tag=v0 --set frontend.image.tag=v0 \
   --set dapr.appToken=ci-dummy-token-0000000000 \
   --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
   --set age.password=ci-dummy-pw --set rustfs.secretKey=ci-dummy-key \
@@ -101,7 +101,7 @@ peak=$((cap * body + headroom))
 # DNS survives anywhere (app env OR the greptime config), and that setting ONLY the rustfs half leaks.
 EXT_S3=https://s3.ext.example.com
 atomic=$(helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
-  --set image.catalog.tag=v0 --set image.web.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
+  --set image.catalog.tag=v0 --set frontend.image.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
   --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
   --set age.password=ci-dummy-pw --set rustfs.secretKey=ci-dummy-key \
   --set backups.volumeSnapshot.snapshotClassName=csi-snapclass --set ingress.host=lance.example.com \
@@ -112,7 +112,7 @@ grep -q "lance-ns-rustfs:9000" <<<"$atomic" \
 # Negative: rustfs externalized but the greptime companion OMITTED must still show the leak (proves the pairing
 # is load-bearing, i.e. the guard above isn't vacuous).
 leak=$(helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
-  --set image.catalog.tag=v0 --set image.web.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
+  --set image.catalog.tag=v0 --set frontend.image.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
   --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
   --set age.password=ci-dummy-pw --set rustfs.secretKey=ci-dummy-key \
   --set backups.volumeSnapshot.snapshotClassName=csi-snapclass --set ingress.host=lance.example.com \
@@ -124,7 +124,7 @@ grep -q "lance-ns-rustfs:9000" <<<"$leak" \
 # render the SecretStore + ExternalSecret CRs, SKIP the static infra-credentials + observability-s3 Secrets,
 # and SATISFY the fail-closed prod-secret guard WITHOUT age.password/rustfs.secretKey (ESO supplies them).
 eso=$(helm template lance-ns "$CHART" -f "$CHART/values-prod.yaml" \
-  --set image.catalog.tag=v0 --set image.web.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
+  --set image.catalog.tag=v0 --set frontend.image.tag=v0 --set dapr.appToken=ci-dummy-token-0000000000 \
   --set 'observability.edgeAuth.htpasswd=observer:$apr1$ci000000$0000000000000000000000' \
   --set backups.volumeSnapshot.snapshotClassName=csi-snapclass --set ingress.host=lance.example.com \
   --set externalSecrets.enabled=true 2>/dev/null) \

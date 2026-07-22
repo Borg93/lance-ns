@@ -35,15 +35,11 @@ data:
         public: true
         redirectURIs:
           - http://localhost:8080/callback
-          {{- if and .Values.web.enabled .Values.web.oidc.enabled .Values.web.oidc.publicOrigin }}
-          # The UI's OIDC callback, so a per-user login through THIS (in-chart) Dex is accepted. In prod the
-          # IdP is external (web.oidc.publicIssuer) and registers its own redirect there — this is for a
-          # demo/ingress that still uses the bundled Dex.
-          - {{ .Values.web.oidc.publicOrigin | trimSuffix "/" }}/auth/callback
-          {{- end }}
           {{- if and .Values.frontend.enabled .Values.frontend.oidc.enabled .Values.frontend.oidc.publicOrigin }}
           # The micro-frontend zones' OIDC callback (the home zone owns /auth/callback; every zone shares this
-          # one origin-wide redirect). Same demo/ingress-with-bundled-Dex rationale as the web callback above.
+          # one origin-wide redirect), so a per-user login through THIS (in-chart) Dex is accepted. In prod the
+          # IdP is external (frontend.oidc.publicIssuer) and registers its own redirect there — this is for a
+          # demo/ingress that still uses the bundled Dex.
           - {{ .Values.frontend.oidc.publicOrigin | trimSuffix "/" }}/auth/callback
           {{- end }}
 ---

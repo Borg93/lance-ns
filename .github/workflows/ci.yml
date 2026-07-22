@@ -66,11 +66,11 @@ jobs:
         run: |
           curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
 
-      # Turborepo workspace bun gates (Batch 12) — svelte-check + unit tests fan out over apps/* AND
-      # packages/* (the @lance/ui exports/transport-agnosticism tests run here too); lint/fmt:check are the
-      # turbo ROOT tasks (oxlint warnings-as-errors incl. .svelte script blocks; oxfmt over ts/js/json AND
-      # .svelte). Run hermetically in the pinned oven/bun image via the Dagger module (.dagger/frontend.go).
-      # `dagger call frontend` == `make frontend`.
+      # Turborepo workspace bun gates — svelte-check + tsgo + unit tests fan out over the packages/* AND
+      # components/frontends/* (the 5 micro-frontend zones + @rask/{ui,api} + @lance/ui) workspace; lint/
+      # fmt:check are the turbo ROOT tasks (oxlint warnings-as-errors + oxfmt on the lance side; eslint +
+      # prettier on the MFE dirs). Run hermetically in the pinned oven/bun image via the Dagger module
+      # (.dagger/frontend.go). `dagger call frontend` == `make frontend`.
       - name: Frontend bun gate — svelte-check + unit + oxlint + oxfmt (Dagger)
         env:
           DAGGER_NO_NAG: "1"
@@ -88,19 +88,22 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Install Playwright chromium
-        working-directory: frontend/apps/web
+        working-directory: frontend
         run: bunx playwright install --with-deps chromium
 
-      - name: Playwright e2e (hermetic — /api mocked in-page)
+      # All 5 zones' e2e (home/data/lineage/models/admin), fanned by turbo. Run SERIALLY (--concurrency=1):
+      # each zone spins its own vite SSR dev server + a chromium instance, and 5 concurrent first-compiles
+      # blow the per-server startup window on a 2-core runner.
+      - name: Playwright e2e — all zones (hermetic — /api mocked in-page)
         working-directory: frontend
-        run: bunx turbo run test:e2e --filter=lance-lineage-web
+        run: bunx turbo run test:e2e --concurrency=1
 
       - name: Upload Playwright traces on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/apps/web/test-results/
+          path: frontend/components/frontends/*/test-results/
           retention-days: 7
 
   # AGE-backed lineage e2e (§7): the graph repository's REAL Cypher runs against a real Apache AGE

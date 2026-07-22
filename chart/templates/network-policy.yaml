@@ -216,7 +216,6 @@ spec:
         operator: In
         values:
           - gateway
-          - web
           {{- if .Values.frontend.enabled }}
           {{- range .Values.frontend.apps }}
           - web-{{ .name }}

@@ -27,26 +27,21 @@ docker_build(
         sync('services', '/srv/services'),
     ],
 )
-docker_build(
-    'lance-lineage-web', '.',
-    dockerfile='.docker/web.dockerfile',
-    only=['.docker', 'frontend'],
-)
-
 # Deploy the umbrella chart via real helm (post-install hooks + subchart CRDs honored — unlike Tilt's
 # bare helm() which only templates). Tilt injects the freshly built images into the chart's per-image
 # repository/tag values and side-loads them into kind.
 helm_resource(
     'lance-ns',
     'chart',
-    # The P5 micro-frontend zones default on (frontend.enabled), but Tilt builds only catalog+web (below);
-    # disable the zones here so `tilt ci` doesn't wait on 5 never-built zone images. Tilt keeps the single
-    # `web` pod for the dev loop until the zone-in-Tilt migration lands.
+    # The P5 micro-frontend zones (frontend.enabled, default on) build from the parametrized
+    # frontend.dockerfile — NOT wired into Tilt's dev loop yet, so disable them here or `tilt ci` would wait
+    # on 5 never-built zone images. Tilt runs the BACKEND (catalog/lineage/…) for the dev loop; drive the
+    # zones with `make frontend-images && make frontend-load` + a `helm upgrade --set frontend.enabled=true`
+    # (see docs/DEPLOY.md). Zone-in-Tilt live_update is a follow-up.
     flags=['--timeout=300s', '--set', 'frontend.enabled=false'],
-    image_deps=['lance-rest-catalog', 'lance-lineage-web'],
+    image_deps=['lance-rest-catalog'],
     image_keys=[
         ('image.catalog.repository', 'image.catalog.tag'),
-        ('image.web.repository', 'image.web.tag'),
     ],
     resource_deps=['dapr-repo', 'nats-repo', 'openfga-repo'],
     labels=['lance-ns'],

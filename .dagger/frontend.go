@@ -7,13 +7,13 @@ import (
 )
 
 // bunImage is the frontend toolchain's base image — the exact digest-pinned tag from
-// .docker/web.dockerfile (oven/bun:1.3.14-slim), so the Dagger run matches the shipped image rather
-// than trusting the CI setup-bun action's unpinned 'latest'. Bun is the whole toolchain here: turbo,
+// .docker/frontend.dockerfile (oven/bun:1.3.14-slim), so the Dagger run matches the shipped zone images
+// rather than trusting the CI setup-bun action's unpinned 'latest'. Bun is the whole toolchain here: turbo,
 // oxlint and oxfmt arrive as frontend/ root devDependencies via `bun install --frozen-lockfile`.
 const bunImage = "oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04"
 
 // frontendBase returns the installed turborepo workspace container: the bun image + source +
-// `bun install --frozen-lockfile` (the whole apps/* + packages/* workspace from frontend/bun.lock).
+// `bun install --frozen-lockfile` (the packages/* + components/frontends/* workspace from frontend/bun.lock).
 // Unexported → a shared private helper, not a Dagger Function. The bun install cache mirrors the
 // dockerfile's `--mount=type=cache,target=/root/.bun/install/cache`.
 func (m *LanceNs) frontendBase(src *dagger.Directory) *dagger.Container {
@@ -22,14 +22,15 @@ func (m *LanceNs) frontendBase(src *dagger.Directory) *dagger.Container {
 		WithMountedCache("/root/.bun/install/cache", dag.CacheVolume("lance-ns-bun")).
 		WithDirectory("/src", src, dagger.ContainerWithDirectoryOpts{
 			// Exclude checked-in build/install artefacts so the container installs clean from the lockfile.
+			// The zone build outputs (.svelte-kit/build) are stripped generically via the globs below.
 			Exclude: []string{
 				".git",
 				"node_modules",
 				"frontend/node_modules",
 				"frontend/.turbo",
-				"frontend/apps/web/.svelte-kit",
-				"frontend/apps/web/build",
-				"frontend/apps/web/test-results",
+				"frontend/components/frontends/*/.svelte-kit",
+				"frontend/components/frontends/*/build",
+				"frontend/components/frontends/*/test-results",
 			},
 		}).
 		WithWorkdir("/src/frontend").

@@ -31,7 +31,6 @@ WORKDIR /src
 # are resolved relative to the workspace root, so patches/ must be present for the frozen install.
 COPY frontend/package.json frontend/bun.lock frontend/turbo.json ./
 COPY frontend/patches patches
-COPY frontend/apps apps
 COPY frontend/packages packages
 COPY frontend/components/frontends components/frontends
 

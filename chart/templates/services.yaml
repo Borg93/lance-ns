@@ -299,12 +299,11 @@ spec:
             # RunEvent 401'd under auth and ALL training provenance was lost (live 2026-07-13). Only the
             # trainer is listed: the allowlist is what stops an app-token holder speaking as a human, and
             # its outputs are still FGA-checked as `service-trainer`, so D5's rung still bounds it.
-            # The service subjects allowed to speak app-to-app to lineage: the trainer, the (retiring) web
-            # pod, and the P5 micro-frontend zones (frontend.serviceIdentity) — the zones read lineage as a
-            # SERVICE on the no-login governed path, so their identity MUST be allowlisted or every zone's
-            # read fails closed (403). web + frontend default to the same subject; listed explicitly so the
-            # web retirement (dropping web.serviceIdentity) leaves the zones' path intact.
-            - { name: LINEAGE_SERVICE_SUBJECTS, value: "{{ .Values.medallion.train.trainerIdentity }},{{ .Values.web.serviceIdentity }},{{ .Values.frontend.serviceIdentity }}" }
+            # The service subjects allowed to speak app-to-app to lineage: the trainer + the P5
+            # micro-frontend zones (frontend.serviceIdentity) — the zones read lineage as a SERVICE on the
+            # no-login governed path, so their identity MUST be allowlisted or every zone's read fails closed
+            # (403). (The retired web pod's identity was here too; frontend.serviceIdentity carries it now.)
+            - { name: LINEAGE_SERVICE_SUBJECTS, value: "{{ .Values.medallion.train.trainerIdentity }},{{ .Values.frontend.serviceIdentity }}" }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- toYaml .Values.resources.default | nindent 12 }}
@@ -321,120 +320,3 @@ metadata:
 spec:
   ports: [{ name: http, port: {{ .Values.services.lineage.port }}, targetPort: http }]
   selector: { app.kubernetes.io/component: lineage, app.kubernetes.io/instance: {{ .Release.Name }} }
----
-{{- if .Values.web.enabled }}
-# Web — the SvelteKit UI; proxies /api → the lineage service in-cluster.
-#
-# GATED (2026-07-14). This block had NO guard, while `scripts/e2e_stack.sh` passed `--set web.enabled=false`
-# — a key that did not exist, so helm silently accepted it and the web pod deployed anyway. In CI its image
-# is never built, so it sat in ImagePullBackOff, `helm --wait` could never converge, and the e2e-stack job
-# failed EVERY time. A headless stack (CI, any API-only deploy) must be able to switch the UI off.
-apiVersion: apps/v1
-kind: Deployment
-metadata:
-  name: {{ include "lance.fullname" . }}-web
-  labels: {{- include "lance.labels" . | nindent 4 }}
-spec:
-  replicas: {{ .Values.web.replicas | default 1 }}
-  selector:
-    matchLabels: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }
-  template:
-    metadata:
-      labels:
-        {{- include "lance.labels" . | nindent 8 }}
-        app.kubernetes.io/component: web
-    spec:
-      terminationGracePeriodSeconds: {{ .Values.lifecycle.terminationGracePeriodSeconds }}
-      {{- if .Values.podDisruptionBudget.enabled }}
-      {{- include "lance.spreadConstraints" "web" | nindent 6 }}
-      {{- end }}
-      {{- if .Values.security.serviceAccounts.enabled }}
-      serviceAccountName: {{ include "lance.fullname" . }}-sa-web
-      {{- end }}
-      containers:
-        - name: web
-          image: "{{ include "lance.webImage" . }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          {{- include "lance.securityContext" . | nindent 10 }}
-          {{- include "lance.preStop" . | nindent 10 }}
-          env:
-            - { name: LINEAGE_API, value: "http://{{ include "lance.fullname" . }}-lineage:{{ .Values.services.lineage.port }}" }
-            # #42 models page: the /capi BFF proxies to the catalog. Reads/writes carry ONLY a signed-in
-            # user's bearer (the catalog has no service-token door), so no service credential is wired here.
-            - { name: CATALOG_API, value: "http://{{ include "lance.fullname" . }}-catalog:{{ .Values.services.catalog.port }}" }
-            # #64 human trigger door: the BFF proxies /produce + /train to lance-ray forwarding ONLY the
-            # signed-in user's bearer (no service token leaves the web pod); lance-ray's authorize_produce
-            # verifies it (OIDC) and checks project-admin (can_administer). Only rendered when medallion is on.
-            {{- if .Values.medallion.enabled }}
-            - { name: MEDALLION_API, value: "http://{{ include "lance.fullname" . }}-lance-ray:{{ .Values.medallion.port }}" }
-            {{- end }}
-            # #53 embedded experiment tracking: the BFF queries GreptimeDB's Prometheus-compatible endpoint
-            # server-side for the deployed Perses "Model Training" dashboard's metrics. In-cluster ClusterIP,
-            # so the §5e edge auth (nginx auth_basic on the gateway's /greptime/, /perses/ locations) is not
-            # in the path — the credential is never exposed to the browser. Empty on auth-off/dev.
-            - { name: GREPTIME_API, value: "http://{{ include "lance.fullname" . }}-greptimedb-standalone:4000" }
-            - { name: PORT, value: "3000" }
-            {{- if .Values.auth.enabled }}
-            # Governed READ path: when no user is signed in, the BFF proxy authenticates to lineage as a
-            # SERVICE via the app-token door (services/lineage/api/security.py ServicePrincipal), so the
-            # read-only lineage UI works on the auth-ON stack WITHOUT a per-user browser login (which needs
-            # a browser-reachable Dex). Bounded by web.serviceIdentity's FGA READER rung (seed_medallion_fga.sh).
-            - name: LINEAGE_SERVICE_TOKEN
-              valueFrom:
-                secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
-            - { name: LINEAGE_SERVICE_ID, value: {{ .Values.web.serviceIdentity | quote }} }
-            {{- if .Values.web.oidc.enabled }}
-            # Per-user OIDC login (opt-in; needs a browser-reachable IdP — see values web.oidc). The vars
-            # flip the BFF to authEnabled: /auth/login redirects to publicIssuer, the callback lands on
-            # publicOrigin, and each user's own bearer is forwarded to the governed backends. The BFF is a
-            # CONFIDENTIAL client — the dex.clientId client carries a secret (shared with the password-grant
-            # path), so the server-side token exchange must present it (Dex rejects a bare PKCE request with
-            # "missing client_secret"). Both secrets ride a Secret via secretKeyRef, never plaintext env.
-            {{- if not .Values.web.oidc.sessionSecret }}{{ fail "web.oidc.enabled requires web.oidc.sessionSecret (>=32 chars) to seal the session cookie" }}{{- end }}
-            {{- if not .Values.web.oidc.publicIssuer }}{{ fail "web.oidc.enabled requires web.oidc.publicIssuer (a browser-reachable IdP)" }}{{- end }}
-            {{- if not .Values.web.oidc.publicOrigin }}{{ fail "web.oidc.enabled requires web.oidc.publicOrigin (the browser-reachable web origin)" }}{{- end }}
-            - { name: OIDC_ISSUER, value: {{ .Values.web.oidc.publicIssuer | quote }} }
-            - { name: OIDC_CLIENT_ID, value: {{ .Values.dex.clientId | quote }} }
-            - name: OIDC_CLIENT_SECRET
-              valueFrom:
-                secretKeyRef: { name: {{ .Release.Name }}-web-session, key: clientSecret }
-            - { name: OIDC_REDIRECT_URI, value: "{{ .Values.web.oidc.publicOrigin | trimSuffix "/" }}/auth/callback" }
-            - name: SESSION_SECRET
-              valueFrom:
-                secretKeyRef: { name: {{ .Release.Name }}-web-session, key: secret }
-            {{- end }}
-            {{- end }}
-          ports: [{ name: http, containerPort: 3000 }]
-          {{- include "lance.tcpProbes" "http" | nindent 10 }}
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
-          volumeMounts:
-            {{- include "lance.tmpMount" . | nindent 12 }}
-      volumes:
-        {{- include "lance.tmpVolume" . | nindent 8 }}
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: {{ include "lance.fullname" . }}-web
-  labels: {{- include "lance.labels" . | nindent 4 }}
-spec:
-  ports: [{ name: http, port: 3000, targetPort: http }]
-  selector: { app.kubernetes.io/component: web, app.kubernetes.io/instance: {{ .Release.Name }} }
-{{- if .Values.web.oidc.enabled }}
----
-# The session-cookie sealing key (AES-256-GCM). A Secret, not a plaintext env var, so prod-render's
-# zero-plaintext-secrets check holds; the web pod reads it via secretKeyRef. Operator-provided + stable
-# (a rotated value logs everyone out), so it is NOT Helm-generated.
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ .Release.Name }}-web-session
-  labels: {{- include "lance.labels" . | nindent 4 }}
-type: Opaque
-data:
-  secret: {{ .Values.web.oidc.sessionSecret | b64enc | quote }}
-  # The Dex client secret the BFF presents at the confidential token exchange (dex.clientId is not a public
-  # client — it carries a secret for the password-grant path). Via a Secret so the zero-plaintext check holds.
-  clientSecret: {{ .Values.dex.clientSecret | b64enc | quote }}
-{{- end }}
-{{- end }}

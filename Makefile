@@ -33,7 +33,6 @@ TILT_V      := 0.33.21
 FGA_V       := 0.6.4
 CATALOG_IMG := lance-rest-catalog:dev
 RAY_IMG     := ray-lance:dev
-WEB_IMG     := lance-lineage-web:dev
 # The micro-frontend zones (P5): the catch-all `home` + the four domain zones. Each builds from the ONE
 # parametrized .docker/frontend.dockerfile via --build-arg APP=<zone>, image lance-<zone>:dev.
 ZONES       := home data lineage models admin
@@ -45,7 +44,7 @@ VERSION     := $(shell git describe --tags --always --dirty 2>/dev/null || echo 
 BUILD_ARGS  := --build-arg BUILD_DATE=$(BUILD_DATE) --build-arg VCS_REF=$(VCS_REF) --build-arg VERSION=$(VERSION)
 
 .PHONY: help bootstrap kind-up kind-down deps images load deploy up verify medallion compaction \
-        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage e2e-web \
+        gateway governed e2e e2e-all e2e-obs e2e-medallion e2e-media e2e-gateway e2e-compaction e2e-cas e2e-lineage \
         e2e-governance e2e-governed-union dashboards status k9s tilt-up tilt-ci clean down openapi openapi-check \
         prod-render-check alert-rules-check ci charts frontend
 
@@ -92,12 +91,11 @@ deps: ## Add subchart repos + vendor chart deps into chart/charts/
 	@helm repo update >/dev/null && helm dependency build ./chart >/dev/null
 	@echo "✓ chart deps vendored"
 
-images: frontend-images ## Build the catalog (catalog+lineage) + web + the 5 MFE zone images
+images: frontend-images ## Build the catalog (catalog+lineage) + the 5 MFE zone images
 	docker build $(BUILD_ARGS) -f .docker/rest-catalog.dockerfile -t $(CATALOG_IMG) .
-	docker build $(BUILD_ARGS) -f .docker/web.dockerfile -t $(WEB_IMG) .
 
 load: ## Side-load the app + zone images into kind
-	kind load docker-image $(CATALOG_IMG) $(WEB_IMG) $(foreach z,$(ZONES),lance-$(z):dev) --name $(CLUSTER)
+	kind load docker-image $(CATALOG_IMG) $(foreach z,$(ZONES),lance-$(z):dev) --name $(CLUSTER)
 
 frontend-images: ## Build all micro-frontend zone images (lance-<zone>:dev) from the parametrized frontend.dockerfile
 	@for z in $(ZONES); do \
@@ -166,7 +164,7 @@ gateway: ## Port-forward the API gateway — one entry point for the whole platf
 
 governed: ## Governed demo: turn auth ON, then prove Dex(OIDC) → catalog → OpenFGA end to end
 	@echo "enabling auth (Dex OIDC + OpenFGA) …"
-	@helm upgrade --install $(RELEASE) ./chart --set image.catalog.tag=dev --set image.web.tag=dev --set auth.enabled=true --timeout 200s >/dev/null
+	@helm upgrade --install $(RELEASE) ./chart --set image.catalog.tag=dev --set auth.enabled=true --timeout 200s >/dev/null
 	@kubectl rollout restart deploy/$(RELEASE)-dex deploy/$(RELEASE)-catalog deploy/$(RELEASE)-lineage >/dev/null
 	@kubectl rollout status deploy/$(RELEASE)-catalog --timeout=120s >/dev/null
 	@kubectl exec -i deploy/$(RELEASE)-catalog -c catalog -- python - < scripts/governed_demo_k8s.py
@@ -182,12 +180,12 @@ PF_ADDR ?= 127.0.0.1
 WEB_PORT ?= 5173
 dashboards: ## Port-forward all the UIs (Ctrl-C to stop). Remote box: make dashboards PF_ADDR=0.0.0.0
 	@echo "bind $(PF_ADDR) — browse localhost (or the host LAN IP if PF_ADDR=0.0.0.0):"
-	@echo "web        → :$(WEB_PORT)"
+	@echo "home zone  → :$(WEB_PORT)   (the landing; cross-zone nav needs the Ingress — see docs/DEPLOY.md)"
 	@echo "lineage    → :8000"
 	@echo "Perses     → :8080   (metrics+traces+logs dashboards over GreptimeDB)"
 	@echo "GreptimeDB → :4000   (/dashboard — SQL + PromQL over all 3 signals)"
 	@echo "Dapr dash  → :8081"
-	@kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-web $(WEB_PORT):3000 & \
+	@kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-web-home $(WEB_PORT):3000 & \
 	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-lineage 8000:8000 & \
 	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-perses 8080:8080 & \
 	 kubectl port-forward --address $(PF_ADDR) svc/$(RELEASE)-greptimedb-standalone 4000:4000 & \
@@ -267,9 +265,6 @@ e2e-cas: ## Validate object-store conditional-write (CAS = Lance manifest commit
 	   uv run pytest tests/e2e/test_object_store_cas_e2e.py -v -m cas; rc=$$?; \
 	 kill $$S 2>/dev/null; exit $$rc
 
-e2e-web: ## LIVE frontend e2e vs the deployed web pod (rask-style: hydration + BFF round-trips; auto-forwards web)
-	@echo "port-forwarding web ..."
-	@kubectl port-forward svc/$(RELEASE)-web 3000:3000 >/dev/null 2>&1 & W=$$!; 	 sleep 3; 	 cd frontend/apps/web && LANCE_E2E_WEB_URL=http://localhost:3000 bunx playwright test -c playwright.live.config.ts; rc=$$?; 	 kill $$W 2>/dev/null; exit $$rc
 
 e2e-governance: ## e2e governance boundary cases (OIDC+FGA: create-lineage, malformed-bearer 401, non-owner rename/overwrite 403) — needs an AUTH-ON stack
 	@echo "port-forwarding catalog/lineage/dex …"

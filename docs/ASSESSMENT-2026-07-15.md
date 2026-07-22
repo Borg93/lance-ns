@@ -1,5 +1,12 @@
 # Assessment 2026-07-15 — catalog bench, rask-merge readiness, production readiness
 
+> ⚠️ **§1 (catalog bench) is superseded — see [`BENCH-2026-07-22.md`](BENCH-2026-07-22.md).** Four of
+> the five "genuinely missing" governance-plane gaps below shipped in the week after this was written
+> (#49 tag mgmt, #50 policy store, #51 access review, #52+#72–#83 console). The 2026-07-22 refresh
+> re-grounds the list against current code; the only genuinely-missing-and-valuable item that remains
+> is **outbound catalog federation** (with control-plane change-events as its companion). §2 (rask
+> merge) and §3 (production readiness) below are unaffected and still live.
+
 Three parallel assessments (multi-agent, evidence-grounded in this repo + web currency checks),
 requested alongside the #42 model-registry UI ship. Companion to `FEATURE-GAP.md` (the standing
 Lakekeeper/Marquez bench); this file adds the wider-catalog bench and the two forward-looking work-lists.

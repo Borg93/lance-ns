@@ -16,7 +16,7 @@ test.beforeEach(async ({ page }) => {
 	];
 	await page.route('**/capi/**', (route) => {
 		const req = route.request();
-		const path = new URL(req.url()).pathname.replace(/^\/capi/, '');
+		const path = new URL(req.url()).pathname.replace(/^.*\/capi/, '');
 		const promote = path.match(/^\/v1\/model\/([^/]+)\/promote$/);
 		if (promote && req.method() === 'POST') {
 			const name = decodeURIComponent(promote[1]);

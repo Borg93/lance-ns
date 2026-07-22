@@ -74,7 +74,7 @@ test.beforeEach(async ({ page }) => {
 	);
 	await page.route('**/capi/**', (route) => {
 		const req = route.request();
-		const path = new URL(req.url()).pathname.replace(/^\/capi/, '');
+		const path = new URL(req.url()).pathname.replace(/^.*\/capi/, '');
 		if (path.endsWith('/detail')) return json(route, DETAIL);
 		if (path.endsWith('/tags') && req.method() === 'POST') {
 			tagPost = req.postDataJSON() as { tag: string; version: number };

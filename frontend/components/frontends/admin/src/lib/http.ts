@@ -1,3 +1,5 @@
+import { base as appBase } from '$app/paths';
+
 /** Per-request timeout — a hung backend must not stack poll ticks (§2 perf, 2026-07-11). */
 export const FETCH_TIMEOUT_MS = 8000;
 
@@ -11,18 +13,24 @@ export function timeoutSignal(ms: number): AbortSignal {
 	return controller.signal;
 }
 
+/** Prefix the SvelteKit base path to an absolute same-origin BFF path (`/api/…`, `/capi/…`,
+ * `/medallion/…`). This zone is served UNDER its base (`/data`, `/admin`, …) and its BFF proxy routes live
+ * there, so a browser call MUST carry the base — the Ingress path-routes `/<zone>` to this zone, and a bare
+ * `/capi` 404s (it never reaches this zone). Bare paths worked in apps/web only because it had no base. */
+export const bffPath = (p: string): string => `${appBase}${p}`;
+
 /** A fetch outcome that keeps the HTTP status — writes need 401 ("sign in") ≠ 403 (rung denial) ≠ 0
  * (offline), which getJSON-style null-on-error cannot express. Shared by the lineage + catalog clients. */
 export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; detail: string };
 
-/** One status-aware JSON request against a same-origin BFF base ("/api" or "/capi"). */
+/** One status-aware JSON request against a same-origin BFF base ("/api" or "/capi"), base-path-aware. */
 export async function requestJSON<T>(
 	base: string,
 	path: string,
 	init?: RequestInit,
 ): Promise<ApiResult<T>> {
 	try {
-		const res = await fetch(`${base}/${path}`, {
+		const res = await fetch(`${bffPath(base)}/${path}`, {
 			...init,
 			signal: timeoutSignal(FETCH_TIMEOUT_MS),
 		});

@@ -9,6 +9,7 @@
 	import { tableFromJSON, tableToIPC } from 'apache-arrow';
 	import AccessGraph from './AccessGraph.svelte';
 	import { fetchProducers } from './api';
+	import { bffPath } from './http';
 	import { deriveQuality, type QualityBadge } from './quality';
 	import GrantsPanel from './GrantsPanel.svelte';
 	import ReadersPanel from './ReadersPanel.svelte';
@@ -474,7 +475,10 @@
 		if (!blobCol || blobRow == null) return;
 		blobFailed = false;
 		// The catch-all BFF forwards the query + the session bearer + the binary body → an <img> src works.
-		blobSrc = `/capi/v1/table/${encodeURIComponent(table)}/blobs?column=${encodeURIComponent(blobCol)}&row=${blobRow}`;
+		// base-prefixed so the <img> hits THIS zone's proxy under its base path (not a bare origin /capi).
+		blobSrc = bffPath(
+			`/capi/v1/table/${encodeURIComponent(table)}/blobs?column=${encodeURIComponent(blobCol)}&row=${blobRow}`,
+		);
 	}
 
 	async function runInsert(): Promise<void> {

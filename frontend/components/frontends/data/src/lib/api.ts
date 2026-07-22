@@ -19,11 +19,11 @@ import type {
 	SearchResults,
 } from './types';
 
-import { FETCH_TIMEOUT_MS, requestJSON, timeoutSignal } from './http';
+import { FETCH_TIMEOUT_MS, bffPath, requestJSON, timeoutSignal } from './http';
 
 async function getJSON<T>(path: string): Promise<T | null> {
 	try {
-		const res = await fetch(`/api/${path}`, { signal: timeoutSignal(FETCH_TIMEOUT_MS) });
+		const res = await fetch(bffPath(`/api/${path}`), { signal: timeoutSignal(FETCH_TIMEOUT_MS) });
 		if (!res.ok) return null;
 		return (await res.json()) as T;
 	} catch {

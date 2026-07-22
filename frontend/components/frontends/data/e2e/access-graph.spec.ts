@@ -40,7 +40,7 @@ test.beforeEach(async ({ page }) => {
 	grantPost = null;
 	await page.route('**/capi/**', (route) => {
 		const req = route.request();
-		const path = new URL(req.url()).pathname.replace(/^\/capi/, '');
+		const path = new URL(req.url()).pathname.replace(/^.*\/capi/, '');
 		if (path.endsWith('/detail')) return json(route, DETAIL);
 		if (path.endsWith('/access/graph')) return json(route, GRAPH);
 		if (path.endsWith('/access/grant')) {

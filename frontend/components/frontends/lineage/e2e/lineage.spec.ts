@@ -40,7 +40,7 @@ test.beforeEach(async ({ page }) => {
 	governance = { tags: ['layer=silver'], description: null };
 	await page.route('**/api/**', (route) => {
 		const req = route.request();
-		const path = new URL(req.url()).pathname.replace(/^\/api/, '');
+		const path = new URL(req.url()).pathname.replace(/^.*\/api/, '');
 		const gov = path.match(/^\/datasets\/([^/]+)\/governance$/);
 		if (gov)
 			return json(route, {

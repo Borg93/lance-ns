@@ -95,6 +95,34 @@ def test_build_run_event_records_the_transform_edge() -> None:
     assert "SourceCodeLocationJobFacet" in source["_schemaURL"]
 
 
+def _run_event_for(project: str | None) -> dict[str, Any]:
+    return build_run_event(
+        operation="embed_features",
+        author="data_eng",
+        job_namespace="lance-medallion",
+        inputs=[("bronze", "bronze$events")],
+        output_namespace="silver",
+        output_name="silver$features",
+        token="tok1",
+        project=project,
+    )
+
+
+def test_run_id_without_project_keeps_the_single_tenant_seed() -> None:
+    # Regression: a project-less emit derives its runId from EXACTLY the pre-#84 seed — the graph's
+    # existing runs (and every redelivery of them) must keep MERGEing onto the same ids.
+    assert _run_event_for(None)["run"]["runId"] == run_id_for("embed_features-tok1")
+
+
+def test_run_id_is_project_qualified_so_tenants_never_collide() -> None:
+    # Two projects reusing the SAME token must yield TWO distinct runs — an unqualified seed would
+    # MERGE one tenant's run onto the other's, cross-wiring their lineage.
+    acme, globex = _run_event_for("acme")["run"]["runId"], _run_event_for("globex")["run"]["runId"]
+    assert acme == run_id_for("acme-embed_features-tok1")
+    assert globex == run_id_for("globex-embed_features-tok1")
+    assert acme != globex
+
+
 def test_mover_emits_lineage_then_triggers_next_stage() -> None:
     dapr = _FakeDapr()
     event = {"data": {"token": "abc123", "dataset": "bronze$events", "namespace": "bronze"}}

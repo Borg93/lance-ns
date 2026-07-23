@@ -9,13 +9,15 @@ stages out as ``<root_uri>/medallion/<namespace>``.
 
 Records are immutable except ``status``, so resolution accepts short staleness through a per-process TTL
 cache — positive hits only, meaning a freshly provisioned warehouse is visible immediately while a
-deactivation is honored within one TTL window. All IO is blocking; callers threadpool it.
+deactivation is honored within one TTL window (default 5s; ``WAREHOUSE_REGISTRY_TTL_SECONDS``
+overrides). All IO is blocking; callers threadpool it.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import time
 
@@ -34,9 +36,25 @@ _REGISTRY_PREFIX = "_warehouses"
 PROJECT_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$"
 _PROJECT_RE = re.compile(PROJECT_PATTERN)
 
-_DEFAULT_TTL_SECONDS = 30.0
+#: Env override for the positive-cache TTL — operators trading resolver load against how long a
+#: DEACTIVATED warehouse may keep resolving (the stale-positive window).
+_TTL_ENV_VAR = "WAREHOUSE_REGISTRY_TTL_SECONDS"
+#: Small by design: the cache only ever serves stale POSITIVES, and the harm of one (routing a tenant
+#: into a warehouse an admin just deactivated) outweighs the saved registry listing.
+_DEFAULT_TTL_SECONDS = 5.0
 #: ``(control_root, project) → (expires_at_monotonic, root_uri)`` — positive resolutions only.
 _cache: dict[tuple[str, str], tuple[float, str]] = {}
+
+
+def _default_ttl_seconds() -> float:
+    """The positive-cache TTL: ``WAREHOUSE_REGISTRY_TTL_SECONDS`` when set + parseable, else 5s."""
+    raw = os.environ.get(_TTL_ENV_VAR)
+    if raw:
+        try:
+            return float(raw)
+        except ValueError:
+            log.warning("warehouse_registry_ttl_invalid", extra={"value": raw})
+    return _DEFAULT_TTL_SECONDS
 
 
 class UnresolvableProjectError(RuntimeError):
@@ -63,7 +81,7 @@ def project_root(
     storage_options: StorageOptions,
     project: str,
     *,
-    ttl_seconds: float = _DEFAULT_TTL_SECONDS,
+    ttl_seconds: float | None = None,
 ) -> str | None:
     """The ACTIVE warehouse ``root_uri`` for ``project``, or ``None`` when it has no active warehouse.
 
@@ -73,9 +91,15 @@ def project_root(
     warning, never allowed to void the rest. Multiple active warehouses resolve DETERMINISTICALLY to
     the lowest warehouse ``id`` (warned) so routing never flaps between roots.
 
-    Positive results are cached per process for ``ttl_seconds``; a miss is NOT cached, so a freshly
-    provisioned warehouse resolves immediately. Blocking IO — callers threadpool it.
+    Positive results are cached per process for ``ttl_seconds`` (``None`` → the
+    ``WAREHOUSE_REGISTRY_TTL_SECONDS`` env value, default 5s); a miss is NOT cached, so a freshly
+    provisioned warehouse resolves immediately. RESIDUAL STALENESS: because only ``status`` ever
+    changes on a record, the cache re-checks it only on expiry — a warehouse deactivated after a
+    positive hit keeps resolving for up to ``ttl_seconds`` per process (set the TTL to 0 to re-read
+    the registry on every call). Blocking IO — callers threadpool it.
     """
+    if ttl_seconds is None:
+        ttl_seconds = _default_ttl_seconds()
     key = (control_root, project)
     cached = _cache.get(key)
     if cached is not None and time.monotonic() < cached[0]:

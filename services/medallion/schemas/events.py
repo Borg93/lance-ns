@@ -167,10 +167,12 @@ def build_run_event(
     standard ``outputStatistics`` facet, when the compute knows the URI (``source_uri``) the standard
     ``dataSource`` facet, and when the quality gate validated the write (``assertions`` set) the standard
     ``dataQualityAssertions`` facet. The ``runId`` is a DETERMINISTIC UUID derived from
-    ``<operation>-<token>`` (spec-valid + stable across redelivery); the raw ``token`` rides the ``lance``
-    run facet for cascade correlation. ``project`` (#84 per-tenant routing) also rides the ``lance``
-    facet, so the cascade head (``/raw-arrival``) can copy it onto the stage trigger — omitted when
-    unset, keeping the single-tenant emit byte-identical. ``event_type='FAIL'`` + ``error_message``
+    ``<operation>-<token>`` — project-qualified to ``<project>-<operation>-<token>`` when ``project`` is
+    set, so two tenants reusing the same token never collide onto one run (spec-valid + stable across
+    redelivery either way); the raw ``token`` rides the ``lance`` run facet for cascade correlation.
+    ``project`` (#84 per-tenant routing) also rides the ``lance`` facet, so the cascade head
+    (``/raw-arrival``) can copy it onto the stage trigger — omitted when unset, keeping the
+    single-tenant emit (run id included) byte-identical. ``event_type='FAIL'`` + ``error_message``
     records a failed run (no version, no outputs asserted); the standard ``errorMessage`` run facet
     carries the reason.
     """
@@ -190,9 +192,14 @@ def build_run_event(
             "message": error_message,
             "programmingLanguage": "PYTHON",
         }
-    # Deterministic UUID keyed on operation+token → stable across redelivery (idempotent MERGE); a
-    # token-less call (defensive fallback — the cascade always threads one) gets a fresh random UUID.
-    run_id = run_id_for(f"{operation}-{token}") if token else str(uuid.uuid4())
+    # Deterministic UUID keyed on (project+)operation+token → stable across redelivery (idempotent
+    # MERGE) yet distinct across tenants: without the project qualifier two projects reusing one token
+    # would MERGE onto the SAME run. Project absent → the exact single-tenant seed (byte-identical);
+    # a token-less call (defensive fallback — the cascade always threads one) gets a fresh random UUID.
+    if token:
+        run_id = run_id_for(f"{project}-{operation}-{token}" if project else f"{operation}-{token}")
+    else:
+        run_id = str(uuid.uuid4())
     # A FAIL run produced no data: it keeps a BARE output (name only — the lineage repo makes the WROTE
     # edge so producers() surfaces the attempt, but withholds the version for a non-success run) and NO
     # version/stats/assertions. It does NOT fabricate lineage: the repo also gates DERIVED_FROM on

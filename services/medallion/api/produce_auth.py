@@ -6,9 +6,10 @@ a signed-in OIDC user who holds ``can_administer`` on the project may trigger pr
 forward the *user's* bearer and the web pod never holds the service token (no secrets-posture change).
 
 Fail-closed at every step: no service token configured is dev-open (matching the old ``require_dapr_token``);
-a matching Dapr token passes (service path, unchanged); otherwise an OIDC bearer is REQUIRED and must be
-valid (else 401) AND resolve to a project admin (else 403), with an OpenFGA outage failing to 503 — never a
-silent allow; a request carrying neither credential is 403.
+a matching Dapr token passes (service path) — but only for the CONFIGURED project, since the shared token
+carries no tenant identity (crossing tenants takes a user bearer); otherwise an OIDC bearer is REQUIRED
+and must be valid (else 401) AND resolve to a project admin (else 403), with an OpenFGA outage failing to
+503 — never a silent allow; a request carrying neither credential is 403.
 """
 
 from __future__ import annotations
@@ -42,14 +43,22 @@ async def authorize_produce(
 
     ``project`` (#84) moves the admin gate onto the REQUESTED project — the caller must administer the
     project it produces into, not the fixed configured one; absent → ``produce_admin_project`` exactly as
-    before. The service-token path is unchanged and (as the head-forging trust it already carries)
-    trusts the project field."""
+    before. The service-token path stays project-BLIND: the shared token authenticates the service, not
+    a tenant, so it may only produce into the configured project — a different requested project is
+    refused (403); crossing tenants takes a user bearer, which gets the per-project FGA check."""
     expected = os.environ.get("APP_API_TOKEN")
     # Dev: no service token configured → open, exactly as require_dapr_token was a no-op.
     if not expected:
         return
-    # Service-to-service path (UNCHANGED): a matching Dapr app-api-token.
+    # Service-to-service path: a matching Dapr app-api-token. The shared token carries NO tenant
+    # identity, so it must never be trusted for an arbitrary requested project — that would let any
+    # token holder produce into every tenant. Configured project (or none) only; else 403.
     if dapr_api_token and secrets.compare_digest(dapr_api_token.encode(), expected.encode()):
+        if project and project != settings.produce_admin_project:
+            raise HTTPException(
+                status_code=403,
+                detail="the service token cannot produce into another project; use a project-admin bearer",
+            )
         return
     # Human path: a signed-in project admin. Only when OIDC is configured + a verifier is wired.
     verifier: OIDCVerifier | None = getattr(request.app.state, "oidc", None)

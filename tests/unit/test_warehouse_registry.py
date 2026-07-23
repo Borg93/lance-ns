@@ -101,6 +101,30 @@ def test_a_miss_is_not_cached_so_fresh_provisioning_resolves_immediately(tmp_pat
     assert project_root(str(tmp_path), {}, "acme", ttl_seconds=3600) == "s3://acme-wh1"
 
 
+def test_default_ttl_is_short_and_env_overridable(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The cache only ever serves stale POSITIVES, so the default window a deactivated warehouse can
+    # keep resolving through must stay short (≤5s); operators tune it via the env var.
+    monkeypatch.delenv("WAREHOUSE_REGISTRY_TTL_SECONDS", raising=False)
+    assert warehouse_registry._default_ttl_seconds() <= 5.0
+    monkeypatch.setenv("WAREHOUSE_REGISTRY_TTL_SECONDS", "0.5")
+    assert warehouse_registry._default_ttl_seconds() == 0.5
+
+
+def test_invalid_env_ttl_falls_back_to_the_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WAREHOUSE_REGISTRY_TTL_SECONDS", "junk")
+    assert warehouse_registry._default_ttl_seconds() == warehouse_registry._DEFAULT_TTL_SECONDS
+
+
+def test_env_ttl_zero_makes_deactivation_immediate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # TTL 0 via the env (no caller changes needed): every call re-reads the registry, so a
+    # deactivation is honored on the very next resolution.
+    monkeypatch.setenv("WAREHOUSE_REGISTRY_TTL_SECONDS", "0")
+    _write_record(tmp_path, _record("wh1", "acme", "s3://acme-wh1", status="active"))
+    assert project_root(str(tmp_path), {}, "acme") == "s3://acme-wh1"
+    _write_record(tmp_path, _record("wh1", "acme", "s3://acme-wh1", status="deactivated"))
+    assert project_root(str(tmp_path), {}, "acme") is None
+
+
 def test_ttl_zero_always_rereads(tmp_path: Path) -> None:
     _write_record(tmp_path, _record("wh1", "acme", "s3://old-root", status="active"))
     assert project_root(str(tmp_path), {}, "acme", ttl_seconds=0) == "s3://old-root"

@@ -197,6 +197,18 @@ def test_oidc_admin_gate_defaults_to_the_configured_project(monkeypatch: pytest.
     assert captured["obj"] == "project:acme"  # no project param → exactly the pre-#84 gate
 
 
+def test_service_token_with_the_configured_project_allows(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The service path stays open for the project it is configured to produce into.
+    assert _run(monkeypatch, app_token="s3cr3t", dapr_token="s3cr3t", project="acme") is None
+
+
+def test_service_token_cannot_request_another_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The shared app token authenticates the SERVICE, not a tenant — trusting it for an arbitrary
+    # requested project would let any token holder produce into every tenant. Cross-project requests
+    # take a user bearer — the per-project FGA check test_oidc_admin_gate_targets_the_requested_project pins.
+    _expect(monkeypatch, 403, app_token="s3cr3t", dapr_token="s3cr3t", project="globex")
+
+
 def test_nonadmin_of_the_requested_project_is_403(monkeypatch: pytest.MonkeyPatch) -> None:
     _expect(
         monkeypatch,

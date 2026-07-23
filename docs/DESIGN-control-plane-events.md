@@ -1,8 +1,12 @@
 # DESIGN — Control-plane change-events + live frontend refresh
 
-> **Status: PLAN (not yet built), reviewed once by a Fable-model pass (2026-07-22) and revised per its
-> findings — see "Review" at the bottom.** Scope is **Lance-only** (2026-07-22 decision): this is an
-> *internal* estate event stream for our own consumers + console, not foreign-catalog interop.
+> **Status: SHIPPED (2026-07-23) — P1 + P2 built, adversarially audited, and PROVEN live on kind**
+> (`scripts/verify_control_events.sh`: mutation → `catalog.control.v1` broadcast → per-replica ring buffer →
+> `GET /v1/events`, estate-admin gated, actor = the verified subject). Revised twice: a Fable-model plan
+> review (2026-07-22) and a design/security review (2026-07-23) that corrected the estate-admin scope, the
+> `APP_API_TOKEN` ingest auth, poll-audit volume, and the `query.live` frontend shape (see the review notes
+> below + `docs/GOAL-finish-lance-ns.md`). Scope is **Lance-only**: an *internal* estate event stream for our
+> own consumers + console, not foreign-catalog interop.
 
 ## Context
 

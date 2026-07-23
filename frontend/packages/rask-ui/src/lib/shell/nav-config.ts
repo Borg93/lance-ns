@@ -104,6 +104,7 @@ export function navMain(): NavItem[] {
 				// tracked in task #85. Removed rather than advertising a 404.)
 				{ title: 'Events', href: `${b}/admin/events`, match: seg(`${b}/admin/events`) },
 				{ title: 'Streams', href: `${b}/admin/streams`, match: seg(`${b}/admin/streams`) },
+				{ title: 'Tenants', href: `${b}/admin/tenants`, match: seg(`${b}/admin/tenants`) },
 			],
 		},
 	];

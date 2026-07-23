@@ -9,7 +9,7 @@ import (
 // bunImage is the frontend toolchain's base image — the exact digest-pinned tag from
 // .docker/frontend.dockerfile (oven/bun:1.3.14-slim), so the Dagger run matches the shipped zone images
 // rather than trusting the CI setup-bun action's unpinned 'latest'. Bun is the whole toolchain here: turbo,
-// oxlint and oxfmt arrive as frontend/ root devDependencies via `bun install --frozen-lockfile`.
+// eslint and prettier arrive as frontend/ root devDependencies via `bun install --frozen-lockfile`.
 const bunImage = "oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04"
 
 // frontendBase returns the installed turborepo workspace container: the bun image + source +
@@ -37,7 +37,7 @@ func (m *LanceNs) frontendBase(src *dagger.Directory) *dagger.Container {
 		WithExec([]string{"bun", "install", "--frozen-lockfile"})
 }
 
-// Frontend runs the frontend job's bun gates — svelte-check + unit tests + oxlint + oxfmt — as one
+// Frontend runs the frontend job's bun gates — svelte-check + unit tests + eslint + prettier — as one
 // turbo invocation fanned across the workspace graph, identical to ci.yml's `bunx turbo run check
 // test lint fmt:check`. Turbo fails on the first non-zero task, which Dagger surfaces as the container
 // error. The Playwright e2e leg (`test:e2e`) is browser-bound and lives in its own function; it is not

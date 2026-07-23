@@ -415,7 +415,7 @@ ci: ## Run the Python CI gate (ruff + ty + openapi drift + unit/integration test
 charts: ## Run the chart CI gate (helm lint/render invariants + prod-render-check + alert-rules-check) via Dagger
 	@dagger call charts
 
-frontend: ## Run the frontend CI gate (svelte-check + bun unit tests + oxlint + oxfmt) hermetically via Dagger
+frontend: ## Run the frontend CI gate (svelte-check + bun unit tests + eslint + prettier) hermetically via Dagger
 	@dagger call frontend
 
 clean: ## helm uninstall the release (keep the cluster)
@@ -433,7 +433,7 @@ e2e-ray-ci: ## #53 guarded Ray-path proof: governed ray-ON kind stack + real Kub
 deadcode: ## Dead-code sweep (vulture). Decorator-invoked symbols are IGNORED and reviewed knowns are whitelisted, so output ~0 == a REAL dead symbol surfaces instead of drowning in noise.
 	@uvx vulture services scripts tests .vulture-whitelist.py --min-confidence 60 \
 		--ignore-decorators "$(DEADCODE_IGNORE_DECORATORS)" || true
-	@cd frontend && bunx knip --no-exit-code 2>/dev/null || echo "  (frontend: oxlint --deny-warnings already gates unused imports/vars)"
+	@cd frontend && bunx knip --no-exit-code 2>/dev/null || echo "  (frontend: eslint --max-warnings=0 gates unused imports/vars)"
 
 # Framework call sites vulture cannot see. WITHOUT these the sweep reported 70 "dead" symbols in services/,
 # every one a false positive (FastAPI routes/exception handlers, pydantic validators) — a sweep that cries

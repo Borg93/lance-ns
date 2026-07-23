@@ -3,7 +3,11 @@ lance-ns deployed (release {{ .Release.Name }}, namespace {{ .Release.Namespace 
 Event-driven path:  catalog --Dapr publish--> [pubsub.jetstream over NATS] --> lineage /lineage-events --> Apache AGE
 
 Reach the services (kind has no host ports — port-forward):
-  kubectl port-forward svc/{{ include "lance.fullname" . }}-web      5173:3000   # the UI
+{{- if .Values.frontend.enabled }}
+  # The UI is the P5 micro-frontend ZONES behind the Ingress (one origin, cross-zone nav). Install an
+  # Ingress controller (ingress-nginx) and port-forward it, then browse http://localhost:8090 (see DEPLOY.md):
+  kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller 8090:80   # / → home, /data, /lineage, /models, /admin
+{{- end }}
   kubectl port-forward svc/{{ include "lance.fullname" . }}-lineage  8000:8000   # the lineage API
   kubectl port-forward svc/{{ include "lance.fullname" . }}-catalog  2333:2333   # the catalog
 

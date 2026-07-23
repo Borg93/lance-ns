@@ -12,11 +12,9 @@
 		"dev": "turbo run dev",
 		"test": "turbo run test && vitest run eslint-rules",
 		"test:e2e": "turbo run test:e2e",
-		"lint": "oxlint --deny-warnings .",
-		"fmt": "oxfmt .",
-		"fmt:check": "oxfmt --check .",
-		"lint:mfe": "prettier --check '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore && eslint components/frontends/home components/frontends/data components/frontends/lineage components/frontends/models components/frontends/admin packages/api packages/rask-ui",
-		"format:mfe": "prettier --write '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore"
+		"lint": "eslint components/frontends/home components/frontends/data components/frontends/lineage components/frontends/models components/frontends/admin packages/api packages/rask-ui",
+		"fmt": "prettier --write '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore",
+		"fmt:check": "prettier --check '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,packages/api,packages/rask-ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.1.0",
@@ -25,8 +23,6 @@
 		"eslint-config-prettier": "^10.1.8",
 		"eslint-plugin-svelte": "^3.19.0",
 		"globals": "^17.6.0",
-		"oxfmt": "0.58.0",
-		"oxlint": "1.73.0",
 		"prettier": "^3.8.4",
 		"prettier-plugin-svelte": "^4.1.1",
 		"prettier-plugin-tailwindcss": "^0.8.0",

@@ -33,6 +33,7 @@ async function adminGate(
 	try {
 		const res = await fetchFn(`${MEDALLION_API}/authorize`, {
 			headers: { authorization: `Bearer ${accessToken}` },
+			signal: AbortSignal.timeout(5000),
 		});
 		if (res.ok) return null;
 		if (res.status === 403)
@@ -59,17 +60,23 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 		return json({ detail: 'jetstream monitor not configured' }, { status: 501 });
 	}
 	try {
-		const res = await fetch(`${NATS_MONITOR_API}/jsz?streams=true&consumers=true&config=true`);
+		// Bounded: a wedged monitor (TCP accepted, no headers) must yield a fast honest 502, not pin the
+		// request on undici's ~300s default.
+		const res = await fetch(`${NATS_MONITOR_API}/jsz?streams=true&consumers=true&config=true`, {
+			signal: AbortSignal.timeout(5000),
+		});
 		if (!res.ok) {
 			return json({ detail: `nats monitor ${res.status}` }, { status: 502 });
 		}
 		const raw = parse(RawJszSchema, await res.json());
-		// Trim: flatten account_details[].stream_detail[] (single $G account today, but shape-robust) and
-		// keep only what the panel renders — the browser never sees the raw monitor payload.
+		// Trim: flatten account_details[].stream_detail[] and keep only what the panel renders — the browser
+		// never sees the raw monitor payload. Stream names are unique only PER ACCOUNT, so with multiple
+		// accounts the name is account-qualified (the panel keys its each-block on it).
+		const multiAccount = raw.account_details.length > 1;
 		const streams = raw.account_details
-			.flatMap((account) => account.stream_detail)
-			.map((s) => ({
-				name: s.name,
+			.flatMap((account) => account.stream_detail.map((s) => ({ account: account.name, s })))
+			.map(({ account, s }) => ({
+				name: multiAccount ? `${account}/${s.name}` : s.name,
 				subjects: s.config.subjects,
 				retention: s.config.retention,
 				storage: s.config.storage,
@@ -101,7 +108,12 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 		};
 		return json(overview);
 	} catch (err) {
+		// Fixed detail: a ValiError's message can echo received-value fragments of the raw monitor payload —
+		// keep the specifics in the server log, never in the response body.
 		console.error(`api jetstream proxy upstream failure: ${String(err)}`);
-		return json({ detail: String(err) }, { status: 502 });
+		return json(
+			{ detail: 'jetstream monitor unreachable or its payload did not parse' },
+			{ status: 502 },
+		);
 	}
 };

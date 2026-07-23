@@ -99,7 +99,9 @@ export function navMain(): NavItem[] {
 			items: [
 				{ title: 'Audit', href: `${b}/admin/audit`, match: seg(`${b}/admin/audit`) },
 				{ title: 'DLQ', href: `${b}/admin/dlq`, match: seg(`${b}/admin/dlq`) },
-				{ title: 'Access', href: `${b}/admin/access`, match: seg(`${b}/admin/access`) },
+				// (an 'Access' leaf used to point at /admin/access, which has no route anywhere — the access
+				// surfaces live in the data zone's table detail + FGA graph; a namespace/access admin page is
+				// tracked in task #85. Removed rather than advertising a 404.)
 				{ title: 'Events', href: `${b}/admin/events`, match: seg(`${b}/admin/events`) },
 				{ title: 'Streams', href: `${b}/admin/streams`, match: seg(`${b}/admin/streams`) },
 			],

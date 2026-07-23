@@ -79,11 +79,33 @@ test('drop confirms via the AlertDialog, posts the cascade behavior, and the row
 	await expect(dialog).toContainText('Drop namespace bronze');
 	await dialog.getByRole('checkbox').check(); // Cascade — bronze holds a table, Restrict would refuse
 	await dialog.getByRole('button', { name: 'Drop', exact: true }).click();
-	expect(dropPost).toEqual({ path: '/v1/namespace/bronze/drop', body: { behavior: 'Cascade' } });
+	// Poll (don't race the route interception — same rule as the base-path test above).
+	await expect
+		.poll(() => dropPost)
+		.toEqual({ path: '/v1/namespace/bronze/drop', body: { behavior: 'Cascade' } });
+	// The dialog must CLOSE after the drop — a still-open dialog keeps the destructive action armed for a
+	// second confirm-free fire (audit: major).
+	await expect(page.getByRole('alertdialog')).toHaveCount(0);
 	// The success re-load renders the post-drop registry: bronze gone, gold intact.
 	await expect(page.locator('section.ns', { hasText: 'bronze' })).toHaveCount(0);
 	await expect(page.locator('section.ns', { hasText: 'gold' })).toBeVisible();
 	await expect(page.locator('.banner.ok')).toContainText('namespace bronze dropped (cascade)');
+});
+
+test('an unticked confirm posts Restrict — the default must never silently cascade', async ({
+	page,
+}) => {
+	await page.goto('/data/namespaces');
+	await page.getByRole('button', { name: 'Drop namespace gold' }).click();
+	const dialog = page.getByRole('alertdialog');
+	await expect(dialog).toContainText('Drop namespace gold');
+	// Leave the cascade checkbox UNTICKED: the wire contract must carry Restrict (refuse-on-non-empty) —
+	// this pins the default so a mapping inversion can't silently cascade-destroy a namespace.
+	await dialog.getByRole('button', { name: 'Drop', exact: true }).click();
+	await expect
+		.poll(() => dropPost)
+		.toEqual({ path: '/v1/namespace/gold/drop', body: { behavior: 'Restrict' } });
+	await expect(page.getByRole('alertdialog')).toHaveCount(0);
 });
 
 test('cancelling the confirm never posts the drop', async ({ page }) => {

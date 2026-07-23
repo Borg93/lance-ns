@@ -17,8 +17,12 @@
 	const unauthorized = $derived(overview === null && settled && lastStatus === 401);
 	const forbidden = $derived(overview === null && settled && lastStatus === 403);
 	const unavailable = $derived(overview === null && settled && lastStatus === 501);
+	// -1 = the client-side parse boundary rejected the BFF payload (contract drift, not a monitor outage).
+	const drifted = $derived(overview === null && settled && lastStatus === -1);
+	// 0 stays IN the offline set: after the first settle, a fetch-level failure (network down, BFF timeout)
+	// reports status 0 and must render as offline, not hang on the loading message (audit finding).
 	const offline = $derived(
-		overview === null && settled && ![0, 200, 401, 403, 501].includes(lastStatus),
+		overview === null && settled && ![-1, 200, 401, 403, 501].includes(lastStatus),
 	);
 
 	async function load(): Promise<void> {
@@ -33,9 +37,10 @@
 				overview = parse(JetStreamOverviewSchema, res.data);
 				lastStatus = 200;
 			} catch (err) {
+				// -1 = contract drift (the drifted state), distinct from a monitor outage's 502 (audit nit).
 				console.error(`jetstream overview parse failure: ${String(err)}`);
 				overview = null;
-				lastStatus = 502;
+				lastStatus = -1;
 			}
 		} else {
 			// Clear the stale view on failure so the auth/forbidden/offline state reflects reality — else a
@@ -102,6 +107,10 @@
 		</div>
 	{:else if unavailable}
 		<div class="empty">The stream view needs the NATS monitor (NATS_MONITOR_API unset).</div>
+	{:else if drifted}
+		<div class="empty">
+			<ShieldAlert size={15} /> The overview payload drifted from the contract — refusing to render it.
+		</div>
 	{:else if offline}
 		<div class="empty"><RefreshCw size={15} /> NATS monitor unreachable (HTTP {lastStatus}).</div>
 	{:else if overview === null}

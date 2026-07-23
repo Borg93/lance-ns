@@ -95,7 +95,12 @@
 			// the parse boundary throws on a wire-contract drift — surface it, never render from a lie
 			banner = { tone: 'fail', text: `drop response drifted from the contract: ${String(err)}` };
 		} finally {
+			// ALWAYS close + disarm: bits-ui's AlertDialog.Action does not auto-close, so leaving the dialog
+			// open would keep the destructive action armed for a second, confirm-free fire (audit: major).
+			// The banner carries success/failure either way.
 			busy = false;
+			dropOpen = false;
+			dropTarget = null;
 		}
 	}
 </script>

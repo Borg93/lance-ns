@@ -46,7 +46,7 @@ shared origin-wide session cookie (home additionally exchanges the code). Emit u
 # JetStream visibility (admin /streams): the NATS HTTP monitor port, unauthenticated by design and
 # ClusterIP-only — consumed strictly server-side behind the zone BFF's admin gate, never by the browser.
 # The headless Service is the one that carries :8222 (the plain Service exposes only 4222).
-- { name: NATS_MONITOR_API, value: "http://{{ .Release.Name }}-nats-headless:8222" }
+- { name: NATS_MONITOR_API, value: "http://{{ include "lance.natsHost" . }}-headless:8222" }
 {{- end }}
 - { name: LANCE_GATEWAY_URL, value: "http://{{ include "lance.fullname" . }}-gateway:{{ .Values.gateway.port }}" }
 - { name: PORT, value: "3000" }

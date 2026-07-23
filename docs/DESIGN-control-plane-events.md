@@ -5,7 +5,7 @@
 > `GET /v1/events`, estate-admin gated, actor = the verified subject). Revised twice: a Fable-model plan
 > review (2026-07-22) and a design/security review (2026-07-23) that corrected the estate-admin scope, the
 > `APP_API_TOKEN` ingest auth, poll-audit volume, and the `query.live` frontend shape (see the review notes
-> below + `docs/GOAL-finish-lance-ns.md`). Scope is **Lance-only**: an *internal* estate event stream for our
+> below). Scope is **Lance-only**: an *internal* estate event stream for our
 > own consumers + console, not foreign-catalog interop.
 
 ## Context

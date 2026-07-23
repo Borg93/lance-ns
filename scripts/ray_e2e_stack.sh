@@ -103,7 +103,6 @@ helm upgrade --install "$RELEASE" ./chart --timeout 600s \
   --set openbao.enabled=false \
   --set observability.enabled=false \
   --set compaction.enabled=false \
-  --set web.enabled=false \
   --set frontend.enabled=false
 # Dapr sidecar-injector race + fresh-cluster recreate (see e2e_stack.sh for the full rationale).
 kubectl rollout status deploy/dapr-sidecar-injector --timeout=300s

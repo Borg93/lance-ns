@@ -107,7 +107,6 @@ helm upgrade --install "$RELEASE" ./chart --timeout 600s \
   --set services.lineage.reconcile.enabled=true \
   --set observability.enabled=false \
   --set compaction.enabled=false \
-  --set web.enabled=false \
   --set frontend.enabled=false
 
 # Dapr's sidecar injector is a MUTATING WEBHOOK: it injects daprd only into pods created AFTER it is Ready.

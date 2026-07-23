@@ -100,6 +100,8 @@ export function navMain(): NavItem[] {
 				{ title: 'Audit', href: `${b}/admin/audit`, match: seg(`${b}/admin/audit`) },
 				{ title: 'DLQ', href: `${b}/admin/dlq`, match: seg(`${b}/admin/dlq`) },
 				{ title: 'Access', href: `${b}/admin/access`, match: seg(`${b}/admin/access`) },
+				{ title: 'Events', href: `${b}/admin/events`, match: seg(`${b}/admin/events`) },
+				{ title: 'Streams', href: `${b}/admin/streams`, match: seg(`${b}/admin/streams`) },
 			],
 		},
 	];

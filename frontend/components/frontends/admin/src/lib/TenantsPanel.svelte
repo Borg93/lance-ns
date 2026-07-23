@@ -103,8 +103,8 @@
 					{:else}
 						{#each p.admins as a (a)}<span class="chip mono">{a}</span>{/each}
 					{/if}
-					<a class="jump" href="/data/warehouses">warehouses ↗</a>
-					<a class="jump" href="/data/namespaces">namespaces ↗</a>
+					<a class="jump" href="/data/warehouses" data-sveltekit-reload>warehouses ↗</a>
+					<a class="jump" href="/data/namespaces" data-sveltekit-reload>namespaces ↗</a>
 				</div>
 			</section>
 		{/each}

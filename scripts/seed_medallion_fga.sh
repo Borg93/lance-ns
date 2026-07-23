@@ -85,3 +85,29 @@ w user:service-blesser validator namespace:models
 w user:service-web reader "$WAREHOUSE"
 
 echo "✓ seeded medallion grants (mover writers + media lane, silver→gold validator, trainer reader/models-writer, stage/table parent links) into store $SID"
+
+# --- Per-TENANT enablement (#84, optional args: PROJECT [ZONE_WAREHOUSE]) -------------------------------
+# A tenant cascade (`/produce?project=<p>`) targets the project-QUALIFIED namespaces (`<p>-bronze` …),
+# which inherit NOTHING from the estate seed above — the movers are correctly denied and the trigger is
+# dead-lettered (fail-closed, live-proven 2026-07-23). Enabling a tenant is exactly three tuple groups:
+#   1. parent each `<p>-<stage>` namespace under the tenant's ZONE warehouse (its medallion bucket —
+#      the registry resolves multiple actives to the LOWEST warehouse id; pass that one), so the
+#      project's own admins/readers inherit visibility over their zone data;
+#   2. the mover service rungs on the qualified target stages (same rungs as the estate seed);
+#   3. the table→namespace parent links (movers write Lance directly; nothing else seeds tables).
+# Media lanes stay estate-only (the media pipeline is not project-qualified — #84 scope).
+PROJECT="${1:-}"
+if [ -n "$PROJECT" ]; then
+  ZONE_WH="${2:?usage: seed_medallion_fga.sh <project> <zone-warehouse-id> (the tenant medallion bucket warehouse)}"
+  for ns in raw bronze silver gold; do
+    w "warehouse:$ZONE_WH" parent "namespace:$PROJECT-$ns"
+  done
+  w user:service-raw-to-bronze writer "namespace:$PROJECT-bronze"
+  w user:service-bronze-to-silver writer "namespace:$PROJECT-silver"
+  w user:service-silver-to-gold validator "namespace:$PROJECT-gold"
+  w "namespace:$PROJECT-raw" parent "table:$PROJECT-raw_events"
+  w "namespace:$PROJECT-bronze" parent "table:$PROJECT-bronze\$events"
+  w "namespace:$PROJECT-silver" parent "table:$PROJECT-silver\$features"
+  w "namespace:$PROJECT-gold" parent "table:$PROJECT-gold\$catalog"
+  echo "✓ enabled tenant '$PROJECT' medallion (zone warehouse:$ZONE_WH — stage parents, mover rungs, table links)"
+fi

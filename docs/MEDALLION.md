@@ -112,6 +112,30 @@ network-isolation layer is a gated `NetworkPolicy` (`networkPolicy.enabled`, nee
 restricting ingress to `lance-ray` to in-release pods — defense-in-depth, the same shape KubeRay's token
 auth prescribes (network isolation primary + token secondary).
 
+## Per-tenant zones (#84) — enabling a project's own cascade
+
+With `medallion.projectsEnabled`, `/produce?project=<p>` runs the whole cascade inside the **tenant's own
+bucket** (the project's zone warehouse from the registry — multiple actives resolve deterministically to
+the lowest warehouse id) with every lineage/FGA identity **project-qualified** (`<p>-raw_events`,
+`<p>-bronze$events`, …). The trigger's auth is per-project (`can_administer` on `project:<p>`); `/train`
+deliberately declares **no** project parameter and stays pinned to `medallion.produceAdminProject`.
+
+The qualified namespaces inherit **nothing** from the estate seed, so out of the box the movers are
+denied on `namespace:<p>-bronze` and the trigger is dead-lettered — fail-closed by design (live-proven
+2026-07-23: sidecar `DROP`, DLQ parking, no fallback into another tenant's roots). Enabling a tenant is
+one idempotent command once its zone warehouse exists:
+
+```bash
+kubectl port-forward svc/lance-ns-openfga 8081:8080 &
+OPENFGA_API_URL=http://localhost:8081 scripts/seed_medallion_fga.sh <project> <zone-warehouse-id>
+```
+
+which writes the three tuple groups: stage-namespace parents under the zone warehouse (project
+admins/readers inherit visibility over their zone data), the mover service rungs on the qualified target
+stages, and the table→namespace parent links (movers write Lance directly; nothing else seeds tables).
+After the seed the runs appear in `/runs` for the project's members — before it they exist but are
+governance-hidden, which is the same fail-closed lens, not data loss. Media lanes stay estate-only.
+
 ## Promotion gates — who *may* promote, and whether the data is *good enough* to
 
 A stage moves data forward (fires the next trigger) only when it passes **two independent, opt-in gates** —

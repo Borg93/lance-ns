@@ -119,6 +119,75 @@ schema registry; the difference is that Iceberg's contract semantics (column-ID-
 are ecosystem-standardized, while ours lean on Lance's manifest + our own gates — which is why
 the breaking-change detector in §4 is OUR item to build, not something the format gives us.
 
+## 7 · The event fabric contract
+
+The bus half of the contract, made explicit (2026-07-23). Four rules; every one cites the code that
+enforces it, and the topic constants below are pinned by `tests/unit/test_invariants.py` so a rename
+or an inline topic literal fails CI, not a live stack.
+
+### 7.1 Envelope: CloudEvents, supplied by Dapr
+
+Every publish goes through the one bounded wrapper `services/common/dapr_publish.py::publish_event`
+with `data_content_type="application/json"`; the Dapr **sidecar** wraps the payload in a CloudEvents
+envelope (id, source, type, traceparent) — application code never builds an envelope. Consumers
+receive the envelope as a dict and read `body["data"]`: `handle_cloud_event` in
+`services/lineage/services/consumer.py`, `on_control_event` in `services/catalog/api/dapr.py`, and
+`handle_stage` / `handle_train_trigger` in `services/medallion/services/{transform,train}.py` all
+treat `body` as an untrusted `Any` and guard with `isinstance` before touching `data`.
+
+### 7.2 The topic is the compatibility unit
+
+| Topic | Producer → consumer | Schema (the pydantic model) | Where the name lives |
+|---|---|---|---|
+| `lineage.events.v1` | catalog (`catalog/core/lineage_emit.py`), movers/trainer (via the `services/common/outbox.py` stage→publish→drop path), compaction (`compaction/core/lineage_emit.py`) → lineage subscriber | `lineage.models.RunEvent` (OpenLineage) | defaults on `LINEAGE_DAPR_TOPIC` / `LANCE_DAPR_TOPIC` / `COMPACTION_LINEAGE_TOPIC` / `MEDALLION_LINEAGE_TOPIC` in each service's `core/config.py` |
+| `catalog.control.v1` | catalog (`catalog/core/control_emit.py`) → every catalog replica (broadcast, no `queueGroupName`) | `common.control_events.CatalogControlEvent` | `CONTROL_TOPIC` in `services/common/control_events.py` — the ONE shared constant both sides import |
+| `medallion.raw` / `medallion.bronze` / `medallion.silver` / `medallion.media` | producer head + each mover → the next mover | pointer trigger `{token, dataset, namespace[, project]}` (claim-check §5) | `MEDALLION_RAW_TOPIC` / `MEDALLION_MEDIA_TOPIC` defaults in `medallion/core/config.py`; per-mover `subTopic`/`pubTopic` in `chart/values.yaml` `medallion.movers` |
+| `training.jobs` | `POST /train` head (`medallion/services/train.py`) → the trainer consumer | pointer trigger `{token, model, features:[{dataset, version}], config}` | `MEDALLION_TRAIN_TOPIC` default in `medallion/core/config.py` (`medallion.train.topic` in values) |
+| `dlq.*` | the Dapr sidecar on retry exhaustion → each app's parking route | the original delivery, parked | `dlq.lineage.events` (chart `services.yaml`), `dlq.<subTopic>` + `dlq.lance-ray` (chart `medallion.yaml`); the `DLQ` stream binds `dlq.>` in `nats-stream-job.yaml` |
+
+The two **cross-plane** topics carry an explicit `.v1`: the version in the NAME is the compatibility
+unit — a consumer subscribed to `lineage.events.v1` is entitled to `RunEvent`-shaped payloads
+forever. The medallion/training **trigger** topics are intra-cascade wiring: both ends deploy from
+the same chart values atomically, so retargeting one is a config change, not a schema break — they
+carry no `.vN`. `dlq.*` names derive mechanically from the subscription they park for.
+
+### 7.3 Schema = the pydantic model, validated on consume; invalid → DROP, never crash
+
+There is no schema artifact besides the model class the consumer validates with. The rule at every
+subscription: a payload that fails validation is **dropped** (redelivery cannot fix deterministic
+garbage), and a handler never raises on malformed input — a crash would poison the subscription.
+
+- lineage: `RunEvent.model_validate(data)` → on `ValidationError` log + `record_outcome(DROPPED)` +
+  return `{"status": "DROP"}` (`services/lineage/services/consumer.py`).
+- catalog control: `CatalogControlEvent.model_validate(data)` → on failure log + ack `SUCCESS`
+  (events are refresh hints; the audit trail is the durable record — `services/catalog/api/dapr.py`).
+- medallion triggers: strict field guards (`_safe_name` / `_safe_dataset` / int-version / the 8 KiB
+  config cap) → `_DROP`; deny-by-FGA is also `DROP` (redelivery won't grant the rung), only
+  transient outages `RETRY` (`services/medallion/services/{transform,train}.py`).
+
+### 7.4 Evolution: additive-only within a topic; breaking = a new `.vN` topic
+
+Within `*.v1` a producer may **add optional fields**: the consuming models tolerate them —
+`lineage/models.py` sets `ConfigDict(extra="allow", ...)` explicitly, `CatalogControlEvent` rides
+pydantic's default (unknown fields ignored) — and defaulted fields tolerate absence, so old and new
+payloads coexist mid-rollout.
+It may never rename/remove a field, change a type, or make an optional field required. A breaking
+change ships as a **new topic** (`lineage.events.v2`) with the consumer subscribing to both `.v1`
+and `.v2` until every producer has moved — the same parallel-consumer pattern the JetStream streams
+already support (subjects `lineage.events.*` style bindings cost nothing).
+
+### 7.5 Why there is no schema registry (and when to revisit)
+
+A registry earns its keep when producers and consumers ship independently. Here they cannot drift:
+**one repo, one CI** — producers and consumers import the same model classes
+(`common.control_events`, `lineage.models.RunEvent`), so `ty` type-checks both sides of every topic
+in the same run, and `tests/unit/test_invariants.py` pins the topic constants and rejects inline
+topic literals at publish sites. A registry would add an operand and a failure mode to re-prove a
+property CI already proves. **Revisit trigger:** the moment a consumer is deployed from OUTSIDE
+this repo's CI — an independently-released service, or tenant-authored consumers on the bus — the
+structural guarantee dissolves and a registry (or published JSON-schema artifacts per topic
+version) becomes the contract carrier.
+
 ## Related docs
 [`ARCHITECTURE.md`](ARCHITECTURE.md) · [`DURABILITY.md`](DURABILITY.md) (CAS validation) ·
 [`RAY-TRAIN.md`](RAY-TRAIN.md) (D1 pins, D4 registry) · [`RESILIENCE.md`](RESILIENCE.md)

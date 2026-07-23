@@ -331,6 +331,73 @@ def test_batch_authz_and_credential_vending_are_audited() -> None:
     assert vend.count("audit(") >= 2, "credential vending must audit the write-tier gate + issuance (#41)"
 
 
+# --------------------------------------------------------------------------------------------------
+# 4. Event-fabric contract (DATA-CONTRACT §7) — topics are pinned constants, never inline literals
+# --------------------------------------------------------------------------------------------------
+
+#: The exact topic constants the event fabric runs on (DATA-CONTRACT §7.2). The topic NAME is the
+#: compatibility unit — a consumer subscribed to `lineage.events.v1` is entitled to that payload shape
+#: forever — so a rename or version bump must be a deliberate act that also updates this pin (and, for a
+#: breaking change, ships a NEW `.vN` topic with parallel consumers), never a drive-by edit.
+_PINNED_TOPICS: list[tuple[str, str]] = [
+    # the two cross-plane topics carry an explicit .v1 (the versioned compatibility unit)
+    ("services/common/control_events.py", 'CONTROL_TOPIC = "catalog.control.v1"'),
+    ("services/lineage/core/config.py", 'default="lineage.events.v1", alias="LINEAGE_DAPR_TOPIC"'),
+    ("services/catalog/core/config.py", 'default="lineage.events.v1", alias="LANCE_DAPR_TOPIC"'),
+    ("services/compaction/core/config.py", 'default="lineage.events.v1", alias="COMPACTION_LINEAGE_TOPIC"'),
+    ("services/medallion/core/config.py", 'default="lineage.events.v1", alias="MEDALLION_LINEAGE_TOPIC"'),
+    # the intra-cascade trigger topics (unversioned by design: both ends deploy atomically from one chart)
+    ("services/medallion/core/config.py", 'default="medallion.raw", alias="MEDALLION_SUB_TOPIC"'),
+    ("services/medallion/core/config.py", 'default="medallion.raw", alias="MEDALLION_RAW_TOPIC"'),
+    ("services/medallion/core/config.py", 'default="training.jobs", alias="MEDALLION_TRAIN_TOPIC"'),
+    ("services/medallion/core/config.py", 'default="medallion.media", alias="MEDALLION_MEDIA_TOPIC"'),
+    # the stream bindings the topics land on (nats-stream-job) + the DLQ parking subjects
+    ("chart/templates/nats-stream-job.yaml", 'add_if_missing CATALOG_CONTROL "catalog.control.>"'),
+    ("chart/templates/nats-stream-job.yaml", 'add_if_missing DLQ "dlq.>"'),
+    ("chart/templates/services.yaml", 'LINEAGE_DLQ_TOPIC, value: "dlq.lineage.events"'),
+]
+
+
+@pytest.mark.parametrize(("relpath", "needle"), _PINNED_TOPICS, ids=[n for _, n in _PINNED_TOPICS])
+def test_event_topic_constants_are_pinned(relpath: str, needle: str) -> None:
+    """DATA-CONTRACT §7.2 names these exact topics; this pin keeps the doc and the code from drifting."""
+    assert needle in (REPO / relpath).read_text(), (
+        f"{relpath} no longer contains `{needle}` — the event-fabric topic contract (DATA-CONTRACT §7.2) "
+        "names this exact constant. A deliberate rename must update the doc + this pin together; a "
+        "BREAKING payload change must instead add a NEW .vN topic with parallel consumers."
+    )
+
+
+def _inline_topic_publishes() -> list[str]:
+    """Every `dapr_publish.publish_event(...)` call site whose `topic_name` is an (f-)string literal —
+    or that has no `topic_name` kwarg in view at all — instead of a named settings field / constant.
+
+    An inline literal is a topic name CI cannot see: it bypasses the pins above, the chart's env
+    retargeting, and the versioning rule (DATA-CONTRACT §7.2). Every real site today passes
+    `topic_name=settings.<x>` / `self._topic` / a plumbed-through parameter — this keeps it that way.
+    """
+    offenders: list[str] = []
+    literal_re = re.compile(r"topic_name\s*=\s*f?[\"']")
+    for py in SERVICES.rglob("*.py"):
+        lines = py.read_text().splitlines()
+        for i, line in enumerate(lines):
+            if "dapr_publish.publish_event(" not in line:
+                continue
+            window = "\n".join(lines[i : i + 8])
+            if literal_re.search(window) or "topic_name=" not in window:
+                offenders.append(f"{py.relative_to(REPO)}:{i + 1}")
+    return offenders
+
+
+def test_every_publish_site_uses_a_named_topic_constant() -> None:
+    offenders = _inline_topic_publishes()
+    assert not offenders, (
+        "these publish sites pass an inline topic string (or no topic_name kwarg) instead of a named "
+        f"constant/settings field: {offenders}. Inline topics dodge the pinned-constant contract "
+        "(DATA-CONTRACT §7.2) — route the name through config or a shared constant."
+    )
+
+
 def test_authentication_outcomes_are_audited() -> None:
     """Compliance invariant (#41): ``authenticate`` must audit both the success (who logged in) and the
     failure (rejected token) paths — authn was entirely unlogged before #41, so brute-force / forged-token

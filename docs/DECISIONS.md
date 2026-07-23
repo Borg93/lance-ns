@@ -301,3 +301,65 @@ imperative nats-stream-job; pairs with clustering). The **official nats-io helm 
 (vendored subchart nats-2.14.2). The JetStream admin panel is **read-only** and reaches NATS only through
 an admin-gated BFF proxy — the browser never connects to NATS (same posture as the audit viewer's
 GreptimeDB access).
+
+## Team/role administration — WONTFIX until the Keycloak sync (2026-07-23)
+
+**Decision.** No UI or API surface for administering the *identity-shaped* tuples — `team:<t>#member`,
+`role:<r>#assignee`, `project:<p>` `team`/`member` — is built. Per the gateway-checks entry above, these
+tuples become **event-synced from the IdP** at rask-merge time (a Keycloak event listener writes
+`team#member` / `role#assignee` tuples as group/role membership changes in the IdP); building a manual
+admin surface now would create a second writer that fights the sync from day one. Resource-shaped tuples
+(warehouse/namespace/table rungs) stay app-written and already have the GrantsPanel surface.
+
+**Interim runbook** — until the sync lands, an operator administers identity tuples with the `.localbin/fga`
+CLI directly (the same invocation `scripts/e2e_stack.sh` and `scripts/seed_medallion_fga.sh` use;
+`SID` = the store id those scripts resolve, api-url = the port-forwarded OpenFGA):
+
+```sh
+# put a user on a team (model.fga: team.member accepts [user])
+fga tuple write --api-url http://localhost:8081 --store-id "$SID" user:alice member team:eng
+# assign a role to a user, a whole team, or another role (role.assignee: [user, team#member, role#assignee])
+fga tuple write --api-url http://localhost:8081 --store-id "$SID" user:bob assignee role:validators
+fga tuple write --api-url http://localhost:8081 --store-id "$SID" team:eng#member assignee role:validators
+# make a team own a project (project.team: [team] — members inherit project admin)
+fga tuple write --api-url http://localhost:8081 --store-id "$SID" team:eng team project:acme
+# revoke = the same triple with `tuple delete`
+fga tuple delete --api-url http://localhost:8081 --store-id "$SID" user:alice member team:eng
+```
+
+**Rationale.** The model deliberately routes team access through roles (resource rungs do not accept
+`team#member` directly — `services/common/auth/model.fga`), so identity administration is a *membership*
+concern, which is exactly what an IdP owns. Writing it twice (manual surface now, sync later) buys a
+reconciliation problem for a capability the CLI already covers.
+
+## /streams on a medallion-off governed stack answers 503 — fail-closed, correct (2026-07-23)
+
+**Decision.** The admin JetStream panel's BFF (`frontend/components/frontends/admin/src/routes/api/
+jetstream/+server.ts`) reuses the medallion produce door's side-effect-free `GET /authorize` as its
+admin gate. On a governed stack with `MEDALLION_API` unset (medallion disabled), the route answers
+**503 "jetstream admin authorization is unavailable"** rather than falling back to session-only auth.
+This stays as-is — no fallback gate is added.
+
+**Rationale.** Fail-closed is the correct posture: stream/consumer topology describes the whole estate's
+event fabric, and answering with a weaker gate would mean "medallion off" silently *widens* who can read
+it. And the configuration is hypothetical — a governed estate without the medallion admin authority is
+not a deployed configuration (medallion is the cascade; every governed profile ships it). If a real
+medallion-less governed profile ever appears, it must bring its own admin authority, not a downgrade here.
+
+## CATALOG_CONTROL wildcard masking — accepted at replicas:1 (2026-07-23)
+
+**Decision.** The /streams dead-subscription detector matches expected consumers by Dapr deliver group
+(`queueGroupName` = the subscriber app-id), but the catalog's `catalog.control.v1` subscription is
+deliberately **group-less** (broadcast: every replica buffers every event), so the BFF keys it as `"*"`
+— *any* bound group-less ephemeral on the `CATALOG_CONTROL` stream satisfies the expected catalog entry
+(`+server.ts`, the `serviceLabel` / `key` logic). Known nit, accepted: an operator's `nats` CLI
+inspection consumer (also group-less, also ephemeral) can **mask a dead catalog broadcast** for as long
+as it is attached.
+
+**Rationale.** There is nothing group-shaped to match on — the broadcast semantics *require* the absence
+of a deliver group, and Dapr's ephemeral consumer names are generated, so no stable identifier exists
+today. The window is small (an inspection consumer detaches when the operator's terminal closes) and the
+blast radius at `replicas: 1` is one refresh-hint feed whose durable record is the audit trail anyway.
+**Tighten-when-it-bites:** give the catalog's control subscription a *named ephemeral prefix* (Dapr
+component `consumerID`/name plumbing) and match on the prefix instead of `"*"` — do this the first time
+a masked dead broadcast survives past an operator session.

@@ -26,6 +26,13 @@ np=$(grep -c "kind: NetworkPolicy" "$OUT" || true)
 [ "$np" -ge 9 ] || fail "prod must render the network-isolation layer (>=9 NetworkPolicies), got $np"
 grep -q "default-deny" "$OUT" || fail "prod NetworkPolicy set missing default-deny"
 grep -q -- "-openbao" "$OUT" || fail "prod NetworkPolicy set missing the openbao ingress lock"
+# Goal cond 8: the NATS 8222 monitor port is admitted, and ONLY from the web-admin zone pods (the admin
+# ops view). The windowed grep pins the from-selector + port to THIS rule, not a stray match elsewhere.
+grep -q "name: lance-ns-nats-monitor" "$OUT" || fail "prod NetworkPolicy set missing the nats-monitor (8222) rule"
+grep -A20 "name: lance-ns-nats-monitor" "$OUT" | grep -q "app.kubernetes.io/component: web-admin" \
+  || fail "the nats-monitor rule must admit only the web-admin component pods"
+grep -A20 "name: lance-ns-nats-monitor" "$OUT" | grep -q "port: 8222" \
+  || fail "the nats-monitor rule must target the 8222 monitor port"
 
 # 2. OpenFGA HA — the authz chokepoint every governed call fails-closed through: 3 replicas. (The subchart
 # Deployment's spec.replicas renders ~10 lines below its metadata.name; only the Deployment carries a

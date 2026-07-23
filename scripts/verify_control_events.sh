@@ -14,10 +14,22 @@
 #     --set catalog.warehouses.enabled=true --set dapr.enabled=true --set dapr.sidecars=true
 #   kubectl rollout restart deploy/lance-ns-dex deploy/lance-ns-lance-ray
 # catalog.controlEmit defaults ON, so the broadcast component + NATS stream + subscription render. This
-# script port-forwards read-only + seeds tuples; run it OUTSIDE auto mode (or `!`-prefix the invocation).
+# script port-forwards read-only; run it OUTSIDE auto mode (or `!`-prefix the invocation).
 #
-#   bash scripts/verify_control_events.sh
+# Alice's estate-admin grant is ASSERTED, not seeded (goal cond 4): the chart's auth.bootstrapAdmin
+# post-install hook Job owns that grant now (deploy with --set auth.bootstrapAdmin=<alice's Dex sub>).
+# Pass --seed for legacy runs to seed it manually via the fga CLI. Bob's project-admin tuple is a pure
+# negative-test fixture (a PROJECT admin must 403 on the estate feed) and is seeded in both modes.
+#
+#   bash scripts/verify_control_events.sh [--seed]
 set -uo pipefail
+SEED=0
+for arg in "$@"; do
+  case "$arg" in
+    --seed) SEED=1 ;;
+    *) echo "usage: $0 [--seed]"; exit 2 ;;
+  esac
+done
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 RELEASE="${RELEASE:-lance-ns}"
 CAT_PORT="${CAT_PORT:-2333}"
@@ -52,19 +64,36 @@ BOB="$(mint bob@example.com)"; [ -n "$BOB" ] || fail "could not mint bob's Dex t
 ALICE_SUB="$(sub_of "$ALICE")"; BOB_SUB="$(sub_of "$BOB")"
 [ -n "$ALICE_SUB" ] && [ -n "$BOB_SUB" ] || fail "could not decode subs"
 
-# Seed: alice = ESTATE admin (owner of the root warehouse); bob = a mere PROJECT admin (to prove a project
-# admin CANNOT read the estate-wide feed). ROOT = fga_root_object default.
+# Estate-admin grant: ASSERT by default — the chart's auth.bootstrapAdmin hook Job owns seeding alice's
+# `owner warehouse:lance_catalog` now (cond 4); --seed writes it manually for legacy stacks. Bob's
+# project-admin tuple stays script-seeded in BOTH modes: it is a negative-test fixture (a mere project
+# admin must 403 on the estate feed), not part of the estate bootstrap. ROOT = fga_root_object default.
 SID="$(fga store list --api-url http://localhost:8081 2>/dev/null | python3 -c "import sys,json;s=json.load(sys.stdin).get('stores',[]);print(s[0]['id'] if s else '')")"
 [ -n "$SID" ] || fail "no OpenFGA store (is fga provisioned?)"
-fga tuple write --api-url http://localhost:8081 --store-id "$SID" "user:$ALICE_SUB" owner warehouse:lance_catalog >/dev/null 2>&1 || true
+if [ "$SEED" = "1" ]; then
+  fga tuple write --api-url http://localhost:8081 --store-id "$SID" "user:$ALICE_SUB" owner warehouse:lance_catalog >/dev/null 2>&1 || true
+fi
 fga tuple write --api-url http://localhost:8081 --store-id "$SID" "user:$BOB_SUB" admin project:acme >/dev/null 2>&1 || true
-for i in $(seq 1 20); do
+# --seed polls longer (a fresh write can lag through OpenFGA); assert mode expects a pre-existing grant.
+TRIES=$([ "$SEED" = "1" ] && echo 20 || echo 5)
+for i in $(seq 1 "$TRIES"); do
   a="$(fga query check --api-url http://localhost:8081 --store-id "$SID" "user:$ALICE_SUB" can_observe_events warehouse:lance_catalog 2>/dev/null | python3 -c "import sys,json;print(json.load(sys.stdin).get('allowed',False))" 2>/dev/null || true)"
   [ "$a" = "True" ] && break
-  [ "$i" = "20" ] && fail "alice never became an estate admin (can_observe_events) — OpenFGA lag or seeding failed"
+  if [ "$i" = "$TRIES" ]; then
+    if [ "$SEED" = "1" ]; then
+      fail "alice never became an estate admin (can_observe_events) — OpenFGA lag or seeding failed"
+    fi
+    fail "alice is NOT an estate admin (can_observe_events on warehouse:lance_catalog). The chart owns this \
+grant now: deploy with --set auth.bootstrapAdmin=$ALICE_SUB (the bootstrap-admin hook Job seeds it), or rerun \
+with --seed for legacy manual seeding."
+  fi
   sleep 1
 done
-ok "seeded: alice=estate-admin (root owner), bob=project-admin"
+if [ "$SEED" = "1" ]; then
+  ok "seeded: alice=estate-admin (root owner), bob=project-admin"
+else
+  ok "asserted: alice=estate-admin (via auth.bootstrapAdmin), bob=project-admin (fixture)"
+fi
 
 CAT="http://localhost:$CAT_PORT"
 code() { curl -s -o /dev/null -w '%{http_code}' "$@"; }

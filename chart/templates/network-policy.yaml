@@ -225,6 +225,30 @@ spec:
   ingress:
     - {}
 ---
+# (3e) nats:8222 — the NATS monitoring endpoint (varz/connz/jsz), surfaced in the admin zone's ops view
+# (goal cond 8). Admitted ONLY from the web-admin zone pods; client traffic (4222, every Dapr sidecar)
+# keeps riding the general intra-namespace allow (3a), which today also covers the NATS pods — this rule
+# makes the monitor-port contract explicit and keeps the admin path admitted if NATS ever joins the
+# excluded guarded-store list in (3a). Selector mirrors the subchart-pod idiom used for greptimedb
+# above; component=nats (not just name) so nats-box is not a target.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-nats-monitor
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+      app.kubernetes.io/component: nats
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels: { app.kubernetes.io/component: web-admin }
+      ports:
+        - { protocol: TCP, port: 8222 }
+---
 # The original lance-ray ingress restriction (pre-Batch-9, kept): /produce is a direct operator
 # trigger — in-release pods only, defense-in-depth on top of require_dapr_token.
 apiVersion: networking.k8s.io/v1

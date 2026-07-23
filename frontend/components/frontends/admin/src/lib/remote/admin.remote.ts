@@ -24,6 +24,7 @@ export const controlEvents = query.live(async function* (): AsyncGenerator<Contr
 	const headers: Record<string, string> = bearer ? { authorization: `Bearer ${bearer}` } : {};
 
 	let cursor = 0;
+	let first = true;
 	const window: ControlEvent[] = [];
 	const seen = new Set<string>();
 
@@ -48,7 +49,12 @@ export const controlEvents = query.live(async function* (): AsyncGenerator<Contr
 				for (const dropped of window.splice(0, window.length - WINDOW))
 					seen.delete(dropped.event_id);
 			}
-			if (changed) yield window.slice().reverse(); // newest first; a fresh copy each yield
+			// Always yield the first successful poll (even empty) so the consumer resolves + renders the
+			// empty state, rather than hanging in `pending`; after that, only yield on a real change.
+			if (changed || first) {
+				first = false;
+				yield window.slice().reverse(); // newest first; a fresh copy each yield
+			}
 		}
 		await sleep(POLL_MS);
 	}

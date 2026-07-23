@@ -21,13 +21,14 @@ from contextlib import suppress
 from typing import Any
 
 from common import dapr_publish, fga, outbox
+from common.warehouse_registry import UnresolvableProjectError, is_safe_project, project_root
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import ServiceUnavailableError
 from openfga_sdk import OpenFgaClient
 from opentelemetry import trace
 
-from medallion.core.config import MedallionSettings
+from medallion.core.config import MedallionSettings, project_namespace
 from medallion.core.metrics import record_denied, record_quality_blocked, record_transition
 from medallion.schemas.events import build_run_event
 from medallion.services.compute import measure_stage, transform_stage
@@ -67,10 +68,39 @@ async def handle_stage(
     When ``fga_client`` is set (MEDALLION_FGA_ENABLED), the mover first CHECKS it is authorized to produce
     the target stage — ``can_promote`` for the silver->gold mover, ``can_create_table`` for the others — as
     its own service identity. Unauthorized -> ``DROP`` (redelivery won't grant the role): the cascade
-    enforces the ReBAC, so a mover lacking the validator role genuinely cannot promote to gold."""
+    enforces the ReBAC, so a mover lacking the validator role genuinely cannot promote to gold.
+
+    ``project`` on the trigger (#84 per-tenant routing, opt-in) resolves this stage's from/to URIs off
+    the warehouse registry (``<project-root>/medallion/<namespace>``) and project-qualifies every lineage
+    identity + the FGA object. FAIL CLOSED: an unsafe project or one arriving with resolution disabled
+    (no ``MEDALLION_CONTROL_ROOT``) is DROPped; a project with no active warehouse records a FAIL run and
+    DROPs — never a fallback to the default roots, which would transform the WRONG tenant's data while
+    emitting real-looking lineage for it. No ``project`` → today's behavior, byte-identical."""
     data = event.get("data") if isinstance(event, dict) else None
     token = data.get("token") if isinstance(data, dict) else None
     transition = f"{settings.from_namespace}->{settings.to_namespace}"
+
+    raw_project = data.get("project") if isinstance(data, dict) else None
+    project = ""
+    if raw_project is not None:
+        if not is_safe_project(raw_project):
+            # Deterministic garbage (would become an S3 prefix / lineage name) — DROP, never repair.
+            log.warning("medallion_stage_bad_project", extra={"transition": transition, "token": token})
+            return _DROP
+        project = raw_project
+    if project and not settings.control_root:
+        # Fail closed (#84): with resolution disabled the default roots MUST NOT serve a tenant trigger.
+        # Deterministic (redelivery won't configure the registry) → DROP, not RETRY.
+        log.warning(
+            "medallion_stage_project_routing_disabled",
+            extra={"transition": transition, "token": token, "project": project},
+        )
+        return _DROP
+    # Lineage + FGA identities — project-qualified when a tenant trigger, exactly the env values when not.
+    from_namespace = project_namespace(project, settings.from_namespace)
+    from_dataset = project_namespace(project, settings.from_dataset)
+    to_namespace = project_namespace(project, settings.to_namespace)
+    to_dataset = project_namespace(project, settings.to_dataset)
 
     if fga_client is not None:
         try:
@@ -78,7 +108,7 @@ async def handle_stage(
                 fga_client,
                 user=settings.fga_service_identity,
                 relation=settings.fga_required_action,
-                obj=settings.fga_object(),
+                obj=settings.fga_object(to_namespace),
             )
         except ServiceUnavailableError as exc:
             # An FGA OUTAGE is transient (unlike a denial): return the explicit RETRY contract so the
@@ -96,7 +126,7 @@ async def handle_stage(
                     "transition": transition,
                     "identity": settings.fga_service_identity,
                     "action": settings.fga_required_action,
-                    "object": settings.fga_object(),
+                    "object": settings.fga_object(to_namespace),
                 },
             )
             return _DROP
@@ -104,6 +134,18 @@ async def handle_stage(
     quality_blocked = False
     completed = False  # set once the COMPLETE lineage emit lands — gates the FAIL-on-failure below
     try:
+        # #84: resolve THIS stage's roots for a tenant trigger — the registry read is blocking IO
+        # (threadpool). No active warehouse is deterministic → the dedicated except below records the
+        # FAIL run and DROPs; a transient registry outage raises IO errors into the generic RETRY path.
+        from_uri, to_uri = settings.from_uri, settings.to_uri
+        if project:
+            root = await run_in_threadpool(
+                project_root, settings.control_root, settings.storage_options(), project
+            )
+            if root is None:
+                raise UnresolvableProjectError(f"project {project!r} has no active warehouse")
+            from_uri = f"{root}/medallion/{settings.from_namespace}"
+            to_uri = f"{root}/medallion/{settings.to_namespace}"
         # 0. Fake-Ray compute (opt-in): a REAL in-process Lance write of the downstream dataset, so the
         # emitted lineage carries the actual version + measured output statistics (rows + on-disk bytes),
         # and the cascade produces data, not just provenance. Blocking Lance/S3 IO → threadpool. Off →
@@ -111,7 +153,7 @@ async def handle_stage(
         # mover then ASSERTS quality on the dataset it just wrote (the produced data is what's validated).
         result = None
         assertions: list[Assertion] = []
-        if settings.compute_enabled and settings.from_uri and settings.to_uri:
+        if settings.compute_enabled and from_uri and to_uri:
             # Serialize the write (+ the quality read of what it just wrote) against a concurrent redelivery
             # of the same stage — single-flight so two overwrites can't race on the same target dataset.
             async with _write_lock:
@@ -126,8 +168,8 @@ async def handle_stage(
                         span.set_attribute("lance.medallion.compute", "ray")
                         await submit_stage_job(
                             settings,
-                            from_uri=settings.from_uri,
-                            to_uri=settings.to_uri,
+                            from_uri=from_uri,
+                            to_uri=to_uri,
                             stage=settings.to_namespace,
                             token=token,  # deterministic submission id → redelivery re-attaches (idempotent)
                         )
@@ -136,8 +178,8 @@ async def handle_stage(
                         # columnLineage facet would be empty on exactly the path production runs.
                         result = await run_in_threadpool(
                             measure_stage,
-                            settings.from_uri,
-                            settings.to_uri,
+                            from_uri,
+                            to_uri,
                             settings.storage_options(),
                         )
                     else:
@@ -145,8 +187,8 @@ async def handle_stage(
                             span.set_attribute("lance.medallion.compute", "in_process")
                         result = await run_in_threadpool(
                             transform_stage,
-                            settings.from_uri,
-                            settings.to_uri,
+                            from_uri,
+                            to_uri,
                             settings.storage_options(),
                             stage=settings.to_namespace,
                         )
@@ -156,7 +198,7 @@ async def handle_stage(
                 if settings.quality_enabled:
                     assertions = await run_in_threadpool(
                         assert_quality,
-                        settings.to_uri,
+                        to_uri,
                         settings.storage_options(),
                         key_column=settings.quality_key_column,
                         required_columns=settings.required_column_list,
@@ -165,13 +207,13 @@ async def handle_stage(
             operation=settings.operation,
             author=settings.author,
             job_namespace=settings.job_namespace,
-            inputs=[(settings.from_namespace, settings.from_dataset)],
-            output_namespace=settings.to_namespace,
-            output_name=settings.to_dataset,
+            inputs=[(from_namespace, from_dataset)],
+            output_namespace=to_namespace,
+            output_name=to_dataset,
             version=result.version if result else 1,
             row_count=result.row_count if result else None,
             size_bytes=result.size_bytes if result else None,
-            source_uri=settings.to_uri if result else None,
+            source_uri=to_uri if result else None,
             schema_fields=result.fields if result else None,
             # Field-to-field column lineage (#1): the compute declares which upstream column each output
             # column came from — declared by the in-process transform, reconstructed from the on-disk schemas
@@ -181,6 +223,7 @@ async def handle_stage(
             # ``"column": null`` fails strict DataQualityAssertionsDatasetFacet validation (column: string).
             assertions=[a.model_dump(exclude_none=True) for a in assertions] or None,
             token=token,
+            project=project or None,
         )
         # 1. Emit the transform's lineage DURABLY (#4): stage the full event in the object-store outbox,
         # publish, drop on ack — so a crash between the Lance commit above and this publish can't lose it
@@ -204,16 +247,53 @@ async def handle_stage(
             quality_blocked = True
         # 3. Trigger the next stage (unless terminal — gold has no pub_topic — or blocked by the gate).
         elif settings.pub_topic:
+            next_trigger = {
+                "token": token,
+                "dataset": settings.to_dataset,
+                "namespace": settings.to_namespace,
+            }
+            if project:  # #84: PROPAGATE the tenant down the cascade; omitted (byte-identical) when unset
+                next_trigger["project"] = project
             await dapr_publish.publish_event(
                 dapr,
                 timeout_seconds=settings.publish_timeout_seconds,
                 pubsub_name=settings.pubsub,
                 topic_name=settings.pub_topic,
-                data=json.dumps(
-                    {"token": token, "dataset": settings.to_dataset, "namespace": settings.to_namespace}
-                ),
+                data=json.dumps(next_trigger),
                 data_content_type="application/json",
             )
+    except UnresolvableProjectError as exc:
+        # Deterministic (#84): redelivery cannot conjure an active warehouse for the project, so mirror
+        # the quality-gate contract — record the FAIL run (the audit trail, idempotent on the
+        # token-derived run_id) and DROP. NEVER fall back to the shared default roots.
+        log.warning(
+            "medallion_stage_project_unresolvable",
+            extra={"transition": transition, "token": token, "project": project, "error": str(exc)},
+        )
+        with suppress(Exception):
+            fail_event = build_run_event(
+                operation=settings.operation,
+                author=settings.author,
+                job_namespace=settings.job_namespace,
+                inputs=[(from_namespace, from_dataset)],
+                output_namespace=to_namespace,
+                output_name=to_dataset,
+                token=token,
+                project=project or None,
+                event_type="FAIL",
+                error_message=str(exc),
+            )
+            await outbox.publish_lineage_with_outbox(
+                dapr,
+                outbox_uri=settings.lineage_outbox_uri,
+                storage_options=settings.storage_options(),
+                run_id=fail_event["run"]["runId"],
+                event_json=json.dumps(fail_event),
+                pubsub_name=settings.pubsub,
+                topic_name=settings.lineage_topic,
+                timeout_seconds=settings.publish_timeout_seconds,
+            )
+        return _DROP
     except UnderivableMediaError as exc:
         # DETERMINISTIC bad media (a payload matched the content probe but cannot decode): redelivery
         # cannot fix bytes, so mirror the quality-gate contract — record the FAIL run (the audit trail,
@@ -229,10 +309,11 @@ async def handle_stage(
                 operation=settings.operation,
                 author=settings.author,
                 job_namespace=settings.job_namespace,
-                inputs=[(settings.from_namespace, settings.from_dataset)],
-                output_namespace=settings.to_namespace,
-                output_name=settings.to_dataset,
+                inputs=[(from_namespace, from_dataset)],
+                output_namespace=to_namespace,
+                output_name=to_dataset,
                 token=token,
+                project=project or None,
                 event_type="FAIL",
                 error_message=str(exc),
             )
@@ -268,10 +349,11 @@ async def handle_stage(
                     operation=settings.operation,
                     author=settings.author,
                     job_namespace=settings.job_namespace,
-                    inputs=[(settings.from_namespace, settings.from_dataset)],
-                    output_namespace=settings.to_namespace,
-                    output_name=settings.to_dataset,
+                    inputs=[(from_namespace, from_dataset)],
+                    output_namespace=to_namespace,
+                    output_name=to_dataset,
                     token=token,
+                    project=project or None,
                     event_type="FAIL",
                     error_message=str(exc),
                 )

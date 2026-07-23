@@ -39,6 +39,13 @@ class MedallionSettings(BaseSettings):
     dapr_enabled: bool = Field(default=False, alias="MEDALLION_DAPR_ENABLED")
     # Serve /docs + /openapi.json (default on for dev; prod sets false, like the catalog's LANCE_REST_DOCS).
     docs_enabled: bool = Field(default=True, alias="MEDALLION_DOCS")
+    # #84 per-tenant medallion routing (opt-in): the catalog's warehouse-registry/control root (the
+    # LANCE_CONTROL_ROOT / LANCE_REST_ROOT value, e.g. ``s3://<bucket>``). When set, a ``project``-carrying
+    # /produce request or stage trigger resolves that project's ACTIVE warehouse root off the registry
+    # (``common.warehouse_registry``) and the stage reads/writes ``<root>/medallion/<namespace>`` instead of
+    # the env URIs. Empty (default) = resolution DISABLED: a project-carrying trigger is DROPPED (fail
+    # closed — never a fallback to the shared roots), and every project-less path stays byte-identical.
+    control_root: str = Field(default="", alias="MEDALLION_CONTROL_ROOT")
 
     # --- mover stage config (the 3 movers share medallion.mover:app, differ only by these) ------
     from_dataset: str = Field(default="raw_events", alias="MEDALLION_FROM_DATASET")
@@ -101,9 +108,14 @@ class MedallionSettings(BaseSettings):
     # The project a trigger-ing user must administer — the gate is ``can_administer`` on ``project:<this>``.
     produce_admin_project: str = Field(default="acme", alias="MEDALLION_PRODUCE_ADMIN_PROJECT")
 
-    def fga_object(self) -> str:
-        """The FGA object the mover must be authorized on — the target stage namespace."""
-        return f"namespace:{self.to_namespace}"
+    def fga_object(self, to_namespace: str | None = None) -> str:
+        """The FGA object the mover must be authorized on — the target stage namespace.
+
+        ``to_namespace`` overrides the env value for the per-project path (#84), where the target is the
+        project-QUALIFIED namespace (``acme-bronze``) and needs its own FGA tuples; default ``None`` keeps
+        today's fixed single-tenant object byte-identically.
+        """
+        return f"namespace:{to_namespace or self.to_namespace}"
 
     # --- Fake-Ray in-process compute (the lance-ray SEAM) — OFF by default (movers stay dummy-emitters).
     # When on, each stage does a REAL Lance write: the producer seeds raw_events; each mover reads its
@@ -261,6 +273,18 @@ class MedallionSettings(BaseSettings):
     # Seed two deterministic sample PNGs into the source prefix before ingesting (the demo's stand-in for
     # an external media drop). Prod points the bucket/prefix at real media and turns this off.
     media_seed_samples: bool = Field(default=True, alias="MEDALLION_MEDIA_SEED_SAMPLES")
+
+
+def project_namespace(project: str, name: str) -> str:
+    """Project-qualify a lineage namespace or dataset name — ``("acme", "bronze")`` → ``"acme-bronze"``.
+
+    Empty ``project`` → ``name`` unchanged (the single-tenant default, byte-identical). Qualification
+    keeps per-project lineage on DISTINCT graph nodes — the lineage repository MERGEs ``Dataset`` nodes
+    on name alone, so two tenants both emitting ``bronze$events`` would otherwise collide onto one node
+    (#84 risk 1) — and the ``-`` join keeps the result inside the established ``[A-Za-z0-9_-]`` segment
+    shape (``acme-bronze$events`` is still a valid ``stage$name`` dataset id).
+    """
+    return f"{project}-{name}" if project else name
 
 
 @lru_cache

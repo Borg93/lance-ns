@@ -17,11 +17,12 @@ import logging
 import uuid
 
 from common import outbox
+from common.warehouse_registry import UnresolvableProjectError, project_root
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from opentelemetry import trace
 
-from medallion.core.config import MedallionSettings
+from medallion.core.config import MedallionSettings, project_namespace
 from medallion.schemas.events import build_run_event
 from medallion.services.compute import seed_raw
 
@@ -31,7 +32,7 @@ tracer = trace.get_tracer(__name__)
 
 
 async def produce(
-    dapr: DaprClient, settings: MedallionSettings, *, token: str | None = None
+    dapr: DaprClient, settings: MedallionSettings, *, token: str | None = None, project: str = ""
 ) -> dict[str, str]:
     """Ingest the raw dataset and emit its write event (the event-driven cascade head).
 
@@ -46,14 +47,33 @@ async def produce(
     the sidecar may have accepted the event before the timeout fired — so a retry that minted a FRESH
     token would double-fire the cascade head as two unrelated runs. A reused token converges instead:
     every downstream run_id derives from it, so the graph MERGEs the duplicate and the overwrite-writes
-    land the same data. Absent (the common fire-and-forget case) → a fresh random token."""
+    land the same data. Absent (the common fire-and-forget case) → a fresh random token.
+
+    ``project`` (#84 per-tenant routing, opt-in) routes the seed into that project's ACTIVE warehouse
+    (``<root>/medallion/<raw_namespace>``, resolved off the warehouse registry) and project-qualifies the
+    emitted namespace/dataset, stamping ``project`` into the ``lance`` run facet so ``/raw-arrival`` can
+    copy it onto the stage trigger. Fail closed: with routing disabled (no ``MEDALLION_CONTROL_ROOT``) or
+    no active warehouse it raises :class:`UnresolvableProjectError` — never a fallback to the shared
+    ``raw_uri``. Empty (default) keeps today's behavior byte-identical."""
     token = token or uuid.uuid4().hex[:12]
+    raw_uri = settings.raw_uri
+    if project:
+        if not settings.control_root:
+            raise UnresolvableProjectError(
+                f"project {project!r} produce refused: routing is disabled (MEDALLION_CONTROL_ROOT unset)"
+            )
+        root = await run_in_threadpool(
+            project_root, settings.control_root, settings.storage_options(), project
+        )
+        if root is None:
+            raise UnresolvableProjectError(f"project {project!r} has no active warehouse")
+        raw_uri = f"{root}/medallion/{settings.raw_namespace}"
     result = None
-    if settings.compute_enabled and settings.raw_uri:
+    if settings.compute_enabled and raw_uri:
         # Fake-Ray ingest: a REAL Lance write of raw_events (blocking IO → threadpool) → the real version
         # + the measured output statistics (rows + on-disk bytes) the emit records as outputStatistics.
         with tracer.start_as_current_span("medallion.produce") as span:
-            result = await run_in_threadpool(seed_raw, settings.raw_uri, settings.storage_options())
+            result = await run_in_threadpool(seed_raw, raw_uri, settings.storage_options())
             span.set_attribute("lance.version", result.version)
             span.set_attribute("lance.row_count", result.row_count)
             span.set_attribute("lance.size_bytes", result.size_bytes)
@@ -62,16 +82,17 @@ async def produce(
         author=settings.producer_author,
         job_namespace=settings.job_namespace,
         inputs=[],
-        output_namespace=settings.raw_namespace,
-        output_name=settings.raw_dataset,
+        output_namespace=project_namespace(project, settings.raw_namespace),
+        output_name=project_namespace(project, settings.raw_dataset),
         version=result.version if result else 1,
         row_count=result.row_count if result else None,
         size_bytes=result.size_bytes if result else None,
-        source_uri=settings.raw_uri if result else None,
+        source_uri=raw_uri if result else None,
         # The measured raw_events schema (blob/vector-aware) so the cascade HEAD's WROTE edge records real
         # columns — seed_raw already captured it in result.fields; it was measured but never emitted (#24).
         schema_fields=result.fields if result else None,
         token=token,
+        project=project or None,
     )
     try:
         # The cascade HEAD is this raw-write lineage event: lance-ray's own /raw-arrival subscription reacts
@@ -95,5 +116,6 @@ async def produce(
     except Exception as exc:  # noqa: BLE001 — best-effort: a publish outage must not 500 the producer
         log.warning("medallion_produce_failed", extra={"token": token, "error": str(exc)})
         return {"status": "publish_failed", "token": token}
-    log.info("medallion_produced", extra={"token": token, "dataset": settings.raw_dataset})
-    return {"status": "produced", "token": token, "dataset": settings.raw_dataset}
+    dataset = project_namespace(project, settings.raw_dataset)
+    log.info("medallion_produced", extra={"token": token, "dataset": dataset})
+    return {"status": "produced", "token": token, "dataset": dataset}

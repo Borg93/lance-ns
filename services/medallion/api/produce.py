@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated
 
+from common.warehouse_registry import UnresolvableProjectError
 from fastapi import APIRouter, Depends, Header
 from fastapi.responses import JSONResponse
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
-from medallion.api.produce_auth import authorize_produce
+from medallion.api.produce_auth import ProjectParam, authorize_produce
 from medallion.services.produce import produce as run_produce
 
 router = APIRouter(tags=["produce"])
@@ -22,7 +23,8 @@ async def authorize(_: Annotated[None, Depends(authorize_produce)]) -> dict[str,
     Side-effect-free, so a governed admin surface (the web audit-log viewer) can reuse the one admin door the
     estate already owns without re-implementing the FGA check or gaining direct OpenFGA access: the web BFF
     bearer-forwards the signed-in user's token here and only proceeds if this returns 200. The admin concept
-    lives here (``produce_admin_project``), so this is its natural home."""
+    lives here (``produce_admin_project``), so this is its natural home. Accepts the same optional
+    ``project`` query param as ``/produce`` (#84), so the BFF can probe admin-ship per tenant."""
     return {"authorized": True}
 
 
@@ -34,6 +36,7 @@ async def produce(
     idempotency_key: Annotated[
         str | None, Header(alias="Idempotency-Key", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     ] = None,
+    project: ProjectParam = None,
 ) -> dict[str, str] | JSONResponse:
     """Ingest (dummy) the raw dataset and emit its write event — the event-driven cascade head.
 
@@ -51,8 +54,26 @@ async def produce(
     ``Idempotency-Key`` (optional) is the retry pairing this route's own 503+Retry-After contract demands:
     a retry that REUSES the key converges onto the same cascade token (deterministic run_ids → the graph
     MERGEs the duplicate head) instead of double-firing two unrelated raw→gold runs.
+
+    ``project`` (optional, #84 per-tenant routing) seeds THAT project's warehouse
+    (``<root>/medallion/raw``, resolved off the warehouse registry) and stamps the project into the head
+    event so the whole cascade routes per-tenant; ``authorize_produce`` gates ``can_administer`` on the
+    requested project. Unresolvable (routing disabled, or no active warehouse) → **409** (fail closed —
+    never a silent fallback to the shared root). Absent → today's single-tenant behavior, unchanged.
     """
-    result = await run_produce(dapr, settings, token=idempotency_key)
+    try:
+        result = await run_produce(dapr, settings, token=idempotency_key, project=project or "")
+    except UnresolvableProjectError as exc:
+        return JSONResponse(
+            status_code=409,
+            media_type="application/problem+json",
+            content={
+                "type": "https://lance.org/problems/conflict",
+                "title": "Conflict",
+                "status": 409,
+                "detail": str(exc),
+            },
+        )
     if result.get("status") == "publish_failed":
         # RFC 9457 problem+json + Retry-After (parity with catalog/lineage errors), not a bare FastAPI 503.
         return JSONResponse(

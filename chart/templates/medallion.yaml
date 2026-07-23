@@ -74,6 +74,12 @@ spec:
             - { name: MEDALLION_PRODUCER_OPERATION, value: {{ .Values.medallion.producer.operation | quote }} }
             - { name: MEDALLION_PRODUCER_AUTHOR, value: {{ .Values.medallion.producer.author | quote }} }
             - { name: MEDALLION_RAW_TOPIC, value: {{ .Values.medallion.producer.rawTopic | quote }} }
+            {{- if .Values.medallion.projectsEnabled }}
+            # #84 per-tenant routing (opt-in): the catalog's warehouse-registry root. A `project`-carrying
+            # /produce resolves that project's ACTIVE warehouse and seeds <root>/medallion/raw there;
+            # project-less requests keep the shared URIs below byte-identically.
+            - { name: MEDALLION_CONTROL_ROOT, value: "s3://{{ .Values.rustfs.bucket }}" }
+            {{- end }}
             # Ray TRAIN head (#115): values-wired passthrough (docs/RAY-TRAIN.md; defaults mirror
             # core/config.py). lineageUrl defaults to the release's own lineage service.
             - { name: MEDALLION_TRAIN_TOPIC, value: {{ .Values.medallion.train.topic | quote }} }
@@ -236,6 +242,13 @@ spec:
             - { name: MEDALLION_AUTHOR, value: {{ .author | quote }} }
             - { name: MEDALLION_SUB_TOPIC, value: {{ .subTopic | quote }} }
             - { name: MEDALLION_PUB_TOPIC, value: {{ .pubTopic | quote }} }
+            {{- if $root.Values.medallion.projectsEnabled }}
+            # #84 per-tenant routing (opt-in): a `project`-carrying stage trigger resolves this stage's
+            # from/to URIs off the warehouse registry (<project-root>/medallion/<namespace>) instead of
+            # the env URIs below; project-less triggers keep them byte-identically. Without this env a
+            # project trigger is DROPPED fail-closed.
+            - { name: MEDALLION_CONTROL_ROOT, value: "s3://{{ $root.Values.rustfs.bucket }}" }
+            {{- end }}
             {{- if $root.Values.dapr.resiliency.enabled }}
             # Dapr-native DLQ (ships with the Resiliency CRD — see values.yaml dapr.resiliency): retry
             # exhaustion parks the trigger on this per-app topic, ERROR-logged by /dlq-event.

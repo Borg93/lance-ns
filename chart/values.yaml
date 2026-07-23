@@ -588,6 +588,15 @@ medallion:
   # stay in the project bucket. Any non-default bucket listed here is auto-provisioned by rustfs-mkbucket.
   # Same RustFS endpoint/creds serve all buckets; a truly external S3 per zone (own endpoint) is future.
   buckets: {} # e.g. { raw: lance-source, gold: lance-sink }
+  # #84 per-tenant medallion routing (OPT-IN). When true, the producer + movers get
+  # MEDALLION_CONTROL_ROOT (the catalog's warehouse-registry root — the same s3://<rustfs.bucket> the
+  # catalog's LANCE_REST_ROOT names), so a `project`-carrying POST /produce (or stage trigger) resolves
+  # that project's ACTIVE warehouse (`_warehouses/*.json`, provisioned via POST /v1/warehouses) and the
+  # cascade reads/writes s3://<project-bucket>/medallion/<stage> with project-qualified lineage
+  # (acme-bronze / acme-bronze$events). Project-less traffic is BYTE-IDENTICAL either way; with this
+  # false (default — zero render diff), a project-carrying trigger is DROPPED fail-closed (never a
+  # fallback into the shared zone URIs). Per-project FGA namespace tuples must be seeded separately.
+  projectsEnabled: false
   # ReBAC enforcement: when true, each mover CHECKS it's authorized (OpenFGA) to produce its target stage
   # before emitting — the silver→gold mover needs `can_promote` (validator), the others `can_create_table`
   # (writer). Off by default (the open-mode demo runs without it); seed the mover-identity grants first

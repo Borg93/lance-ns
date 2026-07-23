@@ -19,10 +19,15 @@ from typing import Annotated
 
 from common import fga
 from common.oidc import OIDCVerifier
-from fastapi import Header, HTTPException, Request
+from common.warehouse_registry import PROJECT_PATTERN
+from fastapi import Header, HTTPException, Query, Request
 from lance_namespace import ServiceUnavailableError, UnauthenticatedError
 
 from medallion.api.dependencies import FgaClientDep, SettingsDep
+
+#: The optional per-tenant project (#84) — shared by the auth gate and the /produce route (FastAPI
+#: deduplicates the identically-declared query param). Pattern-bound so an unsafe id 422s at the edge.
+ProjectParam = Annotated[str | None, Query(min_length=1, max_length=64, pattern=PROJECT_PATTERN)]
 
 
 async def authorize_produce(
@@ -31,8 +36,14 @@ async def authorize_produce(
     fga_client: FgaClientDep,
     dapr_api_token: Annotated[str | None, Header()] = None,
     authorization: Annotated[str | None, Header()] = None,
+    project: ProjectParam = None,
 ) -> None:
-    """Allow EITHER the Dapr app-api-token (service) OR a signed-in project admin (OIDC + can_administer)."""
+    """Allow EITHER the Dapr app-api-token (service) OR a signed-in project admin (OIDC + can_administer).
+
+    ``project`` (#84) moves the admin gate onto the REQUESTED project — the caller must administer the
+    project it produces into, not the fixed configured one; absent → ``produce_admin_project`` exactly as
+    before. The service-token path is unchanged and (as the head-forging trust it already carries)
+    trusts the project field."""
     expected = os.environ.get("APP_API_TOKEN")
     # Dev: no service token configured → open, exactly as require_dapr_token was a no-op.
     if not expected:
@@ -52,7 +63,7 @@ async def authorize_produce(
             raise HTTPException(status_code=401, detail="invalid token") from None
         if fga_client is None:  # OIDC on but FGA unwired → fail closed, never an unauthorized trigger
             raise HTTPException(status_code=503, detail="authorization service is not available")
-        obj = f"project:{settings.produce_admin_project}"
+        obj = f"project:{project or settings.produce_admin_project}"
         try:
             allowed = await fga.check(fga_client, user=token.sub, relation="can_administer", obj=obj)
         except ServiceUnavailableError:

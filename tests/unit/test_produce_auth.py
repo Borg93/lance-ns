@@ -48,13 +48,17 @@ def _run(
     oidc_enabled: bool = True,
     fga_result: bool = True,
     fga_raises: bool = False,
+    project: str | None = None,
+    captured: dict[str, object] | None = None,
 ) -> None:
     if app_token is None:
         monkeypatch.delenv("APP_API_TOKEN", raising=False)
     else:
         monkeypatch.setenv("APP_API_TOKEN", app_token)
 
-    async def fake_check(_client: object, **_kw: object) -> bool:  # user=/relation=/obj= arrive as kwargs
+    async def fake_check(_client: object, **kw: object) -> bool:  # user=/relation=/obj= arrive as kwargs
+        if captured is not None:
+            captured.update(kw)
         if fga_raises:
             raise ServiceUnavailableError("fga down")
         return fga_result
@@ -65,7 +69,12 @@ def _run(
     settings = cast(MedallionSettings, ns)
     return asyncio.run(
         produce_auth.authorize_produce(
-            request, settings, cast(OpenFgaClient, object()), dapr_api_token=dapr_token, authorization=authz
+            request,
+            settings,
+            cast(OpenFgaClient, object()),
+            dapr_api_token=dapr_token,
+            authorization=authz,
+            project=project,
         )
     )
 
@@ -163,3 +172,59 @@ def test_authorize_route_rejects_missing_credential(monkeypatch: pytest.MonkeyPa
 def test_authorize_route_allows_the_admin_door(monkeypatch: pytest.MonkeyPatch) -> None:
     res = _client(monkeypatch).get("/authorize", headers={"dapr-api-token": "s3cret"})
     assert res.status_code == 200 and res.json() == {"authorized": True}
+
+
+# ── #84 per-tenant produce: the admin gate follows the REQUESTED project ───────────────────────────
+
+
+def test_oidc_admin_gate_targets_the_requested_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A caller producing into project X must administer X — not the fixed configured project.
+    captured: dict[str, object] = {}
+    _run(
+        monkeypatch,
+        app_token="s3cr3t",
+        authz="Bearer good",
+        verifier=_Verifier(),
+        project="globex",
+        captured=captured,
+    )
+    assert captured["obj"] == "project:globex"
+
+
+def test_oidc_admin_gate_defaults_to_the_configured_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    _run(monkeypatch, app_token="s3cr3t", authz="Bearer good", verifier=_Verifier(), captured=captured)
+    assert captured["obj"] == "project:acme"  # no project param → exactly the pre-#84 gate
+
+
+def test_nonadmin_of_the_requested_project_is_403(monkeypatch: pytest.MonkeyPatch) -> None:
+    _expect(
+        monkeypatch,
+        403,
+        app_token="s3cr3t",
+        authz="Bearer good",
+        verifier=_Verifier(),
+        fga_result=False,
+        project="globex",
+    )
+
+
+def test_route_rejects_a_malformed_project_with_422(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The project becomes an S3 prefix + lineage qualifier — a path-shaped value is refused at the edge.
+    res = _client(monkeypatch).get(
+        "/authorize", params={"project": "../evil"}, headers={"dapr-api-token": "s3cret"}
+    )
+    assert res.status_code == 422
+
+
+def test_produce_route_409s_when_project_routing_is_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Dev-open door + real settings (control_root unset): a project-carrying produce is REFUSED (409,
+    # problem+json), never silently seeded into the shared root.
+    monkeypatch.delenv("APP_API_TOKEN", raising=False)
+    app = FastAPI()
+    app.include_router(router)
+    app.dependency_overrides[get_dapr] = lambda: None
+    app.dependency_overrides[get_settings] = lambda: MedallionSettings.model_validate({})
+    res = TestClient(app, raise_server_exceptions=False).post("/produce", params={"project": "acme"})
+    assert res.status_code == 409
+    assert res.headers["content-type"].startswith("application/problem+json")

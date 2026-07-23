@@ -19,9 +19,10 @@ import uuid
 from typing import Any
 
 from common import dapr_publish
+from common.warehouse_registry import is_safe_project
 from dapr.aio.clients import DaprClient
 
-from medallion.core.config import MedallionSettings
+from medallion.core.config import MedallionSettings, project_namespace
 from medallion.core.metrics import record_transition
 
 log = logging.getLogger(__name__)
@@ -30,20 +31,26 @@ _SUCCESS = {"status": "SUCCESS"}
 _RETRY = {"status": "RETRY"}
 
 
-def _writes_raw(event: dict[str, Any], settings: MedallionSettings) -> bool:
+def _writes_raw(event: dict[str, Any], settings: MedallionSettings, project: str) -> bool:
     """True iff this event is a COMPLETED write to the raw dataset (the cascade's entry point).
 
     Filters on ``eventType == COMPLETE``: a START or FAIL raw event announces intent / failure, not a
     landed batch, so firing the cascade off one would kick the pipeline over data that isn't there (yet).
     Only a terminal-success raw write is a real arrival.
+
+    With a ``project`` (#84, from the event's ``lance.project`` facet) the expected pair is the
+    project-QUALIFIED one (``acme-raw`` / ``acme-raw_events``) — a per-project raw write fires the head
+    for exactly its own tenant. Empty project keeps the fixed single-tenant pair byte-identically, and
+    the loop guard holds either way: a mover's output namespace (``[<project>-]bronze/silver/gold``)
+    never equals the (equally qualified) raw namespace.
     """
     if str(event.get("eventType", "")).upper() != "COMPLETE":
         return False
+    expected_namespace = project_namespace(project, settings.raw_namespace)
+    expected_name = project_namespace(project, settings.raw_dataset)
     outputs = event.get("outputs") or []
     return any(
-        isinstance(o, dict)
-        and o.get("namespace") == settings.raw_namespace
-        and o.get("name") == settings.raw_dataset
+        isinstance(o, dict) and o.get("namespace") == expected_namespace and o.get("name") == expected_name
         for o in outputs
     )
 
@@ -65,6 +72,23 @@ def _cascade_token(event: dict[str, Any]) -> str:
     return uuid.uuid4().hex[:12]
 
 
+def _cascade_project(event: dict[str, Any]) -> str:
+    """The per-tenant project this raw write belongs to — the ``lance.project`` run facet (#84), or ``""``.
+
+    Absent/unsafe → ``""`` (the single-tenant default): a value outside the path-safe shape must never
+    become an S3 prefix or a lineage-name qualifier, and with ``""`` the qualified raw filter reduces to
+    the fixed pair — so a forged/garbage facet cannot fire the head for a tenant.
+    """
+    run = event.get("run")
+    if isinstance(run, dict):
+        lance = (run.get("facets") or {}).get("lance")
+        if isinstance(lance, dict):
+            project = lance.get("project")
+            if isinstance(project, str) and is_safe_project(project):
+                return project
+    return ""
+
+
 async def handle_raw_arrival(dapr: DaprClient, settings: MedallionSettings, event: Any) -> dict[str, str]:
     """Fire the cascade head when a raw-dataset write arrives; ack-and-ignore everything else.
 
@@ -74,10 +98,15 @@ async def handle_raw_arrival(dapr: DaprClient, settings: MedallionSettings, even
     head never self-triggers (loop guard). A publish outage returns ``RETRY`` for redelivery.
     """
     data = event.get("data") if isinstance(event, dict) else None
-    if not isinstance(data, dict) or not _writes_raw(data, settings):
+    if not isinstance(data, dict):
+        return _SUCCESS  # not a parseable lineage event — ack so Dapr doesn't redeliver
+    project = _cascade_project(data)
+    if not _writes_raw(data, settings, project):
         return _SUCCESS  # not a raw write — ack so Dapr doesn't redeliver, but drive nothing
     token = _cascade_token(data)
     trigger = {"token": token, "dataset": settings.raw_dataset, "namespace": settings.raw_namespace}
+    if project:  # #84: PROPAGATE the tenant onto the stage trigger; omitted (byte-identical) when unset
+        trigger["project"] = project
     try:
         await dapr_publish.publish_event(
             dapr,

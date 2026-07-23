@@ -155,6 +155,7 @@ def build_run_event(
     schema_fields: SchemaFields | None = None,
     column_map: list[tuple[str, str, str]] | None = None,
     token: str | None = None,
+    project: str | None = None,
     event_type: str = "COMPLETE",
     error_message: str | None = None,
 ) -> dict[str, Any]:
@@ -167,12 +168,17 @@ def build_run_event(
     ``dataSource`` facet, and when the quality gate validated the write (``assertions`` set) the standard
     ``dataQualityAssertions`` facet. The ``runId`` is a DETERMINISTIC UUID derived from
     ``<operation>-<token>`` (spec-valid + stable across redelivery); the raw ``token`` rides the ``lance``
-    run facet for cascade correlation. ``event_type='FAIL'`` + ``error_message`` records a failed run
-    (no version, no outputs asserted); the standard ``errorMessage`` run facet carries the reason.
+    run facet for cascade correlation. ``project`` (#84 per-tenant routing) also rides the ``lance``
+    facet, so the cascade head (``/raw-arrival``) can copy it onto the stage trigger — omitted when
+    unset, keeping the single-tenant emit byte-identical. ``event_type='FAIL'`` + ``error_message``
+    records a failed run (no version, no outputs asserted); the standard ``errorMessage`` run facet
+    carries the reason.
     """
     lance_fields: dict[str, Any] = {"operation": operation, "version": version}
     if token:
         lance_fields["token"] = token
+    if project:
+        lance_fields["project"] = project
     run_facets: dict[str, Any] = {"lance": custom_facet(_PRODUCER, **lance_fields)}
     if author:
         run_facets["author"] = custom_facet(_PRODUCER, name=author, sub=author)

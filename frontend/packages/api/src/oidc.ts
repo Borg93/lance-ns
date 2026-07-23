@@ -12,6 +12,7 @@ import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'node:
 export const SESSION_COOKIE = 'lance_session';
 export const VERIFIER_COOKIE = 'oidc_verifier';
 export const STATE_COOKIE = 'oidc_state';
+export const RETURN_COOKIE = 'oidc_return';
 const SEALED_PREFIX = 'v1.'; // marks an AES-256-GCM sealed cookie vs the legacy/dev base64 form
 
 export type OidcConfig = {

@@ -7,6 +7,7 @@
 import { env } from '$env/dynamic/private';
 import { redirect, type RequestHandler } from '@sveltejs/kit';
 import {
+	RETURN_COOKIE,
 	STATE_COOKIE,
 	VERIFIER_COOKIE,
 	buildAuthorizeUrl,
@@ -17,9 +18,6 @@ import {
 import { makeOidcConfig } from '@rask/api/bff';
 
 const TEMP_COOKIE_MAX_AGE = 600; // 10 min — long enough to complete the round-trip to Dex.
-/** Where to land after login. The cross-zone "Sign in" passes ?redirect=<current path> so the user
- *  returns to the zone they started in (e.g. /admin/audit), not always home. */
-const RETURN_COOKIE = 'oidc_return';
 
 /** Only same-origin absolute paths (`/…`, not `//host` protocol-relative) are allowed — an open-redirect guard. */
 function safeReturn(raw: string | null): string {

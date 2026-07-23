@@ -7,6 +7,7 @@
 import { env } from '$env/dynamic/private';
 import { redirect, type RequestHandler } from '@sveltejs/kit';
 import {
+	RETURN_COOKIE,
 	SESSION_COOKIE,
 	STATE_COOKIE,
 	VERIFIER_COOKIE,
@@ -15,8 +16,6 @@ import {
 	exchangeCode,
 } from '@rask/api/oidc';
 import { makeOidcConfig } from '@rask/api/bff';
-
-const RETURN_COOKIE = 'oidc_return';
 
 export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	const cfg = makeOidcConfig(env);

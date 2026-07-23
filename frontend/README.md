@@ -1,29 +1,32 @@
-# frontend — Turborepo workspace (bun + SvelteKit, the rask microfrontend shape)
+# frontend — Turborepo workspace (bun + SvelteKit micro-frontend zones, the rask shape)
 
-Restructured 2026-07-11 (Batch 12) so the rask merge is a **directory graft**: rask runs SvelteKit
-microfrontends consuming a shared component library; this workspace mirrors that shape.
+The frontend is decomposed into **five independently-built SvelteKit zones** (the rask micro-frontend
+shape), so the rask merge is a **directory graft**. Each zone is its own SvelteKit app + Bun SSR server
+(`svelte-adapter-bun`), served under a base path and composed by Ingress zone-routing in the cluster
+(the dev microfrontends proxy locally). They share two workspace packages.
 
 ```
 frontend/
-  package.json      # workspace root — bun workspaces, turbo 2.10 pipeline
+  package.json      # workspace root — bun workspaces, turbo 2.10 pipeline;
+                    #   //#lint and //#fmt:check ROOT tasks run eslint / prettier once repo-wide
   turbo.json        # build/check/test/test:e2e task graph (^build ordering, cached)
-                    #   + //#lint and //#fmt:check ROOT tasks (oxlint / oxfmt run once repo-wide)
-  .oxlintrc.json    # oxlint — lints ts/js AND .svelte script blocks; api.generated.ts ignored
-  .oxfmtrc.json     # oxfmt — THE formatter (tabs, svelte:true via prettier-plugin-svelte
-                    #   semantics); generated files (api.generated.ts, openapi.json) ignored
-  apps/
-    web/            # lance-lineage-web — the lineage explorer (SvelteKit, Svelte 5 runes)
+  eslint.config.js  # the single flat ESLint config (the sole linter)
+  components/frontends/
+    home/           # catch-all zone (base '/'); owns the OIDC /auth/{login,callback,logout} routes
+    data/           # /data — namespaces, tables, warehouses
+    lineage/        # /lineage — the lineage graph explorer
+    models/         # /models — model registry, experiments, pipeline
+    admin/          # /admin — audit, DLQ, and the live control-plane activity feed (query.live)
   packages/
-    ui/             # @lance/ui — shared Svelte 5 components + GSAP {@attach} factories
-                    #   (transport- AND framework-agnostic BY RULE: no fetch/API clients,
-                    #   no $lib/$app imports; a bun test sweeps every source to enforce it)
-    config/         # @lance/config — shared tsconfig preset (extended by apps/* and packages/*)
+    rask-ui/        # @rask/ui — shared shadcn-svelte design system on bits-ui 2 (AppShell + nav-config)
+    api/            # @rask/api — cross-cutting seam: OIDC/sealed-session, the BFF gateway, valibot parse
 ```
 
-Commands (root): `bun install` · `bunx turbo run build` · `bunx turbo run check test lint fmt:check`
-(CI-exact; `bun run fmt` rewrites) · `bunx turbo run test:e2e --filter=lance-lineage-web`. The web image
-(`.docker/web.dockerfile`) builds via the same turbo graph; runtime contract unchanged
-(`bun ./build/index.js`, port 3000, uid 1000).
+Commands (root): `bun install` · `bun run build` · `bun run check` · `bun run lint` · `bun run fmt:check`
+(CI-exact; `bun run fmt` rewrites) · `bun run test:e2e`. Each zone image builds from the parametrized
+`.docker/frontend.dockerfile` (`--build-arg APP=<zone>` → `lance-<zone>:dev`); runtime contract
+`bun ./build/index.js`, uid 1000. `make frontend-images` / `make frontend-load` build + side-load all five.
 
-Adding a microfrontend later = `apps/<name>` + a `dependsOn: ^build` ride on the existing
-pipeline; adding shared components = `packages/ui/src` + the export test.
+Adding a zone = `components/frontends/<name>` (its own `svelte.config.js` with `paths.base`) + the chart's
+`frontend.apps` list + the Ingress route. Remote functions (`query`/`query.live`) are enabled per zone
+(`kit.experimental.remoteFunctions` + `compilerOptions.experimental.async`); shared UI lives in `@rask/ui`.

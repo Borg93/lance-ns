@@ -5,13 +5,15 @@
 	// table count from the registry the /namespaces page already derives from), the kind-generalized
 	// GrantsPanel, and a maintenance-policy card mirroring the table policy form. Same stack-mode
 	// states as the registry — governed without a session ⇒ sign-in, unreachable ⇒ retrying.
-	import { Boxes, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
+	import { Boxes, Network, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchTables } from '$lib/catalog';
 	import GrantsPanel from '$lib/GrantsPanel.svelte';
 	import {
+		type AccessGraph,
 		deleteNamespacePolicy,
+		fetchNamespaceAccessGraph,
 		fetchNamespacePolicy,
 		type NamespacePolicy,
 		type PolicyRequest,
@@ -43,6 +45,13 @@
 		enabled: boolean;
 	}>({ retention_days: null, retain_versions: null, interval: null, target: null, enabled: true });
 
+	// #81 one hop of the authorization graph around the namespace, as a compact LIST card (TableDetail's
+	// lazy-toggle pattern without the SvelteFlow canvas — the namespace page has no inline grant form to
+	// prefill, so a list states the same edges more cheaply). Owner-gated by the catalog (can_delete).
+	let showGraph = $state(false);
+	let graph = $state<AccessGraph | null>(null);
+	let graphStatus = $state<'loading' | 'ok' | 'denied' | 'offline'>('loading');
+
 	const unauthorized = $derived(tables === null && lastStatus === 401);
 	const offline = $derived(tables === null && settled && lastStatus !== 401);
 
@@ -64,6 +73,38 @@
 			lastStatus = res.status;
 		}
 	}
+
+	async function loadGraph(): Promise<void> {
+		const current = ns;
+		graphStatus = 'loading';
+		const res = await fetchNamespaceAccessGraph(current);
+		if (ns !== current) return; // latest-wins across a namespace navigation
+		if (res.ok) {
+			graph = res.data;
+			graphStatus = 'ok';
+		} else if (res.status === 401 || res.status === 403) {
+			graphStatus = 'denied';
+		} else {
+			graphStatus = 'offline';
+		}
+	}
+
+	function toggleGraph(): void {
+		showGraph = !showGraph;
+		if (showGraph) loadGraph();
+	}
+
+	// Split the one-hop edges for the card: inbound = grants (subject holds a rung ON the namespace),
+	// outbound = the container edge (namespace → parent/project). Labels come from the graph's nodes.
+	const graphLabel = (id: string): string => graph?.nodes.find((n) => n.id === id)?.label ?? id;
+	const grantEdges = $derived.by(() => {
+		const g = graph;
+		return g === null ? [] : g.edges.filter((e) => e.target === g.object);
+	});
+	const containerEdges = $derived.by(() => {
+		const g = graph;
+		return g === null ? [] : g.edges.filter((e) => e.source === g.object);
+	});
 
 	async function loadPolicy(): Promise<void> {
 		const current = ns;
@@ -106,6 +147,10 @@
 		policyError = null;
 		editingPolicy = false;
 		busy = false;
+		// #81 graph card — reset too, or namespace A's grantees would flash on B until its fetch lands.
+		showGraph = false;
+		graph = null;
+		graphStatus = 'loading';
 		loadTables();
 		loadPolicy();
 	});
@@ -312,6 +357,52 @@
 		<section>
 			<h2>Access</h2>
 			<GrantsPanel dataset={ns} kind="namespace" />
+			<!-- #81 one hop of the authorization graph, lazy-loaded as a compact list card. -->
+			<button class="btn ghost graphtoggle" onclick={toggleGraph}>
+				{showGraph ? 'Hide' : 'Show'} authorization graph
+			</button>
+			{#if showGraph}
+				<div class="graphcard">
+					<header class="graphhead">
+						<Network size={14} />
+						<h3>Authorization graph</h3>
+						<span class="mut mono">who holds which rung · one hop around {ns}</span>
+					</header>
+					{#if graphStatus === 'denied'}
+						<p class="mut">
+							<ShieldAlert size={13} /> Owner access is required to view the graph.
+						</p>
+					{:else if graphStatus === 'offline'}
+						<p class="mut">Graph unavailable right now — reopen to retry.</p>
+					{:else if graphStatus === 'loading'}
+						<p class="mut">Loading the authorization graph…</p>
+					{:else if graph}
+						{#if grantEdges.length === 0}
+							<p class="mut">No direct grants on this namespace.</p>
+						{:else}
+							<ul class="edges">
+								{#each grantEdges as e (`${e.source}:${e.relation}`)}
+									<li class="mono">
+										<span class="subject">{graphLabel(e.source)}</span>
+										<span class="chip rel">{e.relation}</span>
+										<span class="mut">on {graphLabel(e.target)}</span>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+						{#if containerEdges.length > 0}
+							<ul class="edges">
+								{#each containerEdges as e (`${e.relation}:${e.target}`)}
+									<li class="mono">
+										<span class="mut">{e.relation} →</span>
+										<span class="subject">{graphLabel(e.target)}</span>
+									</li>
+								{/each}
+							</ul>
+						{/if}
+					{/if}
+				</div>
+			{/if}
 		</section>
 	{/if}
 </div>
@@ -461,5 +552,46 @@
 	.btn:disabled {
 		opacity: 0.5;
 		cursor: default;
+	}
+	.graphtoggle {
+		margin: 10px 0 8px;
+	}
+	.graphcard {
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		background: var(--panel-2);
+		padding: 10px 12px;
+	}
+	.graphhead {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		margin-bottom: 6px;
+	}
+	.graphhead h3 {
+		font-size: 13px;
+		margin: 0;
+	}
+	.edges {
+		list-style: none;
+		margin: 0;
+		padding: 0;
+		font-size: 12px;
+	}
+	.edges li {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		padding: 3px 0;
+		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+	}
+	.edges li:last-child {
+		border-bottom: none;
+	}
+	.subject {
+		color: var(--ink);
+	}
+	.chip.rel {
+		border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
 	}
 </style>

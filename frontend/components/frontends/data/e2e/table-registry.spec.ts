@@ -51,6 +51,9 @@ test('declare-table posts a JSON body (no Arrow) and the registry re-lists the n
 
 test('declare with a location carries it on the wire (#85)', async ({ page }) => {
 	await page.goto('/data/tables');
+	// Hydration guard (same as the first declare test): clicking the toggle before Svelte attaches the
+	// handler is a silent no-op and the form never opens.
+	await expect(page.getByRole('link', { name: 'db1$existing' })).toBeVisible();
 	await page.getByRole('button', { name: 'Declare table' }).click();
 	await page.getByLabel('Namespace').fill('db1');
 	await page.getByLabel('Table name').fill('pinned');
@@ -71,6 +74,8 @@ test('a 403 declare renders the create-denied state and adds no row (#85)', asyn
 		json(route, { detail: 'forbidden' }, 403),
 	);
 	await page.goto('/data/tables');
+	// Hydration guard — see the location test above.
+	await expect(page.getByRole('link', { name: 'db1$existing' })).toBeVisible();
 	await page.getByRole('button', { name: 'Declare table' }).click();
 	await page.getByLabel('Namespace').fill('db1');
 	await page.getByLabel('Table name').fill('fresh');

@@ -70,8 +70,9 @@ test('renders the header, table roster, and policy chips from the mocked list + 
 }) => {
 	await page.goto('/data/namespaces/gold');
 	await expect(page.getByRole('heading', { name: 'gold', exact: true })).toBeVisible();
-	// The count comes from the registry list, grouped by the `<namespace>$` prefix.
-	await expect(page.locator('header')).toContainText('2 tables');
+	// The count comes from the registry list, grouped by the `<namespace>$` prefix. Scoped to the page's
+	// own header: the AppShell topbar and the access-graph card both contribute <header> elements too.
+	await expect(page.locator('.page > header')).toContainText('2 tables');
 	await expect(page.locator('a.row', { hasText: 'gold$catalog' })).toHaveAttribute(
 		'href',
 		'/data/tables/gold%24catalog',

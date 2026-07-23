@@ -75,7 +75,11 @@ test('inline grant on the graph posts through the BFF', async ({ page }) => {
 	await page.getByRole('button', { name: 'Show authorization graph' }).click();
 	const graph = page.locator('.ag');
 	await graph.getByPlaceholder('user (e.g. alice), or role:… / team:…#member').fill('carol');
-	await graph.getByLabel('Rung').click();
+	// force: the detail page's poll re-renders shift layout just enough that Playwright's stability
+	// sampler starves under the 30s budget; the trigger is present+enabled (asserted) and the wire
+	// assertion below is the real contract, so skipping the stability wait is safe here.
+	await expect(graph.getByLabel('Rung')).toBeEnabled();
+	await graph.getByLabel('Rung').click({ force: true });
 	await page.getByRole('option', { name: 'reader', exact: true }).click();
 	await graph.getByRole('button', { name: 'Grant', exact: true }).click();
 	await expect.poll(() => grantPost).toEqual({ user: 'carol', relation: 'reader' });

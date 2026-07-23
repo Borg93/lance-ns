@@ -101,15 +101,19 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 		// never sees the raw monitor payload. Stream names are unique only PER ACCOUNT, so with multiple
 		// accounts the name is account-qualified (the panel keys its each-block on it).
 		const multiAccount = raw.account_details.length > 1;
-		// Present consumer groups per BARE stream name (expected/present matching must ignore the
-		// account qualifier below). "*" marks a group-less ephemeral on CATALOG_CONTROL — the catalog
-		// broadcast consumer carries no deliver group by design, so ANY such consumer satisfies the
-		// expected catalog entry.
-		const present = new Map<string, Set<string>>();
-		const markPresent = (stream: string, group: string) => {
-			const groups = present.get(stream) ?? new Set<string>();
+		// Consumer groups per BARE stream name (expected/present matching must ignore the account
+		// qualifier below), split by BOUNDNESS: a durable consumer outlives its subscriber, so mere
+		// existence must not count as present (the dead-subscription false negative, audit 2026-07-23).
+		// A consumer is bound when NATS says a push subscription is attached (`push_bound`) or a pull
+		// client is actively waiting (`num_waiting` > 0). "*" marks a group-less ephemeral on
+		// CATALOG_CONTROL — the catalog broadcast consumer carries no deliver group by design, so ANY
+		// such (bound) consumer satisfies the expected catalog entry.
+		const bound = new Map<string, Set<string>>();
+		const existing = new Map<string, Set<string>>();
+		const mark = (into: Map<string, Set<string>>, stream: string, group: string) => {
+			const groups = into.get(stream) ?? new Set<string>();
 			groups.add(group);
-			present.set(stream, groups);
+			into.set(stream, groups);
 		};
 		const streams = raw.account_details
 			.flatMap((account) => account.stream_detail.map((s) => ({ account: account.name, s })))
@@ -125,8 +129,9 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 				state: s.state,
 				consumers: s.consumer_detail.map((c) => {
 					const group = c.config?.deliver_group;
-					if (group) markPresent(s.name, group);
-					else if (s.name === 'CATALOG_CONTROL') markPresent(s.name, '*');
+					const isBound = c.push_bound === true || c.num_waiting > 0;
+					const key = group ?? (s.name === 'CATALOG_CONTROL' ? '*' : null);
+					if (key !== null) mark(isBound ? bound : existing, s.name, key);
 					return {
 						name: c.name,
 						service: serviceLabel(s.name, group),
@@ -140,13 +145,22 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 				}),
 			}))
 			.sort((a, b) => a.name.localeCompare(b.name));
-		// Expected-vs-present diff: an expected entry whose stream has no matching group (a missing stream
-		// counts every expectation on it as missing) is a dead subscription. Order follows the env list —
-		// the same order the Dapr components render in.
-		const missing = EXPECTED_CONSUMERS.filter(({ stream, service }) => {
-			const groups = present.get(stream);
-			return !(groups?.has(service) || groups?.has('*'));
-		});
+		// Expected-vs-bound diff: an expected entry whose stream has no BOUND matching group (a missing
+		// stream counts every expectation on it as missing) is a dead subscription. Order follows the env
+		// list — the same order the Dapr components render in. When a consumer for the group exists but
+		// nothing is attached (an orphaned durable), the entry is flagged `unbound` so the panel can name
+		// the more deceptive flavor honestly ("present but unbound").
+		const isSatisfied = (m: Map<string, Set<string>>, stream: string, service: string) => {
+			const groups = m.get(stream);
+			return groups?.has(service) === true || groups?.has('*') === true;
+		};
+		const missing = EXPECTED_CONSUMERS.filter(
+			({ stream, service }) => !isSatisfied(bound, stream, service),
+		).map(({ stream, service }) => ({
+			stream,
+			service,
+			unbound: isSatisfied(existing, stream, service),
+		}));
 		const overview: JetStreamOverview = {
 			now: raw.now,
 			totals: {

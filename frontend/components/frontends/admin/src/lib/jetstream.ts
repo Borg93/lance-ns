@@ -36,6 +36,13 @@ const RawConsumerSchema = v.object({
 	num_ack_pending: v.number(),
 	num_redelivered: v.number(),
 	num_pending: v.number(),
+	// Boundness: a durable consumer OUTLIVES its subscriber, so mere existence in /jsz does not prove
+	// anything reads it (the dead-subscription false negative, audit 2026-07-23). For push consumers
+	// NATS reports `push_bound` (true only while a subscription is attached); pull consumers have no
+	// such flag — `num_waiting` (outstanding pull requests) > 0 is the only positive liveness signal.
+	// Both optional defensively: each appears only for its consumer flavor.
+	push_bound: v.optional(v.boolean()),
+	num_waiting: v.optional(v.number(), 0),
 });
 
 const RawStreamSchema = v.object({
@@ -105,12 +112,16 @@ export const JetStreamStreamSchema = v.object({
 });
 export type JetStreamStream = v.InferOutput<typeof JetStreamStreamSchema>;
 
-/** An expected consumer group (from JETSTREAM_EXPECTED_CONSUMERS) with no live consumer on its stream —
- * a DEAD SUBSCRIPTION: the app looks Ready while nothing reads its trigger stream (the silent cascade
- * stall of 2026-07-13). Absence is invisible in the raw monitor payload; this diff is what surfaces it. */
+/** An expected consumer group (from JETSTREAM_EXPECTED_CONSUMERS) with no BOUND consumer on its stream —
+ * a dead subscription: the app looks Ready while nothing reads its trigger stream (the silent cascade
+ * stall of 2026-07-13). Absence is invisible in the raw monitor payload; this diff is what surfaces it.
+ * `unbound` distinguishes the two flavors: false = no consumer exists at all; true = a consumer (e.g. a
+ * durable that outlived its subscriber) EXISTS but nothing is attached to it — equally dead, and even
+ * more deceptive because the raw topology looks populated. */
 export const JetStreamMissingConsumerSchema = v.object({
 	stream: v.string(),
 	service: v.string(),
+	unbound: v.optional(v.boolean(), false),
 });
 export type JetStreamMissingConsumer = v.InferOutput<typeof JetStreamMissingConsumerSchema>;
 

@@ -108,6 +108,12 @@
 			.map((s) => [s.column.trim(), s.expression.trim()] as [string, string])
 			.filter(([column, expression]) => column && expression),
 	);
+	// A HALF-filled pair (column without expression, or vice versa) must BLOCK the update — silently
+	// dropping it would apply a different write than the one on screen (audit 2026-07-23). Fully-empty
+	// extra pairs stay ignorable (the "+ add SET pair" affordance always leaves one around).
+	const rowSetPartial = $derived(
+		rowSets.some((s) => (s.column.trim() === '') !== (s.expression.trim() === '')),
+	);
 
 	function rowFail(status: number, detail: string): void {
 		if (status === 401) rowMsg = { ok: false, text: 'Sign in to change rows.' };
@@ -118,7 +124,7 @@
 
 	async function runUpdateRows(): Promise<void> {
 		const sets = rowSetPairs;
-		if (rowBusy || sets.length === 0) return;
+		if (rowBusy || sets.length === 0 || rowSetPartial) return;
 		rowBusy = true;
 		rowMsg = null;
 		const requested = table; // latest-wins: don't post A's result onto B if the user navigated mid-write
@@ -177,8 +183,10 @@
 		colBusy = true;
 		colError = null;
 		backfillMsg = null;
+		const requested = table; // latest-wins: don't post A's job message onto B if the user navigated mid-write
 		try {
-			const res = await backfillColumn(table, column, backfillWhere.trim() || undefined);
+			const res = await backfillColumn(requested, column, backfillWhere.trim() || undefined);
+			if (table !== requested) return;
 			if (res.ok) {
 				backfilling = null;
 				backfillWhere = '';
@@ -1137,8 +1145,18 @@
 			>
 				+ add SET pair
 			</button>
+			{#if rowSetPartial}
+				<p class="mut" role="status">
+					A SET pair is only half-filled — complete (or clear) both its column and expression;
+					partial pairs are never silently dropped.
+				</p>
+			{/if}
 			<div class="ins-row">
-				<button class="btn" disabled={rowBusy || rowSetPairs.length === 0} onclick={runUpdateRows}>
+				<button
+					class="btn"
+					disabled={rowBusy || rowSetPairs.length === 0 || rowSetPartial}
+					onclick={runUpdateRows}
+				>
 					{rowBusy ? '…' : 'Update rows'}
 				</button>
 				{#if rowDeleteConfirm}

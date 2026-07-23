@@ -47,21 +47,37 @@ shared origin-wide session cookie (home additionally exchanges the code). Emit u
 # ClusterIP-only — consumed strictly server-side behind the zone BFF's admin gate, never by the browser.
 # The headless Service is the one that carries :8222 (the plain Service exposes only 4222).
 - { name: NATS_MONITOR_API, value: "http://{{ include "lance.natsHost" . }}-headless:8222" }
-{{- if .Values.dapr.enabled }}
+{{- if and .Values.dapr.enabled .Values.dapr.sidecars }}
 {{/* Dead-subscription detector (admin /streams): the comma list of "STREAM:service" consumer groups the
 estate EXPECTS on JetStream, rendered from the SAME values (and the same medallion.enabled /
-catalog.controlEmit gates) dapr-component.yaml renders its subscriber components from — so the expectation
-cannot drift from the real subscription topology. The zone BFF diffs this against live /jsz consumers: an
-expected group that is absent is a silently-dead subscription (a Ready pod reading nothing — the 2026-07-13
-cascade stall), invisible in the raw monitor payload. The catalog control consumer is group-less by design
-(broadcast); the BFF counts any no-group ephemeral on CATALOG_CONTROL as the catalog. */}}
+catalog.controlEmit / dapr.resiliency.enabled gates) dapr-component.yaml and the *_DLQ_TOPIC envs render
+their subscriptions from — so the expectation cannot drift from the real subscription topology. Gated on
+dapr.sidecars too (not just dapr.enabled): components may render, but without injected sidecars no app
+subscribes, and the panel would report every group as a false dead subscription. The zone BFF diffs this
+against live /jsz consumers: an expected group that is absent (or present-but-unbound) is a silently-dead
+subscription (a Ready pod reading nothing — the 2026-07-13 cascade stall), invisible in the raw monitor
+payload. The catalog control consumer is group-less by design (broadcast); the BFF counts any no-group
+ephemeral on CATALOG_CONTROL as the catalog. */}}
 {{- $expected := list (printf "LINEAGE:%s" .Values.services.lineage.daprAppId) }}
+{{- if .Values.dapr.resiliency.enabled }}
+{{/* DLQ parking subscription (services.yaml LINEAGE_DLQ_TOPIC): lineage subscribes dlq.lineage.events
+on its own component, so its group must be live on the DLQ stream whenever resiliency is on. */}}
+{{- $expected = append $expected (printf "DLQ:%s" .Values.services.lineage.daprAppId) }}
+{{- end }}
 {{- if .Values.medallion.enabled }}
 {{- $expected = append $expected (printf "LINEAGE:%s" .Values.medallion.producer.daprAppId) }}
 {{- range .Values.medallion.movers }}
 {{- $expected = append $expected (printf "MEDALLION:%s" .daprAppId) }}
 {{- end }}
 {{- $expected = append $expected (printf "TRAINING:%s" .Values.medallion.producer.daprAppId) }}
+{{- if .Values.dapr.resiliency.enabled }}
+{{/* DLQ parking subscriptions (medallion.yaml MEDALLION_DLQ_TOPIC, same resiliency gate): the producer
+parks on dlq.lance-ray, each mover on dlq.<subTopic> — all queue-grouped by app-id on the DLQ stream. */}}
+{{- $expected = append $expected (printf "DLQ:%s" .Values.medallion.producer.daprAppId) }}
+{{- range .Values.medallion.movers }}
+{{- $expected = append $expected (printf "DLQ:%s" .daprAppId) }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- if .Values.catalog.controlEmit }}
 {{- $expected = append $expected (printf "CATALOG_CONTROL:%s" .Values.services.catalog.daprAppId) }}

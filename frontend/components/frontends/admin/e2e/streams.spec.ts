@@ -116,6 +116,24 @@ test('missing expected consumers render the dead-subscription warn banner', asyn
 	await expect(page.getByLabel('Stream LINEAGE')).toBeVisible();
 });
 
+test('an existing-but-unbound durable fires the banner as "present but unbound"', async ({
+	page,
+}) => {
+	// The false-negative flavor (audit 2026-07-23): a durable consumer OUTLIVES its subscriber, so the
+	// raw topology looks populated while nothing is attached. The BFF (push_bound false / num_waiting 0)
+	// flags the expected group `unbound: true`; the panel must still shout, and name the flavor.
+	await page.route('**/admin/api/jetstream*', (route) =>
+		json(route, {
+			...OVERVIEW,
+			missing: [{ stream: 'MEDALLION', service: 'raw-to-bronze', unbound: true }],
+		}),
+	);
+	await page.goto('/admin/streams');
+	const banner = page.locator('.missingbanner');
+	await expect(banner).toContainText('1 expected consumer MISSING');
+	await expect(banner).toContainText('MEDALLION:raw-to-bronze · present but unbound');
+});
+
 test('a consumer inactive for over 10 minutes renders dimmed with a stale chip', async ({
 	page,
 }) => {
@@ -157,6 +175,34 @@ test('Refresh re-queries the BFF and shows +N delta chips', async ({ page }) => 
 	await expect(page.locator('.bar .delta')).toHaveText('+9');
 	await expect(page.getByLabel('Stream LINEAGE').locator('.delta')).toHaveText('+9');
 	await expect(page.getByLabel('Stream DLQ').locator('.delta')).toHaveCount(0);
+});
+
+test('a shrinking stream renders a neutral negative delta with an accurate tooltip', async ({
+	page,
+}) => {
+	let calls = 0;
+	await page.route('**/admin/api/jetstream*', (route) => {
+		calls += 1;
+		if (calls === 1) return json(route, OVERVIEW);
+		// Second poll: DLQ drained 5 → 2 (e.g. a replay) — shrinkage, not growth.
+		const drained = structuredClone(OVERVIEW);
+		drained.totals.messages = 138;
+		for (const s of drained.streams) if (s.name === 'DLQ') s.state.messages = 2;
+		return json(route, drained);
+	});
+	await page.goto('/admin/streams');
+	await expect(page.getByLabel('Stream DLQ')).toBeVisible();
+	const before = calls;
+	await page.getByRole('button', { name: 'Refresh' }).click();
+	await expect.poll(() => calls).toBeGreaterThan(before);
+	// Negative chips carry the neutral `neg` styling and say REMOVED, never the growth-green "+N".
+	const dlqDelta = page.getByLabel('Stream DLQ').locator('.delta');
+	await expect(dlqDelta).toHaveText('-3');
+	await expect(dlqDelta).toHaveClass(/neg/);
+	await expect(dlqDelta).toHaveAttribute('title', /removed since last refresh/);
+	const totalsDelta = page.locator('.bar .delta');
+	await expect(totalsDelta).toHaveText('-3');
+	await expect(totalsDelta).toHaveClass(/neg/);
 });
 
 test('a 403 from the BFF renders the forbidden state', async ({ page }) => {

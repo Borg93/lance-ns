@@ -518,6 +518,21 @@ test('rename posts {new_table_name} and navigates to the renamed detail (#85)', 
 	await expect(page.getByRole('heading', { name: 'db1$t2' })).toBeVisible();
 });
 
+test('a 409 rename surfaces "already exists" and stays on the page (#85)', async ({ page }) => {
+	// The catalog answers 409 when the destination id is taken — the page must say so (not the generic
+	// detail passthrough) and must NOT navigate: the source table still exists under its old id.
+	await page.route('**/capi/v1/table/*/rename', (route) =>
+		json(route, { detail: 'conflict' }, 409),
+	);
+	await page.goto('/data/tables/db1%24t');
+	const danger = page.locator('section.dangerzone');
+	await danger.getByLabel('Rename table to').fill('other');
+	await danger.getByRole('button', { name: 'Rename' }).click();
+	await expect(danger).toContainText('Denied: a table named db1$other already exists.');
+	await expect(page).toHaveURL(/\/data\/tables\/db1%24t$/);
+	await expect(page.getByRole('heading', { name: 'db1$t' })).toBeVisible();
+});
+
 // --- #85 row ops: update / delete by SQL predicate ---
 
 test('update rows posts the exact {predicate, updates} wire body and surfaces the count (#85)', async ({
@@ -535,6 +550,30 @@ test('update rows posts the exact {predicate, updates} wire body and surfaces th
 		.toEqual({ op: 'update', body: { predicate: 'id > 3', updates: [['name', "'x'"]] } });
 	// updated_rows + version are REQUIRED on the wire — the affected-row count surfaces
 	await expect(section).toContainText('Updated 2 rows → v4.');
+});
+
+test('a partially-filled SET pair blocks the update with an inline hint (#85)', async ({
+	page,
+}) => {
+	// A half-filled pair must BLOCK, not be silently dropped — else the write that fires differs from
+	// the form on screen (audit 2026-07-23).
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Update / delete rows' });
+	const update = section.getByRole('button', { name: 'Update rows' });
+	await section.getByLabel('SET column 1').fill('name');
+	// column without expression → disabled + the hint names the problem
+	await expect(update).toBeDisabled();
+	await expect(section).toContainText('A SET pair is only half-filled');
+	// completing the pair clears the block; nothing was ever posted while blocked
+	await section.getByLabel('SET expression 1').fill("'x'");
+	await expect(update).toBeEnabled();
+	await expect(section.getByText('A SET pair is only half-filled')).toHaveCount(0);
+	expect(rowPost).toBeNull();
+	// a SECOND, half-filled pair re-blocks even though pair 1 is complete
+	await section.getByRole('button', { name: '+ add SET pair' }).click();
+	await section.getByLabel('SET expression 2').fill('true');
+	await expect(update).toBeDisabled();
+	await expect(section).toContainText('A SET pair is only half-filled');
 });
 
 test('update with an empty predicate omits the key (all rows) (#85)', async ({ page }) => {

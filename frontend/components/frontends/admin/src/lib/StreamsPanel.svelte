@@ -75,7 +75,9 @@
 	// fabric spots dead-letter backlog at a glance.
 	const isDlq = (name: string) => name === 'DLQ' || name.startsWith('DLQ_');
 
-	// "+N since last refresh" deltas — null (no chip) until a baseline exists or when nothing changed.
+	// "+N since last refresh" deltas — no chip until a baseline exists or when nothing changed. A
+	// NEGATIVE delta (messages left the stream — retention, purge, GC or a replay drain) renders
+	// neutral, not in the growth green, with a tooltip that says what it actually measures.
 	const totalsDelta = $derived(
 		prev !== null && overview !== null ? overview.totals.messages - prev.messages : 0,
 	);
@@ -85,6 +87,10 @@
 		return before === undefined ? 0 : messages - before;
 	}
 	const fmtDelta = (d: number): string => (d > 0 ? `+${d.toLocaleString()}` : d.toLocaleString());
+	const deltaTitle = (d: number): string =>
+		d > 0
+			? 'messages added since last refresh'
+			: 'messages removed since last refresh (retention, purge, or a drain)';
 
 	// A consumer whose last delivery activity is >10 min behind the monitor's own clock (`overview.now`,
 	// not the browser clock — no client-skew false positives) is rendered dimmed with a "stale" chip: on
@@ -133,7 +139,9 @@
 				{overview.totals.streams} streams · {overview.totals.consumers} consumers ·
 				{overview.totals.messages.toLocaleString()} msgs
 				{#if totalsDelta !== 0}
-					<span class="delta" title="messages since last refresh">{fmtDelta(totalsDelta)}</span>
+					<span class="delta" class:neg={totalsDelta < 0} title={deltaTitle(totalsDelta)}
+						>{fmtDelta(totalsDelta)}</span
+					>
 				{/if}
 				· {fmtBytes(overview.totals.bytes)}
 			</span>
@@ -171,7 +179,13 @@
 					>
 					— a dead subscription: the app may look Ready while nothing reads its stream.
 					{#each overview.missing as m (`${m.stream}:${m.service}`)}
-						<span class="misspair mono">{m.stream}:{m.service}</span>
+						<span
+							class="misspair mono"
+							title={m.unbound
+								? 'a consumer for this group exists (e.g. an orphaned durable) but nothing is attached to it'
+								: 'no consumer for this group exists on the stream'}
+							>{m.stream}:{m.service}{m.unbound ? ' · present but unbound' : ''}</span
+						>
 					{/each}
 				</span>
 			</div>
@@ -198,7 +212,10 @@
 							<span class="stat mono">
 								{s.state.messages.toLocaleString()} msgs
 								{#if streamDelta(s.name, s.state.messages) !== 0}
-									<span class="delta" title="messages since last refresh"
+									<span
+										class="delta"
+										class:neg={streamDelta(s.name, s.state.messages) < 0}
+										title={deltaTitle(streamDelta(s.name, s.state.messages))}
 										>{fmtDelta(streamDelta(s.name, s.state.messages))}</span
 									>
 								{/if}
@@ -300,6 +317,10 @@
 		color: var(--ok, #3f9e63);
 		font-weight: 600;
 		margin-left: 2px;
+	}
+	/* Shrinkage is not growth: a negative delta (retention/purge/drain) renders neutral, not green. */
+	.delta.neg {
+		color: var(--mut);
 	}
 	.missingbanner {
 		display: flex;

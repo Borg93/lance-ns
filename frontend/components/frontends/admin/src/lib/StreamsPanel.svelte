@@ -1,15 +1,21 @@
 <script lang="ts">
-	// `/streams` — read-only JetStream visibility over the estate's event fabric. The /api/jetstream BFF
+	// `/streams` — read-only JetStream diagnostics over the estate's event fabric. The /api/jetstream BFF
 	// admin-gates (medallion /authorize), fetches the unauthenticated NATS monitor `/jsz` server-side, and
 	// returns a trimmed typed overview — the monitor URL and raw payload never reach the browser. This panel
 	// renders stream cards with per-consumer lag (pending / ack-pending / redelivered): redeliveries are the
-	// wedge signal, backlog the pressure signal. Strictly a viewer — no mutation affordances by design.
-	import { Layers, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	// wedge signal, backlog the pressure signal. On top of the raw state it diagnoses: EXPECTED consumers
+	// that are absent (a dead subscription — invisible in /jsz itself, the worst historical failure mode),
+	// stale consumers (no delivery in 10 min), and +N message deltas between manual refreshes. Strictly a
+	// viewer — no mutation affordances by design.
+	import { Layers, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
 	import { parse } from '@rask/api';
 	import { JetStreamOverviewSchema, type JetStreamOverview } from './jetstream';
 	import { requestJSON } from './http';
 
 	let overview = $state<JetStreamOverview | null>(null);
+	// The PREVIOUS successful poll's message counts (totals + per-stream), so a manual Refresh can show
+	// "+N since last refresh" chips — flow visibility without adding any timer (same manual/on-mount model).
+	let prev = $state<{ messages: number; streamMessages: Record<string, number> } | null>(null);
 	let lastStatus = $state(0);
 	let settled = $state(false);
 	let inflight = 0;
@@ -34,7 +40,18 @@
 			try {
 				// Wire boundary: parse (don't cast) the trimmed shape, so a BFF/schema drift surfaces as an
 				// honest unreachable state instead of a UI built from values that lie about their type.
-				overview = parse(JetStreamOverviewSchema, res.data);
+				const next = parse(JetStreamOverviewSchema, res.data);
+				// Snapshot the OUTGOING poll's counts before replacing it — the delta baseline. A failed
+				// interim poll keeps the last good baseline ("since last refresh" = last RENDERED refresh).
+				if (overview !== null) {
+					prev = {
+						messages: overview.totals.messages,
+						streamMessages: Object.fromEntries(
+							overview.streams.map((s) => [s.name, s.state.messages]),
+						),
+					};
+				}
+				overview = next;
 				lastStatus = 200;
 			} catch (err) {
 				// -1 = contract drift (the drifted state), distinct from a monitor outage's 502 (audit nit).
@@ -57,6 +74,28 @@
 	// The lineage transactional-outbox DLQ stream (#83) — visually flagged so an operator scanning the
 	// fabric spots dead-letter backlog at a glance.
 	const isDlq = (name: string) => name === 'DLQ' || name.startsWith('DLQ_');
+
+	// "+N since last refresh" deltas — null (no chip) until a baseline exists or when nothing changed.
+	const totalsDelta = $derived(
+		prev !== null && overview !== null ? overview.totals.messages - prev.messages : 0,
+	);
+	function streamDelta(name: string, messages: number): number {
+		if (prev === null) return 0;
+		const before = prev.streamMessages[name];
+		return before === undefined ? 0 : messages - before;
+	}
+	const fmtDelta = (d: number): string => (d > 0 ? `+${d.toLocaleString()}` : d.toLocaleString());
+
+	// A consumer whose last delivery activity is >10 min behind the monitor's own clock (`overview.now`,
+	// not the browser clock — no client-skew false positives) is rendered dimmed with a "stale" chip: on
+	// an active fabric that usually means its app stopped reading (wedged/crashlooping subscriber).
+	const STALE_MS = 10 * 60 * 1000;
+	function isStale(lastActive: string | undefined, now: string): boolean {
+		if (!lastActive) return false;
+		const active = new Date(lastActive).getTime();
+		const ref = new Date(now).getTime();
+		return !Number.isNaN(active) && !Number.isNaN(ref) && ref - active > STALE_MS;
+	}
 
 	function fmtBytes(n: number): string {
 		if (n < 1024) return `${n} B`;
@@ -92,7 +131,11 @@
 		{#if overview}
 			<span class="totals mono">
 				{overview.totals.streams} streams · {overview.totals.consumers} consumers ·
-				{overview.totals.messages.toLocaleString()} msgs · {fmtBytes(overview.totals.bytes)}
+				{overview.totals.messages.toLocaleString()} msgs
+				{#if totalsDelta !== 0}
+					<span class="delta" title="messages since last refresh">{fmtDelta(totalsDelta)}</span>
+				{/if}
+				· {fmtBytes(overview.totals.bytes)}
 			</span>
 		{/if}
 	</div>
@@ -115,62 +158,98 @@
 		<div class="empty"><RefreshCw size={15} /> NATS monitor unreachable (HTTP {lastStatus}).</div>
 	{:else if overview === null}
 		<div class="empty">Loading the JetStream overview…</div>
-	{:else if overview.streams.length === 0}
-		<div class="empty">No JetStream streams exist yet — the event fabric is empty.</div>
 	{:else}
-		<div class="cards">
-			{#each overview.streams as s (s.name)}
-				<section class="card" class:dlq={isDlq(s.name)} aria-label="Stream {s.name}">
-					<div class="card-head">
-						<span class="name mono">{s.name}</span>
-						{#if isDlq(s.name)}
-							<span
-								class="badge dlqbadge"
-								title="Lineage dead-letter stream — backlog here is at-risk events"
-							>
-								DLQ
-							</span>
-						{/if}
-						<span class="badge">{s.retention}</span>
-						<span class="badge">{s.storage}</span>
-						<span class="spacer"></span>
-						<span class="stat mono">
-							{s.state.messages.toLocaleString()} msgs · {fmtBytes(s.state.bytes)} · seq
-							{s.state.first_seq}–{s.state.last_seq} · max_age {fmtAgeNs(s.max_age_ns)} · R{s.num_replicas}
-						</span>
-					</div>
-					<div class="subjects mono">{s.subjects.join(', ') || '—'}</div>
-					{#if s.consumers.length === 0}
-						<div class="noconsumers">No consumers bound ({s.state.consumer_count} reported).</div>
-					{:else}
-						<table>
-							<thead>
-								<tr>
-									<th>consumer</th><th>group</th><th class="num">pending</th>
-									<th class="num">ack-pending</th><th class="num">redelivered</th><th
-										>last active</th
+		{#if overview.missing.length > 0}
+			<!-- The dead-subscription detector: an EXPECTED consumer group that is absent from the live
+			     topology. Raw /jsz cannot show an absence — this diff (chart-rendered expectations vs live
+			     consumers) is what catches a Ready pod whose subscription silently died. -->
+			<div class="missingbanner" role="alert" aria-label="Missing expected consumers">
+				<TriangleAlert size={15} />
+				<span>
+					<strong>
+						{overview.missing.length} expected consumer{overview.missing.length === 1 ? '' : 's'} MISSING</strong
+					>
+					— a dead subscription: the app may look Ready while nothing reads its stream.
+					{#each overview.missing as m (`${m.stream}:${m.service}`)}
+						<span class="misspair mono">{m.stream}:{m.service}</span>
+					{/each}
+				</span>
+			</div>
+		{/if}
+		{#if overview.streams.length === 0}
+			<div class="empty">No JetStream streams exist yet — the event fabric is empty.</div>
+		{:else}
+			<div class="cards">
+				{#each overview.streams as s (s.name)}
+					<section class="card" class:dlq={isDlq(s.name)} aria-label="Stream {s.name}">
+						<div class="card-head">
+							<span class="name mono">{s.name}</span>
+							{#if isDlq(s.name)}
+								<span
+									class="badge dlqbadge"
+									title="Lineage dead-letter stream — backlog here is at-risk events"
+								>
+									DLQ
+								</span>
+							{/if}
+							<span class="badge">{s.retention}</span>
+							<span class="badge">{s.storage}</span>
+							<span class="spacer"></span>
+							<span class="stat mono">
+								{s.state.messages.toLocaleString()} msgs
+								{#if streamDelta(s.name, s.state.messages) !== 0}
+									<span class="delta" title="messages since last refresh"
+										>{fmtDelta(streamDelta(s.name, s.state.messages))}</span
 									>
-								</tr>
-							</thead>
-							<tbody>
-								{#each s.consumers as c (c.name)}
+								{/if}
+								· {fmtBytes(s.state.bytes)} · seq
+								{s.state.first_seq}–{s.state.last_seq} · max_age {fmtAgeNs(s.max_age_ns)} · R{s.num_replicas}
+							</span>
+						</div>
+						<div class="subjects mono">{s.subjects.join(', ') || '—'}</div>
+						{#if s.consumers.length === 0}
+							<div class="noconsumers">No consumers bound ({s.state.consumer_count} reported).</div>
+						{:else}
+							<table>
+								<thead>
 									<tr>
-										<td class="mono">
-											{c.durable ? c.name : `${c.name} (ephemeral)`}
-										</td>
-										<td class="mono">{c.deliver_group ?? '—'}</td>
-										<td class="num mono" class:pend={c.num_pending > 0}>{c.num_pending}</td>
-										<td class="num mono" class:pend={c.num_ack_pending > 0}>{c.num_ack_pending}</td>
-										<td class="num mono" class:warn={c.num_redelivered > 0}>{c.num_redelivered}</td>
-										<td class="mono faint">{when(c.last_active)}</td>
+										<th>service</th><th>consumer</th><th class="num">pending</th>
+										<th class="num">ack-pending</th><th class="num">redelivered</th><th
+											>last active</th
+										>
 									</tr>
-								{/each}
-							</tbody>
-						</table>
-					{/if}
-				</section>
-			{/each}
-		</div>
+								</thead>
+								<tbody>
+									{#each s.consumers as c (c.name)}
+										<tr class:stale={isStale(c.last_active, overview.now)}>
+											<td class="mono service">{c.service}</td>
+											<td class="mono">
+												{c.durable ? c.name : `${c.name} (ephemeral)`}
+											</td>
+											<td class="num mono" class:pend={c.num_pending > 0}>{c.num_pending}</td>
+											<td class="num mono" class:pend={c.num_ack_pending > 0}
+												>{c.num_ack_pending}</td
+											>
+											<td class="num mono" class:warn={c.num_redelivered > 0}
+												>{c.num_redelivered}</td
+											>
+											<td class="mono faint">
+												{when(c.last_active)}
+												{#if isStale(c.last_active, overview.now)}
+													<span class="stalechip" title="No delivery activity for over 10 minutes"
+														>stale</span
+													>
+												{/if}
+											</td>
+										</tr>
+									{/each}
+								</tbody>
+							</table>
+						{/if}
+					</section>
+				{/each}
+			</div>
+		{/if}
 	{/if}
 </div>
 
@@ -216,6 +295,34 @@
 	.totals {
 		font-size: 12px;
 		color: var(--mut);
+	}
+	.delta {
+		color: var(--ok, #3f9e63);
+		font-weight: 600;
+		margin-left: 2px;
+	}
+	.missingbanner {
+		display: flex;
+		align-items: baseline;
+		gap: 8px;
+		border: 1px solid color-mix(in srgb, var(--warn, #d18b28) 60%, var(--line));
+		background: color-mix(in srgb, var(--warn, #d18b28) 9%, transparent);
+		color: var(--warn, #d18b28);
+		border-radius: var(--radius-sm);
+		font-size: 13px;
+		padding: 10px 12px;
+		margin-bottom: 12px;
+	}
+	.missingbanner strong {
+		font-weight: 700;
+	}
+	.misspair {
+		display: inline-block;
+		border: 1px solid color-mix(in srgb, var(--warn, #d18b28) 55%, var(--line));
+		border-radius: var(--radius-sm);
+		font-size: 11px;
+		padding: 0 6px;
+		margin-left: 6px;
 	}
 	.empty {
 		display: flex;
@@ -311,6 +418,24 @@
 	}
 	td.warn {
 		color: var(--warn, #d18b28);
+	}
+	td.service {
+		color: var(--ink);
+	}
+	/* Stale consumer: dimmed row (still legible) + a warn-toned chip on the last-active cell. */
+	tr.stale td {
+		opacity: 0.55;
+	}
+	.stalechip {
+		display: inline-block;
+		border: 1px solid color-mix(in srgb, var(--warn, #d18b28) 60%, var(--line));
+		border-radius: var(--radius-sm);
+		color: var(--warn, #d18b28);
+		font-size: 10px;
+		text-transform: uppercase;
+		letter-spacing: 0.04em;
+		padding: 0 5px;
+		margin-left: 6px;
 	}
 	.faint {
 		color: var(--faint);

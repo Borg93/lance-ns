@@ -20,6 +20,34 @@ const NATS_MONITOR_API = env.NATS_MONITOR_API ?? '';
 // `can_administer` project admin, or the service/dev paths). We bearer-FORWARD the user's token (never a
 // service token) and only query the NATS monitor if it returns 200.
 const MEDALLION_API = env.MEDALLION_API ?? '';
+// The dead-subscription detector: JETSTREAM_EXPECTED_CONSUMERS (chart _helpers.tpl frontendEnv) is a
+// comma list of "STREAM:service" rendered from the SAME values the Dapr pubsub components render, so the
+// expectation cannot drift from what the estate actually subscribes. An expected group with no live
+// consumer is INVISIBLE in raw /jsz — the app sits Ready while its trigger stream goes unread (the silent
+// cascade stall, 2026-07-13) — so the BFF diffs expected vs present and returns the gap as `missing`.
+const EXPECTED_CONSUMERS: readonly { stream: string; service: string }[] = (
+	env.JETSTREAM_EXPECTED_CONSUMERS ?? ''
+)
+	.split(',')
+	.map((entry) => entry.trim())
+	.filter((entry) => entry.length > 0)
+	.flatMap((entry) => {
+		const sep = entry.indexOf(':');
+		// A malformed segment (no separator, empty stream/service) is dropped rather than fabricating a
+		// forever-missing phantom — the helm helper is the single source and renders well-formed pairs.
+		if (sep <= 0 || sep === entry.length - 1) return [];
+		return [{ stream: entry.slice(0, sep), service: entry.slice(sep + 1) }];
+	});
+
+// Per-consumer service label: Dapr's queueGroupName IS the subscriber app-id, so the deliver group names
+// the service directly. The catalog control broadcast is deliberately group-less (every replica gets every
+// event), so a no-group ephemeral on CATALOG_CONTROL is a catalog replica; any other group-less ephemeral
+// (e.g. a nats-cli inspection consumer) gets the honest "(ephemeral)" placeholder.
+function serviceLabel(bareStream: string, deliverGroup: string | undefined): string {
+	if (deliverGroup) return deliverGroup;
+	if (bareStream === 'CATALOG_CONTROL') return 'catalog (broadcast replica)';
+	return '(ephemeral)';
+}
 
 // Returns null when the caller is an authorized admin; otherwise the {status, detail} to answer with.
 async function adminGate(
@@ -73,6 +101,16 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 		// never sees the raw monitor payload. Stream names are unique only PER ACCOUNT, so with multiple
 		// accounts the name is account-qualified (the panel keys its each-block on it).
 		const multiAccount = raw.account_details.length > 1;
+		// Present consumer groups per BARE stream name (expected/present matching must ignore the
+		// account qualifier below). "*" marks a group-less ephemeral on CATALOG_CONTROL — the catalog
+		// broadcast consumer carries no deliver group by design, so ANY such consumer satisfies the
+		// expected catalog entry.
+		const present = new Map<string, Set<string>>();
+		const markPresent = (stream: string, group: string) => {
+			const groups = present.get(stream) ?? new Set<string>();
+			groups.add(group);
+			present.set(stream, groups);
+		};
 		const streams = raw.account_details
 			.flatMap((account) => account.stream_detail.map((s) => ({ account: account.name, s })))
 			.map(({ account, s }) => ({
@@ -85,17 +123,30 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 				max_bytes: s.config.max_bytes,
 				num_replicas: s.config.num_replicas,
 				state: s.state,
-				consumers: s.consumer_detail.map((c) => ({
-					name: c.name,
-					durable: Boolean(c.config?.durable_name),
-					deliver_group: c.config?.deliver_group,
-					num_pending: c.num_pending,
-					num_ack_pending: c.num_ack_pending,
-					num_redelivered: c.num_redelivered,
-					last_active: c.delivered?.last_active,
-				})),
+				consumers: s.consumer_detail.map((c) => {
+					const group = c.config?.deliver_group;
+					if (group) markPresent(s.name, group);
+					else if (s.name === 'CATALOG_CONTROL') markPresent(s.name, '*');
+					return {
+						name: c.name,
+						service: serviceLabel(s.name, group),
+						durable: Boolean(c.config?.durable_name),
+						deliver_group: group,
+						num_pending: c.num_pending,
+						num_ack_pending: c.num_ack_pending,
+						num_redelivered: c.num_redelivered,
+						last_active: c.delivered?.last_active,
+					};
+				}),
 			}))
 			.sort((a, b) => a.name.localeCompare(b.name));
+		// Expected-vs-present diff: an expected entry whose stream has no matching group (a missing stream
+		// counts every expectation on it as missing) is a dead subscription. Order follows the env list —
+		// the same order the Dapr components render in.
+		const missing = EXPECTED_CONSUMERS.filter(({ stream, service }) => {
+			const groups = present.get(stream);
+			return !(groups?.has(service) || groups?.has('*'));
+		});
 		const overview: JetStreamOverview = {
 			now: raw.now,
 			totals: {
@@ -105,6 +156,7 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 				bytes: raw.bytes,
 			},
 			streams,
+			missing,
 		};
 		return json(overview);
 	} catch (err) {

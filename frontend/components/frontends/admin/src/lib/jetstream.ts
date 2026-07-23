@@ -72,6 +72,10 @@ export type RawJsz = v.InferOutput<typeof RawJszSchema>;
 
 export const JetStreamConsumerSchema = v.object({
 	name: v.string(),
+	// The estate SERVICE behind this consumer, derived server-side: the deliver group when present (Dapr's
+	// queueGroupName IS the app-id), else the catalog broadcast replica on CATALOG_CONTROL, else the
+	// "(ephemeral)" placeholder for a group-less ephemeral (e.g. a nats-cli inspection consumer).
+	service: v.string(),
 	durable: v.boolean(),
 	deliver_group: v.optional(v.string()),
 	num_pending: v.number(),
@@ -101,6 +105,15 @@ export const JetStreamStreamSchema = v.object({
 });
 export type JetStreamStream = v.InferOutput<typeof JetStreamStreamSchema>;
 
+/** An expected consumer group (from JETSTREAM_EXPECTED_CONSUMERS) with no live consumer on its stream —
+ * a DEAD SUBSCRIPTION: the app looks Ready while nothing reads its trigger stream (the silent cascade
+ * stall of 2026-07-13). Absence is invisible in the raw monitor payload; this diff is what surfaces it. */
+export const JetStreamMissingConsumerSchema = v.object({
+	stream: v.string(),
+	service: v.string(),
+});
+export type JetStreamMissingConsumer = v.InferOutput<typeof JetStreamMissingConsumerSchema>;
+
 export const JetStreamOverviewSchema = v.object({
 	now: v.string(),
 	totals: v.object({
@@ -110,5 +123,6 @@ export const JetStreamOverviewSchema = v.object({
 		bytes: v.number(),
 	}),
 	streams: v.array(JetStreamStreamSchema),
+	missing: v.array(JetStreamMissingConsumerSchema),
 });
 export type JetStreamOverview = v.InferOutput<typeof JetStreamOverviewSchema>;

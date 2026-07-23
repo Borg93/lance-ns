@@ -1,16 +1,19 @@
 import { test, expect, type Route } from '@playwright/test';
 
 // Hermetic /streams coverage: the panel reads the trimmed JetStream overview via the /api/jetstream BFF.
-// Mock it; assert the stream cards + consumer lag rows render (DLQ flagged, redelivery highlighted) and
-// that a 403 renders the forbidden state.
+// Mock it; assert the stream cards + consumer lag rows render (service column first, DLQ flagged,
+// redelivery highlighted, stale consumers dimmed+chipped), the missing-consumer banner (the
+// dead-subscription detector), the "+N since last refresh" delta chips, and that a 403 renders the
+// forbidden state.
 
 const json = (route: Route, body: unknown, status = 200) =>
 	route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
 // Trimmed form of the REAL live /jsz sample (kind cluster, 2026-07-23): LINEAGE with its durable push
-// consumer, plus the DLQ stream carrying an ephemeral consumer with backlog + redeliveries.
+// consumer, plus the DLQ stream carrying an ephemeral consumer with backlog + redeliveries. `now` is
+// within 10 min of every last_active so no consumer renders stale in the base fixture.
 const OVERVIEW = {
-	now: '2026-07-23T19:02:29.893843405Z',
+	now: '2026-07-23T16:25:29.893843405Z',
 	totals: { streams: 2, consumers: 3, messages: 141, bytes: 365657 },
 	streams: [
 		{
@@ -26,6 +29,7 @@ const OVERVIEW = {
 			consumers: [
 				{
 					name: 'fR9hEVt8',
+					service: '(ephemeral)',
 					durable: false,
 					num_pending: 4,
 					num_ack_pending: 1,
@@ -47,6 +51,7 @@ const OVERVIEW = {
 			consumers: [
 				{
 					name: 'lance-ray-durable',
+					service: 'lance-ray',
 					durable: true,
 					deliver_group: 'lance-ray',
 					num_pending: 0,
@@ -57,6 +62,7 @@ const OVERVIEW = {
 			],
 		},
 	],
+	missing: [],
 };
 
 test('renders stream cards with consumer lag rows', async ({ page }) => {
@@ -69,16 +75,88 @@ test('renders stream cards with consumer lag rows', async ({ page }) => {
 	await expect(lineage).toContainText('lineage.events.>');
 	await expect(lineage).toContainText('136 msgs');
 	await expect(lineage).toContainText('limits');
-	// Consumer lag rows: the durable push consumer with its deliver group.
+	// Consumer lag rows: SERVICE first (the BFF-derived estate service), then the consumer name.
+	await expect(lineage.locator('th').first()).toHaveText('service');
+	await expect(lineage.locator('td.service')).toHaveText('lance-ray');
 	await expect(lineage.locator('table')).toContainText('lance-ray-durable');
-	await expect(lineage.locator('table')).toContainText('lance-ray');
 
-	// The DLQ stream is visually flagged, and its ephemeral consumer shows backlog + redeliveries.
+	// The DLQ stream is visually flagged, and its ephemeral consumer shows backlog + redeliveries; a
+	// group-less ephemeral outside CATALOG_CONTROL gets the "(ephemeral)" service placeholder.
 	const dlq = page.getByLabel('Stream DLQ');
 	await expect(dlq).toContainText('DLQ');
 	await expect(dlq.locator('.badge.dlqbadge')).toBeVisible();
+	await expect(dlq.locator('td.service')).toHaveText('(ephemeral)');
 	await expect(dlq.locator('table')).toContainText('fR9hEVt8 (ephemeral)');
 	await expect(dlq.locator('td.warn')).toHaveText('2'); // redelivered > 0 highlighted
+
+	// No expected consumer is missing and nothing is stale in the base fixture.
+	await expect(page.locator('.missingbanner')).toHaveCount(0);
+	await expect(page.locator('.stalechip')).toHaveCount(0);
+});
+
+test('missing expected consumers render the dead-subscription warn banner', async ({ page }) => {
+	// The dead-subscription detector: the BFF diffed JETSTREAM_EXPECTED_CONSUMERS against the live
+	// topology and found two expected groups absent — the panel must shout, because an ABSENT consumer
+	// is invisible in the raw stream cards themselves.
+	await page.route('**/admin/api/jetstream*', (route) =>
+		json(route, {
+			...OVERVIEW,
+			missing: [
+				{ stream: 'MEDALLION', service: 'raw-to-bronze' },
+				{ stream: 'TRAINING', service: 'lance-ray' },
+			],
+		}),
+	);
+	await page.goto('/admin/streams');
+	const banner = page.locator('.missingbanner');
+	await expect(banner).toContainText('2 expected consumers MISSING');
+	await expect(banner).toContainText('MEDALLION:raw-to-bronze');
+	await expect(banner).toContainText('TRAINING:lance-ray');
+	// The ordinary stream cards still render alongside the banner.
+	await expect(page.getByLabel('Stream LINEAGE')).toBeVisible();
+});
+
+test('a consumer inactive for over 10 minutes renders dimmed with a stale chip', async ({
+	page,
+}) => {
+	const stale = structuredClone(OVERVIEW);
+	// LINEAGE's consumer last delivered ~66 min before the monitor clock — well past the 10 min bar.
+	for (const s of stale.streams) {
+		if (s.name !== 'LINEAGE') continue;
+		for (const c of s.consumers) c.last_active = '2026-07-23T15:19:33.986839443Z';
+	}
+	await page.route('**/admin/api/jetstream*', (route) => json(route, stale));
+	await page.goto('/admin/streams');
+
+	const lineage = page.getByLabel('Stream LINEAGE');
+	await expect(lineage.locator('tr.stale')).toHaveCount(1);
+	await expect(lineage.locator('.stalechip')).toHaveText('stale');
+	// The DLQ consumer (active ~6 min before `now`) stays fresh — staleness is per-consumer.
+	await expect(page.getByLabel('Stream DLQ').locator('tr.stale')).toHaveCount(0);
+});
+
+test('Refresh re-queries the BFF and shows +N delta chips', async ({ page }) => {
+	let calls = 0;
+	await page.route('**/admin/api/jetstream*', (route) => {
+		calls += 1;
+		if (calls === 1) return json(route, OVERVIEW);
+		// Second poll: +9 total, +9 on LINEAGE — the chips compare against the previous rendered poll.
+		const grown = structuredClone(OVERVIEW);
+		grown.totals.messages = 150;
+		for (const s of grown.streams) if (s.name === 'LINEAGE') s.state.messages = 145;
+		return json(route, grown);
+	});
+	await page.goto('/admin/streams');
+	await expect(page.getByLabel('Stream LINEAGE')).toBeVisible();
+	// First render: no baseline yet, so no delta chips.
+	await expect(page.locator('.delta')).toHaveCount(0);
+	const before = calls;
+	await page.getByRole('button', { name: 'Refresh' }).click();
+	await expect.poll(() => calls).toBeGreaterThan(before);
+	// Totals chip + the LINEAGE stream chip (DLQ is unchanged → no chip).
+	await expect(page.locator('.bar .delta')).toHaveText('+9');
+	await expect(page.getByLabel('Stream LINEAGE').locator('.delta')).toHaveText('+9');
+	await expect(page.getByLabel('Stream DLQ').locator('.delta')).toHaveCount(0);
 });
 
 test('a 403 from the BFF renders the forbidden state', async ({ page }) => {
@@ -88,17 +166,4 @@ test('a 403 from the BFF renders the forbidden state', async ({ page }) => {
 	await page.goto('/admin/streams');
 	await expect(page.getByText('The stream view is admin-only')).toBeVisible();
 	await expect(page.locator('table')).toHaveCount(0);
-});
-
-test('Refresh re-queries the BFF', async ({ page }) => {
-	let calls = 0;
-	await page.route('**/admin/api/jetstream*', (route) => {
-		calls += 1;
-		return json(route, OVERVIEW);
-	});
-	await page.goto('/admin/streams');
-	await expect(page.getByLabel('Stream LINEAGE')).toBeVisible();
-	const before = calls;
-	await page.getByRole('button', { name: 'Refresh' }).click();
-	await expect.poll(() => calls).toBeGreaterThan(before);
 });

@@ -47,6 +47,27 @@ shared origin-wide session cookie (home additionally exchanges the code). Emit u
 # ClusterIP-only — consumed strictly server-side behind the zone BFF's admin gate, never by the browser.
 # The headless Service is the one that carries :8222 (the plain Service exposes only 4222).
 - { name: NATS_MONITOR_API, value: "http://{{ include "lance.natsHost" . }}-headless:8222" }
+{{- if .Values.dapr.enabled }}
+{{/* Dead-subscription detector (admin /streams): the comma list of "STREAM:service" consumer groups the
+estate EXPECTS on JetStream, rendered from the SAME values (and the same medallion.enabled /
+catalog.controlEmit gates) dapr-component.yaml renders its subscriber components from — so the expectation
+cannot drift from the real subscription topology. The zone BFF diffs this against live /jsz consumers: an
+expected group that is absent is a silently-dead subscription (a Ready pod reading nothing — the 2026-07-13
+cascade stall), invisible in the raw monitor payload. The catalog control consumer is group-less by design
+(broadcast); the BFF counts any no-group ephemeral on CATALOG_CONTROL as the catalog. */}}
+{{- $expected := list (printf "LINEAGE:%s" .Values.services.lineage.daprAppId) }}
+{{- if .Values.medallion.enabled }}
+{{- $expected = append $expected (printf "LINEAGE:%s" .Values.medallion.producer.daprAppId) }}
+{{- range .Values.medallion.movers }}
+{{- $expected = append $expected (printf "MEDALLION:%s" .daprAppId) }}
+{{- end }}
+{{- $expected = append $expected (printf "TRAINING:%s" .Values.medallion.producer.daprAppId) }}
+{{- end }}
+{{- if .Values.catalog.controlEmit }}
+{{- $expected = append $expected (printf "CATALOG_CONTROL:%s" .Values.services.catalog.daprAppId) }}
+{{- end }}
+- { name: JETSTREAM_EXPECTED_CONSUMERS, value: {{ join "," $expected | quote }} }
+{{- end }}
 {{- end }}
 - { name: LANCE_GATEWAY_URL, value: "http://{{ include "lance.fullname" . }}-gateway:{{ .Values.gateway.port }}" }
 - { name: PORT, value: "3000" }

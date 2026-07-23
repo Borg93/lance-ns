@@ -1,20 +1,22 @@
 <script lang="ts">
-	// The dataset panel's access-review section (#51): who holds which can_* action on the table,
-	// expanded through the FGA model (roles, teams, the parent cascade). Owner-only by design — the
-	// catalog gates the enumeration on can_drop, so a non-owner sees the denial state, never the ACL.
+	// The dataset panel's access-review section (#51): who holds which can_* action on the object,
+	// expanded through the FGA model (roles, teams, the parent cascade). Kind-generalized (sweep
+	// group 3): `kind` picks the catalog surface — 'table' (the default, unchanged for TableDetail)
+	// or 'namespace' — and the owner gate is the per-type bar (can_drop / can_delete). Owner-only by
+	// design — the catalog gates the enumeration, so a non-owner sees the denial state, never the ACL.
 	// Collapsed by default: one owner-tier round-trip per dataset, with definitive outcomes (the ACL,
 	// 401/403/501) cached and transient failures (offline, 5xx) retried on the next open.
 	import { Select } from '@rask/ui/select';
 	import { ChevronRight, ShieldCheck } from '@lucide/svelte';
 	import {
 		type AccessList,
-		checkTableAccess,
-		fetchTableAccess,
-		grantTableAccess,
-		revokeTableAccess,
-	} from './catalog';
+		checkAccess,
+		fetchAccess,
+		grantAccess,
+		revokeAccess,
+	} from './namespace';
 
-	let { dataset }: { dataset: string } = $props();
+	let { dataset, kind = 'table' }: { dataset: string; kind?: 'table' | 'namespace' } = $props();
 
 	// #72 the base rungs an owner may hand out (owner/writer/reader/validator) — the model's directly
 	// assignable relations, least→most privilege. NOT the can_* actions the review row shows (those are
@@ -64,7 +66,7 @@
 		failedFor = null;
 		const current = dataset;
 		try {
-			const res = await fetchTableAccess(current);
+			const res = await fetchAccess(kind, current);
 			// Latest-wins: the user clicked away while this was in flight — drop the stale result.
 			if (dataset !== current) return;
 			if (res.ok) {
@@ -74,7 +76,7 @@
 					res.status === 401
 						? 'Sign in to review access.'
 						: res.status === 403
-							? 'Owner access required to review who can reach this table.'
+							? `Owner access required to review who can reach this ${kind}.`
 							: 'This stack runs auth-off — there are no grants to review.';
 				review = { for: current, access: null, denied };
 			} else {
@@ -99,7 +101,7 @@
 		simError = null;
 		const current = dataset;
 		try {
-			const res = await checkTableAccess(current, user, simRelation);
+			const res = await checkAccess(kind, current, user, simRelation);
 			if (dataset !== current) return; // navigated away — drop the stale verdict
 			if (res.ok) {
 				simVerdict = {
@@ -109,7 +111,7 @@
 				};
 				simFor = current;
 			} else if (res.status === 401 || res.status === 403) {
-				simError = 'Simulating access needs the owner tier on this table.';
+				simError = `Simulating access needs the owner tier on this ${kind}.`;
 			} else {
 				simError = `Check failed (HTTP ${res.status}).`;
 			}
@@ -127,19 +129,19 @@
 		const current = dataset;
 		try {
 			const res = grant
-				? await grantTableAccess(current, user, mgRelation)
-				: await revokeTableAccess(current, user, mgRelation);
+				? await grantAccess(kind, current, user, mgRelation)
+				: await revokeAccess(kind, current, user, mgRelation);
 			if (dataset !== current) return; // navigated away — drop the stale result
 			mgFor = current;
 			if (res.ok) {
 				const verb = grant ? 'granted to' : 'revoked from';
 				mgResult = { tone: 'ok', text: `${mgRelation} ${verb} ${res.data.user}.` };
-				const refreshed = await fetchTableAccess(current);
+				const refreshed = await fetchAccess(kind, current);
 				if (dataset === current && refreshed.ok) {
 					review = { for: current, access: refreshed.data, denied: null };
 				}
 			} else if (res.status === 401 || res.status === 403) {
-				mgResult = { tone: 'fail', text: 'Managing access needs the owner tier on this table.' };
+				mgResult = { tone: 'fail', text: `Managing access needs the owner tier on this ${kind}.` };
 			} else if (res.status === 400 || res.status === 422) {
 				mgResult = { tone: 'fail', text: `${mgRelation} is not a grantable rung here.` };
 			} else {
@@ -168,7 +170,7 @@
 			<p class="mut">{shown.denied}</p>
 		{:else if shown?.access}
 			{#if held.length === 0}
-				<p class="mut">No user holds any action on this table (grants may target roles only).</p>
+				<p class="mut">No user holds any action on this {kind} (grants may target roles only).</p>
 			{:else}
 				<table class="acl">
 					<thead><tr><th>action</th><th>who</th></tr></thead>
@@ -222,7 +224,7 @@
 					>
 						<span class="mono">{simVerdictShown.user}</span>
 						{simVerdictShown.allowed ? 'can' : 'cannot'}
-						<span class="mono">{simVerdictShown.relation}</span> on this table.
+						<span class="mono">{simVerdictShown.relation}</span> on this {kind}.
 					</p>
 				{/if}
 			</div>

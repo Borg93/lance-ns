@@ -148,7 +148,7 @@
 			<section class="ns">
 				<div class="ns-head">
 					<Boxes size={13} />
-					<span class="mono ns-name">{ns}</span>
+					<a class="mono ns-name" href={`${base}/namespaces/${encodeURIComponent(ns)}`}>{ns}</a>
 					<span class="count">{members.length} table{members.length === 1 ? '' : 's'}</span>
 					<button
 						class="drop"

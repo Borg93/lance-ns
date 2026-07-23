@@ -27,6 +27,18 @@ def _policy(
     return {"kind": kind, "id": id_, "path": path, "compact_enabled": True, **fields}
 
 
+def _project_policy(id_: str = "acme", buckets: list[str] | None = None, **fields: Any) -> dict[str, Any]:
+    # #84 shape: no path — a project record matches by its warehouse BUCKETS (resolved at set time).
+    return {
+        "kind": "project",
+        "id": id_,
+        "path": "",
+        "buckets": buckets if buckets is not None else ["acme-wh"],
+        "compact_enabled": True,
+        **fields,
+    }
+
+
 def test_registry_round_trips_and_lists(tmp_path: Path) -> None:
     root = str(tmp_path)
     mp.put_policy(root, {}, _policy(retention_days=7))
@@ -95,6 +107,82 @@ def test_resolve_precedence_table_over_namespace_over_none() -> None:
     assert mp.resolve_policy(records, "s3://bkt/elsewhere/tbl") is None
     # Bucket-qualified: the same path in another tenant's bucket must never cross-match.
     assert mp.resolve_policy(records, "s3://otherbkt/medallion/silver/features") is None
+
+
+def test_project_policy_round_trips_and_lists(tmp_path: Path) -> None:
+    # CONTRACT (#84): a PATH-LESS project record (it matches by buckets, not path) must survive the
+    # registry round-trip AND list_policies' validation — the sweep only ever sees what list returns.
+    root = str(tmp_path)
+    mp.put_policy(root, {}, _project_policy(retention_days=90))
+    stored = mp.get_policy(root, {}, "project", "acme")
+    assert stored is not None and stored["buckets"] == ["acme-wh"]
+    listed = mp.list_policies(root, {})
+    assert len(listed) == 1 and listed[0]["kind"] == "project"
+    assert mp.delete_policy(root, {}, "project", "acme") is True
+    assert mp.delete_policy(root, {}, "project", "acme") is False  # idempotent
+
+
+def test_list_policies_rejects_a_bucketless_project_record(tmp_path: Path) -> None:
+    # A project record with no buckets could never match a dataset — malformed, skipped with a warning,
+    # and it must not void the well-formed records next to it.
+    root = str(tmp_path)
+    mp.put_policy(root, {}, _project_policy())
+    mp.put_policy(root, {}, {"kind": "project", "id": "ghost", "path": "", "buckets": []})
+    (tmp_path / "_policies" / "project-nolist.json").write_text('{"kind": "project", "id": "x"}')
+    records = mp.list_policies(root, {})
+    assert len(records) == 1 and records[0]["id"] == "acme"
+
+
+def test_resolve_precedence_table_beats_namespace_beats_project_beats_none() -> None:
+    # CONTRACT (#84): resolution order is exact table -> longest namespace -> project bucket -> None
+    # (global defaults). The project tier is strictly the LAST fallback.
+    records = [
+        _policy(id_="silver$features", path="acme-wh/medallion/silver/features", retention_days=1),
+        _policy(kind="namespace", id_="silver", path="acme-wh/medallion/silver", retention_days=30),
+        _project_policy(buckets=["acme-wh", "acme-wh2"], retention_days=90),
+    ]
+    hit = mp.resolve_policy(records, "s3://acme-wh/medallion/silver/features")
+    assert hit is not None and hit["retention_days"] == 1  # table beats namespace beats project
+    hit = mp.resolve_policy(records, "s3://acme-wh/medallion/silver/other")
+    assert hit is not None and hit["retention_days"] == 30  # namespace beats project
+    hit = mp.resolve_policy(records, "s3://acme-wh/medallion/bronze/events")
+    assert hit is not None and hit["retention_days"] == 90  # project catches the rest of its buckets
+    hit = mp.resolve_policy(records, "s3://acme-wh2/u1_db$t")
+    assert hit is not None and hit["retention_days"] == 90  # every bucket in the record is covered
+    assert mp.resolve_policy(records, "s3://other-wh/u1_db$t") is None  # cross-bucket never matches
+    # A bucket-NAME prefix must not match ("acme-wh2" covered explicitly above; "acme-whx" is not).
+    assert mp.resolve_policy(records, "s3://acme-whx/u1_db$t") is None
+
+
+def test_project_policy_matches_flat_catalog_layout_without_a_logical_id() -> None:
+    # The bucket-level match needs no logical id, so BOTH the catalog's flat `<uuid>_<table_id>` layout
+    # and the medallion-nested layout in a project bucket resolve the project record.
+    records = [_project_policy(retention_days=90)]
+    for uri in ("s3://acme-wh/u1_db$users", "s3://acme-wh/medallion/gold/features"):
+        hit = mp.resolve_policy(records, uri, logical_id=None)
+        assert hit is not None and hit["retention_days"] == 90, uri
+
+
+def test_sweep_consumes_a_project_policy_via_the_same_resolution_call(tmp_path: Path) -> None:
+    # PIN (#84): the sweep needs NO change to honor the project tier — run_sweep resolves via
+    # list_policies + resolve_policy(records, uri, logical_id=table_id_from_uri(uri)) and then applies
+    # the skip logic. Drive exactly that call shape off a real registry and prove a project record
+    # both resolves and opts its bucket's datasets out.
+    from compaction.core.lineage_emit import table_id_from_uri
+
+    root = str(tmp_path)
+    mp.put_policy(root, {}, _project_policy(compact_enabled=False))
+    records = mp.list_policies(root, {})
+    settings = _settings(tmp_path)
+    now = datetime.now(UTC)
+
+    uri = "s3://acme-wh/medallion/silver/events"  # medallion-nested: table_id_from_uri yields no id
+    policy = mp.resolve_policy(records, uri, logical_id=table_id_from_uri(uri), delimiter=settings.delimiter)
+    assert policy is not None and policy["kind"] == "project"
+    assert _policy_skip_reason(policy, settings, {}, now, uri) == "policy_disabled"
+
+    outside = "s3://other-wh/u1_db$t"
+    assert mp.resolve_policy(records, outside, logical_id=table_id_from_uri(outside)) is None
 
 
 def test_resolve_matches_namespace_by_logical_parent_chain() -> None:

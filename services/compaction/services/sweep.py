@@ -1,8 +1,10 @@
 """The maintenance sweep: discover every dataset in the bucket, compact + GC each, aggregate the result.
 
 Since #50, a per-table/namespace maintenance policy (from the catalog's ``_policies/`` registry) can skip
-a dataset (``policy_disabled`` / ``policy_interval``) or override its old-version retention; a policy-less
-dataset keeps the global defaults. Keeps the blocking S3/Lance orchestration out of the route so the cron
+a dataset (``policy_disabled`` / ``policy_interval``) or override its old-version retention; #84 adds a
+project-level record as the tenant-wide fallback (resolution: table > namespace > project > global
+defaults, all inside ``maintenance_policies.resolve_policy``); a policy-less dataset keeps the global
+defaults. Keeps the blocking S3/Lance orchestration out of the route so the cron
 handler stays a thin shell and the aggregation (:func:`summarize`) stays unit-testable without S3.
 """
 
@@ -89,9 +91,10 @@ def _policy_skip_reason(
 def run_sweep(settings: CompactionSettings) -> list[DatasetResult]:
     """Discover every dataset in EVERY swept bucket and compact + GC each; record what was reclaimed.
 
-    #50 policies: a per-table/namespace record from the catalog's ``_policies/`` registry can disable a
-    dataset's maintenance, re-pace it (cadence stamp per dataset), or override its old-version retention;
-    everything else keeps the global defaults.
+    #50/#84 policies: a per-table/namespace/project record from the catalog's ``_policies/`` registry can
+    disable a dataset's maintenance, re-pace it (cadence stamp per dataset), or override its old-version
+    retention (a table record beats a namespace record beats a project record); everything else keeps the
+    global defaults.
 
     MULTI-BUCKET (audit 2026-07-14). This used to sweep exactly ONE bucket, so every #3-A per-warehouse
     bucket and #3-B multi-base data bucket was invisible to GC — their tables accumulated superseded

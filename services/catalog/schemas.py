@@ -176,6 +176,9 @@ class PolicyResponse(BaseModel):
     kind: str
     id: str
     path: str
+    # #84 project-level records match by bucket (their warehouse buckets, resolved at set time), not by a
+    # single path (which is "" for them). None for table/namespace records.
+    buckets: list[str] | None = None
     retention_days: int | None = None
     retain_versions: int | None = None
     compact_enabled: bool = True

@@ -6583,6 +6583,20 @@
       },
       "PolicyResponse": {
         "properties": {
+          "buckets": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buckets"
+          },
           "compact_enabled": {
             "default": true,
             "title": "Compact Enabled",
@@ -9676,6 +9690,160 @@
         "summary": "List Tables",
         "tags": [
           "namespace"
+        ]
+      }
+    },
+    "/v1/project/{id}/policy/delete": {
+      "post": {
+        "description": "Remove the project's maintenance policy (idempotent) \u2014 admin-gated.",
+        "operationId": "delete_project_policy_v1_project__id__policy_delete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyDeleteResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Project Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/v1/project/{id}/policy/describe": {
+      "post": {
+        "description": "The project's maintenance policy \u2014 admin-gated like set/delete (``project`` defines no\nreader-tier relation); 404 when none is set.",
+        "operationId": "describe_project_policy_v1_project__id__policy_describe_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Describe Project Policy",
+        "tags": [
+          "policy"
+        ]
+      }
+    },
+    "/v1/project/{id}/policy/set": {
+      "post": {
+        "description": "Set (or replace) the project-level maintenance policy (#84) \u2014 the tenant-wide default the sweep\nfalls back to when no table or namespace policy matches. Admin-gated (``can_administer`` on\n``project:<id>``, checked explicitly \u2014 see the module docstring).\n\nThe record's ``buckets`` are the project's ACTIVE warehouse buckets, resolved from the warehouse\nregistry NOW: a warehouse provisioned after this set is not covered until the policy is re-set\n(the same set-time-resolution stance as the table policy's physical path). A project with no\nactive warehouse is refused \u2014 a policy that could never match anything should fail loudly at set\ntime, not lie dormant.",
+        "operationId": "set_project_policy_v1_project__id__policy_set_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PolicyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PolicyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Set Project Policy",
+        "tags": [
+          "policy"
         ]
       }
     },

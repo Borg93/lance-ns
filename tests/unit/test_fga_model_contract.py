@@ -213,6 +213,8 @@ _OTHER_SERVICE_PAIRS: dict[tuple[str, str], str] = {
     ("namespace", "can_create_table"): "medallion/services/train.py + transform.py default",
     ("namespace", "can_promote"): "medallion silver->gold mover (chart requiredAction)",
     ("table", "can_promote"): "catalog require_can_promote (#17 model promotion endpoint)",
+    ("project", "can_create_warehouse"): "catalog fga_deps.require_can_create_warehouse (#3-A)",
+    ("project", "can_administer"): "catalog/api/v1/endpoints/policies.py (#84 project policy routes)",
 }
 
 

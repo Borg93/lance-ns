@@ -11,8 +11,13 @@ govern a same-named path in another tenant's bucket), so the two services never 
 
 * table policy — ``path`` is the dataset directory (resolved from ``describe_table`` at set time);
 * namespace policy — ``path`` is the namespace directory prefix, and the id doubles as a logical
-  parent-chain match for the catalog's flat ``<uuid>_<table_id>`` layout (see :func:`resolve_policy`;
-  a table policy wins over a namespace policy wins over the sweep's global defaults).
+  parent-chain match for the catalog's flat ``<uuid>_<table_id>`` layout (see :func:`resolve_policy`);
+* project policy (#84) — the tenant-wide default: no ``path``, instead ``buckets`` (the project's
+  active warehouse buckets, resolved from the warehouse registry at set time), matched at the bucket
+  level so it also covers medallion-nested datasets that carry no logical id.
+
+Resolution order (:func:`resolve_policy`): a table policy wins over a namespace policy wins over a
+project policy wins over the sweep's global defaults.
 
 Trust boundary: like the warehouse registry, records are trusted as written — the write path is the
 catalog's owner-gated API, and a principal with direct write access to the control bucket is already
@@ -101,11 +106,27 @@ def list_policies(control_root: str, storage_options: StorageOptions) -> list[di
         except Exception as exc:  # noqa: BLE001 — skip the one bad record, keep the rest enforceable
             log.warning("maintenance_policy_unreadable", extra={"path": info.path, "error": str(exc)})
             continue
-        if isinstance(record, dict) and record.get("kind") and record.get("path"):
+        if isinstance(record, dict) and _record_is_well_formed(record):
             out.append(record)
         else:
             log.warning("maintenance_policy_malformed", extra={"path": info.path})
     return out
+
+
+def _record_is_well_formed(record: dict[str, Any]) -> bool:
+    """Whether a stored record carries the fields its kind needs to ever match a dataset.
+
+    Table/namespace records match by ``path``; a project record (#84) has no single path — it matches
+    by ``buckets`` (its warehouse buckets, resolved at set time), so it needs a non-empty bucket list
+    instead. A record that could never match is malformed, not merely inert — surface it.
+    """
+    kind = record.get("kind")
+    if not kind:
+        return False
+    if kind == "project":
+        buckets = record.get("buckets")
+        return bool(record.get("id")) and isinstance(buckets, list) and bool(buckets)
+    return bool(record.get("path"))
 
 
 def resolve_policy(
@@ -116,7 +137,8 @@ def resolve_policy(
     delimiter: str = "$",
 ) -> dict[str, Any] | None:
     """The policy governing dataset ``uri`` (``s3://<bucket>/<path>``): an exact table match wins,
-    else the longest-matching namespace record, else ``None`` (the sweep's global defaults apply).
+    else the longest-matching namespace record, else a project record (#84) whose ``buckets`` contain
+    the dataset's bucket, else ``None`` (the sweep's global defaults apply).
 
     Record paths are bucket-qualified (``<bucket>/<path>``) — the sweep spans multiple buckets
     (per-warehouse, multi-base), and a bucket-relative path would let a policy in one bucket govern a
@@ -128,14 +150,22 @@ def resolve_policy(
     2026-07-16). The caller therefore also passes the dataset's ``logical_id`` (from the ``<uuid>_``
     layout) and the record matches when its id is on the logical parent chain. The directory-prefix
     match stays for nested layouts (the medallion zones), where there is no logical id to derive.
+
+    A project record (#84) matches when the dataset's BUCKET is in the record's ``buckets`` — the
+    bucket-level match needs no logical id, so it also covers a project bucket's medallion-nested
+    datasets. It is strictly the LAST fallback: any table or namespace match shadows it. A bucket
+    belongs to one project, so overlapping project records would be a registry misconfiguration; the
+    first match encountered wins.
     """
     rel = uri.removeprefix("s3://").rstrip("/") if uri.startswith("s3://") else uri.rstrip("/")
+    bucket = rel.split("/", 1)[0]
     parents: set[str] = set()
     if logical_id:
         segments = logical_id.split(delimiter)
         parents = {delimiter.join(segments[:i]) for i in range(1, len(segments))}
     best: dict[str, Any] | None = None
     best_len = -1
+    project_hit: dict[str, Any] | None = None
     for record in records:
         path = str(record.get("path", "")).rstrip("/")
         if record.get("kind") == "table" and path and rel == path:
@@ -146,7 +176,11 @@ def resolve_policy(
             # len(path) orders both match modes: a deeper namespace always has the longer path.
             if (by_path or by_id) and len(path) > best_len:
                 best, best_len = record, len(path)
-    return best
+        elif record.get("kind") == "project" and project_hit is None:
+            buckets = record.get("buckets")
+            if isinstance(buckets, list) and bucket in buckets:
+                project_hit = record
+    return best if best is not None else project_hit
 
 
 def _state_key(record: dict[str, Any], uri: str) -> str:

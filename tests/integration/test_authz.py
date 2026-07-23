@@ -1062,6 +1062,40 @@ def test_table_policy_describe_is_reader_tier(client: TestClient, monkeypatch) -
     assert captured[-1] == {"user": "alice", "relation": "can_get_metadata", "obj": "table:db1$users"}
 
 
+def test_project_policy_set_requires_project_admin(client: TestClient, monkeypatch) -> None:
+    """CONTRACT (#84): the project-level policy is TENANT-ADMIN tier — ``can_administer`` on
+    ``project:<id>`` (checked explicitly; ``/v1/project`` is not a router-guarded resource prefix) —
+    and on a deny the warehouse registry is never consulted."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+    registry_reads: list[str] = []
+    from catalog.services import warehouses as wh_svc
+
+    monkeypatch.setattr(wh_svc, "list_warehouses", lambda *a, **k: registry_reads.append("read") or [])
+
+    resp = client.post(
+        "/v1/project/acme/policy/set",
+        headers={"Authorization": "Bearer t"},
+        json={"retention_days": 90},
+    )
+    assert resp.status_code == 403
+    assert captured[-1] == {"user": "alice", "relation": "can_administer", "obj": "project:acme"}
+    assert registry_reads == []  # fail-closed ORDER: gate first, registry read only after an allow
+
+
+def test_project_policy_describe_and_delete_require_project_admin(client: TestClient, monkeypatch) -> None:
+    """CONTRACT (#84): describe gates on ``can_administer`` too — the ``project`` type defines no
+    reader-tier relation, and checking a phantom one would 400 → fail-closed 503 for everyone."""
+    _wire(client)
+    captured: list[dict] = []
+    monkeypatch.setattr(fga_module, "check", _fake_check(captured, allow=False))
+    for action in ("describe", "delete"):
+        resp = client.post(f"/v1/project/acme/policy/{action}", headers={"Authorization": "Bearer t"})
+        assert resp.status_code == 403, action
+        assert captured[-1] == {"user": "alice", "relation": "can_administer", "obj": "project:acme"}
+
+
 def test_table_access_list_requires_owner_via_can_drop(client: TestClient, monkeypatch) -> None:
     """CONTRACT (#51): enumerating who holds access reveals principals — owner tier via ``can_drop``;
     403 for a non-owner, and no ListUsers query is ever issued on a deny."""

@@ -820,6 +820,72 @@ def test_maintenance_policy_crud_round_trips(client: TestClient, fake_ns: MagicM
     assert client.post("/v1/table/db1$users/policy/describe").status_code == 404
 
 
+def _project_policy_settings(tmp_path: object):  # noqa: ANN202 — Settings, imported locally like the fixture
+    from catalog.core.config import Settings
+
+    # A LOCAL control root so the warehouse registry + policy records round-trip on the FS per test
+    # (the shared fixture's fixed /tmp root would leak records across tests).
+    return Settings.model_validate(
+        {
+            "impl": "dir",
+            "root": "s3://lance-catalog",
+            "control_root": f"file://{tmp_path}",
+            "s3_access_key_id": "x",
+            "s3_secret_access_key": "x",
+        }
+    )
+
+
+def test_project_policy_crud_round_trips(client: TestClient, tmp_path: object) -> None:
+    # CONTRACT (#84): set resolves the project's ACTIVE warehouse buckets from the registry at set time
+    # and persists them on the record; describe returns it; delete is idempotent, then describe 404s.
+    from catalog.core.config import get_settings
+    from catalog.services import warehouses as wh_svc
+
+    s = _project_policy_settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    so = s.storage_options()
+    wh_svc.put_warehouse(
+        s.registry_root, so, {"id": "wh-a", "bucket": "acme-wh", "project": "acme", "status": "active"}
+    )
+    wh_svc.put_warehouse(
+        s.registry_root, so, {"id": "wh-b", "bucket": "acme-old", "project": "acme", "status": "deactivated"}
+    )
+    wh_svc.put_warehouse(
+        s.registry_root, so, {"id": "wh-c", "bucket": "other-wh", "project": "other", "status": "active"}
+    )
+
+    set_resp = client.post("/v1/project/acme/policy/set", json={"retention_days": 90})
+    assert set_resp.status_code == 200, set_resp.text
+    body = set_resp.json()
+    # Only the project's own ACTIVE bucket is covered — never a deactivated one or another tenant's.
+    assert body["kind"] == "project" and body["buckets"] == ["acme-wh"] and body["retention_days"] == 90
+
+    desc = client.post("/v1/project/acme/policy/describe")
+    assert desc.status_code == 200 and desc.json()["buckets"] == ["acme-wh"]
+
+    assert client.post("/v1/project/acme/policy/delete").status_code == 200
+    assert client.post("/v1/project/acme/policy/describe").status_code == 404
+
+
+def test_project_policy_set_refused_without_an_active_warehouse(client: TestClient, tmp_path: object) -> None:
+    # A policy that could never match anything must fail loudly at set time, not lie dormant.
+    from catalog.core.config import get_settings
+
+    client.app.dependency_overrides[get_settings] = lambda: _project_policy_settings(tmp_path)
+    resp = client.post("/v1/project/ghost/policy/set", json={"retention_days": 90})
+    assert resp.status_code == 400
+    assert "no active warehouse" in resp.json()["error"]
+
+
+def test_project_policy_rejects_a_malformed_project_id(client: TestClient, tmp_path: object) -> None:
+    from catalog.core.config import get_settings
+
+    client.app.dependency_overrides[get_settings] = lambda: _project_policy_settings(tmp_path)
+    resp = client.post("/v1/project/Bad_Name/policy/set", json={"retention_days": 90})
+    assert resp.status_code == 400
+
+
 def test_access_list_is_unsupported_without_fga(client: TestClient) -> None:
     # CONTRACT (#51): an auth-off stack has no grants to review — answer 501 honestly instead of an
     # empty grant list that would read as "nobody has access".

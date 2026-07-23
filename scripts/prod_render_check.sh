@@ -26,8 +26,16 @@ np=$(grep -c "kind: NetworkPolicy" "$OUT" || true)
 [ "$np" -ge 9 ] || fail "prod must render the network-isolation layer (>=9 NetworkPolicies), got $np"
 grep -q "default-deny" "$OUT" || fail "prod NetworkPolicy set missing default-deny"
 grep -q -- "-openbao" "$OUT" || fail "prod NetworkPolicy set missing the openbao ingress lock"
-# Goal cond 8: the NATS 8222 monitor port is admitted, and ONLY from the web-admin zone pods (the admin
-# ops view). The windowed grep pins the from-selector + port to THIS rule, not a stray match elsewhere.
+# NATS isolation (goal cond 8): the general intra-namespace ingress allow must EXCLUDE the nats pods —
+# without the exclusion the explicit nats rules are decorative (NetworkPolicies are additive). Then the
+# two explicit rules must render: 4222 (clients, port-scoped from any in-namespace pod — the daprd
+# sidecars live in nearly every app pod) and 8222 (monitor) from the web-admin zone pods. The windowed
+# greps pin the from-selector + port to THEIR rule, not a stray match elsewhere.
+grep -qF "values: [openbao, age, rustfs, nats]" "$OUT" \
+  || fail "the general intra-namespace ingress allow must exclude the nats pods (with openbao/age/rustfs)"
+grep -q "name: lance-ns-nats-clients" "$OUT" || fail "prod NetworkPolicy set missing the nats-clients (4222) rule"
+grep -A20 "name: lance-ns-nats-clients" "$OUT" | grep -q "port: 4222" \
+  || fail "the nats-clients rule must target the 4222 client port"
 grep -q "name: lance-ns-nats-monitor" "$OUT" || fail "prod NetworkPolicy set missing the nats-monitor (8222) rule"
 grep -A20 "name: lance-ns-nats-monitor" "$OUT" | grep -q "app.kubernetes.io/component: web-admin" \
   || fail "the nats-monitor rule must admit only the web-admin component pods"

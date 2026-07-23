@@ -25,6 +25,7 @@ an authz-lookup outage must not 500 the tenant list — the gate above already f
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 
@@ -96,19 +97,29 @@ def _group_by_project(records: list[dict[str, str]]) -> dict[str, list[ProjectWa
     return grouped
 
 
+# Per-project budget for the display-only admins lookup. The BFF gives the whole request ~8s; a slow (not
+# down) OpenFGA must never spend that N-projects-over: one attempt (no retries — the wrapper's default
+# bounded-retry ladder alone can exceed the budget) under a tight deadline, degrading to [] on expiry.
+_ADMINS_TIMEOUT_SECONDS = 2.0
+
+
 async def _admins_for(client: OpenFgaClient | None, settings: Settings, project: str) -> list[str]:
     """The project's effective ``can_administer`` subjects via ``fga.list_users`` (#51), or ``[]``.
 
-    Degrades — never 500s: FGA off/unwired yields ``[]`` outright, and an OpenFGA outage
-    (``ServiceUnavailableError`` from the wrapper's exhausted retries) is logged and yields ``[]`` too,
-    so the registry-derived facts still serve while the authz lookup is down. The estate gate already
-    ran fail-closed before this, so a degraded ``admins`` is a display gap, not an authz gap.
+    Degrades — never 500s: FGA off/unwired yields ``[]`` outright; an OpenFGA outage
+    (``ServiceUnavailableError``) or a lookup blowing the per-call ``_ADMINS_TIMEOUT_SECONDS`` budget is
+    logged and yields ``[]`` too, so the registry-derived facts still serve while the authz lookup is
+    down or slow. The estate gate already ran fail-closed before this, so a degraded ``admins`` is a
+    display gap, not an authz gap.
     """
     if not (settings.fga_enabled and client is not None):
         return []
     try:
-        return await fga.list_users(client, relation="can_administer", obj=f"project:{project}")
-    except ServiceUnavailableError:
+        async with asyncio.timeout(_ADMINS_TIMEOUT_SECONDS):
+            return await fga.list_users(
+                client, relation="can_administer", obj=f"project:{project}", retry_attempts=1
+            )
+    except (ServiceUnavailableError, TimeoutError):
         log.warning("project_admins_unavailable", extra={"project": project})
         return []
 
@@ -136,11 +147,15 @@ async def list_projects(
         client, settings, token, relation="can_observe_events", obj=settings.fga_root_object
     )
     grouped = await _load_grouped(settings)
+    # The per-project admins lookups run CONCURRENTLY: sequential awaits would stack N × the per-call
+    # budget on a slow OpenFGA (a brownout, not an outage) and blow past the BFF's request deadline;
+    # gathered, the worst case is ONE _ADMINS_TIMEOUT_SECONDS regardless of tenant count (each call
+    # still degrades to [] on its own expiry — see _admins_for).
+    projects = sorted(grouped)
+    admins = await asyncio.gather(*(_admins_for(client, settings, project) for project in projects))
     return [
-        ProjectResponse(
-            project=project, warehouses=entries, admins=await _admins_for(client, settings, project)
-        )
-        for project, entries in sorted(grouped.items())
+        ProjectResponse(project=project, warehouses=grouped[project], admins=project_admins)
+        for project, project_admins in zip(projects, admins, strict=True)
     ]
 
 

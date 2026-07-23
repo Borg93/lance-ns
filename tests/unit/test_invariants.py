@@ -398,6 +398,35 @@ def test_every_publish_site_uses_a_named_topic_constant() -> None:
     )
 
 
+def _direct_publish_event_calls() -> list[str]:
+    """Every ``.publish_event(`` call site OUTSIDE the wrapper module ``common/dapr_publish.py``.
+
+    The wrapper exists because the Dapr SDK's ``publish_event`` has no per-call timeout and no default
+    gRPC deadline — a wedged sidecar hangs the caller forever. ``dapr_publish.publish_event(...)`` is
+    the wrapper itself (excluded by the lookbehind); a direct ``client.publish_event(...)`` reopens the
+    hang the wrapper closes, so no first-party module outside the wrapper may make one.
+    """
+    wrapper = SERVICES / "common" / "dapr_publish.py"
+    direct_re = re.compile(r"(?<!dapr_publish)\.publish_event\(")
+    offenders: list[str] = []
+    for py in SERVICES.rglob("*.py"):
+        if py == wrapper:
+            continue
+        for i, line in enumerate(py.read_text().splitlines()):
+            if direct_re.search(line):
+                offenders.append(f"{py.relative_to(REPO)}:{i + 1}")
+    return offenders
+
+
+def test_every_publish_goes_through_the_timeout_wrapper() -> None:
+    offenders = _direct_publish_event_calls()
+    assert not offenders, (
+        "these sites call .publish_event( directly instead of common.dapr_publish.publish_event — the "
+        f"unbounded SDK call a wedged sidecar hangs forever: {offenders}. Route the publish through the "
+        "wrapper (it forwards **kwargs and enforces timeout_seconds)."
+    )
+
+
 def test_authentication_outcomes_are_audited() -> None:
     """Compliance invariant (#41): ``authenticate`` must audit both the success (who logged in) and the
     failure (rejected token) paths — authn was entirely unlogged before #41, so brute-force / forged-token

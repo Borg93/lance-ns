@@ -12,6 +12,7 @@ Two layers: direct-function tests pin every fail-closed branch of :func:`authori
 from __future__ import annotations
 
 import asyncio
+import inspect
 from types import SimpleNamespace
 from typing import cast
 
@@ -22,6 +23,7 @@ from lance_namespace import ServiceUnavailableError, UnauthenticatedError
 from medallion.api import produce_auth
 from medallion.api.dependencies import get_dapr, get_settings
 from medallion.api.produce import router
+from medallion.api.train import router as train_router
 from medallion.core.config import MedallionSettings
 from openfga_sdk import OpenFgaClient
 
@@ -240,3 +242,72 @@ def test_produce_route_409s_when_project_routing_is_disabled(monkeypatch: pytest
     res = TestClient(app, raise_server_exceptions=False).post("/produce", params={"project": "acme"})
     assert res.status_code == 409
     assert res.headers["content-type"].startswith("application/problem+json")
+
+
+# ── /train gate: pinned to the CONFIGURED project — a caller-supplied ?project= is ignored ─────────
+
+
+def test_train_gate_declares_no_project_param() -> None:
+    # The pin is structural: authorize_train has NO `project` parameter, so FastAPI never binds a
+    # caller's ?project= into the train gate — training writes single-tenant state under the configured
+    # produce_admin_project, and authorization scope must equal write scope.
+    assert "project" not in inspect.signature(produce_auth.authorize_train).parameters
+
+
+def test_train_gate_checks_the_configured_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The OIDC admin door through authorize_train always targets the CONFIGURED project.
+    monkeypatch.setenv("APP_API_TOKEN", "s3cr3t")
+    captured: dict[str, object] = {}
+
+    async def fake_check(_client: object, **kw: object) -> bool:
+        captured.update(kw)
+        return True
+
+    monkeypatch.setattr(produce_auth.fga, "check", fake_check)
+    ns = SimpleNamespace(oidc_enabled=True, produce_admin_project="acme")
+    request = cast(Request, SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(oidc=_Verifier()))))
+    asyncio.run(
+        produce_auth.authorize_train(
+            request,
+            cast(MedallionSettings, ns),
+            cast(OpenFgaClient, object()),
+            dapr_api_token=None,
+            authorization="Bearer good",
+        )
+    )
+    assert captured["obj"] == "project:acme"
+
+
+def _train_client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
+    monkeypatch.setenv("APP_API_TOKEN", "s3cret")
+    app = FastAPI()
+    app.include_router(train_router)
+    app.include_router(router)  # /produce mounted alongside, to contrast the per-project behavior
+    app.dependency_overrides[get_dapr] = lambda: None
+    # ray_enabled=False → a request PASSING the guard hits the disabled-head 409 (a crisp "guard passed"
+    # signal distinct from the guard's own 403); oidc off keeps the human door shut.
+    app.dependency_overrides[get_settings] = lambda: SimpleNamespace(
+        oidc_enabled=False, produce_admin_project="acme", ray_enabled=False, s3_endpoint="", raw_uri=""
+    )
+    return TestClient(app, raise_server_exceptions=False)
+
+
+_TRAIN_BODY = {"model": "m1", "features": [{"dataset": "silver$feats"}]}
+
+
+def test_train_route_ignores_a_caller_supplied_project(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Service token + ?project=other on /train: the stray param is IGNORED — the guard passes (pinned to
+    # the configured project) and the request proceeds to the handler (here the disabled-head 409).
+    res = _train_client(monkeypatch).post(
+        "/train", params={"project": "globex"}, json=_TRAIN_BODY, headers={"dapr-api-token": "s3cret"}
+    )
+    assert res.status_code == 409, res.text
+
+
+def test_produce_route_keeps_the_per_project_refusal(monkeypatch: pytest.MonkeyPatch) -> None:
+    # …while the SAME credential + ?project=other on /produce keeps the per-project behavior: the shared
+    # service token carries no tenant identity, so a cross-project produce stays 403.
+    res = _train_client(monkeypatch).post(
+        "/produce", params={"project": "globex"}, headers={"dapr-api-token": "s3cret"}
+    )
+    assert res.status_code == 403, res.text

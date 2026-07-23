@@ -81,7 +81,7 @@ catalog:
   # Control-plane change-events: every governance/metadata mutation (grants/warehouses/policies/tables)
   # publishes a CatalogControlEvent onto a DEDICATED broadcast Dapr topic (catalog.control.v1, no
   # queueGroupName) that EVERY catalog replica buffers, so the admin console live-refreshes via
-  # GET /v1/events (see docs/DESIGN-control-plane-events.md). ON renders the catalog-control-pubsub Dapr
+  # GET /v1/events (see docs/DECISIONS.md #control-events--broadcast--ring-buffer). ON renders the catalog-control-pubsub Dapr
   # component + the CATALOG_CONTROL NATS stream + the broadcast subscription, and turns emission on. On by
   # default (parity with lineage emit, which the chart also enables) — best-effort + fail-open, so a bus
   # outage degrades to "no live refresh + the audit trail still records it", never a failed mutation.
@@ -140,8 +140,11 @@ security:
 # rustfs ← the data plane + GreptimeDB). Default OFF (kind's default CNI ignores NetworkPolicy
 # anyway); flip in values-prod on a policy-enforcing CNI — live runbook in todo_fable §7a.
 networkPolicy:
-  # NOTE (goal cond 8): the policy set includes a nats-monitor rule admitting ONLY the web-admin zone
-  # pods to the NATS pods' 8222 monitor port (varz/jsz for the admin ops view) — see network-policy.yaml.
+  # NOTE (goal cond 8): the NATS pods are EXCLUDED from the general intra-namespace ingress allow; their
+  # only ingress is two explicit, port-scoped rules — 4222 (clients) from any in-namespace pod (the daprd
+  # sidecars live in nearly every app pod, so a label enumeration would be dishonest) and 8222 (monitor,
+  # varz/jsz for the admin ops view) from the web-admin zone pods ONLY. 6222/7422 stay closed — see
+  # network-policy.yaml (3e)/(3f).
   enabled: false
   # Extra `from` peers for the openbao policy — e.g. the external-secrets operator's namespace when
   # externalSecrets.enabled: [{namespaceSelector: {matchLabels: {kubernetes.io/metadata.name: external-secrets}}}]

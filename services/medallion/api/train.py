@@ -15,7 +15,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from medallion.api.dependencies import DaprClientDep, SettingsDep
-from medallion.api.produce_auth import authorize_produce
+from medallion.api.produce_auth import authorize_train
 from medallion.core.config import get_settings
 from medallion.services.train import (
     DATASET_PATTERN,
@@ -67,7 +67,8 @@ async def train(
     body: TrainRequest,
     dapr: DaprClientDep,
     settings: SettingsDep,
-    _: Annotated[None, Depends(authorize_produce)],  # #64: service token OR a signed-in project admin
+    _: Annotated[None, Depends(authorize_train)],  # #64: service token OR an admin of the CONFIGURED
+    # project — pinned, a stray ?project= is ignored (single-tenant write; see authorize_train)
     idempotency_key: Annotated[
         str | None, Header(alias="Idempotency-Key", min_length=1, max_length=64, pattern=r"^[A-Za-z0-9._-]+$")
     ] = None,

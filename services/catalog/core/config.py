@@ -92,11 +92,15 @@ class Settings(BaseSettings):
 
     @property
     def reserved_bucket_set(self) -> frozenset[str]:
-        """Bucket names no warehouse may claim: the shared catalog root, the registry/control bucket, and
-        the configured medallion zone buckets (``LANCE_RESERVED_BUCKETS``). Non-s3 roots (local dev/test
-        ``file://`` registries) contribute nothing — there is no bucket to reserve."""
+        """Bucket names no warehouse may claim: the shared catalog root, the registry/control bucket, the
+        model-registry root, every approved multi-base data bucket, and the configured medallion zone
+        buckets (``LANCE_RESERVED_BUCKETS``). Platform-owned storage is reserved regardless of zoning —
+        a zoned ``models_root`` or a multibase data bucket is exactly as claimable-looking as the shared
+        root, and a warehouse over any of them would hand one project governance of every tenant's data
+        there. Non-s3 roots (local dev/test ``file://`` registries) contribute nothing — there is no
+        bucket to reserve."""
         named = {b.strip() for b in self.reserved_buckets.split(",") if b.strip()}
-        for uri in (self.root, self.registry_root):
+        for uri in (self.root, self.registry_root, self.models_root, *self.multibase_data_base_list):
             if uri.startswith("s3://") and (bucket := uri.removeprefix("s3://").split("/", 1)[0]):
                 named.add(bucket)
         return frozenset(named)
@@ -199,9 +203,9 @@ class Settings(BaseSettings):
     # 256 MiB — generous for tabular batches + small inline blobs, bounded well under a worker's memory.
     max_body_bytes: int = Field(default=256 * 1024 * 1024, ge=1, alias="LANCE_MAX_BODY_BYTES")
 
-    # Load-shedding (P5): cap CONCURRENT in-flight Arrow-IPC writes. Each buffers up to max_body_bytes, so N
+    # Load-shedding: cap CONCURRENT in-flight Arrow-IPC writes. Each buffers up to max_body_bytes, so N
     # concurrent = N × 256MiB — an OOM the memory tier only partly bounds. Over the cap → 429 (THROTTLING),
-    # shed before the body is buffered. Generous default (rarely trips); 0 disables it (pre-P5 behavior).
+    # shed before the body is buffered. Generous default (rarely trips); 0 disables it entirely.
     max_concurrent_writes: int = Field(default=16, ge=0, alias="LANCE_MAX_CONCURRENT_WRITES")
 
     # Lineage emission (opt-in). When enabled, the catalog emits an OpenLineage event to the lineage

@@ -138,14 +138,17 @@ def test_admins_from_fga_list_users(monkeypatch: pytest.MonkeyPatch) -> None:
     _patch_records(monkeypatch, _RECORDS)
     calls: list[tuple[str, str]] = []
 
-    async def _fake_list_users(_client: Any, *, relation: str, obj: str) -> list[str]:
+    async def _fake_list_users(_client: Any, *, relation: str, obj: str, **kw: Any) -> list[str]:
         calls.append((relation, obj))
+        # Display-only path: a single attempt under the tight per-call budget — the wrapper's default
+        # bounded-retry ladder alone could exceed it, so the endpoint must pin retry_attempts=1.
+        assert kw == {"retry_attempts": 1}
         return ["alice"] if obj == "project:acme" else []
 
     monkeypatch.setattr(ep.fga, "list_users", _fake_list_users)
     result = _list(_settings(fga_enabled=True), client=object())
     assert [(p.project, p.admins) for p in result] == [("acme", ["alice"]), ("globex", [])]
-    assert calls == [("can_administer", "project:acme"), ("can_administer", "project:globex")]
+    assert sorted(calls) == [("can_administer", "project:acme"), ("can_administer", "project:globex")]
 
 
 def test_admins_empty_when_fga_off(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -172,3 +175,38 @@ def test_admins_degrade_on_fga_outage(monkeypatch: pytest.MonkeyPatch) -> None:
     result = _list(_settings(fga_enabled=True), client=object())
     assert [p.project for p in result] == ["acme", "globex"]
     assert all(p.admins == [] for p in result)
+
+
+def test_admins_degrade_on_a_slow_fga(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A BROWNOUT (slow, not down): a lookup that outlives the per-call budget must degrade to [] on
+    # expiry — never ride the wrapper's retry ladder toward the BFF's 8s request deadline.
+    _no_gate(monkeypatch)
+    _patch_records(monkeypatch, _RECORDS)
+    monkeypatch.setattr(ep, "_ADMINS_TIMEOUT_SECONDS", 0.05)
+
+    async def _slow(*_a: Any, **_k: Any) -> list[str]:
+        await asyncio.sleep(0.5)  # well past the (shrunk) budget
+        return ["alice"]
+
+    monkeypatch.setattr(ep.fga, "list_users", _slow)
+    result = _list(_settings(fga_enabled=True), client=object())
+    assert [p.project for p in result] == ["acme", "globex"]
+    assert all(p.admins == [] for p in result)  # degraded per project, response still whole
+
+
+def test_admins_lookups_run_concurrently(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The per-project lookups are gathered, not sequential: worst case is ONE per-call budget regardless
+    # of tenant count. Both fakes must be in flight before either finishes.
+    _no_gate(monkeypatch)
+    _patch_records(monkeypatch, _RECORDS)
+    started, overlap = set(), []
+
+    async def _tracking(_client: Any, *, obj: str, **_k: Any) -> list[str]:
+        started.add(obj)
+        await asyncio.sleep(0.05)  # long enough for the other call to have started
+        overlap.append(len(started))
+        return []
+
+    monkeypatch.setattr(ep.fga, "list_users", _tracking)
+    _list(_settings(fga_enabled=True), client=object())
+    assert overlap and all(n == 2 for n in overlap)  # both projects' lookups overlapped in time

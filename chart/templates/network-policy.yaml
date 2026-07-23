@@ -6,9 +6,10 @@
 #   (2) the kube-dns egress allow ships IN THIS SAME FILE (default-deny egress without it bricks
 #       name resolution — the audit's named footgun);
 #   (3) targeted ingress allows for the guarded stores (openbao ← secret-consuming app pods only;
-#       age-postgres:5432 ← its real clients; rustfs:9000 ← the data plane) — every OTHER pod gets
-#       plain intra-namespace ingress, EXCLUDING the guarded stores so the targeted lists stay
-#       exclusive (NetworkPolicies are additive: the general allow must NOT cover the stores);
+#       age-postgres:5432 ← its real clients; rustfs:9000 ← the data plane; nats ← 4222 intra-namespace
+#       + 8222 admin-only, other ports closed) — every OTHER pod gets plain intra-namespace ingress,
+#       EXCLUDING the guarded stores so the targeted lists stay exclusive (NetworkPolicies are
+#       additive: the general allow must NOT cover the stores);
 #   (4) values-prod flips `networkPolicy.enabled` — the LIVE verification runbook is todo_fable
 #       §7a (all pods Ready, e2e suites green, and a negative probe: curl openbao:8200 from the
 #       web pod must time out).
@@ -101,7 +102,7 @@ metadata:
 spec:
   podSelector:
     matchExpressions:
-      - { key: app.kubernetes.io/component, operator: NotIn, values: [openbao, age, rustfs] }
+      - { key: app.kubernetes.io/component, operator: NotIn, values: [openbao, age, rustfs, nats] }
   policyTypes: [Ingress]
   ingress:
     - from:
@@ -226,11 +227,10 @@ spec:
     - {}
 ---
 # (3e) nats:8222 — the NATS monitoring endpoint (varz/connz/jsz), surfaced in the admin zone's ops view
-# (goal cond 8). Admitted ONLY from the web-admin zone pods; client traffic (4222, every Dapr sidecar)
-# keeps riding the general intra-namespace allow (3a), which today also covers the NATS pods — this rule
-# makes the monitor-port contract explicit and keeps the admin path admitted if NATS ever joins the
-# excluded guarded-store list in (3a). Selector mirrors the subchart-pod idiom used for greptimedb
-# above; component=nats (not just name) so nats-box is not a target.
+# (goal cond 8). NATS is on the (3a) exclusion list, so the two nats rules here are its ONLY ingress:
+# this one admits the 8222 monitor port from the web-admin zone pods alone; (3f) below admits client
+# traffic on 4222. Selector mirrors the subchart-pod idiom used for greptimedb above; component=nats
+# (not just name) so nats-box is not a target.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
@@ -248,6 +248,32 @@ spec:
             matchLabels: { app.kubernetes.io/component: web-admin }
       ports:
         - { protocol: TCP, port: 8222 }
+---
+# (3f) nats:4222 — the client port. Admitted from ANY intra-namespace pod, port-scoped, and honestly so:
+# the legitimate clients are the daprd SIDECARS, which live inside every dapr.io/enabled app pod
+# (gateway, catalog, lineage, compaction, lance-ray, each medallion mover) plus the nats-box hook Jobs
+# (stream provision + DLQ tooling) — i.e. nearly every first-party pod in the namespace, and the set
+# follows the dapr.io/enabled ANNOTATION, which no label selector can see. Enumerating component labels
+# would restate that near-total list and silently strand the next sidecar carrier (a wedged bus, not a
+# security win), so the deliberate shape is pod-open/port-closed. The isolation gained vs the old (3a)
+# blanket allow is the PORTS: 6222 (cluster routes) + 7422 (leafnodes) are now unreachable, and 8222 is
+# admin-only via (3e).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "lance.fullname" . }}-nats-clients
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/name: nats
+      app.kubernetes.io/component: nats
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - podSelector: {}
+      ports:
+        - { protocol: TCP, port: 4222 }
 ---
 # The original lance-ray ingress restriction (pre-Batch-9, kept): /produce is a direct operator
 # trigger — in-release pods only, defense-in-depth on top of require_dapr_token.

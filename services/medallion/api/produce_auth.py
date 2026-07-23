@@ -83,3 +83,28 @@ async def authorize_produce(
             status_code=403, detail="produce needs project admin (can_administer) or the service token"
         )
     raise HTTPException(status_code=403, detail="invalid or missing produce credential")
+
+
+async def authorize_train(
+    request: Request,
+    settings: SettingsDep,
+    fga_client: FgaClientDep,
+    dapr_api_token: Annotated[str | None, Header()] = None,
+    authorization: Annotated[str | None, Header()] = None,
+) -> None:
+    """The ``/train`` door: the same dual-auth as produce, PINNED to the configured project.
+
+    Training writes SINGLE-TENANT state (the model registry under the configured
+    ``produce_admin_project``), so unlike ``/produce`` there is no per-tenant routing for a requested
+    project to select — honoring a caller-supplied ``?project=`` here would let an admin of any OTHER
+    project pass the gate while the run still lands in the configured tenant's registry (authorization
+    scope must equal write scope). This dependency declares NO ``project`` query param, so a stray
+    ``?project=`` is ignored and the admin check always targets ``produce_admin_project``."""
+    await authorize_produce(
+        request,
+        settings,
+        fga_client,
+        dapr_api_token=dapr_api_token,
+        authorization=authorization,
+        project=None,  # the explicit pin: always the configured produce_admin_project
+    )

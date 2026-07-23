@@ -19,12 +19,13 @@ from common.oidc import IDToken
 from fastapi.testclient import TestClient
 
 
-def _settings(tmp_path: Any, *, enabled: bool = True, fga: bool = False) -> Settings:
+def _settings(tmp_path: Any, *, enabled: bool = True, fga: bool = False, reserved: str = "") -> Settings:
     data: dict[str, Any] = {
         "impl": "dir",
         "root": "s3://lance-catalog",
         "warehouses_enabled": enabled,
         "control_root": f"file://{tmp_path}",
+        "reserved_buckets": reserved,
         "s3_access_key_id": "x",
         "s3_secret_access_key": "x",
     }
@@ -73,6 +74,56 @@ def test_create_warehouse_cross_project_collision_409(
     r = client.post("/v1/warehouses", json={"id": "wh-x", "project": "evil"})
     assert r.status_code == 409, r.text
     assert client.post("/v1/warehouses", json={"id": "wh-x", "project": "acme"}).status_code == 200
+
+
+def test_create_warehouse_bucket_claimed_by_another_project_409(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Mallory layer 1 (audit 2026-07-23): the bucket is caller-chosen and provisioning an EXISTING bucket
+    # is a silent no-op, so a rival project could register its OWN warehouse id over the victim's bucket —
+    # then set a project policy governing (and destroying version history in) the victim's data. The
+    # bucket-claim scan mirrors the warehouse-id guard: a DIFFERENT project's claim → 409; the same
+    # project re-claiming its own bucket under another warehouse id stays allowed.
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    client.app.dependency_overrides[get_settings] = lambda: _settings(tmp_path)
+    assert (
+        client.post("/v1/warehouses", json={"id": "wh-a", "project": "acme", "bucket": "acme-wh"}).status_code
+        == 200
+    )
+    r = client.post("/v1/warehouses", json={"id": "wh-evil", "project": "evil", "bucket": "acme-wh"})
+    assert r.status_code == 409, r.text
+    same = client.post("/v1/warehouses", json={"id": "wh-a2", "project": "acme", "bucket": "acme-wh"})
+    assert same.status_code == 200, same.text
+
+
+def test_create_warehouse_reserved_bucket_refused(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Mallory layer 1b: the shared catalog root bucket (settings.root) and the medallion zone buckets
+    # (LANCE_RESERVED_BUCKETS, populated by the chart from medallion.buckets) are platform storage — no
+    # project may register a warehouse over them.
+    provisioned: list[str] = []
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: provisioned.append(bucket))
+    client.app.dependency_overrides[get_settings] = lambda: _settings(tmp_path, reserved="lance-source")
+    for bucket in ("lance-catalog", "lance-source"):  # the shared root + a configured zone bucket
+        r = client.post("/v1/warehouses", json={"id": "wh-evil", "project": "evil", "bucket": bucket})
+        assert r.status_code == 400, r.text
+    assert provisioned == []  # refused before any bucket/registry/FGA side effect
+
+
+def test_list_warehouses_tolerates_a_corrupt_record(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # One corrupt registry object must not 500 the listing (nor void the project-policy resolution that
+    # consumes the same list) — skip-with-warning, keep the readable records.
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    client.app.dependency_overrides[get_settings] = lambda: _settings(tmp_path)
+    assert client.post("/v1/warehouses", json={"id": "wh-a", "project": "acme"}).status_code == 200
+    (tmp_path / "_warehouses" / "zzz-corrupt.json").write_text("{truncated")
+    (tmp_path / "_warehouses" / "zzz-idless.json").write_text('{"bucket": "x"}')
+    listed = client.get("/v1/warehouses")
+    assert listed.status_code == 200, listed.text
+    assert [w["id"] for w in listed.json()] == ["wh-a"]
 
 
 def test_namespace_binding_is_write_once_409(
@@ -190,6 +241,43 @@ def test_deactivate_hides_existence_from_non_admin_404(
     monkeypatch.setattr(fga_module, "check", deny)
     r = client.post("/v1/warehouses/wh-real/deactivate", headers={"authorization": "Bearer t"})
     assert r.status_code == 404, r.text  # NOT 403 — a non-admin cannot learn wh-real exists
+
+
+def test_mallory_cross_tenant_bucket_takeover_fails_at_every_layer(
+    client: TestClient, tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The full Mallory walkthrough (audit 2026-07-23): claiming another tenant's bucket must be refused at
+    # EVERY layer — the warehouse create (front door), the project-policy set (defense in depth if a rival
+    # record got into the registry anyway), and the sweep's resolution (if a contested policy record got
+    # written anyway). No layer may fall back to first-encountered-wins over the victim's data.
+    from common import maintenance_policies as mp
+
+    monkeypatch.setattr(wh_svc, "provision_bucket", lambda bucket, so: None)
+    s = _settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    so = s.storage_options()
+    assert (
+        client.post("/v1/warehouses", json={"id": "wh-a", "project": "acme", "bucket": "acme-wh"}).status_code
+        == 200
+    )
+
+    # Layer 1 — the shared-bucket claim is refused at warehouse create.
+    r = client.post("/v1/warehouses", json={"id": "wh-evil", "project": "evil", "bucket": "acme-wh"})
+    assert r.status_code == 409, r.text
+
+    # Layer 2 — force the rival record straight into the registry: the policy set still refuses.
+    wh_svc.put_warehouse(
+        s.registry_root, so, {"id": "wh-evil", "bucket": "acme-wh", "project": "evil", "status": "active"}
+    )
+    r = client.post("/v1/project/evil/policy/set", json={"retention_days": 1, "retain_versions": 1})
+    assert r.status_code == 409, r.text
+
+    # Layer 3 — force contested policy records anyway: resolution warns and matches NEITHER.
+    contested = [
+        {"kind": "project", "id": "acme", "path": "", "buckets": ["acme-wh"], "retention_days": 365},
+        {"kind": "project", "id": "evil", "path": "", "buckets": ["acme-wh"], "retention_days": 1},
+    ]
+    assert mp.resolve_policy(contested, "s3://acme-wh/medallion/gold/features") is None
 
 
 def test_create_denied_for_non_admin_403(

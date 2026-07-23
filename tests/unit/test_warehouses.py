@@ -49,6 +49,30 @@ def test_list_empty_registry_is_empty(tmp_path: Any) -> None:
     assert warehouses.list_warehouses(_root(tmp_path), {}) == []
 
 
+def test_list_skips_corrupt_and_malformed_records(tmp_path: Any) -> None:
+    # Per-record tolerance (audit 2026-07-23 minor): one bad registry object must never void the listing
+    # (it feeds the policy set + the bucket-claim guards) — skip with a warning, keep the readable rest.
+    root, so = _root(tmp_path), {}
+    good = {"id": "wh-a", "bucket": "bkt-a", "root_uri": "s3://bkt-a", "project": "acme", "created_at": "t"}
+    warehouses.put_warehouse(root, so, good)
+    (tmp_path / "_warehouses" / "zzz-corrupt.json").write_text("{truncated")
+    (tmp_path / "_warehouses" / "zzz-notdict.json").write_text('["not", "a", "record"]')
+    (tmp_path / "_warehouses" / "zzz-idless.json").write_text('{"bucket": "x", "project": "p"}')
+    assert warehouses.list_warehouses(root, so) == [good]
+
+
+def test_projects_claiming_bucket() -> None:
+    records = [
+        {"id": "wh-a", "bucket": "shared", "project": "acme"},
+        {"id": "wh-b", "bucket": "shared", "project": "evil"},
+        {"id": "wh-c", "bucket": "other", "project": "acme"},
+        {"id": "wh-d", "bucket": "shared", "project": "acme"},  # duplicate claim collapses per project
+    ]
+    assert warehouses.projects_claiming_bucket(records, "shared") == {"acme", "evil"}
+    assert warehouses.projects_claiming_bucket(records, "other") == {"acme"}
+    assert warehouses.projects_claiming_bucket(records, "ghost") == set()
+
+
 def test_bind_and_resolve(tmp_path: Any) -> None:
     root, so = _root(tmp_path), {}
     assert warehouses.warehouse_for_namespace(root, so, "team_ns") is None  # unbound → default root

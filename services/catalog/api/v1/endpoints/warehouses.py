@@ -123,6 +123,26 @@ async def create_warehouse(
             f"warehouse {warehouse_id!r} is already registered to another project"
         )
 
+    # Reserved-bucket guard (audit 2026-07-23, the Mallory scenario's first door): the shared catalog
+    # root/registry bucket and the medallion zone buckets are PLATFORM storage — a warehouse claiming one
+    # would make its project the bucket's "owner" (provision_bucket is idempotent on an existing bucket, so
+    # the claim silently succeeds) and a later project-policy set would govern every tenant's data in it.
+    if bucket in settings.reserved_bucket_set:
+        raise InvalidInputError(
+            f"bucket {bucket!r} is reserved platform storage (catalog root/registry or a medallion zone "
+            "bucket) and cannot back a warehouse"
+        )
+    # Cross-project BUCKET-claim guard — the same takeover the warehouse-ID guard above closes, through the
+    # other key: `bucket` is caller-chosen and provisioning an EXISTING bucket is a silent no-op, so without
+    # this scan Mallory registers `wh-evil` over the victim's `acme-wh` bucket and her project policy (via
+    # set_project_policy's registry resolution) governs — and can destroy version history in — acme's data.
+    records = await run_in_threadpool(warehouses.list_warehouses, settings.registry_root, so)
+    rival_claims = warehouses.projects_claiming_bucket(records, bucket) - {project}
+    if rival_claims:
+        raise NamespaceAlreadyExistsError(
+            f"bucket {bucket!r} is already registered to another project's warehouse"
+        )
+
     root_uri = f"s3://{bucket}"
     await run_in_threadpool(warehouses.provision_bucket, bucket, so)
     record = {

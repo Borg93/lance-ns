@@ -154,8 +154,10 @@ def resolve_policy(
     A project record (#84) matches when the dataset's BUCKET is in the record's ``buckets`` — the
     bucket-level match needs no logical id, so it also covers a project bucket's medallion-nested
     datasets. It is strictly the LAST fallback: any table or namespace match shadows it. A bucket
-    belongs to one project, so overlapping project records would be a registry misconfiguration; the
-    first match encountered wins.
+    belongs to one project, so DISTINCT project records both claiming the dataset's bucket are a
+    registry misconfiguration (a possible cross-tenant claim): the tier then resolves to NO match
+    with a warning — never first-encountered-wins, which would let record ordering decide whose
+    retention policy destroys whose version history (audit 2026-07-23).
     """
     rel = uri.removeprefix("s3://").rstrip("/") if uri.startswith("s3://") else uri.rstrip("/")
     bucket = rel.split("/", 1)[0]
@@ -165,7 +167,7 @@ def resolve_policy(
         parents = {delimiter.join(segments[:i]) for i in range(1, len(segments))}
     best: dict[str, Any] | None = None
     best_len = -1
-    project_hit: dict[str, Any] | None = None
+    project_hits: list[dict[str, Any]] = []
     for record in records:
         path = str(record.get("path", "")).rstrip("/")
         if record.get("kind") == "table" and path and rel == path:
@@ -176,11 +178,19 @@ def resolve_policy(
             # len(path) orders both match modes: a deeper namespace always has the longer path.
             if (by_path or by_id) and len(path) > best_len:
                 best, best_len = record, len(path)
-        elif record.get("kind") == "project" and project_hit is None:
+        elif record.get("kind") == "project":
             buckets = record.get("buckets")
             if isinstance(buckets, list) and bucket in buckets:
-                project_hit = record
-    return best if best is not None else project_hit
+                project_hits.append(record)
+    if best is not None:
+        return best
+    if len(project_hits) > 1:
+        log.warning(
+            "maintenance_policy_project_overlap",
+            extra={"bucket": bucket, "projects": sorted(str(r.get("id")) for r in project_hits)},
+        )
+        return None
+    return project_hits[0] if project_hits else None
 
 
 def _state_key(record: dict[str, Any], uri: str) -> str:

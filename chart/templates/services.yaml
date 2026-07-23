@@ -73,6 +73,11 @@ spec:
             # LANCE_REST_ROOT (backward-compatible). The warehouse registry lives under LANCE_REST_ROOT
             # (control_root defaults to it), so no extra bucket is needed.
             - { name: LANCE_WAREHOUSES_ENABLED, value: {{ .Values.catalog.warehouses.enabled | default false | quote }} }
+            # Buckets no warehouse may claim (audit 2026-07-23): the medallion ZONE buckets (raw/gold can
+            # live outside the shared bucket) — the catalog root/registry bucket is always reserved in-app.
+            {{- $reserved := list }}
+            {{- range $ns, $bkt := .Values.medallion.buckets }}{{- $reserved = append $reserved $bkt }}{{- end }}
+            - { name: LANCE_RESERVED_BUCKETS, value: {{ $reserved | uniq | join "," | quote }} }
             # #3-B Lance multi-base DATA distribution: the ALLOWLIST of bucket URIs a create may spread its
             # fragments across (?data_base=... per request, validated against this list). Empty = feature off.
             - { name: LANCE_MULTIBASE_DATA_BASES, value: {{ .Values.catalog.multibase.dataBases | default (list) | join "," | quote }} }

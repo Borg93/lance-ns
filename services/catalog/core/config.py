@@ -69,6 +69,12 @@ class Settings(BaseSettings):
     # routes to the default `root`. The warehouse REGISTRY (records + bindings) lives under `control_root`.
     warehouses_enabled: bool = Field(default=False, alias="LANCE_WAREHOUSES_ENABLED")
     control_root: str = Field(default="", alias="LANCE_CONTROL_ROOT")
+    # Buckets NO warehouse may ever claim, beyond the always-reserved catalog root/registry buckets (audit
+    # 2026-07-23: a project admin could register a warehouse over the SHARED bucket — or a medallion zone
+    # bucket — and a later project-policy set would then govern every tenant's datasets in it). The chart
+    # populates this from the `medallion.buckets` values map (the raw/gold zone buckets); comma-separated,
+    # empty = only the root/registry buckets are reserved (the default, byte-identical for single-bucket).
+    reserved_buckets: str = Field(default="", alias="LANCE_RESERVED_BUCKETS")
 
     # #17 model registry (candidate→blessed promotion). Each model's Lance registry dataset lives at
     # ``<models_root>/<model>`` — the medallion trainer writes it DIRECTLY there (registry_uri_for), so the
@@ -83,6 +89,17 @@ class Settings(BaseSettings):
     def registry_root(self) -> str:
         """Where warehouse records + namespace bindings live (defaults to the catalog `root` bucket)."""
         return self.control_root or self.root
+
+    @property
+    def reserved_bucket_set(self) -> frozenset[str]:
+        """Bucket names no warehouse may claim: the shared catalog root, the registry/control bucket, and
+        the configured medallion zone buckets (``LANCE_RESERVED_BUCKETS``). Non-s3 roots (local dev/test
+        ``file://`` registries) contribute nothing — there is no bucket to reserve."""
+        named = {b.strip() for b in self.reserved_buckets.split(",") if b.strip()}
+        for uri in (self.root, self.registry_root):
+            if uri.startswith("s3://") and (bucket := uri.removeprefix("s3://").split("/", 1)[0]):
+                named.add(bucket)
+        return frozenset(named)
 
     @property
     def models_root(self) -> str:

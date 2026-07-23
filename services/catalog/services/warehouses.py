@@ -18,7 +18,6 @@ from __future__ import annotations
 
 import json
 import logging
-from contextlib import suppress
 
 import pyarrow.fs as pafs
 from common.objectfs import StorageOptions, fs_and_base
@@ -92,15 +91,35 @@ def get_warehouse(
 
 
 def list_warehouses(control_root: str, storage_options: StorageOptions) -> list[dict[str, str]]:
-    """Every registered warehouse record (unordered). An absent registry prefix yields ``[]``."""
+    """Every readable warehouse record (unordered). An absent registry prefix yields ``[]``.
+
+    One corrupt or unreadable record is SKIPPED with a warning, never allowed to 500 the whole listing
+    (mirrors ``maintenance_policies.list_policies``): the list feeds the project-policy set and the
+    bucket-claim guards, and a single bad object voiding it would turn one tenant's registry corruption
+    into an every-tenant control-plane outage.
+    """
     fs, base = fs_and_base(control_root, storage_options)
     out: list[dict[str, str]] = []
     for info in fs.get_file_info(pafs.FileSelector(f"{base}/{_REGISTRY_PREFIX}", allow_not_found=True)):
         if info.type != pafs.FileType.File or not info.path.endswith(".json"):
             continue
-        with suppress(FileNotFoundError), fs.open_input_stream(info.path) as stream:
-            out.append(json.loads(stream.readall().decode("utf-8")))
+        try:
+            with fs.open_input_stream(info.path) as stream:
+                record = json.loads(stream.readall().decode("utf-8"))
+        except Exception as exc:  # noqa: BLE001 — skip the one bad record, keep the rest listable
+            log.warning("warehouse_record_unreadable", extra={"path": info.path, "error": str(exc)})
+            continue
+        if isinstance(record, dict) and record.get("id") and record.get("bucket") and record.get("project"):
+            out.append(record)
+        else:  # missing the identity fields every consumer keys on (id/bucket/project) → skip, don't 500
+            log.warning("warehouse_record_malformed", extra={"path": info.path})
     return out
+
+
+def projects_claiming_bucket(records: list[dict[str, str]], bucket: str) -> set[str]:
+    """Every project with a warehouse record claiming ``bucket`` (any lifecycle status — a deactivated
+    warehouse still owns its bucket's data, so its claim still blocks a rival registration)."""
+    return {str(r["project"]) for r in records if r.get("bucket") == bucket and r.get("project")}
 
 
 def bind_namespace(

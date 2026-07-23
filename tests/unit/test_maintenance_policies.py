@@ -154,6 +154,29 @@ def test_resolve_precedence_table_beats_namespace_beats_project_beats_none() -> 
     assert mp.resolve_policy(records, "s3://acme-whx/u1_db$t") is None
 
 
+def test_resolve_overlapping_project_claims_warns_and_matches_nothing(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # Mallory layer 3 (audit 2026-07-23): two DISTINCT project records both claiming one bucket is a
+    # contested registry — first-encountered-wins would let record ordering decide whose retention
+    # policy destroys whose version history. The project tier must resolve to NO match, with a warning;
+    # a table/namespace match above the tier, and a single uncontested claim, keep resolving.
+    contested = [
+        _project_policy(id_="acme", buckets=["shared-bkt"], retention_days=365),
+        _project_policy(id_="evil", buckets=["shared-bkt", "evil-wh"], retention_days=1),
+    ]
+    with caplog.at_level("WARNING", logger="common.maintenance_policies"):
+        assert mp.resolve_policy(contested, "s3://shared-bkt/u1_db$t") is None
+    assert any(r.message == "maintenance_policy_project_overlap" for r in caplog.records)
+    # The uncontested bucket in the same records still resolves its (single) claimant.
+    hit = mp.resolve_policy(contested, "s3://evil-wh/u1_db$t")
+    assert hit is not None and hit["id"] == "evil"
+    # A namespace record shadows the project tier entirely — the overlap never reaches it.
+    shadowed = [_policy(kind="namespace", id_="db", path="shared-bkt/root/db", retention_days=7), *contested]
+    hit = mp.resolve_policy(shadowed, "s3://shared-bkt/root/db/t")
+    assert hit is not None and hit["retention_days"] == 7
+
+
 def test_project_policy_matches_flat_catalog_layout_without_a_logical_id() -> None:
     # The bucket-level match needs no logical id, so BOTH the catalog's flat `<uuid>_<table_id>` layout
     # and the medallion-nested layout in a project bucket resolve the project record.

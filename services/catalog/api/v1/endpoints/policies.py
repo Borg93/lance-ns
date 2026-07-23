@@ -28,6 +28,7 @@ from fastapi.concurrency import run_in_threadpool
 from lance_namespace import (
     DescribeTableRequest,
     InvalidInputError,
+    NamespaceAlreadyExistsError,
     NamespaceNotFoundError,
     TableNotFoundError,
 )
@@ -212,9 +213,15 @@ async def set_project_policy(
 
     The record's ``buckets`` are the project's ACTIVE warehouse buckets, resolved from the warehouse
     registry NOW: a warehouse provisioned after this set is not covered until the policy is re-set
-    (the same set-time-resolution stance as the table policy's physical path). A project with no
-    active warehouse is refused — a policy that could never match anything should fail loudly at set
-    time, not lie dormant."""
+    (the same set-time-resolution stance as the table policy's physical path). Staleness runs the OTHER
+    way too: a warehouse deactivated AFTER this set stays on the stored record — the policy keeps
+    governing that bucket's datasets until the policy is re-set (or deleted); a deactivation does not
+    rewrite existing policy records. A project with no active warehouse is refused — a policy that
+    could never match anything should fail loudly at set time, not lie dormant.
+
+    Defense in depth (audit 2026-07-23): a resolved bucket that ANOTHER project's warehouse also claims
+    is refused with 409 — even if a rival claim somehow got past ``create_warehouse``'s guards, it must
+    not become a policy governing (and destroying version history in) the other tenant's data."""
     project = _validated_project(id)
     await fga_deps.require_relation(
         client, settings, token, relation="can_administer", obj=f"project:{project}"
@@ -233,6 +240,14 @@ async def set_project_policy(
             f"project {project!r} has no active warehouse — provision one first "
             "(a project policy scopes to the project's warehouse buckets, resolved at set time)"
         )
+    for bucket in buckets:
+        rivals = warehouses.projects_claiming_bucket(registered, bucket) - {project}
+        if rivals:
+            raise NamespaceAlreadyExistsError(
+                f"bucket {bucket!r} is also claimed by another project's warehouse — the registry is "
+                "contested; refusing to set a policy over another tenant's data (fix the warehouse "
+                "records first)"
+            )
     record = {**_record("project", project, "", body), "buckets": buckets}
     await run_in_threadpool(policies.put_policy, settings.registry_root, so, record)
     log.info("maintenance_policy_set", extra={"kind": "project", "id": project})

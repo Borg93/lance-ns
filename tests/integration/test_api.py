@@ -878,6 +878,49 @@ def test_project_policy_set_refused_without_an_active_warehouse(client: TestClie
     assert "no active warehouse" in resp.json()["error"]
 
 
+def test_project_policy_set_refused_on_a_cross_claimed_bucket(client: TestClient, tmp_path: object) -> None:
+    # Mallory layer 2 (audit 2026-07-23, defense in depth): even if a rival bucket claim got PAST the
+    # create_warehouse guards (records written straight into the registry here), a policy set that would
+    # resolve a bucket another project's warehouse also claims must be refused — never a retention policy
+    # over the other tenant's data.
+    from catalog.core.config import get_settings
+    from catalog.services import warehouses as wh_svc
+
+    s = _project_policy_settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    so = s.storage_options()
+    wh_svc.put_warehouse(
+        s.registry_root, so, {"id": "wh-a", "bucket": "shared-bkt", "project": "acme", "status": "active"}
+    )
+    wh_svc.put_warehouse(
+        s.registry_root, so, {"id": "wh-evil", "bucket": "shared-bkt", "project": "evil", "status": "active"}
+    )
+    resp = client.post("/v1/project/evil/policy/set", json={"retention_days": 1, "retain_versions": 1})
+    assert resp.status_code == 409, resp.text
+
+
+def test_project_policy_set_tolerates_a_corrupt_registry_record(client: TestClient, tmp_path: object) -> None:
+    # A corrupt warehouse record next to the project's own must not 500 the set (skip-with-warning): the
+    # policy still resolves the readable active bucket.
+    from pathlib import Path
+
+    from catalog.core.config import get_settings
+    from catalog.services import warehouses as wh_svc
+
+    s = _project_policy_settings(tmp_path)
+    client.app.dependency_overrides[get_settings] = lambda: s
+    wh_svc.put_warehouse(
+        s.registry_root,
+        s.storage_options(),
+        {"id": "wh-a", "bucket": "acme-wh", "project": "acme", "status": "active"},
+    )
+    (Path(str(tmp_path)) / "_warehouses" / "zzz-corrupt.json").write_text("{truncated")
+    resp = client.post("/v1/project/acme/policy/set", json={"retention_days": 90})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["buckets"] == ["acme-wh"]
+    assert client.post("/v1/project/acme/policy/delete").status_code == 200  # no leak across tests
+
+
 def test_project_policy_rejects_a_malformed_project_id(client: TestClient, tmp_path: object) -> None:
     from catalog.core.config import get_settings
 

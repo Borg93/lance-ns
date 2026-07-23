@@ -56,7 +56,7 @@ One doc staleness found: FEATURE-GAP.md §3 says full-text search is "deferred",
 
 # What's left before the rask merge — concrete work-list
 
-Grounding: `/home/blackwell/Desktop/lance-ns/docs/RASK-INTEGRATION.md` (the migration checklist), `docs/OPERATORS.md` (adoption order + the Ray submit-seam decision), `docs/DESIGN-catalog-parity.md` (archive; #1–#5 all shipped 2026-07-15, so the *feature* prerequisites for the merge are done), and a direct read of the rask checkout at `/home/blackwell/Desktop/lance-ns/rask` (gitignored sibling, HEAD `4f0d22d`). Nothing merge-blocking remains on the lance-ns feature side; everything left is integration mechanics plus five decisions.
+Grounding: `/home/blackwell/Desktop/lance-ns/docs/RASK-INTEGRATION.md` (the migration checklist), `docs/OPERATORS.md` (adoption order + the Ray submit-seam decision), `docs/DECISIONS.md` (archive; #1–#5 all shipped 2026-07-15, so the *feature* prerequisites for the merge are done), and a direct read of the rask checkout at `/home/blackwell/Desktop/lance-ns/rask` (gitignored sibling, HEAD `4f0d22d`). Nothing merge-blocking remains on the lance-ns feature side; everything left is integration mechanics plus five decisions.
 
 ## 1. What rask provides that we inherit (use, don't rebuild)
 
@@ -89,7 +89,7 @@ Grounding: `/home/blackwell/Desktop/lance-ns/docs/RASK-INTEGRATION.md` (the migr
 
 ## 4. Conflicts / decisions needed (resolve before or in week 1)
 
-- **AGE on CNPG** (blocking the chart flip): custom Postgres-with-AGE image for the CNPG `Cluster` vs separate AGE operand vs the `GOAL-prove-it.md` Lance-native-graph pivot that deletes the dependency.
+- **AGE on CNPG** (blocking the chart flip): custom Postgres-with-AGE image for the CNPG `Cluster` vs separate AGE operand vs the `docs/DECISIONS.md` #age-on-cnpg-vs-lance-native-graph-the-lineage-store-decision Lance-native-graph pivot that deletes the dependency.
 - **Two charts → one**: rask's umbrella wins (RASK-INTEGRATION already assumes it). Two NATS/Dapr/OpenFGA/observability stacks collapse to one each — but our Dapr surface is richer (pubsub Components, resiliency CRs, app-tokens, secret store, 32Mi body size already matched) and our NATS needs the stream-provisioning Job (LINEAGE/MEDALLION/TRAINING) or NACK; rask's Dapr is sidecar-invocation-only today.
 - **Auth posture collision**: rask is trusted-network/no-auth end-to-end; we are fail-closed OIDC+FGA. Decide the blast radius: auth only on our services + our zone's BFF (lowest-friction, ships as-is) vs gateway-wide enforcement (turns on authz for rask's batches/search/volumes — real scope).
 - **Duplicate frontends/design systems**: two Bits-UI+Tailwind component libraries (`@rask/ui` vs `@lance/ui`) — merge into `@rask/ui` per RASK-INTEGRATION §5, and decide the domain name for our zone (`lineage` vs folding into rask's dummy `train`/`studio`-style slot or `discover`). Also two e2e Playwright setups → extend rask's `tests/e2e`.

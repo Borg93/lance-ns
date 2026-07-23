@@ -8567,7 +8567,7 @@
     },
     "/v1/materialized_view/{id}/create": {
       "post": {
-        "description": "Create a materialized view via the native backend's ``create_materialized_view``.\n\nThen seeds FGA ownership on the ``materialized_view`` type so the creator keeps refresh/read rights.\n\nNo OpenLineage is emitted here (unlike the cascade): the MV's source arrives ONLY as an opaque\n``source_query`` blob the namespace server stores without interpreting, so there is no structured list\nof source tables to name in a lineage event. Emitting MV lineage is a decision-gate (WONTFIX until an\nMV consumer needs it) \u2014 it requires either a query parser or a structured ``source_tables`` request\nfield; do NOT fabricate an edge from the view's own output schema. See docs/DESIGN-catalog-parity.md #38b.",
+        "description": "Create a materialized view via the native backend's ``create_materialized_view``.\n\nThen seeds FGA ownership on the ``materialized_view`` type so the creator keeps refresh/read rights.\n\nNo OpenLineage is emitted here (unlike the cascade): the MV's source arrives ONLY as an opaque\n``source_query`` blob the namespace server stores without interpreting, so there is no structured list\nof source tables to name in a lineage event. Emitting MV lineage is a decision-gate (WONTFIX until an\nMV consumer needs it) \u2014 it requires either a query parser or a structured ``source_tables`` request\nfield; do NOT fabricate an edge from the view's own output schema. See docs/DECISIONS.md #38b.",
         "operationId": "create_materialized_view_v1_materialized_view__id__create_post",
         "parameters": [
           {

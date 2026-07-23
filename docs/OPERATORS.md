@@ -110,7 +110,7 @@ DOES have are already owned elsewhere:
 | version/feature pinning (`pylance`, `lance-ray`, data_storage_version) | image pins + probe-before-callsite (§0) + docs/RAY.md landmines | process, not software |
 
 So: nothing to install for either. The single actionable follow-up either way is the **orphan
-janitor** (already tracked in docs/GOAL-prove-it.md as blob-pointer lifecycle — GC must never collect
+janitor** (already tracked in docs/DECISIONS.md #blob-pointer-lifecycle-gc--never-collect-referenced-artifacts as blob-pointer lifecycle — GC must never collect
 registry-referenced artifact objects, and crashed-run tokens need a sweep).
 
 ## 5 · Secrets: the dev-mode fragility, and the operator plan (added 2026-07-14)
@@ -131,7 +131,7 @@ stuck pod under a watchdog; fixed by re-running the seed (the chart's own hook) 
    OpenBao runs `server -config` against its **already-provisioned PVC**. Secrets then survive pod
    restarts, and the seed Job becomes first-boot-only. Cost: OpenBao then needs a real
    `operator init` + unseal step (no fixed root token) — which is the exact chore the operator
-   removes, so this is the bridge, not the destination. Tracked in `docs/GOAL-prove-it.md`.
+   removes, so this is the bridge, not the destination. Tracked in `docs/DECISIONS.md`.
 2. **Prod — a secrets operator (the destination):** adopt **External Secrets Operator** (cloud-agnostic,
    syncs from any backend into k8s Secrets / Dapr), the **Vault/OpenBao operator**, or **bank-vaults**
    for **auto-unseal** (no manual init/unseal) + **declarative secret sync** (retire `openbao-seed`

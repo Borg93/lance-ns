@@ -162,12 +162,12 @@ async def _drain_outbox(repository: RepositoryDep, settings: SettingsDep, opts: 
     idempotently (``ingest_event`` MERGEs on ``run_id``) and then deleted; a delete that fails just leaves
     the object for the next tick to re-ingest (a no-op) and retry the delete. Returns the count ingested.
 
-    BOUNDED + OBSERVED (GOAL-prove-it P1.1/P1.2). The drain reads at most ``outbox_drain_limit`` events per
-    tick, OLDEST FIRST — it previously materialised the whole prefix inside the single-flight lock, so a
-    backlog (precisely the situation the outbox exists for) could OOM or stall the tick: the relay would fail
-    hardest exactly when it mattered most. The remainder drains next tick, so nothing starves. The saturation
-    snapshot is published on EVERY tick — including an empty one, so ``outbox.depth`` falls back to 0 instead
-    of going stale at its last non-zero reading and alerting forever.
+    BOUNDED + OBSERVED (docs/DECISIONS.md P1.1/P1.2 — outbox observability + bounded drain). The drain reads
+    at most ``outbox_drain_limit`` events per tick, OLDEST FIRST — it previously materialised the whole prefix
+    inside the single-flight lock, so a backlog (precisely the situation the outbox exists for) could OOM or
+    stall the tick: the relay would fail hardest exactly when it mattered most. The remainder drains next
+    tick, so nothing starves. The saturation snapshot is published on EVERY tick — including an empty one, so
+    ``outbox.depth`` falls back to 0 instead of going stale at its last non-zero reading and alerting forever.
     """
     depth, oldest_age = await run_in_threadpool(outbox.backlog, settings.outbox_uri, opts)
     outbox_metrics.observe_backlog(depth, oldest_age)

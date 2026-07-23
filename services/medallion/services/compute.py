@@ -145,12 +145,14 @@ def transform_stage(
     thumbnail+embedding, unrecognised → untouched, tabular → no-op). Returns the new downstream Lance
     version + the measured output statistics (rows + on-disk bytes) for the emit.
 
-    SINGLE-BASE BY DESIGN (P2.1, docs/GOAL-prove-it.md): the cascade writes ``mode="overwrite"`` to ONE root
-    per stage — it does NOT distribute a stage table across #3-B multi-base ``data_bases``. That is a
+    SINGLE-BASE BY DESIGN (P2.1, docs/DECISIONS.md #p21--single-base-cascade-write): the cascade writes
+    ``mode="overwrite"`` to ONE root per stage — it does NOT distribute a stage table across #3-B multi-base
+    ``data_bases``. That is a
     deliberate boundary, not an omission: multi-base registers its bases at CREATE time only
     (``initial_bases``), the cascade is overwrite-only, and the medallion already distributes physically at
     the per-ZONE bucket level. #3-B stays REST-create-only (an explicit client signal) until a gold/training
-    table demonstrably needs per-table fan-out AND the real Ray distributed-write path lands — see doc P2.1.
+    table demonstrably needs per-table fan-out AND the real Ray distributed-write path lands — see
+    docs/DECISIONS.md #p21--single-base-cascade-write.
     """
     ds = lance.dataset(from_uri, storage_options=storage_options)
     out, blob_payloads = _carry_forward(ds, stage)

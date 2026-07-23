@@ -41,7 +41,7 @@ The externalization hooks added in this repo make this a **values flip**, not a 
 | `observability.externalOtlpEndpoint` | rask's GreptimeDB OTLP | shared observability |
 
 - **Add the buckets** to rask's `rustfs.buckets`: the lakehouse (`lance-catalog`) + observability (`lance-observability`).
-- **Add the databases** to CNPG: `lineage` + `openfga`. ⚠️ **AGE caveat** — the lineage graph needs the Apache **AGE extension**; CNPG runs stock Postgres, so either (a) point CNPG at a **custom Postgres image with AGE**, (b) keep AGE as a separate operand, or (c) execute the `docs/GOAL-prove-it.md` decision to move lineage to a **Lance-native graph** (drops the AGE/Postgres dependency entirely). Decide before the fold-in.
+- **Add the databases** to CNPG: `lineage` + `openfga`. ⚠️ **AGE caveat** — the lineage graph needs the Apache **AGE extension**; CNPG runs stock Postgres, so either (a) point CNPG at a **custom Postgres image with AGE**, (b) keep AGE as a separate operand, or (c) execute the `docs/DECISIONS.md` AGE-on-CNPG decision to move lineage to a **Lance-native graph** (drops the AGE/Postgres dependency entirely). Decide before the fold-in.
 
 ### 2. lance-ray → a real Ray Data job (the one in-scope gap)
 Today `services/medallion/producer.py` + the movers are **dummy Ray jobs** — pure lineage emitters by
@@ -62,11 +62,11 @@ secret).
 
 ### 5. Drop the demo scaffolding (rask supersedes it)
 - `chart/templates/{age-postgres,rustfs,backup-pg,backup-snapshot}.yaml` → CNPG / rustfs-operator.
-- `frontend/` + the `web` Deployment + `gateway.yaml` → rask's SvelteKit frontends + Traefik Ingress.
-  **Pre-shaped for the graft (2026-07-11):** `frontend/` is now a Turborepo 2.10 + bun workspace in
-  rask's own shape — `apps/web` (the lineage explorer) + `packages/ui` (shared Svelte 5 components,
-  transport-agnostic by tested rule) — so folding in means moving `apps/web` + merging `packages/ui`
-  into rask's component library, not untangling a monolith.
+- `frontend/` + the zone Deployments + `gateway.yaml` → rask's SvelteKit frontends + Traefik Ingress.
+  **Grafted-shape (P5, 2026-07-22):** `frontend/` is now a Turborepo + bun workspace in rask's exact shape —
+  the 5 `components/frontends/<zone>` apps (home/data/lineage/models/admin) on the shared `@rask/ui` design
+  system + the `@rask/api` seam (the old single `apps/web` app + `@lance/ui` were retired in P5) — so folding
+  in is a directory graft of the zones into `rask/components/frontends/`, not untangling a monolith.
 - `openbao` dev-mode + the dev `infra-credentials` static Secret → external-secrets from rask's Vault.
 - The `dex` demo IdP → rask's real IdP (or keep for local-only).
 
@@ -102,7 +102,7 @@ Reproduce those four behaviors in the Ray Data job and the cascade keeps working
   `<release>-postgres` / `<release>-rustfs`, with **no in-cluster DNS leaks** and **no plaintext secrets**.
 
 ## Open decisions (resolve before/early in the merge)
-1. **AGE on CNPG** — custom AGE image vs separate operand vs Lance-native graph (`docs/GOAL-prove-it.md`). Affects §1.
+1. **AGE on CNPG** — custom AGE image vs separate operand vs Lance-native graph (`docs/DECISIONS.md` #age-on-cnpg-vs-lance-native-graph-the-lineage-store-decision). Affects §1.
 2. **Tenancy** — this repo is single-warehouse (`warehouse:lance_catalog`); rask is single implicit `default`
    project. Confirm one warehouse-per-deploy stays the model (no multi-warehouse routing).
 3. **Catalog 501s** — the **7** genuinely backend-stubbed ops (`docs/COVERAGE.md`: rename / backfill /

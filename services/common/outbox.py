@@ -79,7 +79,8 @@ def _staged_infos(outbox_uri: str, storage_options: StorageOptions) -> list[pafs
 
 
 def backlog(outbox_uri: str, storage_options: StorageOptions) -> tuple[int, float]:
-    """``(depth, oldest_age_seconds)`` — the saturation snapshot (#4 observability, GOAL-prove-it P1.1).
+    """``(depth, oldest_age_seconds)`` — the saturation snapshot (#4 observability, docs/DECISIONS.md P1.1
+    (outbox observability, the four signals)).
 
     A metadata-only LIST: no object bodies are read, so this is cheap enough to run on every reconcile tick
     even when the outbox is healthy and empty (which is exactly when it must still report depth=0, or the
@@ -99,9 +100,10 @@ def list_events(
     """Yield ``(run_id, event_json)`` for staged events under the outbox prefix (the relay's input), OLDEST
     FIRST, at most ``limit`` of them.
 
-    BOUNDED (audit finding, GOAL-prove-it P1.2): the drain previously materialised the ENTIRE prefix into
-    memory inside the single-flight lock, so a backlog (exactly the situation the outbox exists for) could
-    OOM or stall the reconcile tick — the relay would fail hardest precisely when it was needed most. The cap
+    BOUNDED (audit finding, docs/DECISIONS.md P1.2 (bounded drain)): the drain previously materialised the
+    ENTIRE prefix into memory inside the single-flight lock, so a backlog (exactly the situation the outbox
+    exists for) could OOM or stall the reconcile tick — the relay would fail hardest precisely when it was
+    needed most. The cap
     makes each tick's work bounded; the remainder drains on the next tick, oldest-first, so nothing starves.
     An absent prefix yields nothing. Blocking IO; the caller threadpools the whole drain.
     """

@@ -1,7 +1,8 @@
 """OpenTelemetry domain metrics for the #4 transactional lineage outbox (OTLP-direct to GreptimeDB).
 
-WHY (GOAL-prove-it P1.1): the outbox is an external boundary (S3 + pub/sub) that carried ZERO of the four
-golden signals — a direct violation of `python-infrastructure/references/observability.md`, which requires
+WHY (docs/DECISIONS.md P1.1, the four signals): the outbox is an external boundary (S3 + pub/sub) that
+carried ZERO of the four golden signals — a direct violation of
+`python-infrastructure/references/observability.md`, which requires
 them "for every external boundary (HTTP, DB, queue, cache)". Concretely: every durability property #4
 claims was **unobservable**. An outbox that silently stops draining — the one failure that loses lineage
 forever — looked exactly like an outbox that is working. The audit ranked this the highest-ROI fix.

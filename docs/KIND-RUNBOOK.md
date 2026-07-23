@@ -1,7 +1,7 @@
 # Kind live-verification runbook — every pending 🟡, one pass, copy-paste order
 
 **Written 2026-07-11.** Everything below is CODE-COMPLETE and CI-proven (unit + render tiers);
-this pass turns the remaining 🟡 items in `docs/GOAL-prove-it.md` into ✅. Each step says the command
+this pass turns the remaining 🟡 items in `docs/DECISIONS.md` into ✅. Each step says the command
 AND the assertion — if an assertion fails, stop and report; that failure jumps the work queue.
 
 ## 0 · Rebuild + roll (prerequisite for everything)

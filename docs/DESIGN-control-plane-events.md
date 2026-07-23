@@ -103,13 +103,15 @@ mutation endpoint ──emit──▶ core/control_emit.py ──▶ Dapr pubsub
   avoids the nginx `proxy_buffering` / Bun `idleTimeout` / adapter-streaming hazards entirely, and has
   the same trust model. "Refreshed within ~5s" is enough for governance changes.
 
-**P3 — SSE upgrade (optional, later; gated on the zone deploy path).**
-- Same broadcast subscription feeds an **in-process fan-out** to that replica's local SSE connections
-  (`GET /v1/events/stream`, `text/event-stream`) — still no broker client. Requires resolving, and the
-  plan must not proceed to P3 until these are settled:
-  - **Deployment:** the chart today deploys only `apps/web` (`lance-lineage-web`); the **data/admin
-    zones exist only behind the dev microfrontends proxy** — P3 has no verified prod path until the MFE
-    migration lands their chart wiring.
+**P3 — real-time upgrade: SUPERSEDED by `query.live` (shipped 2026-07-23).** The original P3 was a
+hand-rolled catalog SSE endpoint, deferred because (a) the zones weren't charted and (b) the streaming
+hazards below. Both are moot: the P5 MFE migration charted the 5 zones, and the console consumes the feed
+through SvelteKit's **`query.live`** remote function (`admin/src/lib/remote/admin.remote.ts`) — the
+framework owns the browser↔zone-server stream + reconnect, and the zone→catalog leg stays a plain poll of
+`GET /v1/events`. So there is no hand-rolled SSE endpoint to build; the notes below are retained only as the
+streaming-config checklist the live drive verifies (ingress no-buffer, adapter-bun `idleTimeout`).
+- Historical P3 sketch (NOT built — `query.live` replaced it): an in-process fan-out to local SSE
+  connections (`GET /v1/events/stream`, `text/event-stream`), which would have needed:
   - **Streaming hazards:** nginx `proxy_buffering off`/`X-Accel-Buffering: no` end-to-end (the BFF
     `makeBackendProxy` in `frontend/packages/api/src/bff.ts` forwards only `content-type` today);
     heartbeat **≤5s** or a raised adapter `idleTimeout` (Bun default 10s would kill a 15s-heartbeat

@@ -56,10 +56,10 @@ def test_empty_poll_writes_no_audit(monkeypatch: Any) -> None:
     monkeypatch.setattr(ep, "audit", rec)
     buf = ControlEventBuffer(8)
     buf.append(_evt())  # head=1
-    # A first poll (since=0) establishes a baseline: empty events, no reset → NOT a meaningful poll.
-    res = _call(_request(buf), _settings(), since=0)
+    # A caught-up poll (since == head) delivers nothing new → NOT a meaningful poll, no audit written.
+    res = _call(_request(buf), _settings(), since=1)
     assert res.events == [] and res.cursor == 1 and res.reset is False
-    assert rec.calls == []  # the 5s empty tick must NOT touch the audit trail
+    assert rec.calls == []  # the 5s steady-state empty tick must NOT touch the audit trail
 
 
 def test_delivered_events_write_one_audit(monkeypatch: Any) -> None:

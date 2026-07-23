@@ -46,13 +46,18 @@ class ControlEventBuffer:
     def since(self, cursor: int) -> tuple[list[CatalogControlEvent], int, bool]:
         """Events strictly after `cursor`, the new head cursor, and a `reset` flag.
 
-        `cursor <= 0` is a first poll — establishes a baseline (the current head) with no history replay and
-        no reset. `reset=True` means the client's next-expected event (`cursor + 1`) is older than the oldest
-        retained event, i.e. it missed the gap (overflow) and must re-read everything (`invalidateAll`)."""
+        A new client polls `since=0` and gets the whole retained window (≤ maxsize) — the recent activity to
+        render on connect — then advances its cursor to `head` and polls incrementally. `reset=True` means a
+        *positive* client cursor's next-expected event (`cursor + 1`) is older than the oldest retained event,
+        i.e. it fell off the bounded buffer (overflow) and must re-read everything (`invalidateAll`).
+
+        Note there is deliberately NO `cursor <= 0` baseline short-circuit: it would advance a fresh client's
+        cursor to `head` while returning nothing, silently skipping the first events after connect (caught
+        live 2026-07-23). The buffer is bounded, so returning the whole window on the first poll is safe."""
         head = self._cursor
-        if cursor <= 0 or not self._buf:
+        if not self._buf:
             return [], head, False
         oldest = self._buf[0][0]
-        reset = (cursor + 1) < oldest
+        reset = cursor > 0 and (cursor + 1) < oldest
         events = [e for (c, e) in self._buf if c > cursor]
         return events, head, reset

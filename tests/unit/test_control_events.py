@@ -54,13 +54,14 @@ def test_event_defaults_and_roundtrip() -> None:
 # ── ring buffer ────────────────────────────────────────────────────────────────────────────────────
 
 
-def test_buffer_first_poll_is_baseline() -> None:
+def test_buffer_zero_cursor_returns_window() -> None:
     buf = ControlEventBuffer(8)
-    buf.append(_evt())
-    buf.append(_evt())
-    # cursor<=0 (a first poll) establishes a baseline: the current head, NO history replay, no reset.
+    buf.append(_evt(object_id="a"))
+    buf.append(_evt(object_id="b"))
+    # since=0 returns the whole retained window (the recent activity a fresh client renders on connect), NOT
+    # an empty baseline — a baseline would advance the cursor past these first events and silently skip them.
     events, head, reset = buf.since(0)
-    assert events == [] and head == 2 and reset is False
+    assert [e.object_id for e in events] == ["a", "b"] and head == 2 and reset is False
 
 
 def test_buffer_cursor_delivers_only_new() -> None:

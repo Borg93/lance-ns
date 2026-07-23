@@ -51,7 +51,8 @@ def test_body_id_matching_the_path_passes(client: TestClient, fake_ns: MagicMock
 
 
 def test_body_id_differing_from_the_path_is_400(client: TestClient, fake_ns: MagicMock) -> None:
-    # CONTRACT (spec, FEATURE-GAP deviation #1): a body id that CONTRADICTS the path id must refuse —
+    # CONTRACT (spec; docs/DECISIONS.md "FEATURE-GAP minor deviations" #1): a body id that
+    # CONTRADICTS the path id must refuse —
     # the path id is what the authz gate checked, so silently picking either one is wrong.
     resp = client.post("/v1/table/db1$users/count_rows", json={"id": ["db1", "other"]})
     assert resp.status_code == 400, resp.text

@@ -28,7 +28,7 @@ router = APIRouter()
 # compactionReplicas=1 (values.yaml) this is cluster-wide single-flight. The reconcile sweep does the same
 # with a pg advisory lock — compaction is stateless (no DB), so an in-process lock is the analog. A tick
 # that finds a sweep already running SKIPS (does not queue): the running sweep already covers every dataset,
-# so re-running is redundant, and queuing would pile ticks up behind a long sweep. (prod-readiness P5)
+# so re-running is redundant, and queuing would pile ticks up behind a long sweep.
 _sweep_lock = asyncio.Lock()
 
 

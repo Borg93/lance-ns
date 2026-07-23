@@ -1,13 +1,14 @@
-"""Load-shedding — a pure-ASGI middleware that caps CONCURRENT in-flight Arrow-IPC writes (prod-readiness P5).
+"""Load-shedding — a pure-ASGI middleware that caps CONCURRENT in-flight Arrow-IPC writes.
 
 Each ``/v1/table/{id}/{create,insert,merge_insert}`` buffers the whole request body in memory before the
 handler runs (up to ``max_body_bytes`` = 256MiB, see body_limit.py), so N concurrent writes = N × 256MiB —
-the OOM that the per-workload memory tier (P2c, catalog=1Gi) only PARTLY bounds. Under a write burst the pod
-OOMs and takes every in-flight request with it. This sheds the overflow: once ``max_concurrent`` writes are
-in flight, the next is rejected with **429** (the ``THROTTLING`` → 429 mapping in common/exceptions.py that
-had no producer) + a ``Retry-After``, BEFORE a single body byte is buffered — so shedding actually relieves
+the OOM that the per-workload memory tier (catalog=1Gi in values-prod) only PARTLY bounds. Under a write
+burst the pod OOMs and takes every in-flight request with it. This sheds the overflow: once
+``max_concurrent`` writes are in flight, the next is rejected with **429** (the ``THROTTLING`` → 429
+mapping in common/exceptions.py that had no producer) + a ``Retry-After``, BEFORE a single body byte is
+buffered — so shedding actually relieves
 memory pressure rather than adding to it. Reads and non-bulk writes (``/commit``, ``update``, ``delete``)
-pass through untouched. ``max_concurrent=0`` disables it (the pre-P5 behavior).
+pass through untouched. ``max_concurrent=0`` disables it entirely.
 
 Pure ASGI (not ``BaseHTTPMiddleware``) so the reject happens before the body is read, mirroring body_limit.
 The in-flight counter is a plain int: the event loop is single-threaded and there is NO await between the

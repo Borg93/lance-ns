@@ -92,11 +92,25 @@ So: long-lived lakehouse + provenance, with a compaction/GC lifecycle aging out 
 - **Lakehouse (S3/RustFS)** — the highest-value asset. In prod: an external object store with versioning +
   cross-region replication + lifecycle rules. In-cluster: snapshot the RustFS PVC (`VolumeSnapshot` on a CSI
   StorageClass). Lance datasets are immutable-versioned on disk, so an object-store snapshot is consistent.
-- **AGE / Postgres** — `pg_dump` / WAL archiving (managed DB does PITR); or PVC `VolumeSnapshot`.
+- **AGE / Postgres** — `pg_dump` / WAL archiving (managed DB does PITR); or PVC `VolumeSnapshot`. The
+  in-cluster pg-backup CronJob (`backup-pg.yaml`) dumps `lineage` + `openfga` gzipped to
+  `_backups/pg/<UTC>/` on RustFS and prunes all but the newest `backups.pgDump.keep` dumps (default 7;
+  0 disables).
 - **OpenBao** — the file-backend PVC snapshot, or (prod) the external Vault's own backup; secrets are also
   re-derivable from the source of truth the operator populates from.
 - **NATS** — transient; no backup needed (idempotent MERGE on `run_id` means a lost-then-replayed event is a
   no-op).
+
+**Known open gaps in the in-cluster path** (accept the loss window or externalize — see
+[DECISIONS.md "P4/P7"](DECISIONS.md) and [RUNBOOK-restore.md](RUNBOOK-restore.md)):
+- **Backup fate-sharing**: the pg_dump lands on RustFS, so a total RustFS loss loses both the Lance data
+  *and* the DB dumps. Ship the dumps off-cluster (a second object store / off-site), or externalize
+  Postgres to CloudNativePG and use its PITR.
+- **OpenBao PVC**: no automated backup path is shipped — snapshot it yourself and back up the unseal
+  material out-of-band.
+- **RPO/RTO are undocumented**, and nothing verifies the RustFS `VolumeSnapshot` actually succeeds (the
+  empty `snapshotClassName` is a per-cluster value) — confirm both on your cluster before trusting the
+  snapshot leg.
 
 ## Prod profile
 `chart/values-prod.yaml` is a starting overlay — it flips the safe-by-default-off prod switches (sealed

@@ -7,8 +7,9 @@ where we are right now, and what's next**. Skim the diagrams; read the section y
 > **[`FLOW.md`](FLOW.md)**: the single coherent narrative of the *implemented* flow, with the distributed
 > (KubeRay / Ray Data) variants clearly marked as the rask future.
 >
-> 🔬 **Are we correct, and what do we lack vs Lakekeeper / Marquez?** See **[`FEATURE-GAP.md`](FEATURE-GAP.md)** —
-> a docs-grounded confidence review (HIGH) + an honest feature-gap map.
+> 🔬 **Are we correct, and what do we lack vs the other catalogs?** See **[`BENCH-2026-07-22.md`](BENCH-2026-07-22.md)** —
+> the current feature bench (Lakekeeper / Polaris / Unity / Gravitino / Nessie) — and the recorded
+> spec deviations in **[`DECISIONS.md`](DECISIONS.md)** ("FEATURE-GAP minor deviations").
 >
 > 📜 **What contract do producers and consumers actually rely on?** See **[`DATA-CONTRACT.md`](DATA-CONTRACT.md)** —
 > "the Lance manifest is the schema, the version is the handshake": the storage/bus/identity

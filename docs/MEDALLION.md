@@ -103,7 +103,7 @@ exposes blob-v2 columns as plain LargeBinary — so until the stage job re-attac
 write and ships the deriver (+Pillow) in the ray image, blob upstreams take the in-process path.
 Consumers with NO storage credentials (browser, notebook) fetch the blob bytes back through the
 catalog: `GET /v1/table/{id}/blobs?column=payload&row=N[&version=]`, Range-capable (206/416) and
-governed at reader-tier `can_read_data` — see `docs/FEATURE-GAP.md` §1 (serving) for details.
+governed at reader-tier `can_read_data` — see `docs/DECISIONS.md` "FEATURE-GAP §1 (serving)" for details.
 
 **`/produce` auth (the cascade head).** `/produce` is a direct operator trigger (not sidecar-delivered), so
 it is guarded by `require_dapr_token` (the shared `APP_API_TOKEN`): **no-op in dev** (unset token — `make

@@ -13,7 +13,9 @@ kind load docker-image <the images> --name <cluster>
 helm upgrade --install lance-ns ./chart --timeout 240s
 ```
 **ASSERT:** all pods Ready; `kubectl logs job/<release>-nats-stream-*` shows the **TRAINING** stream
-created next to LINEAGE/MEDALLION (new — without it every `/train` publish 503s).
+created next to LINEAGE/MEDALLION (new — without it every `/train` publish 503s). On current charts the
+job also provisions **DLQ** (resiliency default-on) and **CATALOG_CONTROL** (the `catalog.controlEmit`
+broadcast behind `GET /v1/events` / `/admin/events`).
 
 ## 1 · The two e2e suites (the §0 done-done gate)
 
@@ -107,9 +109,14 @@ assert the orphan dir is gone and the published artifacts still load (step 4.4 r
 
 In the audit's order, one flag at a time, re-asserting pods Ready after each:
 1. `--set networkPolicy.enabled=true` → e2e suites still green; **NEGATIVE probe:**
-   `kubectl exec deploy/lance-ns-web -- wget -T3 -qO- http://lance-ns-openbao:8200/v1/sys/health`
-   **times out** (openbao is exclusive), while the catalog still consumes secrets at boot
+   `kubectl exec deploy/lance-ns-web-home -- wget -T3 -qO- http://lance-ns-openbao:8200/v1/sys/health`
+   **times out** (openbao is exclusive; any zone pod `web-<name>` works as the probe source — the
+   single `web` pod is retired), while the catalog still consumes secrets at boot
    (positive control). ESO users: set `networkPolicy.openbaoExtraFrom` FIRST.
+   **POSITIVE probe (the nats-monitor rule):** with NetPol on, the admin zone can still read the NATS
+   monitor — `kubectl exec deploy/lance-ns-web-admin -- wget -T3 -qO- http://lance-ns-nats-headless:8222/jsz`
+   answers (the `-nats-monitor` policy admits `:8222` from web-admin pods only), and `/admin/streams`
+   keeps rendering the JetStream panel.
 2. ✅ **PROVEN 2026-07-13** — `--set security.serviceAccounts.enabled=true` → all pods Ready, each
    bound to `lance-ns-sa-<workload>`, the k8s-API token still NOT mounted (the audit's intent), daprd
    reports zero component failures, and `POST /produce` still cascades.

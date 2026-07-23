@@ -8583,7 +8583,7 @@
     },
     "/v1/events": {
       "get": {
-        "description": "Return control-plane change-events after ``since`` for a platform (estate) administrator.\n\nFail-closed via FGA: a non-estate-admin gets 403, an OpenFGA outage 503, and the gate is a no-op only\nwhen FGA is off (parity with every other ``require_*`` site). The ring buffer is per-replica + in-memory,\nso ``cursor`` is a per-replica monotonic counter and ``reset`` means the client missed the buffer window\n(scaling the catalog past one replica needs session affinity or a shared buffer \u2014 see the DESIGN doc).",
+        "description": "Return control-plane change-events after ``since`` for a platform (estate) administrator.\n\nFail-closed via FGA: a non-estate-admin gets 403, an OpenFGA outage 503, and the gate is a no-op only\nwhen FGA is off (parity with every other ``require_*`` site). The ring buffer is per-replica + in-memory,\nso ``cursor`` is a per-replica monotonic counter and ``reset`` means the client missed the buffer window\n(scaling the catalog past one replica needs session affinity or a shared buffer \u2014 see docs/DECISIONS.md\n#control-events--per-replica-cursor-boundary).",
         "operationId": "poll_control_events_v1_events_get",
         "parameters": [
           {

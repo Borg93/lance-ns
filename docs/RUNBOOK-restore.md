@@ -1,9 +1,13 @@
 # Backup & restore runbook
 
 How the estate is backed up, and the **order-sensitive** procedure to restore it. Closes the "no restore
-procedure anywhere" gap (P4). The restore steps below are authored from the backup artifacts + Apache AGE's
-requirements; **they MUST be validated once in a real restore drill** before being trusted in an incident —
-that drill is the remaining P4 done-condition (needs a live throwaway cluster).
+procedure anywhere" gap. The Postgres/AGE leg is authored from the backup artifacts + Apache AGE's
+requirements **and proven by a drill**: `scripts/age_restore_drill.sh` (run inside the age-postgres pod
+against a throwaway DB, wired into `e2e_stack.sh` behind `E2E_RESTORE_DRILL`) performs this runbook's exact
+pg_dump→drop→restore and verifies the graph came back with its labels + a real vertex — green on the
+pinned PG16 engine. The drill green does not transfer across a Postgres major (see the migration section
+below). The RustFS `VolumeSnapshot` leg is **not** drilled — validate it on your cluster's CSI driver
+before trusting it in an incident.
 
 > The in-cluster backups are the SELF-CONTAINED-prod path. If you externalize to CloudNativePG (Postgres)
 > and a managed S3 / rustfs-operator (object store), use THEIR PITR + snapshots instead — set
@@ -17,10 +21,11 @@ that drill is the remaining P4 done-condition (needs a live throwaway cluster).
 | **pg_dump** (gzip) | the `lineage` DB (AGE graph + events/reads tables) **and** the `openfga` DB (authz tuples) | RustFS S3 `_backups/pg/<UTC>/` | `backup-pg.yaml` (CronJob, `backups.pgDump`) |
 | **VolumeSnapshot** | the RustFS data PVC = the **Lance lakehouse** (all medallion + registry data) | cluster CSI VolumeSnapshot | `backup-snapshot.yaml` (`backups.volumeSnapshot`) |
 
-**Not backed up** (accept the loss window or externalize — see [GOAL-production-readiness.md](GOAL-production-readiness.md) P4/P7):
-GreptimeDB local WAL/metadata (metrics — reconstructable), OpenBao's file PVC (P4 gap — back up the unseal
-material out-of-band), and note the pg_dump lands on RustFS, so a **total RustFS loss loses both the Lance
-data AND the DB dumps** unless you also ship the dumps off-cluster (P4 "fate-sharing" gap).
+**Not backed up** (accept the loss window or externalize — see [DECISIONS.md "P4/P7"](DECISIONS.md) and
+[DURABILITY.md](DURABILITY.md)): GreptimeDB local WAL/metadata (metrics — reconstructable), OpenBao's file
+PVC (an open gap — back up the unseal material out-of-band), and note the pg_dump lands on RustFS, so a
+**total RustFS loss loses both the Lance data AND the DB dumps** unless you also ship the dumps
+off-cluster (the "fate-sharing" gap).
 
 ## Consistency: restore AGE + RustFS as a pair
 
@@ -52,7 +57,7 @@ graph — drop/recreate the DB first.
    A non-zero Dataset count + the graph name confirms the labels restored, not just the metadata rows.
 6. Repeat 1–4 for `openfga` (no AGE steps — it's plain relational).
 7. **App recovery is automatic**: on next boot lineage runs `ensure_graph()` (a no-op if step 4 restored the
-   graph) + `ensure_graph_constraints()`, and `/readyz` gates on the graph being queryable (P1/P2a) — so a
+   graph) + `ensure_graph_constraints()`, and `/readyz` gates on the graph being queryable — so a
    half-restored graph fails readiness loudly rather than serving silently.
 
 **If step 5 shows the graph metadata but zero labels** — the known plain-pg_dump-of-AGE hazard — restore is
@@ -116,7 +121,7 @@ supported route is logical: dump on the old major → fresh data directory on th
    pre-created a fresh `lineage` graph in step 4.
 6. **Prove the round-trip on the new major before re-opening writes**: copy `scripts/age_restore_drill.sh`
    into the new pod and run it (the same `kubectl cp` + `kubectl exec` shape as `e2e_stack.sh`'s
-   `E2E_RESTORE_DRILL` step). The P4 drill green was proven on the pinned PG16 engine only — it does not
+   `E2E_RESTORE_DRILL` step). The restore-drill green was proven on the pinned PG16 engine only — it does not
    transfer to a new major, and this is the moment the plain-pg_dump-of-AGE hazard would resurface.
 7. **Un-quiesce**: scale lineage + openfga back up, then run the [After restore](#after-restore) checks.
 

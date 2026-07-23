@@ -93,7 +93,7 @@ def test_summarize_aggregates_reclaimed_and_errors() -> None:
 def test_on_cron_single_flight_skips_an_overlapping_sweep(monkeypatch: Any) -> None:
     """A cron tick that finds a prior sweep still in flight SKIPS instead of starting a SECOND concurrent
     sweep — two sweeps would race compact_files()/cleanup_old_versions() on the same datasets. The sweep is
-    unbounded (every dataset) so overlap is real once it outlasts the cron interval. (prod-readiness P5)"""
+    unbounded (every dataset) so overlap is real once it outlasts the cron interval."""
     import asyncio
     import types
 

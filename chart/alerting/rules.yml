@@ -2,7 +2,7 @@
 # (:4000/v1/prometheus), routed by Alertmanager. Deployed by chart/templates/alerting.yaml when
 # observability.alerting.enabled. Seeded from the Perses panels already labelled "alertable" — every metric
 # below is one this estate actually emits. Proven to FIRE on synthetic series by rules_test.yml
-# (`make alert-rules-check` → promtool). The live datasource round-trip is a drill (see GOAL-production-readiness.md).
+# (`make alert-rules-check` → promtool). The live datasource round-trip is a drill (see docs/DECISIONS.md "P3b").
 # The point: these turn SILENT failures (data quietly stops flowing) into a page. See docs/RUNBOOK-oncall.md.
 groups:
   - name: lance-lineage

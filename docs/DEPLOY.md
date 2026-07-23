@@ -24,7 +24,7 @@ into `.localbin/` (gitignored).
 | --------- | ---- | ---- |
 | **catalog** | app (FastAPI) + daprd sidecar | **producer** — creates Lance tables on S3; publishes OpenLineage events via Dapr |
 | **lineage** | app (FastAPI) + daprd sidecar | **consumer** — Dapr subscription ingests events into Apache AGE; serves the lineage API |
-| **frontend zones** | 5 apps (SvelteKit SSR) | the UI as rask-style micro-frontend **zones** — `home` (catch-all `/`) + `data` (`/data`) + `lineage` (`/lineage`) + `models` (`/models`) + `admin` (`/admin`). One parametrized `frontend.dockerfile` (`lance-<zone>:tag`); the **Ingress** path-routes each zone (`ingress.yaml`); every zone shares one env seam (`lance.frontendEnv`) + reads one origin-wide OIDC session cookie (the `home` zone owns `/auth/*`). Replaces the retired single `web` pod. |
+| **frontend zones** | 5 apps (SvelteKit SSR) | the UI as rask-style micro-frontend **zones** — `home` (catch-all `/`) + `data` (`/data`) + `lineage` (`/lineage`) + `models` (`/models`) + `admin` (`/admin`). One parametrized `frontend.dockerfile` (`lance-<zone>:tag`); the **Ingress** path-routes each zone (`ingress.yaml`); every zone shares one env seam (`lance.frontendEnv`) + reads one origin-wide OIDC session cookie (the `home` zone owns `/auth/*`). Replaces the retired single `web` pod. The admin zone additionally serves the ops pages `/admin/{audit,dlq,events,streams,tenants}` — the estate-wide ones (events feed, JetStream panel, tenant admin) gate on the `auth.bootstrapAdmin` estate-admin grant — and the data zone carries the namespace + table **lifecycle** surfaces (`/data/{namespaces,tables,warehouses}`: declare/create, drop/deregister/restore, rename, grants). |
 | **medallion** | 4 apps + sidecars | event-driven pipeline: `lance-ray` producer + raw→bronze→silver→gold movers (see [MEDALLION.md](MEDALLION.md)) |
 | **compaction** | app + sidecar | compaction/GC service triggered by a Dapr **cron binding** (`bindings.cron`) — compacts Lance fragments + GCs old versions |
 | **gateway** | nginx + sidecar | **backend** clean-URL edge that routes API traffic via **Dapr service invocation** (`/v1.0/invoke/...`): `/lineage/`,`/catalog/`,`/produce` (values-gated: `medallion.producer.expose`, off in prod — it's the unauthenticated demo entry),`/perses/`,`/greptime/`. Reached by a port-forward to its Service (`make dashboards`); it is **out of the frontend path** now (the zones' BFF proxies reach the backend directly, and the Ingress routes the zones). Dapr-delivered routes (lineage ingest + the reconcile cron binding) are **403-blocked** from one source (`lance.lineageSidecarOnlyRoutes`) — the sidecar is their only legitimate caller |
@@ -109,6 +109,12 @@ SCHEME-DERIVED from the issuer (2026-07-12): a plain-http issuer (the in-cluster
 https issuer (any real IdP) keeps the verifier's HTTPS guard enforced — never hardcoded open. OpenFGA's schema migrates against the AGE
 Postgres (pinned to v1.8.0; the openfga db's `search_path` is forced off AGE's `ag_catalog`).
 
+**First estate admin (`auth.bootstrapAdmin`).** Set it to a Dex subject (the id_token's `sub`, e.g.
+`alice`) and a post-install/upgrade hook Job grants that user `owner` on the FGA root object
+(`warehouse:lance_catalog`) — the grant the estate-wide surfaces gate on (`GET /v1/events`, the admin
+console's events/streams/tenants pages). Empty (the default) renders no Job and grants stay out-of-band
+(seed scripts / the UI). Requires `auth.enabled`; the Job is idempotent (check-before-write).
+
 **Per-user UI login across the zones (opt-in `frontend.oidc.enabled`).** By default the zones run auth-OFF
 even when the backends are governed: each reads lineage as `frontend.serviceIdentity` (allow-listed in
 `LINEAGE_SERVICE_SUBJECTS`), and catalog control-plane surfaces show "sign in" with no way to sign in —
@@ -141,7 +147,8 @@ Ingress controller. These steps mutate the cluster — run them yourself (or `!`
 # 3. deploy governed + zones OIDC-on + ingress-on (publicOrigin = the forwarded ingress origin;
 #    produceAdminProject=acme so alice's admin grant opens the produce door)
 !helm upgrade --install lance-ns ./chart --timeout 300s \
-   --set auth.enabled=true --set medallion.enabled=true --set medallion.produceAdminProject=acme \
+   --set auth.enabled=true --set auth.bootstrapAdmin=alice \
+   --set medallion.enabled=true --set medallion.produceAdminProject=acme \
    --set ingress.enabled=true \
    --set frontend.oidc.enabled=true \
    --set frontend.oidc.publicIssuer=http://lance-ns-dex:5556/dex \
@@ -189,6 +196,25 @@ catalog/lineage.
   seconds); manual fast cutover — `nats consumer rm` the `<app>-durable` consumers on
   LINEAGE/MEDALLION/TRAINING/DLQ — is only needed when upgrading with a chart older than that Job.
   Fresh installs never hit this. Details: [`RESILIENCE.md`](RESILIENCE.md) gap #7.
+- **Control-plane change-events (`catalog.controlEmit`, default on):** the catalog broadcasts its own
+  control-plane mutations (create/drop/grant/…) on a **dedicated group-less pubsub component**
+  (`pubsub.controlName` = `catalog-control-pubsub`, topic `catalog.control.v1`, own `CATALOG_CONTROL`
+  stream) so every catalog replica buffers every event; clients poll `GET /v1/events` (estate-admin
+  gated) and the admin zone renders it at `/admin/events`. Best-effort + fail-open: a bus outage
+  degrades to "no live refresh" (the audit trail still records the mutation), never a failed mutation.
+  The per-replica ring buffer is correct at `services.catalog.replicas=1` (the default).
+- **JetStream visibility (`/admin/streams`):** the admin zone's BFF reads the NATS HTTP monitor
+  (`NATS_MONITOR_API` → the headless Service's `:8222`, admitted by the `nats-monitor` NetworkPolicy
+  from web-admin pods only — the browser never touches NATS) and diffs live consumers against
+  `JETSTREAM_EXPECTED_CONSUMERS` (rendered from the same values the subscriptions render from) to
+  flag silently-dead subscriptions.
+- **Per-tenant medallion routing (`medallion.projectsEnabled`, opt-in, #84):** when true, the producer +
+  movers resolve a `project`-carrying trigger to that project's ACTIVE warehouse bucket (via
+  `MEDALLION_CONTROL_ROOT`) and the cascade writes `s3://<project-bucket>/medallion/<stage>` with
+  project-qualified lineage; project-less traffic is byte-identical, and with it false a project-carrying
+  trigger is dropped fail-closed. Warehouse-create refuses the medallion zone buckets
+  (`LANCE_RESERVED_BUCKETS`, auto-derived from `medallion.buckets`). Tenant lifecycle is driven from
+  `/admin/tenants`.
 - **AGE + OpenFGA share one Postgres**: AGE's `ag_catalog` search-path would break OpenFGA migrations,
   so the openfga db is pinned to `search_path = public` in the AGE initdb.
 - **kind has no host ports** — reach services via `make dashboards` (port-forwards).

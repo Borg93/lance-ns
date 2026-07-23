@@ -2,7 +2,7 @@
 # `make alert-rules-check` runs `promtool check rules rules.yml` + `promtool test rules rules_test.yml`.
 # This is the "prove it fires" that render-checking alone can't give: the render can be valid while the
 # PromQL never trips. The remaining unproven piece is only the live vmalert->GreptimeDB query round-trip
-# (a drill, GOAL-production-readiness.md P3b).
+# (a drill, docs/DECISIONS.md "P3b").
 rule_files:
   - rules.yml
 

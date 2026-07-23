@@ -1,9 +1,10 @@
 # On-call runbook
 
 Symptom → cause → action for the known failure modes of the Lance-lakehouse estate. Grounded in how this
-stack actually fails; pairs with the phased hardening in [GOAL-production-readiness.md](GOAL-production-readiness.md).
-Until the alerting engine lands (P3), these are found by watching the Perses dashboards (`make dashboards`)
-or a user report — not a page.
+stack actually fails. With alerting enabled (`observability.alerting.enabled`, on in prod), the proven
+rules (`chart/alerting/rules.yml`) page via vmalert → Alertmanager — note the live vmalert→GreptimeDB
+round-trip is still an unrehearsed drill (see [DECISIONS.md "P3b"](DECISIONS.md)). On kind (alerting off),
+these are found by watching the Perses dashboards (`make dashboards`) or a user report — not a page.
 
 ## Orientation
 
@@ -43,7 +44,7 @@ or a user report — not a page.
 
 **Cause.** OpenFGA is the authz chokepoint — every governed call `fga.check`s it and **fails closed**. A
 single-replica OpenFGA (kind) that is drained/OOMed/rescheduling takes the whole estate down until it
-returns. Prod runs 3 replicas + a PDB (P1b/P2b), which makes this a quorum event, not a total outage.
+returns. The prod overlay runs 3 replicas + a PDB, which makes this a quorum event, not a total outage.
 
 **Diagnose.** `kubectl get pods -l app.kubernetes.io/name=openfga`; check its datastore (`age-postgres`) is
 up — OpenFGA stores tuples in the same Postgres as the lineage graph.
@@ -72,7 +73,7 @@ auto-unseal operator before calling the secret tier prod-ready.
 **Symptom.** An app pod restarts repeatedly shortly after scheduling; logs show the lifespan never finishing.
 
 **Cause.** The FastAPI lifespan (Dapr secret fetch ~80s worst case + AGE pool + DDL + FGA provision) runs
-**before** uvicorn serves. The `startupProbe` (P1) gives 300s for this; if boot exceeds it, a dependency is
+**before** uvicorn serves. The `startupProbe` gives 300s for this; if boot exceeds it, a dependency is
 genuinely stuck — usually OpenBao sealed (above) or AGE unreachable.
 
 **Diagnose.** `kubectl logs <pod> --previous` for where the lifespan stalls; check OpenBao + AGE.
@@ -84,14 +85,14 @@ genuinely stuck — usually OpenBao sealed (above) or AGE unreachable.
 **Symptom.** `/readyz` returns 503 `{"status":"degraded","database":"unavailable"}`; the pod goes `NotReady`
 and is pulled from rotation (correct — it stops serving 500s).
 
-**Cause.** `/readyz` gates on BOTH the AGE pool (`SELECT 1`) and the **graph** (`RETURN 1`, P1). A graph
+**Cause.** `/readyz` gates on BOTH the AGE pool (`SELECT 1`) and the **graph** (`RETURN 1`). A graph
 failure (an external managed-PG that was never bootstrapped, a failed `create_graph`, a bad restore) now
 fails readiness LOUDLY instead of silently discarding events.
 
 **Diagnose.** `kubectl exec <age-pod> -- psql -c "LOAD 'age'; SELECT count(*) FROM ag_catalog.ag_graph;"` —
 is the `lineage` graph present? Is the pool reachable?
 
-**Act.** If the graph is absent on managed PG, lineage self-heals via `ensure_graph()` on next boot (P2a) —
+**Act.** If the graph is absent on managed PG, lineage self-heals via `ensure_graph()` on next boot —
 restart the pod. If the pool is down, see [AGE down](#age-postgres-down--lineage--fga).
 
 ## Cascade stalled
@@ -114,7 +115,7 @@ fixing a Ray-job cause.
 
 ## DLQ parking → a delivery gave up
 
-**Symptom.** `medallion_dlq_parked{lance_medallion_app}` rises (P1) and/or `dapr_dead_letter_parked` ERROR
+**Symptom.** `medallion_dlq_parked{lance_medallion_app}` rises and/or `dapr_dead_letter_parked` ERROR
 logs. A specific cascade item is permanently stalled after exhausting its retry schedule.
 
 **Cause.** Dapr's Resiliency retry policy was exhausted for a delivery, so the sidecar published it to the
@@ -142,12 +143,13 @@ non-zero depth means the relay isn't draining — usually the lineage service or
 **Symptom.** Catalog reads/writes fail; Lance datasets unreadable; GreptimeDB flush errors.
 
 **Cause.** `rustfs` is a single-replica object store backing BOTH the Lance lakehouse and GreptimeDB's
-object storage — a data-plane SPOF (kind). Prod answer is a managed S3 (`rustfs.externalEndpoint`, P7).
+object storage — a data-plane SPOF (kind). Prod answer is a managed S3 (`rustfs.externalEndpoint` — see
+[DECISIONS.md "P4/P7"](DECISIONS.md)).
 
 **Diagnose.** `kubectl get pods -l app.kubernetes.io/component=rustfs`; check the PVC is bound and the node
 can mount it (RWO + Recreate strategy means it can't move nodes while the old pod holds the volume).
 
-**Act.** Recover the pod/volume; for prod durability, externalize to managed S3 (P7).
+**Act.** Recover the pod/volume; for prod durability, externalize to managed S3.
 
 ## AGE Postgres down → lineage + FGA
 
@@ -155,9 +157,11 @@ can mount it (RWO + Recreate strategy means it can't move nodes while the old po
 lineage graph store and OpenFGA's datastore.
 
 **Cause.** Single StatefulSet replica (kind), a dual-purpose SPOF. Prod answer is managed Postgres
-(`age.externalHost` / CloudNativePG, P7) — sized via the `resources.age` tier (P2c, 1Gi).
+(`age.externalHost` / CloudNativePG — see [DECISIONS.md "P4/P7"](DECISIONS.md) and docs/CNPG-AGE.md) —
+sized via the `resources.age` tier (1Gi in prod).
 
 **Diagnose.** `kubectl get pods -l app.kubernetes.io/component=age-postgres`; `pg_isready`; PVC bound?
 
-**Act.** Recover the pod/volume; lineage self-bootstraps the graph on reconnect (P2a). For prod, externalize
-to a replicated managed Postgres (P7) and take real backups (P4).
+**Act.** Recover the pod/volume; lineage self-bootstraps the graph on reconnect (`ensure_graph()`). For
+prod, externalize to a replicated managed Postgres and take real backups
+([RUNBOOK-restore.md](RUNBOOK-restore.md)).

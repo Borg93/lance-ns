@@ -157,7 +157,7 @@ def test_zero_disables_the_limit() -> None:
             await send({"type": "http.response.start", "status": 200, "headers": []})
             await send({"type": "http.response.body", "body": b""})
 
-        mw = WriteConcurrencyLimitMiddleware(app, max_concurrent=0)  # 0 => disabled (pre-P5 behavior)
+        mw = WriteConcurrencyLimitMiddleware(app, max_concurrent=0)  # 0 => disabled
         return await _drive(mw, _write("/v1/table/t/insert"))
 
     assert asyncio.run(scenario()) == 200

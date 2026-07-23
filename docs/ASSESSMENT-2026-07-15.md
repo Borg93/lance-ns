@@ -10,8 +10,9 @@
 > below are unaffected and still live.
 
 Three parallel assessments (multi-agent, evidence-grounded in this repo + web currency checks),
-requested alongside the #42 model-registry UI ship. Companion to `FEATURE-GAP.md` (the standing
-Lakekeeper/Marquez bench); this file adds the wider-catalog bench and the two forward-looking work-lists.
+requested alongside the #42 model-registry UI ship. Companion to `FEATURE-GAP.md` (the then-standing
+Lakekeeper/Marquez bench — since retired; its recorded deviations live in `DECISIONS.md` and the current
+bench is `BENCH-2026-07-22.md`); this file adds the wider-catalog bench and the two forward-looking work-lists.
 
 ## 1. Feature bench vs Polaris / Unity Catalog OSS / Gravitino / Nessie / Lakekeeper
 
@@ -23,7 +24,7 @@ Lakekeeper/Marquez bench); this file adds the wider-catalog bench and the two fo
 
 # Bench: lance-ns vs Polaris / Unity Catalog OSS / Gravitino / Nessie / Lakekeeper (2026-07-15)
 
-**Ground truth**: `/home/blackwell/Desktop/lance-ns/docs/FEATURE-GAP.md` (Lakekeeper + Marquez bench, currency-checked 2026-07-12) and `/home/blackwell/Desktop/lance-ns/docs/API.md` (66 catalog + 21 lineage paths). Claims verified in `services/catalog` and `services/lineage` where noted.
+**Ground truth**: `docs/FEATURE-GAP.md` (the Lakekeeper + Marquez bench as it stood, currency-checked 2026-07-12; since retired — see `DECISIONS.md` + `BENCH-2026-07-22.md`) and `/home/blackwell/Desktop/lance-ns/docs/API.md` (66 catalog + 21 lineage paths). Claims verified in `services/catalog` and `services/lineage` where noted.
 
 **Currency check**: Lakekeeper's latest release is still v0.13.1 (2026-06-30) — nothing shipped after FEATURE-GAP.md's 2026-07-12 check, so its Lakekeeper section remains current (v0.13.0's Lance generic tables, nested roles, admission gates, multi-OIDC, per-warehouse format-version policy are all already accounted for). Competitor states used: Polaris 1.5.0 (2026-05-18: generic tables GA, catalog federation incl. BigQuery Metastore, policy store, multi-event-listener framework, OPA + Ranger external authorizers), Unity Catalog OSS 0.4.x–0.5.0 (storage credentials + external locations + vending, VARIANT, atomic CTAS, metric views experimental, models/volumes/functions; note: the web fetcher rendered some UC dates as 2024 — the CVE-2026-27478 fix in 0.4.1 confirms these are 2026 releases), Gravitino 1.2–1.3 (Table Maintenance Service, metalake-wide tags incl. column tags, policies + task templates, UDF management, redesigned UI, **a Lance REST service since 1.1**), Nessie (catalog-level git semantics — stable feature set).
 

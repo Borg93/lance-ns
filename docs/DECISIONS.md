@@ -245,6 +245,40 @@ half is already done: `create_materialized_view` seeds FGA ownership on the `mat
 table must be recreated, an invalidated index returns wrong rows, an un-tailed ref mutation is lost lineage.
 Recorded so nobody "cleans them up" back into the trap.
 
+## FEATURE-GAP §1 (serving) — blob serving is a governed proxy, not presigned URLs
+
+**Decision.** Credential-less consumers (browser, notebook) fetch blob bytes back through the catalog:
+`GET /v1/table/{id}/blobs?column=&row=[&version=]` streams the bytes with RFC 9110 Range support — a
+`Range: bytes=…` request reads only the window from storage via the lazy `BlobFile` (206 +
+`Content-Range`; 416 when unsatisfiable) — governed at reader-tier `can_read_data` like `/query`.
+Deliberately a governed proxy, **not** presigned URLs: a signed URL bypasses ReBAC for its TTL.
+Blob modes managed/inline/packed/dedicated (bytes copied in) always work; **external-pointer**
+(`Blob.from_uri` outside the dataset root) is gated behind `vending.allowExternalBlobs` (default off —
+an external object's lifecycle is outside Lance's version-aware GC) and rejected with a clean 400 when off.
+
+**Rationale.** The catalog vends storage access; handing out a URL that answers without an FGA check for
+its lifetime would punch a ReBAC hole exactly at the highest-value bytes (media blobs). Range support
+keeps the proxy viable for large blobs (a viewer reads a window, not the object).
+
+## FEATURE-GAP minor deviations #1–#7 — the spec-deviation register
+
+**Decision.** The catalog's conscious deviations from `ns_catalog/spec.yaml`, recorded so each is a
+decision rather than drift (originally the retired `FEATURE-GAP.md` §1 table; #1/#3/#5/#7 since fixed):
+
+| # | Deviation | Spec says | Status |
+|---|-----------|-----------|--------|
+| 1 | ~~Path/body `id` mismatch silently overrides~~ | 400 when both present **and differ** | ✅ fixed (#43) — every body-carrying `{id}` route reconciles via `core/identifiers.reconcile_body_id`; a differing body id is a 400 (the path id is what the authz gate checked, so silently picking either is wrong) |
+| 2 | Unsupported → HTTP **501** | `UnsupportedOperationErrorResponse` is **406** | body `code:0` is correct; only the HTTP status diverges (501 is arguably cleaner) — kept |
+| 3 | ~~`exists` → 204~~ | 200 no-content | ✅ fixed (spec 0.9) — both `exists` endpoints return 200 |
+| 4 | CreateTable ignores `x-lance-table-location` + `storage_options` | caller-chosen location/options | conscious: the catalog vends storage access (fine for single-root; a completeness gap) |
+| 5 | ~~MergeInsert param set~~ | full param set | ✅ conformant since the pylance-8/spec-0.9 upgrade; residue: the FastAPI signature keeps `on` optional so the backend's own 400 answers a missing `on` (tightening would trade a spec-true 400 for a 422 — consciously left) |
+| 6 | List ops omit per-request `delimiter` (`include_declared` shipped) | those params | **consciously skipped** — delimiter is deploy-fixed via `LANCE_NS_DELIMITER`; honoring it per-request would have to thread through the router-level FGA gate too (endpoint-only support would let the gate authorize a differently-parsed object — an authz-drift hazard); the native backend also cannot honor the `ListAllTables` response-joining half |
+| 7 | ~~`insert` emits versionless lineage~~ | insert bumps a Lance version | ✅ fixed (GOAL 3) — `insert` reopens the dataset and stamps the real version on the WROTE edge |
+
+**Rationale.** Each open row (#2, #4, #6) trades spec-letter conformance for a safety or architecture
+property (clean 501 semantics, catalog-vended storage, authz-gate/parse coherence); recording them keeps
+a future "cleanup" from reintroducing the hazard the deviation avoids.
+
 ## Gateway checks — where auth lives (2026-07-23)
 
 **Decision.** No gateway-level authorization, ever; no gateway-level authentication today. AuthN = the IdP
@@ -363,3 +397,126 @@ blast radius at `replicas: 1` is one refresh-hint feed whose durable record is t
 **Tighten-when-it-bites:** give the catalog's control subscription a *named ephemeral prefix* (Dapr
 component `consumerID`/name plumbing) and match on the prefix instead of `"*"` — do this the first time
 a masked dead broadcast survives past an operator session.
+
+## control-events — broadcast + ring buffer
+
+**Decision.** The control-plane change-event feed (shipped + live-proven 2026-07-23,
+`scripts/verify_control_events.sh`) rides a **dedicated** Dapr pub/sub component
+(`catalog-control-pubsub`, topic `catalog.control.v1`) that the catalog subscribes to **without a
+`queueGroupName`** — with JetStream, no deliver group means **every** catalog replica receives **every**
+event (broadcast, not competing-consumer) — and with `deliverPolicy: new` on an **ephemeral** consumer:
+a restarting replica does not replay retained history into its buffer, it starts fresh at the stream head.
+Each replica appends events into a bounded, in-memory, drop-oldest ring buffer
+(`services/catalog/core/control_buffer.py`) with a monotonic cursor and `event_id` dedupe, served by
+`GET /v1/events?since=<cursor>`.
+
+**Rationale.** The catalog has no NATS client and must not grow one (the `lineage_emit.py` no-broker-
+client principle); a per-connection JetStream ephemeral consumer was rejected in the 2026-07-22 review
+because Dapr subscriptions are app-level/startup-registered. The no-queueGroup broadcast is the
+multi-replica-correct fan-out with zero new dependencies. `deliverPolicy=new` + ephemeral is correct
+here (where it would be a bug for the cascade movers) because events are **refresh hints**, not the
+durable record — the audit trail is — so replaying history into a fresh buffer would only re-announce
+stale changes; a client bridging a restart just sees `reset` and re-reads authoritative state.
+
+## control-events — per-replica cursor boundary
+
+**Decision.** The ring buffer **and** its monotonic cursor are **per-replica** (each broadcast subscriber
+buffers independently, in process memory). This is correct at the default `services.catalog.replicas: 1`.
+Scaling the catalog past one replica requires **session affinity** (a client's polls stick to one
+replica) **or a shared buffer** — a NATS KV-backed buffer is the natural candidate when task #20
+(NACK/CRD-managed streams) unparks — otherwise a load-balanced poll hits different replicas, sees
+inconsistent cursors, and degrades to noisy `reset`s.
+
+**Rationale.** Safe-by-construction degradation: because an event is only a hint and the consumer
+(`admin.remote.ts`) dedups by `event_id` and clears on `reset`, a multi-replica catalog degrades
+*noisily, never wrongly* — the cost is redundant re-reads, not wrong data. Accepting the boundary keeps
+the shipped feature dependency-free (no shared store) at the deployed replica count, with the scaling
+path named rather than silently missing.
+
+## control-events — estate-admin scope
+
+**Decision.** `GET /v1/events` is gated by a real **catalog-side** FGA check of `can_observe_events` on
+the fixed root object (`settings.fga_root_object` = `warehouse:lance_catalog`), an owner-tier
+**platform** privilege — a mere project admin gets 403, and the client treats 403 as terminal. A
+*meaningful* poll (events delivered or a reset) is audited (`event_stream_opened`); empty ticks are not,
+so a 5s-polling console does not flood the audit trail.
+
+**Rationale.** The feed is **estate-wide** — the buffer holds every project's governance changes
+(broadcast subscription, no per-tenant partition) — so authorization scope must equal data scope. The
+first draft's per-project `can_administer` param let any project admin read the whole estate (the #12
+review fix, 2026-07-23); and the `/audit` "admin bar" precedent lived only in the BFF, so this feature
+had to add the catalog-side gate itself. Honest limitation, accepted: live refresh is admin-only — the
+non-admin whose *own* access just changed does not get a live refresh; the benefit is for an admin
+observing the estate.
+
+## control-events — query.live supersedes SSE
+
+**Decision.** The originally planned P3 — a hand-rolled catalog SSE endpoint
+(`GET /v1/events/stream`) — is **superseded, not deferred**: the console consumes the feed through
+SvelteKit's **`query.live`** remote function
+(`frontend/components/frontends/admin/src/lib/remote/admin.remote.ts`). The generator runs on the zone
+(Bun) server — it holds the cursor, a bounded recent window, and `event_id` dedup, polls the catalog
+`GET /v1/events` with the signed-in admin's bearer, and yields whenever the window changes — while the
+framework owns the browser↔zone stream and reconnect (backoff + `navigator.onLine`). The zone→catalog
+leg stays a plain ~5s poll.
+
+**Rationale.** Poll-first was already the right default for a small admin audience ("refreshed within
+~5s" is enough for governance changes), and the SSE upgrade carried a hazard checklist — nginx
+`proxy_buffering`/`X-Accel-Buffering`, Bun's 10s adapter `idleTimeout` vs heartbeat cadence,
+terminal-on-403 without `EventSource` reconnect hammering — plus a hard block on the zones being
+charted. The P5 MFE migration charted the zones and `query.live` gave the browser-stream half for free,
+so there is no hand-rolled SSE to build; the hazard list survives only as the streaming-config checklist
+the live drive verifies (ingress no-buffer, adapter-bun `idleTimeout`).
+
+## control-events — fail-open emit contract
+
+**Decision.** Every control-plane mutation endpoint `await`s the emit (`core/control_emit.py`)
+**after** the backend/FGA mutation succeeds — so a change that did not happen is never announced — and
+the emitter **swallows every error**: a bus outage degrades to "no live refresh + the audit trail still
+records it", never a failed mutation. The **audit trail is the durable compliance record**; the event
+stream is only the live-notify layer, and an event is a refresh hint, never authoritative data — on
+receipt the UI re-reads state through the normal FGA-governed path, so the feed can never disclose more
+than the caller may already read, and a dropped/duplicated/late event only costs a redundant (or
+slightly delayed) re-read. Actor is the **verified** OIDC subject, never self-asserted.
+
+**Rationale.** This mirrors the `lineage_emit` fail-open principle: eventing must never be able to fail
+a mutation. Splitting durability (audit, GreptimeDB) from liveness (bus, ring buffer) is what makes the
+in-memory drop-oldest buffer and best-effort publish acceptable — nothing that matters is *only* in the
+stream.
+
+## P3b — alerting: rule logic proven hermetically; the live transport is a drill
+
+**Decision.** (Extracted from the retired `GOAL-production-readiness.md`.) The alert rules
+(`chart/alerting/rules.yml`) are *proven to fire* on synthetic series by `chart/alerting/rules_test.yml`
+via `promtool test rules` (`make alert-rules-check`, in the CI test job) — a hermetic proof render-checking
+alone cannot give, since a render can be valid while the PromQL never trips. The evaluator
+(`chart/templates/alerting.yaml`: vmalert querying GreptimeDB's `:4000/v1/prometheus`, notifying
+Alertmanager) is render-verified and gated on `observability.alerting.enabled` (on in prod). The one
+deliberately-unproven piece is the **live vmalert→GreptimeDB query round-trip plus a real Alertmanager
+receiver** (`webhookUrl` → Slack/PagerDuty): that needs a live cluster and remains an open prod drill.
+Only the transport is unproven — the alert logic is not.
+
+**Rationale.** Splitting the proof this way keeps the part that can regress silently (the PromQL logic)
+pinned in CI, while the part that depends on a real cluster + a real paging endpoint is an explicit,
+documented acceptance step instead of a pretended green.
+
+## P4/P7 — backups + structural SPOFs: the prod answer is externalize, not in-chart HA
+
+**Decision.** (Extracted from the retired `GOAL-production-readiness.md`.) The two big structural SPOFs —
+RustFS and AGE-Postgres single-replica — are deliberately *not* solved in-chart: that would need an
+object-store operator / CloudNativePG, the same class as the parked items. The chart instead wires the
+handoff — `rustfs.externalEndpoint` / `age.externalHost` — and `prod-render-check` leg 10 asserts the
+RustFS handoff is atomic with the GreptimeDB object-store endpoint (either both set or neither). The
+AGE-on-CNPG path is documented and proven (docs/CNPG-AGE.md; CNPG physical PITR supersedes the pg_dump
+path). Adopting either = flip the value.
+
+**The open backup gaps that follow** (accepted loss windows until externalized; operational detail in
+docs/DURABILITY.md + docs/RUNBOOK-restore.md):
+- the pg_dump lands on RustFS, so a total RustFS loss loses both the Lance data *and* the DB dumps
+  (fate-sharing) — ship the dumps off-cluster, or externalize to CNPG PITR;
+- the OpenBao file-backend PVC has no backup path (back up the unseal material out-of-band);
+- a documented RPO/RTO and verification that the VolumeSnapshot actually succeeds (the empty
+  `snapshotClassName` is a per-cluster value) are still owed;
+- lesser SPOFs stay documented, not fixed: the movers' single-flight lock is process-local (caps each
+  stage at 1 mover; a distributed lock is parked until throughput demands it), and Dex is a
+  single-replica in-memory IdP (externalize for prod).

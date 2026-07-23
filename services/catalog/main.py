@@ -31,6 +31,8 @@ from catalog.api.load_shed import WriteConcurrencyLimitMiddleware
 from catalog.api.maintenance import maintenance_middleware
 from catalog.api.v1.router import api_router
 from catalog.core.config import get_settings
+from catalog.core.control_buffer import ControlEventBuffer
+from catalog.core.control_emit import make_control_emitter
 from catalog.core.lineage_emit import make_emitter
 from catalog.core.namespace import build_namespace
 from catalog.core.vending import make_vendor
@@ -121,6 +123,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         topic=settings.dapr_topic,
         job_namespace=settings.lineage_job_namespace,
         timeout_seconds=settings.lineage_emit_timeout_seconds,
+    )
+    # Control-plane change-events (opt-in, best-effort — the governance/metadata stream). Publishes through
+    # the same local sidecar (reuse/lazily build the Dapr client). The per-replica ring buffer is ALWAYS
+    # built (plain memory, fed by the broadcast subscription in api/dapr.py); the emitter is a no-op when off.
+    if settings.control_emit_enabled and dapr_client is None:
+        dapr_client = DaprClient()
+    app.state.control_buffer = ControlEventBuffer(settings.control_buffer_size)
+    app.state.control_emitter = make_control_emitter(
+        enabled=settings.control_emit_enabled,
+        dapr=dapr_client,
+        pubsub=settings.control_pubsub,
+        timeout_seconds=settings.control_emit_timeout_seconds,
     )
     app.state.startup_complete = True
     try:

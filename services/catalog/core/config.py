@@ -206,6 +206,22 @@ class Settings(BaseSettings):
     dapr_pubsub: str = Field(default="lineage-pubsub", alias="LANCE_DAPR_PUBSUB")
     dapr_topic: str = Field(default="lineage.events.v1", alias="LANCE_DAPR_TOPIC")
 
+    # Control-plane change-events (opt-in, best-effort — the governance/metadata stream, distinct from the
+    # OpenLineage data events above). When on, mutations publish a `CatalogControlEvent` onto the SAME Dapr
+    # pub/sub component (`dapr_pubsub`) under the versioned `catalog.control.v1` topic, subscribed WITHOUT a
+    # queueGroupName so every replica buffers every event for the poll endpoint. Off by default, like lineage.
+    control_emit_enabled: bool = Field(default=False, alias="LANCE_CONTROL_EMIT_ENABLED")
+    control_emit_timeout_seconds: float = Field(
+        default=5.0, ge=0.1, alias="LANCE_CONTROL_EMIT_TIMEOUT_SECONDS"
+    )
+    # A DEDICATED Dapr pub/sub component (NOT the shared lineage one) with NO queueGroupName, so the
+    # catalog's own subscription is a BROADCAST — every replica receives every event → each replica's ring
+    # buffer stays complete. The chart renders it (dapr-component.yaml) + a NATS stream (nats-stream-job).
+    control_pubsub: str = Field(default="catalog-control-pubsub", alias="LANCE_CONTROL_PUBSUB")
+    # The bounded per-replica ring buffer size (events retained for `GET /v1/events`); a client whose cursor
+    # fell off the end (overflow) gets `reset: true` → the console `invalidateAll()`s.
+    control_buffer_size: int = Field(default=512, ge=1, alias="LANCE_CONTROL_BUFFER_SIZE")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail fast on incomplete auth / lineage configuration."""

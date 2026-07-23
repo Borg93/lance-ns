@@ -2,6 +2,8 @@
 // Types are generated from docs/catalog-openapi.json (`bun run gen:types:catalog`) — never hand-mirrored.
 // The describe route serializes with response_model_exclude_none, so its null fields arrive absent —
 // read optional fields with `?? null` rather than trusting the generated required-nullable shape.
+import { parse } from '@rask/api';
+import * as v from 'valibot';
 import type { components } from './catalog.generated';
 import { type ApiResult, requestJSON as request } from './http';
 
@@ -318,3 +320,28 @@ export const bindWarehouseNamespace = (id: string, namespace: string) =>
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ namespace }),
 	});
+
+// The lance-namespace DropNamespaceResponse wire contract (all fields optional — the catalog serializes
+// with response_model_exclude_none). Parsed (not cast) at the boundary per the @rask/api
+// parse-don't-validate rule: a schema drift throws to the caller instead of lying downstream.
+const DropNamespaceResponseSchema = v.object({
+	context: v.optional(v.record(v.string(), v.string())),
+	properties: v.optional(v.record(v.string(), v.string())),
+	transaction_id: v.optional(v.array(v.string())),
+});
+export type DropNamespace = v.InferOutput<typeof DropNamespaceResponseSchema>;
+
+/** #85 drop a namespace. Cascade is a BODY field (`behavior: "Cascade"` also drops the tables inside;
+ * the default `"Restrict"` errors on a non-empty namespace) — not a query param. Owner-gated by the
+ * catalog (can_delete on namespace:<id>); the BFF forwards only the signed-in user's session. */
+export const dropNamespace = async (
+	namespace: string,
+	cascade: boolean,
+): Promise<ApiResult<DropNamespace>> => {
+	const res = await requestJSON<unknown>(`v1/namespace/${enc(namespace)}/drop`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ behavior: cascade ? 'Cascade' : 'Restrict' }),
+	});
+	return res.ok ? { ok: true, data: parse(DropNamespaceResponseSchema, res.data) } : res;
+};

@@ -4,15 +4,25 @@
 	// needs a parent id), so we derive the namespaces from the tables the catalog lists: every namespace
 	// that holds at least one table, with its tables linked into the detail view. Same stack-mode states
 	// as the tables page — governed without a session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data.
-	import { Boxes, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	// Lifecycle (#85): drop with an AlertDialog confirm (Restrict by default; Cascade opt-in — the
+	// catalog's dir backend errors a Restrict drop of a non-empty namespace). Creation deliberately has
+	// NO surface here — the governed path is the warehouse-bind flow (/warehouses), which the "New
+	// namespace" affordance points at; a bare create would bypass the bucket-per-warehouse tenancy.
+	import { AlertDialog } from '@rask/ui/alert-dialog';
+	import { Boxes, Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
-	import { fetchTables } from './catalog';
+	import { dropNamespace, fetchTables } from './catalog';
 
 	const POLL_MS = 5000;
 
 	let tables = $state<string[] | null>(null);
 	let lastStatus = $state(0);
 	let settled = $state(false);
+	let busy = $state(false);
+	let banner = $state<{ tone: 'ok' | 'fail'; text: string } | null>(null);
+	let dropOpen = $state(false);
+	let dropTarget = $state<string | null>(null);
+	let cascade = $state(false);
 
 	const unauthorized = $derived(tables === null && lastStatus === 401);
 	const offline = $derived(tables === null && settled && lastStatus !== 401);
@@ -45,6 +55,49 @@
 		const timer = setInterval(load, POLL_MS);
 		return () => clearInterval(timer);
 	});
+
+	// Tables inside the namespace queued for drop — sizes the Cascade choice honestly.
+	const targetCount = $derived(
+		dropTarget === null ? 0 : (groups.find(([ns]) => ns === dropTarget)?.[1].length ?? 0),
+	);
+
+	function openDrop(ns: string): void {
+		dropTarget = ns;
+		cascade = false;
+		banner = null;
+		dropOpen = true;
+	}
+
+	function fail(ns: string, status: number, detail: string): void {
+		if (status === 401)
+			banner = { tone: 'fail', text: 'Sign in — dropping a namespace is a per-user action.' };
+		else if (status === 403)
+			banner = { tone: 'fail', text: `Denied: dropping ${ns} needs the owner rung (can_delete).` };
+		else if (status === 0)
+			banner = { tone: 'fail', text: 'Catalog unreachable — the drop was not applied.' };
+		else banner = { tone: 'fail', text: detail };
+	}
+
+	async function confirmDrop(): Promise<void> {
+		const ns = dropTarget;
+		if (ns === null || busy) return;
+		busy = true;
+		banner = null;
+		try {
+			const res = await dropNamespace(ns, cascade);
+			if (res.ok) {
+				banner = { tone: 'ok', text: `namespace ${ns} dropped${cascade ? ' (cascade)' : ''}` };
+				await load();
+			} else {
+				fail(ns, res.status, res.detail);
+			}
+		} catch (err) {
+			// the parse boundary throws on a wire-contract drift — surface it, never render from a lie
+			banner = { tone: 'fail', text: `drop response drifted from the contract: ${String(err)}` };
+		} finally {
+			busy = false;
+		}
+	}
 </script>
 
 <div class="page">
@@ -52,7 +105,20 @@
 		<h1>Namespaces</h1>
 		<span class="sub mono">grouped from the catalog registry · &lt;namespace&gt;$&lt;table&gt;</span
 		>
+		<a
+			class="new"
+			href={`${base}/warehouses`}
+			title="Namespaces are created through the governed warehouse-bind flow"
+		>
+			<Plus size={12} /> New namespace
+		</a>
 	</header>
+
+	{#if banner}
+		<div class="banner" class:ok={banner.tone === 'ok'} class:fail={banner.tone === 'fail'}>
+			{banner.text}
+		</div>
+	{/if}
 
 	{#if unauthorized}
 		<div class="empty">
@@ -67,7 +133,11 @@
 	{:else if tables === null}
 		<div class="empty"><p>Loading…</p></div>
 	{:else if groups.length === 0}
-		<div class="empty"><p>No namespaces yet — a table create makes the first.</p></div>
+		<div class="empty">
+			<p>
+				No namespaces yet — <a href={`${base}/warehouses`}>bind one to a warehouse</a> to create the first.
+			</p>
+		</div>
 	{:else}
 		{#each groups as [ns, members] (ns)}
 			<section class="ns">
@@ -75,6 +145,14 @@
 					<Boxes size={13} />
 					<span class="mono ns-name">{ns}</span>
 					<span class="count">{members.length} table{members.length === 1 ? '' : 's'}</span>
+					<button
+						class="drop"
+						aria-label={`Drop namespace ${ns}`}
+						disabled={busy}
+						onclick={() => openDrop(ns)}
+					>
+						<Trash2 size={12} /> drop
+					</button>
 				</div>
 				<ul class="list">
 					{#each members as t (t)}
@@ -85,6 +163,31 @@
 		{/each}
 	{/if}
 </div>
+
+<AlertDialog.Root bind:open={dropOpen}>
+	<AlertDialog.Content>
+		<AlertDialog.Title>Drop namespace {dropTarget}</AlertDialog.Title>
+		<AlertDialog.Description>
+			This permanently drops <span class="mono">{dropTarget}</span> from the catalog (owner-gated: can_delete).
+			The default Restrict behavior refuses a non-empty namespace — tick Cascade to also drop everything
+			inside it.
+		</AlertDialog.Description>
+		<label class="cascade">
+			<input type="checkbox" bind:checked={cascade} disabled={busy} />
+			Cascade — also drop the {targetCount} table{targetCount === 1 ? '' : 's'} inside
+		</label>
+		<div class="dialog-actions">
+			<AlertDialog.Cancel disabled={busy}>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action
+				class="border-destructive/40 bg-destructive/15 text-destructive hover:bg-destructive/25"
+				disabled={busy}
+				onclick={confirmDrop}
+			>
+				Drop
+			</AlertDialog.Action>
+		</div>
+	</AlertDialog.Content>
+</AlertDialog.Root>
 
 <style>
 	.page {
@@ -105,6 +208,37 @@
 	.sub {
 		color: var(--faint);
 		font-size: 12px;
+	}
+	.new {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		margin-left: auto;
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		text-decoration: none;
+	}
+	.new:hover {
+		border-color: var(--mut);
+	}
+	.banner {
+		padding: 8px 12px;
+		border-radius: var(--radius-sm);
+		border: 1px solid var(--line);
+		margin-bottom: 12px;
+		font-size: 13px;
+	}
+	.banner.ok {
+		border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
+		color: var(--ok);
+	}
+	.banner.fail {
+		border-color: color-mix(in srgb, var(--fail) 45%, var(--line));
+		color: var(--fail);
 	}
 	.ns {
 		margin-bottom: 18px;
@@ -146,5 +280,38 @@
 		gap: 8px;
 		color: var(--mut);
 		padding: 32px 0;
+	}
+	.drop {
+		display: inline-flex;
+		align-items: center;
+		gap: 4px;
+		margin-left: auto;
+		background: none;
+		border: none;
+		border-radius: var(--radius-sm);
+		color: var(--faint);
+		font-size: 11px;
+		padding: 2px 6px;
+		cursor: pointer;
+	}
+	.drop:hover {
+		color: var(--fail);
+		background: var(--panel-2);
+	}
+	.drop:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.cascade {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		color: var(--mut);
+		font-size: 13px;
+	}
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
 	}
 </style>

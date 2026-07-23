@@ -21,6 +21,29 @@ scopes:
 {{- if .Values.compaction.lineageEmit }}
   - {{ .Values.compaction.daprAppId }} {{/* compaction publishes maintenance lineage only when lineageEmit is on */}}
 {{- end }}
+{{- if .Values.catalog.controlEmit }}
+---
+# BROADCAST component for the catalog's OWN control-plane change-events (grants/warehouses/policies/tables).
+# DEDICATED (not the shared lineage-pubsub) and with NO queueGroupName → jetstream sets no DeliverGroup, so
+# EVERY catalog replica receives EVERY event and appends it to its per-replica ring buffer (GET /v1/events).
+# The catalog is BOTH publisher (core/control_emit.py) and subscriber (api/dapr.py) on this one component.
+# Ephemeral (no durableName) + deliverPolicy=new: a booting/redeployed replica must NOT replay 168h of past
+# governance events into a fresh in-memory buffer — the buffer is a live-refresh hint window, not a log.
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: {{ .Values.pubsub.controlName | default "catalog-control-pubsub" }}
+  labels: {{- include "lance.labels" . | nindent 4 }}
+spec:
+  type: pubsub.jetstream
+  version: v1
+  metadata:
+    - { name: natsURL, value: "{{ include "lance.natsUrl" . }}" }
+    - { name: name, value: "lance-dapr-catalog-control" }
+    - { name: deliverPolicy, value: "new" }
+scopes:
+  - {{ .Values.services.catalog.daprAppId }}
+{{- end }}
 {{- /* One component PER SUBSCRIBER app-id (see the lance.subPubsub helper): queueGroupName makes that
      app's replicas a competing-consumer group (single delivery per app — without it every replica gets
      EVERY message: jetstream only sets a DeliverGroup when queueGroupName is non-empty), and it CANNOT

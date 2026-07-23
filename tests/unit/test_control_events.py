@@ -9,7 +9,6 @@ covered by their own tests once wired; these pin the foundation.
 from __future__ import annotations
 
 import asyncio
-from types import SimpleNamespace
 from typing import Any, cast
 
 from catalog.core.control_buffer import ControlEventBuffer
@@ -157,10 +156,9 @@ def test_make_control_emitter_selection() -> None:
 def test_emit_control_builds_and_emits() -> None:
     fake = _FakeDapr()
     em = DaprControlEmitter(cast(Any, fake), pubsub="p", topic=CONTROL_TOPIC, timeout_seconds=5)
-    app = SimpleNamespace(state=SimpleNamespace(control_emitter=em))
     asyncio.run(
         emit_control(
-            app,
+            em,
             action="table_renamed",
             object_type="table",
             object_id="table:db1$t",
@@ -172,9 +170,11 @@ def test_emit_control_builds_and_emits() -> None:
     assert published.action == "table_renamed" and published.extra == {"from": "t", "to": "t2"}
 
 
-def test_emit_control_is_defensive_without_emitter() -> None:
-    # A test app (or a lifespan that never ran) has no control_emitter → the helper is a silent no-op.
-    app = SimpleNamespace(state=SimpleNamespace())
+def test_emit_control_noop_emitter_is_safe() -> None:
+    # The off state (the ControlEmitterDep fallback) is a NoopControlEmitter — emit_control on it never raises
+    # and never publishes, so a control-off / unwired deployment can call it freely at every mutation site.
     asyncio.run(
-        emit_control(app, action="grant_added", object_type="grant", object_id="x", actor=None)
-    )  # no raise
+        emit_control(
+            NoopControlEmitter(), action="grant_added", object_type="grant", object_id="x", actor=None
+        )
+    )  # no raise, no publish

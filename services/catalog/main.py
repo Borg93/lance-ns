@@ -14,6 +14,7 @@ from contextlib import asynccontextmanager, suppress
 import httpx
 from common import fga
 from common.audit import configure_audit
+from common.dapr_auth import assert_app_token_configured
 from common.exceptions import install_problem_handlers
 from common.lance_metrics import instrument_lance_if_available
 from common.obs import configure_app_logging
@@ -27,6 +28,7 @@ from lance_namespace import LanceNamespaceError
 from pydantic import SecretStr
 
 from catalog.api.body_limit import BodySizeLimitMiddleware
+from catalog.api.dapr import register_control_dapr
 from catalog.api.load_shed import WriteConcurrencyLimitMiddleware
 from catalog.api.maintenance import maintenance_middleware
 from catalog.api.v1.router import api_router
@@ -50,6 +52,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.shutting_down = False
     app.state.startup_complete = False
     configure_audit(enabled=settings.audit_enabled)  # #41 gate the compliance audit stream
+    # Fail closed if control eventing is on but the ingest route (api/dapr.py /control-events) would be
+    # unauthenticated: require_dapr_token silently no-ops on a blank APP_API_TOKEN, so an unset token with
+    # the subscription live is a misconfiguration a forged in-cluster POST could exploit — refuse to boot.
+    assert_app_token_configured(dapr_enabled=settings.control_emit_enabled)
     instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # Consume the sensitive S3 secret from the Dapr secret store (OpenBao) — the store is the SOLE source
     # of truth, NOT a fallback (the audit's 'wired but never read' / 'plaintext still ships' fix). With
@@ -163,6 +169,9 @@ app = FastAPI(
     openapi_url="/openapi.json" if _settings.docs_enabled else None,
 )
 app.include_router(api_router)
+# Wire the broadcast control-plane-event subscription that fills each replica's ring buffer. DaprApp always
+# adds GET /dapr/subscribe; the subscription registers only when control_emit_enabled (see api/dapr.py).
+register_control_dapr(app)
 # Read-only maintenance gate (no-op unless LANCE_MAINTENANCE_READ_ONLY=true).
 app.middleware("http")(maintenance_middleware)
 # Reject oversized request bodies with 413 before they are buffered (Arrow-IPC OOM guard). See body_limit.py.

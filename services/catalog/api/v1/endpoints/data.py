@@ -36,6 +36,7 @@ from lance_namespace import (
 
 from catalog.api import fga_deps, lineage_deps
 from catalog.api.dependencies import (
+    ControlEmitterDep,
     FgaClientDep,
     LineageEmitterDep,
     NamespaceDep,
@@ -43,6 +44,7 @@ from catalog.api.dependencies import (
     StorageOptionsDep,
 )
 from catalog.api.security import CurrentToken
+from catalog.core.control_emit import emit_control
 from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import DELETE, INSERT, MERGE_INSERT, UPDATE, InputPin, shape_run_facets
 from catalog.core.lineage_metadata import build_lineage_metadata, inject_into_arrow_stream
@@ -114,6 +116,7 @@ async def create_table(
     token: CurrentToken,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    control: ControlEmitterDep,
     so: StorageOptionsDep,
     data: Annotated[bytes, Body(media_type=ARROW_STREAM)],
     mode: str | None = None,
@@ -272,6 +275,24 @@ async def create_table(
         source_uri=response.location,  # the real Lance URI → #23 reconcile can read the on-disk file
         schema_fields=schema_fields,
     )
+    # Only a real creation emits — an ExistOk request that KEPT a pre-existing table wrote nothing and
+    # created nothing (same guard that skips ownership seeding above), so a `table_created` here would be a
+    # spurious event announcing a creation-by-caller that never happened. A fresh create + an Overwrite
+    # (drop+recreate) still emit.
+    if not existok_kept_existing:
+        await emit_control(
+            control,
+            action="table_created",
+            object_type="table",
+            object_id=f"table:{table_id}",
+            actor=f"user:{token.sub}" if token is not None else None,
+            extra={
+                "namespace": namespace,
+                "version": response.version or 1,
+                "mode": mode,
+                "location": response.location,
+            },
+        )
     return response
 
 

@@ -37,9 +37,15 @@ from lance_namespace import (
 from openfga_sdk import OpenFgaClient
 
 from catalog.api import fga_deps
-from catalog.api.dependencies import FgaClientDep, SettingsDep, _namespace_for_root
+from catalog.api.dependencies import (
+    ControlEmitterDep,
+    FgaClientDep,
+    SettingsDep,
+    _namespace_for_root,
+)
 from catalog.api.security import CurrentToken
 from catalog.core.config import Settings
+from catalog.core.control_emit import emit_control
 from catalog.core.identifiers import parse_identifier
 from catalog.schemas import (
     CreateWarehouseNamespaceRequest,
@@ -89,6 +95,7 @@ async def create_warehouse(
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    control: ControlEmitterDep,
     body: CreateWarehouseRequest,
 ) -> WarehouseResponse:
     """Provision a warehouse: create its physical bucket + register it + seed FGA. Admin-gated.
@@ -134,6 +141,14 @@ async def create_warehouse(
     await run_in_threadpool(warehouses.put_warehouse, settings.registry_root, so, record)
     await fga_deps.seed_warehouse(client, settings, token, warehouse_id=warehouse_id, project=project)
     log.info("warehouse_created", extra={"warehouse": warehouse_id, "bucket": bucket, "project": project})
+    await emit_control(
+        control,
+        action="warehouse_created",
+        object_type="warehouse",
+        object_id=f"warehouse:{warehouse_id}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"bucket": bucket, "project": project},
+    )
     return WarehouseResponse(**record)
 
 
@@ -211,21 +226,47 @@ async def _set_warehouse_status(
 
 @router.post("/{warehouse_id}/deactivate", response_model_exclude_none=True)
 async def deactivate_warehouse(
-    warehouse_id: str, settings: SettingsDep, token: CurrentToken, client: FgaClientDep
+    warehouse_id: str,
+    settings: SettingsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
+    control: ControlEmitterDep,
 ) -> WarehouseResponse:
     """Quarantine a warehouse (#3-A lifecycle): the resolver then refuses EVERY op on its bound namespaces
     (403), so no new tables are created and existing ones are suspended — the tenant-offboarding first step.
     Admin-gated on the warehouse's project. Idempotent (re-deactivating is a no-op)."""
-    return await _set_warehouse_status(warehouse_id, "deactivated", settings, token, client)
+    result = await _set_warehouse_status(warehouse_id, "deactivated", settings, token, client)
+    await emit_control(
+        control,
+        action="warehouse_deactivated",
+        object_type="warehouse",
+        object_id=f"warehouse:{warehouse_id}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={},
+    )
+    return result
 
 
 @router.post("/{warehouse_id}/activate", response_model_exclude_none=True)
 async def activate_warehouse(
-    warehouse_id: str, settings: SettingsDep, token: CurrentToken, client: FgaClientDep
+    warehouse_id: str,
+    settings: SettingsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
+    control: ControlEmitterDep,
 ) -> WarehouseResponse:
     """Reactivate a quarantined warehouse (#3-A lifecycle) — restores routing to its bound namespaces.
     Admin-gated on the warehouse's project. Idempotent."""
-    return await _set_warehouse_status(warehouse_id, "active", settings, token, client)
+    result = await _set_warehouse_status(warehouse_id, "active", settings, token, client)
+    await emit_control(
+        control,
+        action="warehouse_activated",
+        object_type="warehouse",
+        object_id=f"warehouse:{warehouse_id}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={},
+    )
+    return result
 
 
 @router.post("/{warehouse_id}/namespaces", response_model_exclude_none=True)
@@ -235,6 +276,7 @@ async def create_warehouse_namespace(
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    control: ControlEmitterDep,
     body: CreateWarehouseNamespaceRequest,
 ) -> CreateNamespaceResponse:
     """Create a top-level namespace INSIDE this warehouse's bucket and bind it, so all its tables route
@@ -311,4 +353,12 @@ async def create_warehouse_namespace(
             parent_object=f"warehouse:{warehouse_id}",
         )
     log.info("warehouse_namespace_created", extra={"warehouse": warehouse_id, "namespace": ns_name})
+    await emit_control(
+        control,
+        action="warehouse_bound",
+        object_type="warehouse",
+        object_id=f"warehouse:{warehouse_id}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"namespace": ns_name},
+    )
     return response

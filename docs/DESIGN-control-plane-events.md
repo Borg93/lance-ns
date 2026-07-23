@@ -150,6 +150,11 @@ access review). Each event carries an `event_id` for client-side dedupe.
   still records it", never a failed mutation.
 - **Ring buffer is per-replica + in-memory** — bounded (drop-oldest); a client whose cursor fell off the
   end gets `reset`. Acceptable because events are hints and the buffer only needs to cover a poll gap.
+  **Multi-replica boundary:** the buffer AND its monotonic cursor are per-replica, so at
+  `services.catalog.replicas > 1` a load-balanced poll can hit different replicas and see inconsistent
+  cursors → noisy (but safe) `reset`s. Correct at the default `replicas: 1`; scaling the catalog needs
+  session affinity (client polls stick to one replica) or a shared buffer. The `query.live` generator
+  cushions it (dedup by `event_id`, clear-on-`reset`), so it degrades noisily, never wrongly.
 - **P3 is genuinely blocked** on the MFE migration (zone deploy) + the streaming hazards — do not start
   it until those clear.
 

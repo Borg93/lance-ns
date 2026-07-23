@@ -17,6 +17,7 @@ from lance_namespace import (
 from openfga_sdk import OpenFgaClient
 
 from catalog.core.config import Settings, get_settings
+from catalog.core.control_emit import ControlEmitter, NoopControlEmitter
 from catalog.core.identifiers import parse_identifier
 from catalog.core.lineage_emit import LineageEmitter, NoopEmitter
 from catalog.core.namespace import build_namespace_for_root
@@ -186,6 +187,15 @@ def get_lineage_emitter(request: Request) -> LineageEmitter:
 
 
 LineageEmitterDep = Annotated[LineageEmitter, Depends(get_lineage_emitter)]
+
+
+def get_control_emitter(request: Request) -> ControlEmitter:
+    """The control-plane change-event emitter built in the app lifespan — a no-op when emission is off."""
+    emitter = getattr(request.app.state, "control_emitter", None)
+    return emitter if emitter is not None else NoopControlEmitter()
+
+
+ControlEmitterDep = Annotated[ControlEmitter, Depends(get_control_emitter)]
 
 
 def get_vendor(request: Request) -> CredentialVendor:

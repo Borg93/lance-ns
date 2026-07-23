@@ -2033,6 +2033,80 @@
         "title": "BranchContents",
         "type": "object"
       },
+      "CatalogControlEvent": {
+        "description": "One control-plane mutation notice. Published AFTER the backend/FGA mutation succeeds; the `actor` is\nthe VERIFIED principal from the OIDC token in scope (never self-asserted \u2014 the pub/sub topic is an\ninternal catalog-only channel, so the subscriber trusts the catalog's stamp, exactly like lineage's\ntrusted `author`).",
+        "properties": {
+          "action": {
+            "enum": [
+              "grant_added",
+              "grant_revoked",
+              "warehouse_created",
+              "warehouse_activated",
+              "warehouse_deactivated",
+              "warehouse_bound",
+              "policy_set",
+              "policy_deleted",
+              "namespace_created",
+              "namespace_dropped",
+              "table_created",
+              "table_dropped",
+              "table_renamed",
+              "table_registered",
+              "table_deregistered",
+              "table_declared"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Actor"
+          },
+          "event_id": {
+            "title": "Event Id",
+            "type": "string"
+          },
+          "extra": {
+            "additionalProperties": true,
+            "title": "Extra",
+            "type": "object"
+          },
+          "object_id": {
+            "title": "Object Id",
+            "type": "string"
+          },
+          "object_type": {
+            "enum": [
+              "grant",
+              "warehouse",
+              "policy",
+              "namespace",
+              "table"
+            ],
+            "title": "Object Type",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "action",
+          "object_type",
+          "object_id"
+        ],
+        "title": "CatalogControlEvent",
+        "type": "object"
+      },
       "CommitFragmentsRequest": {
         "description": "A client-direct APPEND commit (#2): the serialized Lance ``FragmentMetadata`` the client wrote\nDIRECTLY to object storage (``[fragment.to_json() for fragment in write_fragments(...)]``), plus the\n``read_version`` those fragments were built against (optimistic concurrency).",
         "properties": {
@@ -4746,6 +4820,33 @@
           }
         },
         "title": "DropTableResponse",
+        "type": "object"
+      },
+      "EventsResponse": {
+        "description": "A poll response: control events strictly after the caller's cursor, the new head cursor, and a reset\nflag (``True`` when the client's cursor fell off the bounded buffer \u2192 the console should re-read all).",
+        "properties": {
+          "cursor": {
+            "title": "Cursor",
+            "type": "integer"
+          },
+          "events": {
+            "items": {
+              "$ref": "#/components/schemas/CatalogControlEvent"
+            },
+            "title": "Events",
+            "type": "array"
+          },
+          "reset": {
+            "title": "Reset",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "events",
+          "cursor",
+          "reset"
+        ],
+        "title": "EventsResponse",
         "type": "object"
       },
       "ExplainTableQueryPlanRequest": {
@@ -8349,6 +8450,25 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/dapr/subscribe": {
+      "get": {
+        "operationId": "_get_subscriptions_dapr_subscribe_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": " Get Subscriptions",
+        "tags": [
+          "PubSub"
+        ]
+      }
+    },
     "/livez": {
       "get": {
         "operationId": "livez_livez_get",
@@ -8390,6 +8510,58 @@
         "summary": "Readyz",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/events": {
+      "get": {
+        "description": "Return control-plane change-events after ``since`` for a platform (estate) administrator.\n\nFail-closed via FGA: a non-estate-admin gets 403, an OpenFGA outage 503, and the gate is a no-op only\nwhen FGA is off (parity with every other ``require_*`` site). The ring buffer is per-replica + in-memory,\nso ``cursor`` is a per-replica monotonic counter and ``reset`` means the client missed the buffer window\n(scaling the catalog past one replica needs session affinity or a shared buffer \u2014 see the DESIGN doc).",
+        "operationId": "poll_control_events_v1_events_get",
+        "parameters": [
+          {
+            "description": "the last cursor the client saw (0 = baseline)",
+            "in": "query",
+            "name": "since",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "the last cursor the client saw (0 = baseline)",
+              "minimum": 0,
+              "title": "Since",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EventsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Poll Control Events",
+        "tags": [
+          "events"
         ]
       }
     },

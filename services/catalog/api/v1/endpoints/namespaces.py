@@ -22,8 +22,9 @@ from lance_namespace import (
 )
 
 from catalog.api import fga_deps
-from catalog.api.dependencies import FgaClientDep, NamespaceDep, SettingsDep
+from catalog.api.dependencies import ControlEmitterDep, FgaClientDep, NamespaceDep, SettingsDep
 from catalog.api.security import CurrentToken
+from catalog.core.control_emit import emit_control
 from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.services import native
 
@@ -82,6 +83,7 @@ async def create_namespace(
     settings: SettingsDep,
     token: CurrentToken,
     client: FgaClientDep,
+    control: ControlEmitterDep,
     body: CreateNamespaceRequest | None = None,
 ) -> CreateNamespaceResponse:
     """Create a namespace via ``create_namespace``, then seed its FGA owner + parent edge."""
@@ -93,6 +95,14 @@ async def create_namespace(
     # concentric cascade reaches the namespace and its tables — stops a nested-namespace
     # lockout and lets a layer-level grant (medallion bronze/silver/gold) reach children.
     await fga_deps.seed_ownership(client, settings, token, resource="namespace", segments=segments)
+    await emit_control(
+        control,
+        action="namespace_created",
+        object_type="namespace",
+        object_id=f"namespace:{id}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"mode": req.mode, "properties": req.properties},
+    )
     return response
 
 
@@ -123,7 +133,9 @@ async def drop_namespace(
     id: str,
     ns: NamespaceDep,
     settings: SettingsDep,
+    token: CurrentToken,
     client: FgaClientDep,
+    control: ControlEmitterDep,
     body: DropNamespaceRequest | None = None,
 ) -> DropNamespaceResponse:
     """Drop namespace ``id`` (``drop_namespace``); revoke its FGA tuples — and, for a Cascade drop, every
@@ -147,6 +159,14 @@ async def drop_namespace(
     await fga_deps.revoke_ownership(client, settings, resource="namespace", segments=segments)
     for resource, child_segments in descendants:
         await fga_deps.revoke_ownership(client, settings, resource=resource, segments=child_segments)
+    await emit_control(
+        control,
+        action="namespace_dropped",
+        object_type="namespace",
+        object_id=f"namespace:{id}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"cascade": cascade, "descendants_revoked": len(descendants)},
+    )
     return response
 
 

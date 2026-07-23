@@ -57,6 +57,14 @@ spec:
               # each app's durableName, which only avoids clashing with the app's main consumer
               # because the two live on different streams.
               add_if_missing DLQ "dlq.>"
+              {{- if .Values.catalog.controlEmit }}
+              # Control-plane change-events (grants/warehouses/policies/tables) broadcast to EVERY catalog
+              # replica's ring buffer (GET /v1/events). Its own stream so a parking-free broadcast publish
+              # can't fail for want of a stream. Consumers are EPHEMERAL (no durableName) → they are NOT in
+              # the durable-drift reconcile loop below, and deliverPolicy=new means retention isn't
+              # load-bearing (a booting replica skips the backlog rather than replaying it into memory).
+              add_if_missing CATALOG_CONTROL "catalog.control.>"
+              {{- end }}
               # Reconcile app-durable config drift (the UPGRADE path): a Dapr jetstream subscription
               # can only BIND an existing durable whose config matches its request — after a values
               # change that alters consumer config (e.g. the resiliency flip's maxDeliver/backOff),

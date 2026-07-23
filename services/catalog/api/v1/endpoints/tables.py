@@ -34,6 +34,7 @@ from lance_namespace import (
 
 from catalog.api import fga_deps, lineage_deps
 from catalog.api.dependencies import (
+    ControlEmitterDep,
     FgaClientDep,
     LineageEmitterDep,
     NamespaceDep,
@@ -43,6 +44,7 @@ from catalog.api.dependencies import (
 )
 from catalog.api.security import CurrentToken
 from catalog.api.v1.endpoints.credentials import _has_external_bases
+from catalog.core.control_emit import emit_control
 from catalog.core.identifiers import parse_identifier, reconcile_body_id
 from catalog.core.lineage_emit import (
     DECLARE_TABLE,
@@ -92,6 +94,7 @@ async def declare_table(
     token: CurrentToken,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    control: ControlEmitterDep,
     body: DeclareTableRequest | None = None,
     authorization: Annotated[str | None, Header()] = None,
 ) -> DeclareTableResponse:
@@ -113,6 +116,14 @@ async def declare_table(
         operation=DECLARE_TABLE,
         authorization=authorization,
         source_uri=response.location,
+    )
+    await emit_control(
+        control,
+        action="table_declared",
+        object_type="table",
+        object_id=f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}",
+        actor=f"user:{token.sub}" if token is not None else None,
+        extra={"location": response.location},
     )
     return response
 
@@ -202,6 +213,7 @@ async def drop_table(
     settings: SettingsDep,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    control: ControlEmitterDep,
     token: CurrentToken,
     authorization: Annotated[str | None, Header()] = None,
 ) -> DropTableResponse:
@@ -227,6 +239,14 @@ async def drop_table(
     )
     # Revoke the table's FGA tuples so a later table reusing this id can't inherit stale grants.
     await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+    await emit_control(
+        control,
+        action="table_dropped",
+        object_type="table",
+        object_id=f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}",
+        actor=f"user:{token.sub}" if token is not None else None,
+        extra={},
+    )
     return response
 
 
@@ -237,6 +257,7 @@ async def deregister_table(
     settings: SettingsDep,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    control: ControlEmitterDep,
     token: CurrentToken,
     authorization: Annotated[str | None, Header()] = None,
 ) -> DeregisterTableResponse:
@@ -262,6 +283,14 @@ async def deregister_table(
         authorization=authorization,
     )
     await fga_deps.revoke_ownership(client, settings, resource="table", segments=segments)
+    await emit_control(
+        control,
+        action="table_deregistered",
+        object_type="table",
+        object_id=f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}",
+        actor=f"user:{token.sub}" if token is not None else None,
+        extra={},
+    )
     return response
 
 
@@ -274,6 +303,7 @@ async def register_table(
     token: CurrentToken,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    control: ControlEmitterDep,
     authorization: Annotated[str | None, Header()] = None,
 ) -> RegisterTableResponse:
     """Register an existing table location at ``id`` via ``register_table``, then seed the caller's FGA
@@ -296,6 +326,14 @@ async def register_table(
         authorization=authorization,
         source_uri=response.location,
     )
+    await emit_control(
+        control,
+        action="table_registered",
+        object_type="table",
+        object_id=f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}",
+        actor=f"user:{token.sub}" if token is not None else None,
+        extra={"location": response.location},
+    )
     return response
 
 
@@ -309,6 +347,7 @@ async def rename_table(
     token: CurrentToken,
     client: FgaClientDep,
     emitter: LineageEmitterDep,
+    control: ControlEmitterDep,
     authorization: Annotated[str | None, Header()] = None,
 ) -> RenameTableResponse:
     """Rename the table at ``id`` IN-PROCESS (#5b), then migrate its FGA ownership and emit dest←source
@@ -374,6 +413,17 @@ async def rename_table(
         # as an orphan with no history (audit 2026-07-14). The source's DROP marker above ends its own line;
         # this input edge stitches the destination onto it.
         inputs=[InputPin(segments=segments)],
+    )
+    await emit_control(
+        control,
+        action="table_renamed",
+        object_type="table",
+        object_id=f"table:{fga.canonical_object_id(segments, delimiter=settings.delimiter)}",
+        actor=f"user:{token.sub}" if token is not None else None,
+        extra={
+            "from": fga.canonical_object_id(segments, delimiter=settings.delimiter),
+            "to": fga.canonical_object_id(new_segments, delimiter=settings.delimiter),
+        },
     )
     return RenameTableResponse()
 

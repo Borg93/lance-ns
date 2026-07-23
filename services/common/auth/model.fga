@@ -62,6 +62,10 @@ type warehouse
     # must exist on BOTH `namespace` and `warehouse` — otherwise the check 400s ("relation not found") and
     # fails closed to a 503 for everyone. Same writer rung as can_create_table.
     define can_create_materialized_view: writer
+    # Estate-wide control-plane event feed (GET /v1/events): observing EVERY project's governance changes is
+    # a platform-admin privilege, checked ONLY on the root object (fga_root_object). Owner-tier, so a mere
+    # per-project admin can NOT read the estate feed — authz scope == data scope (the feed is estate-wide).
+    define can_observe_events: owner
 
 # Namespace = a medallion stage (bronze/silver/gold) or a domain namespace; self-nesting under a warehouse.
 type namespace

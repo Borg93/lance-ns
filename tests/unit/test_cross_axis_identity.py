@@ -22,6 +22,7 @@ from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from catalog.core.control_emit import NoopControlEmitter
 from catalog.core.identifiers import parse_identifier
 from common import fga
 
@@ -119,6 +120,7 @@ def test_create_handler_keeps_all_three_axes_identical_under_non_default_delimit
             token=cast(Any, SimpleNamespace(sub="alice")),
             client=cast(Any, object()),
             emitter=cast(Any, emitter),
+            control=cast(Any, NoopControlEmitter()),
             so=cast(Any, {}),  # unused on the native (non-blob) path this test drives
             data=b"arrow-ipc-bytes",
             mode=None,

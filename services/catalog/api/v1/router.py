@@ -11,6 +11,7 @@ from catalog.api.v1.endpoints import (
     columns,
     credentials,
     data,
+    events,
     indices,
     maintenance,
     models,
@@ -43,6 +44,7 @@ for _module in (
     models,
     policies,
     access,
+    events,
     maintenance,
 ):
     api_router.include_router(_module.router)

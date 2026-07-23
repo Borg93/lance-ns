@@ -73,6 +73,18 @@ catalog:
   # off (single-location creates, byte-identical to before). Populate with pre-provisioned data buckets.
   multibase:
     dataBases: []
+  # Control-plane change-events: every governance/metadata mutation (grants/warehouses/policies/tables)
+  # publishes a CatalogControlEvent onto a DEDICATED broadcast Dapr topic (catalog.control.v1, no
+  # queueGroupName) that EVERY catalog replica buffers, so the admin console live-refreshes via
+  # GET /v1/events (see docs/DESIGN-control-plane-events.md). ON renders the catalog-control-pubsub Dapr
+  # component + the CATALOG_CONTROL NATS stream + the broadcast subscription, and turns emission on. On by
+  # default (parity with lineage emit, which the chart also enables) — best-effort + fail-open, so a bus
+  # outage degrades to "no live refresh + the audit trail still records it", never a failed mutation.
+  # BOUNDARY: the ring buffer + its cursor are PER-REPLICA (each broadcast subscriber buffers independently).
+  # Correct at services.catalog.replicas=1 (the default). Scaling the catalog past one replica needs session
+  # affinity (so a client's polls stick to one replica) or a shared buffer — else a load-balanced poll gets
+  # inconsistent cursors and degrades to noisy `reset`s (safe, since events are hints, but wasteful).
+  controlEmit: true
 
 # --- Graceful rollouts -----------------------------------------------------------------------------
 # preStop sleep: endpoint removal must propagate to kube-proxy/the Dapr sidecar BEFORE the app receives
@@ -555,6 +567,11 @@ autoscaling:
 pubsub:
   name: lineage-pubsub
   topic: lineage.events.v1
+  # The DEDICATED broadcast component for the catalog's own control-plane change-events (topic
+  # catalog.control.v1). Separate from `name` (the shared lineage publish component) because it carries NO
+  # queueGroupName — every catalog replica receives every event. Must equal the app's LANCE_CONTROL_PUBSUB
+  # default (services/catalog/core/config.py). Rendered only when catalog.controlEmit is on.
+  controlName: catalog-control-pubsub
 
 # --- Event-driven medallion pipeline (raw → bronze → silver → gold) --------------------------------
 # lance-ray (dummy producer) is the HEAD: POST /produce emits the raw_events lineage + the first trigger

@@ -24,7 +24,9 @@ from lance_namespace import (
     TableNotFoundError,
 )
 
-from catalog.api.dependencies import NamespaceDep, SettingsDep
+from catalog.api.dependencies import ControlEmitterDep, NamespaceDep, SettingsDep
+from catalog.api.security import CurrentToken
+from catalog.core.control_emit import emit_control
 from catalog.core.identifiers import parse_identifier
 from catalog.schemas import PolicyDeleteResponse, PolicyRequest, PolicyResponse
 from catalog.services import native
@@ -56,7 +58,12 @@ def _sweep_path(location: str) -> str:
 
 @table_router.post("/{id}/policy/set", response_model_exclude_none=True)
 async def set_table_policy(
-    id: str, body: PolicyRequest, ns: NamespaceDep, settings: SettingsDep
+    id: str,
+    body: PolicyRequest,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    token: CurrentToken,
+    control: ControlEmitterDep,
 ) -> PolicyResponse:
     """Set (or replace) the table's maintenance policy — owner-gated by the router (``can_drop``)."""
     segments = parse_identifier(id, settings.delimiter)
@@ -67,6 +74,14 @@ async def set_table_policy(
     record = _record("table", canonical, _sweep_path(described.location), body)
     await run_in_threadpool(policies.put_policy, settings.registry_root, settings.storage_options(), record)
     log.info("maintenance_policy_set", extra={"kind": "table", "id": canonical})
+    await emit_control(
+        control,
+        action="policy_set",
+        object_type="policy",
+        object_id=f"table:{canonical}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"kind": "table", "path": record["path"]},
+    )
     return _response(record)
 
 
@@ -83,18 +98,30 @@ async def describe_table_policy(id: str, settings: SettingsDep) -> PolicyRespons
 
 
 @table_router.post("/{id}/policy/delete", response_model_exclude_none=True)
-async def delete_table_policy(id: str, settings: SettingsDep) -> PolicyDeleteResponse:
+async def delete_table_policy(
+    id: str, settings: SettingsDep, token: CurrentToken, control: ControlEmitterDep
+) -> PolicyDeleteResponse:
     """Remove the table's maintenance policy (idempotent) — owner-gated by the router."""
     canonical = _canonical(parse_identifier(id, settings.delimiter), settings.delimiter)
     await run_in_threadpool(
         policies.delete_policy, settings.registry_root, settings.storage_options(), "table", canonical
     )
     log.info("maintenance_policy_deleted", extra={"kind": "table", "id": canonical})
+    await emit_control(
+        control,
+        action="policy_deleted",
+        object_type="policy",
+        object_id=f"table:{canonical}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"kind": "table"},
+    )
     return PolicyDeleteResponse(status="deleted", kind="table", id=canonical)
 
 
 @namespace_router.post("/{id}/policy/set", response_model_exclude_none=True)
-async def set_namespace_policy(id: str, body: PolicyRequest, settings: SettingsDep) -> PolicyResponse:
+async def set_namespace_policy(
+    id: str, body: PolicyRequest, settings: SettingsDep, token: CurrentToken, control: ControlEmitterDep
+) -> PolicyResponse:
     """Set (or replace) a namespace-level policy — applies to every dataset under the namespace's
     directory prefix unless a table policy overrides it. Owner-gated by the router (``can_delete``)."""
     segments = parse_identifier(id, settings.delimiter)
@@ -106,6 +133,14 @@ async def set_namespace_policy(id: str, body: PolicyRequest, settings: SettingsD
     record = _record("namespace", canonical, prefix, body)
     await run_in_threadpool(policies.put_policy, settings.registry_root, settings.storage_options(), record)
     log.info("maintenance_policy_set", extra={"kind": "namespace", "id": canonical})
+    await emit_control(
+        control,
+        action="policy_set",
+        object_type="policy",
+        object_id=f"namespace:{canonical}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"kind": "namespace", "path": record["path"]},
+    )
     return _response(record)
 
 
@@ -122,13 +157,23 @@ async def describe_namespace_policy(id: str, settings: SettingsDep) -> PolicyRes
 
 
 @namespace_router.post("/{id}/policy/delete", response_model_exclude_none=True)
-async def delete_namespace_policy(id: str, settings: SettingsDep) -> PolicyDeleteResponse:
+async def delete_namespace_policy(
+    id: str, settings: SettingsDep, token: CurrentToken, control: ControlEmitterDep
+) -> PolicyDeleteResponse:
     """Remove the namespace's maintenance policy (idempotent) — owner-gated by the router."""
     canonical = _canonical(parse_identifier(id, settings.delimiter), settings.delimiter)
     await run_in_threadpool(
         policies.delete_policy, settings.registry_root, settings.storage_options(), "namespace", canonical
     )
     log.info("maintenance_policy_deleted", extra={"kind": "namespace", "id": canonical})
+    await emit_control(
+        control,
+        action="policy_deleted",
+        object_type="policy",
+        object_id=f"namespace:{canonical}",
+        actor=f"user:{token.sub}" if token else None,
+        extra={"kind": "namespace"},
+    )
     return PolicyDeleteResponse(status="deleted", kind="namespace", id=canonical)
 
 

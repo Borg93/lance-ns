@@ -1,5 +1,8 @@
 {{- $root := . }}
 {{- $age := include "lance.ageConnectHost" . }}
+{{- if and .Values.catalog.controlEmit (not .Values.dapr.sidecars) }}
+{{- fail "catalog.controlEmit=true requires dapr.sidecars=true: the /control-events broadcast ingest publishes + receives via the Dapr sidecar and is authenticated by the sidecar-injected APP_API_TOKEN — without it the catalog fails closed at boot. Enable dapr.sidecars, or set catalog.controlEmit=false." }}
+{{- end }}
 # Catalog (producer) — creates Lance tables on S3 and PUBLISHES OpenLineage events to the Dapr
 # pubsub.jetstream component. The daprd sidecar (injected by the annotations) carries the publish to NATS.
 apiVersion: apps/v1
@@ -99,6 +102,23 @@ spec:
             - { name: LANCE_LINEAGE_TRANSPORT, value: "dapr" }
             - { name: LANCE_DAPR_PUBSUB, value: {{ .Values.pubsub.name | quote }} }
             - { name: LANCE_DAPR_TOPIC, value: {{ .Values.pubsub.topic | quote }} }
+            # Control-plane change-events (opt-in, best-effort — the governance/metadata stream). ON →
+            # mutations publish a CatalogControlEvent onto a DEDICATED broadcast pubsub (no queueGroupName)
+            # under topic catalog.control.v1; every replica buffers every event for GET /v1/events. hasKey+
+            # ternary (NOT `| default`, which treats false as empty) so a key missing under
+            # `helm upgrade --reuse-values` renders the default, not "" (pydantic bool_parsing crash).
+            - { name: LANCE_CONTROL_EMIT_ENABLED, value: {{ hasKey .Values.catalog "controlEmit" | ternary .Values.catalog.controlEmit false | quote }} }
+            - { name: LANCE_CONTROL_PUBSUB, value: {{ .Values.pubsub.controlName | default "catalog-control-pubsub" | quote }} }
+            {{- if .Values.dapr.sidecars }}
+            # Explicit APP_API_TOKEN so require_dapr_token can verify the `dapr-api-token` header the sidecar
+            # stamps on /control-events delivery → a forged direct in-cluster POST is 403'd. Without it the
+            # guard silently no-ops and any pod could inject fabricated change-events into every replica's
+            # buffer. Same secret + pattern as the lineage/medallion/compaction ingest apps; the catalog
+            # lifespan also asserts it is set when control eventing is on (fail-closed, not silently open).
+            - name: APP_API_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ .Release.Name }}-dapr-app-token, key: token }
+            {{- end }}
             # Bound the DaprClient gRPC deadline (the SDK env) — the lineage publish is awaited INLINE in
             # every write handler, so a wedged sidecar/NATS would otherwise hang every catalog write.
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }

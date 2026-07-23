@@ -55,6 +55,7 @@ model: |
       define can_create_namespace: writer
       define can_create_table: writer
       define can_create_materialized_view: writer
+      define can_observe_events: owner
 
   type namespace
     relations
@@ -142,8 +143,24 @@ tuples:
   - { user: namespace:acme_silver, relation: parent, object: transaction:acme_silver$commit1 }
   # grace: an editor-only grant on a standalone (parentless) transaction — may edit properties, NOT commit
   - { user: user:grace, relation: editor, object: transaction:standalone_txn }
+  # root_admin: owner of the ROOT warehouse (fga_root_object). ONLY this estate/platform tier reads the
+  # estate-wide control-plane event feed (can_observe_events, GET /v1/events) — a per-project admin cannot.
+  - { user: user:root_admin, relation: owner, object: warehouse:lance_catalog }
 
 tests:
+  - name: only a ROOT-warehouse (estate) admin can observe the estate-wide control-plane event feed
+    check:
+      - user: user:root_admin
+        object: warehouse:lance_catalog
+        assertions: { can_observe_events: true }
+      # alice is a full project admin (owns acme_bucket via her team) but is NOT the root owner → denied the
+      # estate feed. This is the #12 fix: authz scope == data scope (per-project admin ≠ estate observer).
+      - user: user:alice
+        object: warehouse:lance_catalog
+        assertions: { can_observe_events: false }
+      - user: user:dave
+        object: warehouse:lance_catalog
+        assertions: { can_observe_events: false }
   - name: team-owned project admins get full warehouse access (and a team owns MANY projects)
     check:
       - user: user:alice

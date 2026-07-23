@@ -48,7 +48,8 @@ class NoopControlEmitter:
     """The off state (control emission disabled, or no Dapr transport). Every emit is a no-op."""
 
     async def emit(self, event: CatalogControlEvent) -> None:
-        del event  # off state: no-op (named `event` to satisfy the ControlEmitter protocol)
+        del event  # off state: no-op (`del` not `# noqa: ARG002` so BOTH ruff and ty accept the unused arg;
+        # the param must stay named `event` to structurally match the ControlEmitter protocol)
 
 
 class DaprControlEmitter:
@@ -97,7 +98,7 @@ def make_control_emitter(
 
 
 async def emit_control(
-    app: Any,
+    emitter: ControlEmitter,
     *,
     action: ControlAction,
     object_type: ControlObjectType,
@@ -105,18 +106,29 @@ async def emit_control(
     actor: str | None,
     extra: dict[str, Any] | None = None,
 ) -> None:
-    """Build + emit a `CatalogControlEvent` from `app.state.control_emitter` (best-effort — the emitter
-    swallows every error). Call at a mutation endpoint AFTER the backend/FGA change + audit succeed, passing
-    `request.app`. Defensive no-op if the emitter isn't wired (e.g. a test app without the lifespan)."""
-    emitter = getattr(app.state, "control_emitter", None)
-    if emitter is None:
-        return
-    await emitter.emit(
-        CatalogControlEvent(
+    """Build + emit a `CatalogControlEvent` on `emitter` (best-effort — the emitter swallows every error).
+
+    Call at a mutation endpoint AFTER the backend/FGA change + its audit succeed, so a real change is never
+    announced. Endpoints obtain `emitter` via `ControlEmitterDep` (mirrors `LineageEmitterDep`); the off
+    state is a `NoopControlEmitter` (the dependency's fallback), so the call is always safe — no `getattr`
+    guard needed at the call site. `actor` must be the verified OIDC subject (e.g. `user:alice`), never a
+    request-body value.
+
+    Fail-open covers the WHOLE path, not just the publish: the `CatalogControlEvent` construction (pydantic
+    validation) is wrapped too, so a malformed event can never raise into — and 500 — a mutation that already
+    committed. A build failure degrades to no live-refresh hint, exactly like a publish failure."""
+    try:
+        event = CatalogControlEvent(
             action=action,
             object_type=object_type,
             object_id=object_id,
             actor=actor,
             extra=extra or {},
         )
-    )
+    except Exception as exc:  # noqa: BLE001 — best-effort: eventing must never fail a committed mutation
+        log.warning(
+            "control_event_build_failed",
+            extra={"action": action, "object_id": object_id, "error": str(exc)},
+        )
+        return
+    await emitter.emit(event)

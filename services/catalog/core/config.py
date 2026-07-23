@@ -207,9 +207,10 @@ class Settings(BaseSettings):
     dapr_topic: str = Field(default="lineage.events.v1", alias="LANCE_DAPR_TOPIC")
 
     # Control-plane change-events (opt-in, best-effort — the governance/metadata stream, distinct from the
-    # OpenLineage data events above). When on, mutations publish a `CatalogControlEvent` onto the SAME Dapr
-    # pub/sub component (`dapr_pubsub`) under the versioned `catalog.control.v1` topic, subscribed WITHOUT a
-    # queueGroupName so every replica buffers every event for the poll endpoint. Off by default, like lineage.
+    # OpenLineage data events above). When on, mutations publish a `CatalogControlEvent` onto the DEDICATED
+    # `control_pubsub` component (below, NOT the shared `dapr_pubsub`) under the `catalog.control.v1` topic,
+    # subscribed WITHOUT a queueGroupName so every replica buffers every event for the poll endpoint. Off by
+    # default, like lineage.
     control_emit_enabled: bool = Field(default=False, alias="LANCE_CONTROL_EMIT_ENABLED")
     control_emit_timeout_seconds: float = Field(
         default=5.0, ge=0.1, alias="LANCE_CONTROL_EMIT_TIMEOUT_SECONDS"

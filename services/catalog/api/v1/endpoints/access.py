@@ -32,9 +32,10 @@ from common.audit import FAILURE, SUCCESS, audit
 from fastapi import APIRouter, Request
 from lance_namespace import ServiceUnavailableError, UnsupportedOperationError
 
-from catalog.api.dependencies import SettingsDep
+from catalog.api.dependencies import SettingsDep, get_control_emitter
 from catalog.api.security import CurrentToken
 from catalog.core.config import Settings
+from catalog.core.control_emit import emit_control
 from catalog.core.identifiers import parse_identifier
 from catalog.schemas import (
     AccessCheckRequest,
@@ -233,6 +234,14 @@ async def _access_mutate(
         audit(event, FAILURE, subject=actor, resource=obj, grantee=grantee, relation=body.relation)
         raise
     audit(event, SUCCESS, subject=actor, resource=obj, grantee=grantee, relation=body.relation)
+    await emit_control(
+        get_control_emitter(request),
+        action="grant_added" if grant else "grant_revoked",
+        object_type="grant",
+        object_id=obj,
+        actor=f"user:{token.sub}" if token else None,
+        extra={"relation": body.relation, "subject": grantee},
+    )
     return AccessGrantResponse(object=obj, user=grantee, relation=body.relation, granted=grant)
 
 

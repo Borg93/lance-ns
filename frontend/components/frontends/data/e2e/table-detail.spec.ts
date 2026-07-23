@@ -53,6 +53,15 @@ let gcRan: boolean;
 let compactBody: Record<string, unknown> | null;
 let colPost: { op: string; body: Record<string, unknown> } | null;
 let refPost: { path: string; body: Record<string, unknown> } | null;
+// #85 danger zone + row ops — the lifecycle writes (drop/deregister have no body; rename carries one)
+// and the predicate-scoped update/delete, each recorded with the EXACT stripped /capi path so the wire
+// contract (incl. the %24 id encoding) is pinned, never guessed.
+let dropPath: string | null;
+let deregisterPath: string | null;
+let renamePost: { path: string; body: Record<string, unknown> } | null;
+let rowPost: { op: string; body: Record<string, unknown> } | null;
+// The registry list the post-drop navigation re-lists (GET /v1/table).
+let registryTables: string[];
 // scope #6 — the latest producing run(s) for the quality badge; the lineage /api proxy is stubbed with this.
 let producersFixture: Array<Record<string, unknown>>;
 
@@ -67,6 +76,11 @@ test.beforeEach(async ({ page }) => {
 	gcPreviewBody = null;
 	gcRan = false;
 	compactBody = null;
+	dropPath = null;
+	deregisterPath = null;
+	renamePost = null;
+	rowPost = null;
+	registryTables = ['db1$t', 'db1$other'];
 	producersFixture = []; // default: no quality-bearing runs → honest "no quality gate"
 	// The #6 quality badge reads producing runs through the lineage BFF; stub it to stay hermetic.
 	await page.route('**/api/datasets/**/producers', (route) =>
@@ -76,6 +90,7 @@ test.beforeEach(async ({ page }) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^.*\/capi/, '');
 		if (path.endsWith('/detail')) return json(route, DETAIL);
+		if (path === '/v1/table') return json(route, { tables: registryTables });
 		if (path.endsWith('/tags') && req.method() === 'POST') {
 			tagPost = req.postDataJSON() as { tag: string; version: number };
 			return json(route, { tag: tagPost.tag, version: tagPost.version });
@@ -117,14 +132,37 @@ test.beforeEach(async ({ page }) => {
 			return json(route, { ok: true, fragments_removed: 6, fragments_added: 1 });
 		}
 		if (
-			path.match(/\/columns\/(add|alter|drop|field-meta|table-meta)$/) &&
+			path.match(/\/columns\/(add|alter|drop|backfill|field-meta|table-meta)$/) &&
 			req.method() === 'POST'
 		) {
 			colPost = {
 				op: path.split('/').pop() ?? '',
 				body: req.postDataJSON() as Record<string, unknown>,
 			};
-			return json(route, { version: 4 });
+			// backfill is the async native job — its response is a job_id, not a version
+			return json(route, path.endsWith('/backfill') ? { job_id: 'j1' } : { version: 4 });
+		}
+		// #85 lifecycle + row ops — anchored regexes, NOT endsWith: '/index/…/drop' and '/columns/drop'
+		// also end with '/drop' and must keep hitting their own stubs above.
+		if (/^\/v1\/table\/[^/]+\/drop$/.test(path) && req.method() === 'POST') {
+			dropPath = path;
+			return json(route, { id: ['db1', 't'] });
+		}
+		if (/^\/v1\/table\/[^/]+\/deregister$/.test(path) && req.method() === 'POST') {
+			deregisterPath = path;
+			return json(route, { id: ['db1', 't'], location: 's3://lance-catalog/db1$t' });
+		}
+		if (/^\/v1\/table\/[^/]+\/rename$/.test(path) && req.method() === 'POST') {
+			renamePost = { path, body: req.postDataJSON() as Record<string, unknown> };
+			return json(route, {});
+		}
+		if (/^\/v1\/table\/[^/]+\/update$/.test(path) && req.method() === 'POST') {
+			rowPost = { op: 'update', body: req.postDataJSON() as Record<string, unknown> };
+			return json(route, { updated_rows: 2, version: 4 });
+		}
+		if (/^\/v1\/table\/[^/]+\/delete$/.test(path) && req.method() === 'POST') {
+			rowPost = { op: 'delete', body: req.postDataJSON() as Record<string, unknown> };
+			return json(route, { version: 5 });
 		}
 		const ref = path.match(/\/(branches|tags)\/(create|delete|update)$/);
 		if (ref && req.method() === 'POST') {
@@ -404,4 +442,158 @@ test("states 'no quality gate' honestly when no run recorded assertions (#82)", 
 	await page.goto('/data/tables/db1%24t'); // producersFixture defaults to []
 	const stats = page.locator('section', { hasText: 'Stats' }).first();
 	await expect(stats).toContainText('no quality gate');
+});
+
+// --- #85 danger zone: drop / deregister (AlertDialog confirm) + rename (navigates) ---
+
+test('danger-zone drop confirms via the AlertDialog, closes it, and the registry row is gone (#85)', async ({
+	page,
+}) => {
+	registryTables = ['db1$other']; // the post-drop world the registry re-lists after navigation
+	await page.goto('/data/tables/db1%24t');
+	const danger = page.locator('section.dangerzone');
+	await danger.getByRole('button', { name: 'Drop table' }).click();
+	// The confirm is the portalled @rask/ui AlertDialog — drive it by role, not the trigger section.
+	const dialog = page.getByRole('alertdialog');
+	await expect(dialog).toContainText('Drop table db1$t');
+	await dialog.getByRole('button', { name: 'Drop', exact: true }).click();
+	// The exact wire path, %24-encoded id included — poll, don't race the interception.
+	await expect.poll(() => dropPath).toBe('/v1/table/db1%24t/drop');
+	// The dialog must CLOSE after the drop — a still-open dialog keeps the destructive action armed
+	// for a second, confirm-free fire (the NamespaceRegistry audit fix, copied here).
+	await expect(page.getByRole('alertdialog')).toHaveCount(0);
+	// The id no longer names a table — back to the registry, where the dropped row is gone.
+	await expect(page).toHaveURL(/\/data\/tables$/);
+	await expect(page.getByRole('link', { name: 'db1$other' })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'db1$t', exact: true })).toHaveCount(0);
+});
+
+test('danger-zone deregister confirms via its own AlertDialog copy (#85)', async ({ page }) => {
+	await page.goto('/data/tables/db1%24t');
+	await page.locator('section.dangerzone').getByRole('button', { name: 'Deregister' }).click();
+	const dialog = page.getByRole('alertdialog');
+	await expect(dialog).toContainText('Deregister table db1$t');
+	await expect(dialog).toContainText('data stays on storage'); // deregister ≠ drop, stated honestly
+	await dialog.getByRole('button', { name: 'Deregister', exact: true }).click();
+	await expect.poll(() => deregisterPath).toBe('/v1/table/db1%24t/deregister');
+	await expect(page.getByRole('alertdialog')).toHaveCount(0);
+	await expect(page).toHaveURL(/\/data\/tables$/);
+});
+
+test('cancelling the danger-zone confirm never posts (#85)', async ({ page }) => {
+	await page.goto('/data/tables/db1%24t');
+	await page.locator('section.dangerzone').getByRole('button', { name: 'Drop table' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
+	await expect(page.getByRole('alertdialog')).toHaveCount(0);
+	expect(dropPath).toBeNull();
+	// still on the detail page — nothing was dropped
+	await expect(page).toHaveURL(/\/data\/tables\/db1%24t$/);
+});
+
+test('a 403 drop surfaces the owner-denied state and stays on the page (#85)', async ({ page }) => {
+	// A later page.route wins over the beforeEach glob — deny like the catalog's FGA gate (can_drop).
+	await page.route('**/capi/v1/table/*/drop', (route) => json(route, { detail: 'forbidden' }, 403));
+	await page.goto('/data/tables/db1%24t');
+	const danger = page.locator('section.dangerzone');
+	await danger.getByRole('button', { name: 'Drop table' }).click();
+	await page.getByRole('alertdialog').getByRole('button', { name: 'Drop', exact: true }).click();
+	await expect(danger).toContainText('Denied: drop needs the owner rung (can_drop).');
+	await expect(page.getByRole('alertdialog')).toHaveCount(0); // closed even on failure (finally)
+	await expect(page).toHaveURL(/\/data\/tables\/db1%24t$/);
+});
+
+test('rename posts {new_table_name} and navigates to the renamed detail (#85)', async ({
+	page,
+}) => {
+	await page.goto('/data/tables/db1%24t');
+	const danger = page.locator('section.dangerzone');
+	await danger.getByLabel('Rename table to').fill('t2');
+	await danger.getByRole('button', { name: 'Rename' }).click();
+	// The exact wire body: the catalog's RenameTableRequest carries new_table_name (namespace kept).
+	await expect
+		.poll(() => renamePost)
+		.toEqual({ path: '/v1/table/db1%24t/rename', body: { new_table_name: 't2' } });
+	// success navigates to the renamed table's detail (the old id no longer exists)
+	await expect(page).toHaveURL(/\/data\/tables\/db1%24t2$/);
+	await expect(page.getByRole('heading', { name: 'db1$t2' })).toBeVisible();
+});
+
+// --- #85 row ops: update / delete by SQL predicate ---
+
+test('update rows posts the exact {predicate, updates} wire body and surfaces the count (#85)', async ({
+	page,
+}) => {
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Update / delete rows' });
+	await section.getByLabel('Row predicate').fill('id > 3');
+	await section.getByLabel('SET column 1').fill('name');
+	await section.getByLabel('SET expression 1').fill("'x'");
+	await section.getByRole('button', { name: 'Update rows' }).click();
+	// UpdateTableRequest on the wire: updates = [[column, expression], …] pairs + the predicate.
+	await expect
+		.poll(() => rowPost)
+		.toEqual({ op: 'update', body: { predicate: 'id > 3', updates: [['name', "'x'"]] } });
+	// updated_rows + version are REQUIRED on the wire — the affected-row count surfaces
+	await expect(section).toContainText('Updated 2 rows → v4.');
+});
+
+test('update with an empty predicate omits the key (all rows) (#85)', async ({ page }) => {
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Update / delete rows' });
+	await section.getByLabel('SET column 1').fill('flag');
+	await section.getByLabel('SET expression 1').fill('true');
+	await section.getByRole('button', { name: 'Update rows' }).click();
+	// no predicate key at all — an empty-string predicate is not the same wire contract
+	await expect.poll(() => rowPost).toEqual({ op: 'update', body: { updates: [['flag', 'true']] } });
+});
+
+test('delete rows is a two-click confirm and posts {predicate} only (#85)', async ({ page }) => {
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Update / delete rows' });
+	await section.getByLabel('Row predicate').fill('id = 9');
+	await section.getByRole('button', { name: 'Delete rows' }).click();
+	// first click only arms the confirm — no write yet
+	expect(rowPost).toBeNull();
+	await section.getByRole('button', { name: 'confirm delete' }).click();
+	// DeleteFromTableRequest on the wire: predicate REQUIRED, nothing else
+	await expect.poll(() => rowPost).toEqual({ op: 'delete', body: { predicate: 'id = 9' } });
+	// the delete wire has no row count — the new version is surfaced honestly instead
+	await expect(section).toContainText('Deleted rows matching the predicate → v5.');
+});
+
+test('a 403 row update renders the writer-denied state (#85)', async ({ page }) => {
+	await page.route('**/capi/v1/table/*/update', (route) =>
+		json(route, { detail: 'forbidden' }, 403),
+	);
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Update / delete rows' });
+	await section.getByLabel('SET column 1').fill('name');
+	await section.getByLabel('SET expression 1').fill("'x'");
+	await section.getByRole('button', { name: 'Update rows' }).click();
+	await expect(section).toContainText('Denied: row changes need writer access (can_write_data).');
+});
+
+// --- #85 backfill_column: the async columns op beside add/alter/drop ---
+
+test('backfill posts {column, where} through the columns allowlist and surfaces the job id (#85)', async ({
+	page,
+}) => {
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Schema' }).first();
+	await section.getByRole('button', { name: 'backfill id' }).click();
+	await section.getByLabel('backfill id where').fill('id > 0');
+	await section.getByRole('button', { name: 'run' }).click();
+	await expect.poll(() => colPost?.op).toBe('backfill');
+	expect(colPost?.body).toEqual({ column: 'id', where: 'id > 0' });
+	// async job — the UI surfaces the job_id (no version to refresh yet)
+	await expect(section).toContainText('Backfill of id started · job j1.');
+});
+
+test('backfill with no predicate omits the where key (#85)', async ({ page }) => {
+	await page.goto('/data/tables/db1%24t');
+	const section = page.locator('section', { hasText: 'Schema' }).first();
+	await section.getByRole('button', { name: 'backfill id' }).click();
+	await section.getByRole('button', { name: 'run' }).click();
+	await expect.poll(() => colPost?.op).toBe('backfill');
+	expect(colPost?.body).toEqual({ column: 'id' });
 });

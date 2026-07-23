@@ -321,6 +321,150 @@ export const bindWarehouseNamespace = (id: string, namespace: string) =>
 		body: JSON.stringify({ namespace }),
 	});
 
+// The lance-namespace table-lifecycle wire contracts (#85). All-optional where the spec says so — the
+// catalog serializes with response_model_exclude_none, so null fields arrive absent. Parsed (not cast)
+// at the boundary per the @rask/api parse-don't-validate rule: a schema drift throws to the caller
+// instead of lying downstream.
+const TableLifecycleResponseSchema = v.object({
+	context: v.optional(v.record(v.string(), v.string())),
+	transaction_id: v.optional(v.string()),
+	id: v.optional(v.array(v.string())),
+	location: v.optional(v.string()),
+	properties: v.optional(v.record(v.string(), v.string())),
+});
+export type TableLifecycleResult = v.InferOutput<typeof TableLifecycleResponseSchema>;
+
+const RenameTableResponseSchema = v.object({
+	context: v.optional(v.record(v.string(), v.string())),
+	transaction_id: v.optional(v.string()),
+});
+
+const DeclareTableResponseSchema = v.object({
+	context: v.optional(v.record(v.string(), v.string())),
+	transaction_id: v.optional(v.string()),
+	location: v.optional(v.string()),
+	storage_options: v.optional(v.record(v.string(), v.string())),
+	properties: v.optional(v.record(v.string(), v.string())),
+	managed_versioning: v.optional(v.boolean()),
+});
+export type DeclareTableResult = v.InferOutput<typeof DeclareTableResponseSchema>;
+
+// UpdateTableResponse: updated_rows + version are REQUIRED on the wire (lance-namespace spec) — the
+// affected-row count the UI surfaces. DeleteFromTableResponse carries NO row count, only the new version.
+const UpdateRowsResponseSchema = v.object({
+	transaction_id: v.optional(v.string()),
+	updated_rows: v.number(),
+	version: v.number(),
+});
+export type UpdateRowsResult = v.InferOutput<typeof UpdateRowsResponseSchema>;
+
+const DeleteRowsResponseSchema = v.object({
+	transaction_id: v.optional(v.string()),
+	version: v.optional(v.number()),
+});
+export type DeleteRowsResult = v.InferOutput<typeof DeleteRowsResponseSchema>;
+
+// AlterTableBackfillColumnsResponse: the backfill runs asynchronously — job_id is all it returns.
+const BackfillResponseSchema = v.object({ job_id: v.string() });
+export type BackfillResult = v.InferOutput<typeof BackfillResponseSchema>;
+
+/** #85 drop the table (deletes data + revokes its grants). Owner-gated by the catalog (can_drop);
+ * the BFF forwards only the signed-in user's session. */
+export const dropTable = async (table: string): Promise<ApiResult<TableLifecycleResult>> => {
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/drop`, { method: 'POST' });
+	return res.ok ? { ok: true, data: parse(TableLifecycleResponseSchema, res.data) } : res;
+};
+
+/** #85 deregister the table (detach from the catalog, data stays on storage). Owner-gated
+ * (can_deregister); session-only BFF. */
+export const deregisterTable = async (table: string): Promise<ApiResult<TableLifecycleResult>> => {
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/deregister`, { method: 'POST' });
+	return res.ok ? { ok: true, data: parse(TableLifecycleResponseSchema, res.data) } : res;
+};
+
+/** #85 rename the table within its namespace (POSTs {new_table_name}; the catalog's in-process #5b
+ * rename relocates the data + migrates FGA ownership). Gated can_drop on the source AND
+ * can_create_table on the destination parent; session-only BFF. */
+export const renameTable = async (
+	table: string,
+	newName: string,
+): Promise<ApiResult<TableLifecycleResult>> => {
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/rename`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ new_table_name: newName }),
+	});
+	return res.ok ? { ok: true, data: parse(RenameTableResponseSchema, res.data) } : res;
+};
+
+/** #85 declare an empty table `<namespace>$<name>` — the browser-shaped create (JSON body, no Arrow);
+ * the catalog reserves the id, seeds the caller's ownership, and emits the DECLARE_TABLE marker.
+ * `location` optional (empty → the catalog picks). Gated can_create_table on the parent namespace;
+ * session-only BFF. */
+export const declareTable = async (
+	namespace: string,
+	name: string,
+	location?: string,
+): Promise<ApiResult<DeclareTableResult>> => {
+	const res = await requestJSON<unknown>(`v1/table/${enc(`${namespace}$${name}`)}/declare`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(location ? { location } : {}),
+	});
+	return res.ok ? { ok: true, data: parse(DeclareTableResponseSchema, res.data) } : res;
+};
+
+/** #85 update rows matching a SQL predicate. `updates` is the wire's [[column, expression], …] SET
+ * list (required); `predicate` optional (absent → all rows). Writer-gated (can_write_data);
+ * session-only BFF. Returns the affected-row count + new version. */
+export const updateRows = async (
+	table: string,
+	predicate: string | null,
+	updates: [string, string][],
+): Promise<ApiResult<UpdateRowsResult>> => {
+	const body: { predicate?: string; updates: [string, string][] } = { updates };
+	if (predicate) body.predicate = predicate;
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/update`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(body),
+	});
+	return res.ok ? { ok: true, data: parse(UpdateRowsResponseSchema, res.data) } : res;
+};
+
+/** #85 delete rows matching a SQL predicate (required on the wire — there is no "delete all" default).
+ * Writer-gated (can_write_data); session-only BFF. The response carries only the new version — the
+ * wire has no deleted-row count. */
+export const deleteRows = async (
+	table: string,
+	predicate: string,
+): Promise<ApiResult<DeleteRowsResult>> => {
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/delete`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ predicate }),
+	});
+	return res.ok ? { ok: true, data: parse(DeleteRowsResponseSchema, res.data) } : res;
+};
+
+/** #85 backfill values into a column (async native job — the response is a job_id, and the version
+ * bump is reconciled when the job lands). Optional `where` bounds the backfill. Writer-gated
+ * (can_write_data); session-only BFF via the columns allowlist route. */
+export const backfillColumn = async (
+	table: string,
+	column: string,
+	where?: string,
+): Promise<ApiResult<BackfillResult>> => {
+	const body: { column: string; where?: string } = { column };
+	if (where) body.where = where;
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/columns/backfill`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(body),
+	});
+	return res.ok ? { ok: true, data: parse(BackfillResponseSchema, res.data) } : res;
+};
+
 // The lance-namespace DropNamespaceResponse wire contract (all fields optional — the catalog serializes
 // with response_model_exclude_none). Parsed (not cast) at the boundary per the @rask/api
 // parse-don't-validate rule: a schema drift throws to the caller instead of lying downstream.

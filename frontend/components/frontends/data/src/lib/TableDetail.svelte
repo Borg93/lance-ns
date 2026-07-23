@@ -4,9 +4,12 @@
 	// round-trip through the /capi detail BFF aggregate; policy writes go through their own narrow
 	// session-only routes. A dataset the catalog does not register (e.g. a storage-managed medallion
 	// zone) renders the honest not-in-catalog state instead of a broken page.
+	import { AlertDialog } from '@rask/ui/alert-dialog';
 	import { Select } from '@rask/ui/select';
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { tableFromJSON, tableToIPC } from 'apache-arrow';
+	import { goto } from '$app/navigation';
+	import { base } from '$app/paths';
 	import AccessGraph from './AccessGraph.svelte';
 	import { fetchProducers } from './api';
 	import { bffPath } from './http';
@@ -15,17 +18,23 @@
 	import ReadersPanel from './ReadersPanel.svelte';
 	import {
 		addColumn,
+		backfillColumn,
 		compactTable,
 		createTableBranch,
 		createTableIndex,
 		createTableTag,
+		deleteRows,
 		deleteTableBranch,
 		deleteTablePolicy,
 		deleteTableTag,
+		deregisterTable,
 		dropColumn,
+		dropTable,
 		dropTableIndex,
 		moveTableTag,
 		renameColumn,
+		renameTable,
+		updateRows,
 		type CatalogResult,
 		fetchTableDetail,
 		type GcPreview,
@@ -85,6 +94,180 @@
 	let insertBusy = $state(false);
 	let insertMsg = $state<{ ok: boolean; text: string } | null>(null);
 
+	// #85 row ops — update/delete rows by SQL predicate (writer-gated can_write_data). Update carries the
+	// wire's [[column, expression], …] SET list; delete is destructive → two-click confirm (the restore/GC
+	// idiom). The affected-row count comes from the update response; the delete wire has no count (only
+	// the new version), stated honestly.
+	let rowPredicate = $state('');
+	let rowSets = $state<{ column: string; expression: string }[]>([{ column: '', expression: '' }]);
+	let rowBusy = $state(false);
+	let rowMsg = $state<{ ok: boolean; text: string } | null>(null);
+	let rowDeleteConfirm = $state(false);
+	const rowSetPairs = $derived(
+		rowSets
+			.map((s) => [s.column.trim(), s.expression.trim()] as [string, string])
+			.filter(([column, expression]) => column && expression),
+	);
+
+	function rowFail(status: number, detail: string): void {
+		if (status === 401) rowMsg = { ok: false, text: 'Sign in to change rows.' };
+		else if (status === 403)
+			rowMsg = { ok: false, text: 'Denied: row changes need writer access (can_write_data).' };
+		else rowMsg = { ok: false, text: detail };
+	}
+
+	async function runUpdateRows(): Promise<void> {
+		const sets = rowSetPairs;
+		if (rowBusy || sets.length === 0) return;
+		rowBusy = true;
+		rowMsg = null;
+		const requested = table; // latest-wins: don't post A's result onto B if the user navigated mid-write
+		try {
+			const res = await updateRows(requested, rowPredicate.trim() || null, sets);
+			if (table !== requested) return;
+			if (res.ok) {
+				rowMsg = {
+					ok: true,
+					text: `Updated ${res.data.updated_rows} row${res.data.updated_rows === 1 ? '' : 's'} → v${res.data.version}.`,
+				};
+				await load(); // the update bumped the version — refresh stats + versions
+			} else rowFail(res.status, res.detail);
+		} catch (err) {
+			// the parse boundary throws on a wire-contract drift — surface it, never render from a lie
+			rowMsg = { ok: false, text: `update response drifted from the contract: ${String(err)}` };
+		} finally {
+			rowBusy = false;
+		}
+	}
+
+	async function runDeleteRows(): Promise<void> {
+		const predicate = rowPredicate.trim();
+		if (rowBusy || !predicate) return;
+		rowBusy = true;
+		rowMsg = null;
+		const requested = table;
+		try {
+			const res = await deleteRows(requested, predicate);
+			if (table !== requested) return;
+			if (res.ok) {
+				// the delete wire carries no row count — surface the new version honestly instead
+				rowMsg = {
+					ok: true,
+					text: `Deleted rows matching the predicate${res.data.version != null ? ` → v${res.data.version}` : ''}.`,
+				};
+				await load();
+			} else rowFail(res.status, res.detail);
+		} catch (err) {
+			rowMsg = { ok: false, text: `delete response drifted from the contract: ${String(err)}` };
+		} finally {
+			rowBusy = false;
+			rowDeleteConfirm = false; // ALWAYS disarm — success or failure, the confirm must not stay armed
+		}
+	}
+
+	// #85 backfill values into a column (async native job — the response is a job_id; the version bump is
+	// reconciled when the job lands, so there is nothing to refresh here). Writer-gated (can_write_data).
+	let backfilling = $state<string | null>(null); // the column currently being backfilled
+	let backfillWhere = $state('');
+	let backfillMsg = $state<string | null>(null);
+
+	async function runBackfill(): Promise<void> {
+		const column = backfilling;
+		if (colBusy || !column) return;
+		colBusy = true;
+		colError = null;
+		backfillMsg = null;
+		try {
+			const res = await backfillColumn(table, column, backfillWhere.trim() || undefined);
+			if (res.ok) {
+				backfilling = null;
+				backfillWhere = '';
+				backfillMsg = `Backfill of ${column} started · job ${res.data.job_id}.`;
+			} else colFail(res.status, res.detail);
+		} catch (err) {
+			colError = `backfill response drifted from the contract: ${String(err)}`;
+		} finally {
+			colBusy = false;
+		}
+	}
+
+	// #85 danger zone — rename (navigates to the renamed id), drop + deregister behind an AlertDialog
+	// confirm (NamespaceRegistry's pattern, incl. the always-close-in-finally fix).
+	let renameTableTo = $state('');
+	let dangerBusy = $state(false);
+	let dangerError = $state<string | null>(null);
+	let dangerOpen = $state(false);
+	let dangerAction = $state<'drop' | 'deregister' | null>(null);
+	// The `<ns>$` prefix the renamed table keeps — this form renames within the table's own namespace.
+	const nsPrefix = $derived(table.includes('$') ? table.slice(0, table.lastIndexOf('$') + 1) : '');
+
+	function openDanger(action: 'drop' | 'deregister'): void {
+		dangerAction = action;
+		dangerError = null;
+		dangerOpen = true;
+	}
+
+	function dangerFail(action: string, status: number, detail: string): void {
+		if (status === 401) dangerError = `Sign in — ${action} is a per-user action.`;
+		else if (status === 403)
+			dangerError =
+				action === 'deregister'
+					? 'Denied: deregistering needs the owner rung (can_deregister).'
+					: `Denied: ${action} needs the owner rung (can_drop).`;
+		else if (status === 0) dangerError = `Catalog unreachable — the ${action} was not applied.`;
+		else dangerError = detail;
+	}
+
+	async function confirmDanger(): Promise<void> {
+		const action = dangerAction;
+		if (action === null || dangerBusy) return;
+		dangerBusy = true;
+		dangerError = null;
+		try {
+			const res = action === 'drop' ? await dropTable(table) : await deregisterTable(table);
+			if (res.ok) {
+				await goto(`${base}/tables`); // the id no longer names a table — back to the registry
+			} else {
+				dangerFail(action, res.status, res.detail);
+			}
+		} catch (err) {
+			// the parse boundary throws on a wire-contract drift — surface it, never render from a lie
+			dangerError = `${action} response drifted from the contract: ${String(err)}`;
+		} finally {
+			// ALWAYS close + disarm: bits-ui's AlertDialog.Action does not auto-close, so leaving the dialog
+			// open would keep the destructive action armed for a second, confirm-free fire (audit: major).
+			dangerBusy = false;
+			dangerOpen = false;
+			dangerAction = null;
+		}
+	}
+
+	async function runRenameTable(): Promise<void> {
+		const to = renameTableTo.trim();
+		if (dangerBusy || !to) return;
+		dangerBusy = true;
+		dangerError = null;
+		const requested = table;
+		const newId = `${nsPrefix}${to}`;
+		try {
+			const res = await renameTable(requested, to);
+			if (table !== requested) return;
+			if (res.ok) {
+				renameTableTo = '';
+				// the old id no longer exists — follow the table to its renamed detail page
+				await goto(`${base}/tables/${encodeURIComponent(newId)}`);
+			} else if (res.status === 409) {
+				dangerError = `Denied: a table named ${newId} already exists.`;
+			} else {
+				dangerFail('rename', res.status, res.detail);
+			}
+		} catch (err) {
+			dangerError = `rename response drifted from the contract: ${String(err)}`;
+		} finally {
+			dangerBusy = false;
+		}
+	}
+
 	// #81 the SvelteFlow authorization graph is lazy-mounted (heavy) behind this toggle.
 	let showGraph = $state(false);
 
@@ -138,6 +321,19 @@
 		blobFailed = false;
 		insertJson = '';
 		insertMsg = null;
+		// #85 row ops + danger zone — reset too, or a predicate/SET pair (or an armed delete confirm)
+		// typed on table A would pre-fill B's form and fire against B.
+		rowPredicate = '';
+		rowSets = [{ column: '', expression: '' }];
+		rowMsg = null;
+		rowDeleteConfirm = false;
+		backfilling = null;
+		backfillWhere = '';
+		backfillMsg = null;
+		renameTableTo = '';
+		dangerOpen = false;
+		dangerAction = null;
+		dangerError = null;
 		showGraph = false;
 		gcDays = null;
 		gcKeep = null;
@@ -800,6 +996,17 @@
 											>
 											<button class="btn ghost" onclick={() => (retyping = null)}>×</button>
 										</div>
+									{:else if backfilling === f.name}
+										<!-- #85 backfill — async native job over the column; the optional `where` bounds it. -->
+										<input
+											class="mono rn"
+											bind:value={backfillWhere}
+											placeholder="where (optional)"
+											aria-label="backfill {f.name} where"
+											onkeydown={(e) => e.key === 'Enter' && runBackfill()}
+										/>
+										<button class="btn ghost" disabled={colBusy} onclick={runBackfill}>run</button>
+										<button class="btn ghost" onclick={() => (backfilling = null)}>×</button>
 									{:else}
 										<button
 											class="chip-x"
@@ -820,6 +1027,16 @@
 												retyping = f.name;
 												retypeTo = '';
 											}}>⇄</button
+										>
+										<button
+											class="chip-x"
+											title="backfill column"
+											aria-label="backfill {f.name}"
+											disabled={colBusy}
+											onclick={() => {
+												backfilling = f.name;
+												backfillWhere = '';
+											}}>⤵</button
 										>
 										<button
 											class="chip-x"
@@ -864,6 +1081,7 @@
 				</button>
 			</form>
 			{#if colError}<p class="error">{colError}</p>{/if}
+			{#if backfillMsg}<p class="mut">{backfillMsg}</p>{/if}
 		</section>
 
 		<!-- #74 tail — table + per-column property editor (writer-gated; session-only /capi BFF). -->
@@ -880,6 +1098,69 @@
 				</button>
 				{#if insertMsg}<span class="ins-msg" class:okmsg={insertMsg.ok} class:error={!insertMsg.ok}
 						>{insertMsg.text}</span
+					>{/if}
+			</div>
+		</section>
+
+		<section>
+			<h2>Update / delete rows</h2>
+			<p class="mut">
+				SQL predicate over the table's columns (e.g. <span class="mono">id &gt; 3</span>). Update
+				applies the SET pairs to matching rows (empty predicate = all rows); delete removes them
+				(predicate required). Both are writer-gated.
+			</p>
+			<input
+				class="mono pred"
+				bind:value={rowPredicate}
+				placeholder="predicate (e.g. id > 3)"
+				aria-label="Row predicate"
+			/>
+			{#each rowSets as s, i (i)}
+				<div class="row setpair">
+					<input
+						class="mono"
+						bind:value={s.column}
+						placeholder="column"
+						aria-label="SET column {i + 1}"
+					/>
+					<input
+						class="mono"
+						bind:value={s.expression}
+						placeholder="SQL expression (e.g. price * 2)"
+						aria-label="SET expression {i + 1}"
+					/>
+				</div>
+			{/each}
+			<button
+				class="btn ghost"
+				onclick={() => (rowSets = [...rowSets, { column: '', expression: '' }])}
+			>
+				+ add SET pair
+			</button>
+			<div class="ins-row">
+				<button class="btn" disabled={rowBusy || rowSetPairs.length === 0} onclick={runUpdateRows}>
+					{rowBusy ? '…' : 'Update rows'}
+				</button>
+				{#if rowDeleteConfirm}
+					<button
+						class="btn danger"
+						disabled={rowBusy || !rowPredicate.trim()}
+						onclick={runDeleteRows}
+					>
+						confirm delete
+					</button>
+					<button class="btn ghost" onclick={() => (rowDeleteConfirm = false)}>cancel</button>
+				{:else}
+					<button
+						class="btn danger"
+						disabled={rowBusy || !rowPredicate.trim()}
+						onclick={() => (rowDeleteConfirm = true)}
+					>
+						Delete rows
+					</button>
+				{/if}
+				{#if rowMsg}<span class="ins-msg" class:okmsg={rowMsg.ok} class:error={!rowMsg.ok}
+						>{rowMsg.text}</span
 					>{/if}
 			</div>
 		</section>
@@ -1298,8 +1579,74 @@
 			</button>
 			{#if showGraph}<AccessGraph dataset={table} />{/if}
 		</section>
+
+		<!-- #85 danger zone — rename navigates to the new id; drop/deregister confirm via AlertDialog. -->
+		<section class="dangerzone">
+			<h2>Danger zone</h2>
+			<form
+				class="row"
+				onsubmit={(e) => {
+					e.preventDefault();
+					runRenameTable();
+				}}
+			>
+				<input
+					class="mono"
+					bind:value={renameTableTo}
+					placeholder="new table name"
+					aria-label="Rename table to"
+				/>
+				<button class="btn" type="submit" disabled={dangerBusy || !renameTableTo.trim()}>
+					Rename
+				</button>
+			</form>
+			<p class="mut">
+				Rename relocates the table within its namespace and navigates to the new id (owner-gated:
+				can_drop on the source + can_create_table on the destination).
+			</p>
+			<div class="row">
+				<button class="btn danger" disabled={dangerBusy} onclick={() => openDanger('deregister')}>
+					Deregister
+				</button>
+				<button class="btn danger" disabled={dangerBusy} onclick={() => openDanger('drop')}>
+					<Trash2 size={12} /> Drop table
+				</button>
+			</div>
+			<p class="mut">
+				Deregister detaches the table from the catalog (data stays on storage); drop deletes it
+				permanently.
+			</p>
+			{#if dangerError}<p class="error">{dangerError}</p>{/if}
+		</section>
 	{/if}
 </div>
+
+<AlertDialog.Root bind:open={dangerOpen}>
+	<AlertDialog.Content>
+		<AlertDialog.Title>
+			{dangerAction === 'deregister' ? 'Deregister' : 'Drop'} table {table}
+		</AlertDialog.Title>
+		<AlertDialog.Description>
+			{#if dangerAction === 'deregister'}
+				This detaches <span class="mono">{table}</span> from the catalog (owner-gated: can_deregister).
+				The data stays on storage, but the catalog forgets the id and its grants are revoked.
+			{:else}
+				This permanently drops <span class="mono">{table}</span> and its data (owner-gated: can_drop).
+				Every version, tag and branch is deleted; its grants are revoked.
+			{/if}
+		</AlertDialog.Description>
+		<div class="dialog-actions">
+			<AlertDialog.Cancel disabled={dangerBusy}>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action
+				class="border-destructive/40 bg-destructive/15 text-destructive hover:bg-destructive/25"
+				disabled={dangerBusy}
+				onclick={confirmDanger}
+			>
+				{dangerAction === 'deregister' ? 'Deregister' : 'Drop'}
+			</AlertDialog.Action>
+		</div>
+	</AlertDialog.Content>
+</AlertDialog.Root>
 
 <style>
 	.page {
@@ -1568,6 +1915,28 @@
 	}
 	.row {
 		display: flex;
+		gap: 8px;
+	}
+	.pred {
+		width: 100%;
+		margin-bottom: 6px;
+	}
+	.setpair {
+		margin-bottom: 6px;
+	}
+	.dangerzone {
+		border-top: 1px solid color-mix(in srgb, var(--fail) 30%, var(--line));
+		padding-top: 12px;
+	}
+	.dangerzone form {
+		margin-bottom: 4px;
+	}
+	.dangerzone .row {
+		margin: 8px 0 4px;
+	}
+	.dialog-actions {
+		display: flex;
+		justify-content: flex-end;
 		gap: 8px;
 	}
 </style>

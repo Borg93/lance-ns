@@ -131,10 +131,22 @@ test('the Tuples tab lists, filters server-side, grants via the dialog and revok
 	const table = page.locator('table');
 	await expect(table).toContainText('user:alice');
 	await expect(table).toContainText('namespace:db1');
-	// Server-side filter: the user filter re-queries with ?user=…
-	await page.getByLabel('User filter').fill('user:bob');
+	// Server-side filter, applied on Search ONLY: typing must not fire an estate-gated FGA read
+	// (and an audit event) per keystroke.
+	const before = tupleQueries.length;
+	await page.getByLabel('User filter').pressSequentially('user:bob');
+	// A bare user filter is rejected by the API by design — the form refuses to send one.
+	await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeDisabled();
+	await expect(page.getByText('needs an object_type or object')).toBeVisible();
+	expect(tupleQueries.length).toBe(before);
+	await page.getByLabel('Object type filter').fill('table');
 	await page.getByRole('button', { name: 'Search', exact: true }).click();
-	await expect.poll(() => tupleQueries.some((q) => q.includes('user=user%3Abob'))).toBe(true);
+	await expect
+		.poll(() =>
+			tupleQueries.some((q) => q.includes('user=user%3Abob') && q.includes('object_type=table')),
+		)
+		.toBe(true);
+	expect(tupleQueries.length).toBe(before + 1); // exactly the one Search-triggered read
 	await expect(table).not.toContainText('user:alice');
 	// Grant: the dialog POSTs the exact tuple body.
 	await page.getByLabel('User filter').clear();

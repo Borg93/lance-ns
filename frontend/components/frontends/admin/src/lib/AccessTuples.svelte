@@ -22,6 +22,7 @@
 	import { Dialog } from '@rask/ui/dialog';
 	import { Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { parse } from '@rask/api';
+	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { deleteTuple, fetchTuples, type Tuple, TuplesPageSchema, writeTuple } from './access';
 
@@ -36,6 +37,7 @@
 	let tuples = $state<Tuple[] | null>(null);
 	let continuation = $state<string | null>(null);
 	let lastStatus = $state(0);
+	let lastDetail = $state('');
 	let settled = $state(false);
 	let inflight = 0;
 	let msg = $state<{ ok: boolean; text: string } | null>(null);
@@ -47,10 +49,18 @@
 	// svelte-ignore state_referenced_locally
 	let fObject = $state(object);
 
+	// A bare user filter is rejected by the API by design (an OpenFGA Read needs an object type), so
+	// the form refuses to send one: Search disables and the hint says what to add.
+	const userOnly = $derived(!!fUser.trim() && !fObjectType.trim() && !fObject.trim());
+
 	const unauthorized = $derived(tuples === null && settled && lastStatus === 401);
 	const forbidden = $derived(tuples === null && settled && lastStatus === 403);
 	const drifted = $derived(tuples === null && settled && lastStatus === -1);
-	const offline = $derived(tuples === null && settled && ![-1, 200, 401, 403].includes(lastStatus));
+	// 400 is the contract talking (bad filter shape), not the store being down — render its detail.
+	const invalid = $derived(tuples === null && settled && lastStatus === 400);
+	const offline = $derived(
+		tuples === null && settled && ![-1, 200, 400, 401, 403].includes(lastStatus),
+	);
 
 	function filter(continuationToken?: string) {
 		return {
@@ -63,6 +73,7 @@
 	}
 
 	async function load(): Promise<void> {
+		if (userOnly) return; // the Search button is disabled too — never send a user-only filter
 		const seq = ++inflight;
 		const res = await fetchTuples(filter());
 		if (seq !== inflight) return; // latest-wins
@@ -82,6 +93,7 @@
 			// Clear stale rows on failure so the auth/forbidden/offline state reflects reality.
 			tuples = null;
 			lastStatus = res.status;
+			lastDetail = res.detail;
 		}
 	}
 
@@ -99,8 +111,11 @@
 		}
 	}
 
+	// Load once on mount, filters read UNTRACKED (AuditViewer's idiom): typing in the filter inputs
+	// must not re-fire an estate-gated FGA read + audit event per keystroke — filters apply on the
+	// explicit Search submit.
 	$effect(() => {
-		load();
+		untrack(() => load());
 	});
 
 	// ── grant dialog (POST /v1/access/tuples) ──
@@ -269,11 +284,17 @@
 			placeholder="object (e.g. table:db1$t)"
 			aria-label="Object filter"
 		/>
-		<button class="btn" type="submit">Search</button>
+		<button class="btn" type="submit" disabled={userOnly}>Search</button>
 		<button class="btn grant" type="button" onclick={() => (grantOpen = true)}>
 			<Plus size={13} /> Grant
 		</button>
 	</form>
+
+	{#if userOnly}
+		<p class="hint">
+			A user filter needs an object_type or object alongside it — the store reads per object type.
+		</p>
+	{/if}
 
 	{#if msg}<p class="msg" class:okmsg={msg.ok} class:error={!msg.ok}>{msg.text}</p>{/if}
 
@@ -289,6 +310,8 @@
 		<div class="empty">
 			<ShieldAlert size={15} /> The tuples payload drifted from the contract — refusing to render it.
 		</div>
+	{:else if invalid}
+		<div class="empty"><ShieldAlert size={15} /> The store rejected the filter: {lastDetail}</div>
 	{:else if offline}
 		<div class="empty"><RefreshCw size={15} /> Tuple store unreachable (HTTP {lastStatus}).</div>
 	{:else}
@@ -450,6 +473,11 @@
 	}
 	.msg {
 		font-size: 12px;
+		margin: 0;
+	}
+	.hint {
+		color: var(--warn, #d18b28);
+		font-size: 11px;
 		margin: 0;
 	}
 	.okmsg {

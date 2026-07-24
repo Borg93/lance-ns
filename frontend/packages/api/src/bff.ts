@@ -69,9 +69,36 @@ export function makeOidcConfig(env: Env): OidcConfig | null {
 	};
 }
 
+/** Is this request a signed-out browser PAGE navigation the login-first gate should redirect? Central so
+ *  all zones share the exact predicate. Gated (all must hold): a GET that is not a SvelteKit `__data.json`
+ *  data request, whose `Accept` includes text/html (fetch/API clients don't send it — API `+server.ts`
+ *  routes keep returning 401 JSON, a redirect would corrupt them), outside `/auth/*` (the login round-trip
+ *  itself), outside the `_app`/`api`/`capi` namespaces at any base path, and not an asset-shaped path with
+ *  a file extension (favicon.png, robots.txt, service-worker.js — normally served before the handle, but
+ *  belt-and-braces). Exported for tests. */
+export function isGatedPageRequest(event: {
+	url: URL;
+	request: Request;
+	isDataRequest: boolean;
+}): boolean {
+	const { pathname } = event.url;
+	if (event.request.method !== 'GET' || event.isDataRequest) return false;
+	if (!(event.request.headers.get('accept') ?? '').includes('text/html')) return false;
+	if (pathname === '/auth' || pathname.startsWith('/auth/')) return false;
+	if (/\/(?:_app|api|capi)(?:\/|$)/.test(pathname)) return false;
+	if (/\.[a-z0-9]+$/i.test(pathname)) return false;
+	return true;
+}
+
 /** Per-request `handle`: hydrate `locals.session` from the sealed cookie, dropping a stale/dead one so a
  *  dead token is never forwarded. No-op when `cfg` is null (auth off). Single-sourced so every zone shares
- *  identical session semantics. */
+ *  identical session semantics.
+ *
+ *  Login-first gate: when OIDC IS configured, a signed-out browser page navigation is redirected to the
+ *  home zone's `/auth/login?redirect=<original path>` (the `?redirect=` contract nav-user.svelte already
+ *  uses), so the login page is the first thing a signed-out user sees — on every zone, from this one
+ *  change. With no OIDC env (dev servers, hermetic e2e) `cfg` is null and behavior is unchanged. A plain
+ *  302 Response (not kit's `redirect()`) keeps this module's types-only @sveltejs/kit import. */
 export function makeSessionHandle(cfg: OidcConfig | null): Handle {
 	return async ({ event, resolve }) => {
 		// App.Locals is declared per-zone; in @rask/api's own typecheck it's empty, so read via AuthLocals.
@@ -86,6 +113,13 @@ export function makeSessionHandle(cfg: OidcConfig | null): Handle {
 			} else {
 				event.cookies.delete(SESSION_COOKIE, { path: '/' });
 			}
+		}
+		if (cfg && !locals.session && isGatedPageRequest(event)) {
+			const returnTo = event.url.pathname + event.url.search;
+			return new Response(null, {
+				status: 302,
+				headers: { location: `/auth/login?redirect=${encodeURIComponent(returnTo)}` },
+			});
 		}
 		return resolve(event);
 	};

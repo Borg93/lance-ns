@@ -55,6 +55,11 @@ spec:
             # only resolve for browsers. The BROWSER-facing authorize URL and the iss expectation keep the
             # public OIDC_ISSUER; the BFF rewrites the discovered (public) endpoints onto this base.
             - { name: OIDC_INTERNAL_ISSUER, value: "http://{{ include "lance.fullname" $root }}-dex:5556/dex" }
+            # Login-first gate for the media/annotator SPA zones (no BFF — their bun server checks
+            # lance_session cookie PRESENCE and redirects signed-out page loads to /auth/login). A UX
+            # gate, not a security boundary; the shell zones ignore this env (their gate derives from the
+            # OIDC config above).
+            - { name: AUTH_GATE, value: "true" }
             {{- end }}
           ports: [{ name: http, containerPort: 3000 }]
           {{- include "lance.tcpProbes" "http" | nindent 10 }}

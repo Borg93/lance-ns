@@ -22,6 +22,29 @@ const SEARCH = (args.search ?? 'http://127.0.0.1:8102').replace(/\/$/, '');
 const ANNOTATOR = (args.annotator ?? 'http://127.0.0.1:8103').replace(/\/$/, '');
 const PORT = Number(args.port ?? 5176);
 
+// ─── login-first UX gate (AUTH_GATE=true; the chart sets it with the OIDC env) ─
+// Mirrors the shell zones' central gate (@rask/api/bff makeSessionHandle): a signed-out browser page
+// navigation redirects to the home zone's /auth/login?redirect=<original path>. HONESTLY: this is a UX
+// gate, not a security boundary — it checks lance_session cookie PRESENCE only (this server has no
+// SESSION_SECRET, so it cannot unseal or verify the cookie); the media backends' authz is the catalog
+// token, and real per-user auth on the media plane is merge-phase work. Same exemptions as the shell
+// zones: /auth/*, /api/* (fetch clients keep their JSON contracts), _app/ + extension-bearing assets,
+// non-GET. Off unless AUTH_GATE=true, so local serving keeps today's behavior.
+const AUTH_GATE = process.env.AUTH_GATE === 'true';
+function gateRedirect(req: Request): Response | null {
+	if (!AUTH_GATE || req.method !== 'GET') return null;
+	const url = new URL(req.url);
+	const p = url.pathname;
+	if (p === '/auth' || p.startsWith('/auth/')) return null;
+	if (/\/(?:_app|api|capi)(?:\/|$)/.test(p)) return null;
+	if (/\.[a-z0-9]+$/i.test(p)) return null; // favicon.png, robots.txt, …
+	// Page NAVIGATIONS only — fetch/API clients don't send text/html.
+	if (!(req.headers.get('accept') ?? '').includes('text/html')) return null;
+	if (/(?:^|;\s*)lance_session=/.test(req.headers.get('cookie') ?? '')) return null;
+	const target = `/auth/login?redirect=${encodeURIComponent(p + url.search)}`;
+	return new Response(null, { status: 302, headers: { location: target } });
+}
+
 function apiUpstream(pathname: string): string {
 	if (
 		pathname.startsWith('/api/annotations') ||
@@ -66,6 +89,8 @@ Bun.serve({
 	port: PORT,
 	websocket: app.websocket as never,
 	async fetch(req, server) {
+		const denied = gateRedirect(req);
+		if (denied) return denied;
 		const { pathname } = new URL(req.url);
 		if (pathname.startsWith('/api/')) return proxy(req, apiUpstream(pathname));
 		return app.fetch(req, server);

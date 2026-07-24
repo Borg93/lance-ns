@@ -1,4 +1,5 @@
 import { test, expect, type Route } from '@playwright/test';
+import { signIn } from './session';
 
 // Hermetic /streams coverage: the panel reads the trimmed JetStream overview via the /api/jetstream BFF.
 // Mock it; assert the stream cards + consumer lag rows render (service column first, DLQ flagged,
@@ -64,6 +65,10 @@ const OVERVIEW = {
 	],
 	missing: [],
 };
+
+test.beforeEach(async ({ context }) => {
+	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
+});
 
 test('renders stream cards with consumer lag rows', async ({ page }) => {
 	await page.route('**/admin/api/jetstream*', (route) => json(route, OVERVIEW));

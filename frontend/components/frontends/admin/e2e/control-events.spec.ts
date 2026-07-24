@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { signIn } from './session';
 
 // The live control-plane activity feed (query.live). The generator polls the mock catalog (mock-catalog.ts,
 // the second webServer) server-side, so we drive it by POSTing to the mock's __mock/* control endpoints —
@@ -17,7 +18,8 @@ const control = (path: string, body?: unknown) =>
 		body: body ? JSON.stringify(body) : undefined,
 	});
 
-test.beforeEach(async () => {
+test.beforeEach(async ({ context }) => {
+	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
 	await control('reset');
 });
 

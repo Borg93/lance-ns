@@ -149,5 +149,14 @@ scopes:
 {{- if .Values.compaction.enabled }}
   - {{ .Values.compaction.daprAppId }}
 {{- end }}
+{{- if .Values.medallion.enabled }}
+  # The medallion plane consumes the store too (MEDALLION_SECRETS_FROM_DAPR fetches the S3 secret at
+  # boot when a store is configured) — unscoped, every compute-on + openbao-on medallion pod
+  # fail-closed with ERR_SECRET_STORES_NOT_CONFIGURED (found live 2026-07-24).
+  - {{ .Values.medallion.producer.daprAppId }}
+{{- range .Values.medallion.movers }}
+  - {{ .daprAppId }}
+{{- end }}
+{{- end }}
 {{- end }}
 {{- end }}

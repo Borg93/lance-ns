@@ -14,9 +14,12 @@ hard-coded host, and the transport carries a urllib3 ``Retry``.
 
 Scope (prototype): the dominant read pattern — a scan
 ``to_table(columns=, filter=, limit=, offset=, with_row_id=)`` plus
-``count_rows`` — is covered end to end. Blob serving (``take_blobs`` by stable
-``_rowid``) and hybrid ``search`` are the riskier phases the analysis flags and
-stay ``direct`` (they can remain direct per-call even when the flag is
+``count_rows`` — is covered end to end, and so is the VERSION surface the
+compare-versions panel needs: version listing (``POST /v1/table/{id}/version/list``,
+reader-tier governed) and time-travel (the ``version`` pin on ``/query`` /
+``count_rows``, both honored by the native backend). Blob serving (``take_blobs``
+by stable ``_rowid``) and hybrid ``search`` are the riskier phases the analysis
+flags and stay ``direct`` (they can remain direct per-call even when the flag is
 ``catalog``); wiring them is follow-up.
 
 The catalog ``/query`` endpoint is vector-search-first: it requires a ``vector``
@@ -35,6 +38,7 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 import lance
 import pyarrow as pa
+from pydantic import BaseModel
 
 from common.core.exceptions import (
     ConflictError,
@@ -111,20 +115,32 @@ class LanceTableReader:
         return self._ds.schema
 
 
-class CatalogTransport(Protocol):
-    """Executes a catalog ``/query`` and returns Arrow IPC **file** bytes.
+class CatalogVersion(BaseModel):
+    """One entry of the catalog's version listing (``/v1/table/{id}/version/list``):
+    the Lance version number + its commit timestamp in epoch millis (``None`` when
+    the backend records none)."""
 
-    Mirrors the one call :class:`CatalogTableReader` makes on the lance-ns
-    ``DataApi``; abstracted so the same reader runs against a live REST catalog
+    version: int
+    timestamp_millis: int | None = None
+
+
+class CatalogTransport(Protocol):
+    """Executes the catalog reads :class:`CatalogTableReader` needs — ``/query``
+    (Arrow IPC **file** bytes), ``/count_rows`` and ``/version/list``.
+
+    Mirrors the calls the reader makes on the lance-ns ``DataApi``/``TableApi``;
+    abstracted so the same reader runs against a live REST catalog
     (:class:`RestCatalogTransport`) or an in-process namespace
     (:class:`LocalCatalogTransport`) with no code change.
     """
 
     def query(self, request: QueryTableRequest) -> bytes: ...
 
-    def count(self, table_id: list[str], filter: str | None) -> int: ...
+    def count(self, table_id: list[str], filter: str | None, *, version: int | None = None) -> int: ...
 
     def table_version(self, table_id: list[str]) -> int: ...
+
+    def list_versions(self, table_id: list[str], *, limit: int | None = None) -> list[CatalogVersion]: ...
 
 
 class CatalogTableReader:
@@ -155,6 +171,7 @@ class CatalogTableReader:
         limit: int | None,
         offset: int | None,
         with_row_id: bool,
+        version: int | None,
     ) -> QueryTableRequest:
         from lance_namespace_urllib3_client import (  # optional dep: catalog backend only
             QueryTableRequest,
@@ -171,6 +188,7 @@ class CatalogTableReader:
             filter=filter,
             offset=offset,
             with_row_id=with_row_id or None,
+            version=version,
         )
 
     def to_table(
@@ -181,22 +199,32 @@ class CatalogTableReader:
         limit: int | None = None,
         offset: int | None = None,
         with_row_id: bool = False,
+        version: int | None = None,
     ) -> pa.Table:
+        """Scan the table — ``version`` pins a HISTORICAL snapshot (catalog time-travel;
+        a bad/reclaimed version is the catalog's 404, translated to ``NotFoundError``).
+        The extra defaulted kwarg keeps this a :class:`TableReader`."""
         request = self._build_request(
             columns=columns,
             filter=filter,
             limit=limit,
             offset=offset,
             with_row_id=with_row_id,
+            version=version,
         )
         raw = self._transport.query(request)
         return pa.ipc.open_file(pa.py_buffer(raw)).read_all()
 
-    def count_rows(self, filter: str | None = None) -> int:
-        return self._transport.count(self._id, filter)
+    def count_rows(self, filter: str | None = None, *, version: int | None = None) -> int:
+        return self._transport.count(self._id, filter, version=version)
 
     def table_version(self) -> int:
         return self._transport.table_version(self._id)
+
+    def versions(self, *, limit: int | None = None) -> list[CatalogVersion]:
+        """The table's version history, latest first (the catalog's ``descending``
+        listing), capped at ``limit`` — the surface the compare-versions panel reads."""
+        return self._transport.list_versions(self._id, limit=limit)
 
     @property
     def schema(self) -> pa.Schema:
@@ -217,9 +245,25 @@ class LocalCatalogTransport:
     def __init__(self, ds: lance.LanceDataset) -> None:
         self._ds = ds
 
+    def _at_version(self, version: int | None) -> lance.LanceDataset:
+        """Time-travel to ``version`` (``None`` = current), translating Lance's raw
+        not-found into ``NotFoundError`` — the native backend raises
+        ``TableVersionNotFoundError`` (→ REST 404 → ``NotFoundError``), so the
+        in-process transport must surface the same shape."""
+        if version is None:
+            return self._ds
+        try:
+            return self._ds.checkout_version(version)
+        except (ValueError, FileNotFoundError) as exc:
+            raise NotFoundError(f"table version {version} not found") from exc
+        except OSError as exc:
+            if "not found" in str(exc).lower():
+                raise NotFoundError(f"table version {version} not found") from exc
+            raise
+
     def query(self, request: QueryTableRequest) -> bytes:
         columns = request.columns.column_names if request.columns else None
-        table = self._ds.to_table(
+        table = self._at_version(request.version).to_table(
             columns=columns,
             filter=request.filter,
             limit=request.k if request.k is not None and request.k < 1_000_000_000 else None,
@@ -228,13 +272,28 @@ class LocalCatalogTransport:
         )
         return _to_arrow_file(table)
 
-    def count(self, table_id: list[str], filter: str | None) -> int:
+    def count(self, table_id: list[str], filter: str | None, *, version: int | None = None) -> int:
         del table_id  # bound to a single ds; the id is implied
-        return self._ds.count_rows(filter)
+        return self._at_version(version).count_rows(filter)
 
     def table_version(self, table_id: list[str]) -> int:
         del table_id
         return int(self._ds.version)
+
+    def list_versions(self, table_id: list[str], *, limit: int | None = None) -> list[CatalogVersion]:
+        del table_id
+        entries = [
+            CatalogVersion(version=int(v["version"]), timestamp_millis=_epoch_millis(v.get("timestamp")))
+            for v in reversed(self._ds.versions())  # descending, like the REST listing
+        ]
+        return entries[:limit] if limit is not None else entries
+
+
+def _epoch_millis(ts: object) -> int | None:
+    """A Lance ``versions()`` timestamp (a datetime) → epoch millis; ``None`` when
+    absent or not datetime-shaped (the listing survives an odd manifest)."""
+    to_epoch = getattr(ts, "timestamp", None)
+    return int(to_epoch() * 1000) if callable(to_epoch) else None
 
 
 @contextmanager
@@ -297,11 +356,14 @@ class RestCatalogTransport:
             )
         return bytes(raw)
 
-    def count(self, table_id: list[str], filter: str | None) -> int:
+    def count(self, table_id: list[str], filter: str | None, *, version: int | None = None) -> int:
         from lance_namespace_urllib3_client import CountTableRowsRequest
 
         id_str = self._delimiter.join(table_id)
-        request = CountTableRowsRequest(id=table_id, predicate=filter)
+        # ``version`` pins the count at a historical snapshot (spec 0.9; the native
+        # backend checks out that version server-side) — the per-version counts the
+        # compare-versions history shows.
+        request = CountTableRowsRequest(id=table_id, predicate=filter, version=version)
         with translate_catalog_errors():
             return int(
                 self._api.count_table_rows(
@@ -329,6 +391,27 @@ class RestCatalogTransport:
         if response.version is None:
             raise ServiceUnavailableError(f"catalog describe returned no version for {table_id}")
         return int(response.version)
+
+    def list_versions(self, table_id: list[str], *, limit: int | None = None) -> list[CatalogVersion]:
+        # THEIR listing primitive: ``POST /v1/table/{id}/version/list`` (reader-tier
+        # ``can_get_metadata`` under the catalog's router authorize, audited app-wide).
+        # ``descending=true`` is the spec-0.9 latest-to-oldest guarantee, so ``limit``
+        # caps to the MOST RECENT versions server-side — no client-side re-sort.
+        from lance_namespace_urllib3_client.api.table_api import TableApi
+
+        api = TableApi(self._api.api_client)
+        with translate_catalog_errors():
+            response = api.list_table_versions(
+                self._delimiter.join(table_id),
+                delimiter=self._delimiter,
+                limit=limit,
+                descending=True,
+                _request_timeout=self._timeout,
+            )
+        return [
+            CatalogVersion(version=int(v.version), timestamp_millis=v.timestamp_millis)
+            for v in response.versions or []
+        ]
 
 
 def open_reader(
@@ -360,6 +443,23 @@ def open_reader(
         if dataset is None:
             raise ValueError("in-process catalog fallback requires an opened dataset")
         transport = LocalCatalogTransport(dataset)
+    return CatalogTableReader(transport, list(table_id))
+
+
+def open_catalog_reader(*, table_id: list[str], settings: Settings) -> CatalogTableReader:
+    """The catalog-native reader, for surfaces only the catalog exposes (version
+    listing + time-travel) — the seam behind paths gated on
+    ``settings.rest_catalog_mode``, where the LIVE catalog owns the version
+    number-space. Refuses any other configuration so a mixed/local deployment can
+    never read history from the wrong number-space.
+    """
+    uri = settings.catalog_uri
+    if not settings.rest_catalog_mode or not uri:
+        raise ValueError(
+            "catalog version surface requires full catalog mode "
+            "(MEDIA_CATALOG_URI set + both MEDIA_*_BACKEND=catalog)"
+        )
+    transport = RestCatalogTransport(uri, delimiter=settings.catalog_delimiter, token=settings.catalog_token)
     return CatalogTableReader(transport, list(table_id))
 
 

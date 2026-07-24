@@ -12,13 +12,13 @@ import pyarrow as pa
 from common.core.exceptions import NotFoundError
 from common.deps import DatasetParam, StateDep
 from common.lancekit.keys import chunk_key_filter, validate_doc_key
-from common.lancekit.reader import open_reader
+from common.lancekit.reader import open_catalog_reader, open_reader
 from common.lancekit.registry import table_dataset
 from common.state import dataset_handle
 from fastapi import APIRouter, Query, Response
 
 from annotator.annotations.schema import ANNOTATIONS_TABLE, EMPTY_SCHEMA
-from annotator.annotations.versions import checkout
+from annotator.annotations.versions import VERSION_SOURCE_HEADER, checkout
 
 router = APIRouter(tags=["annotate"])
 
@@ -57,7 +57,7 @@ def annotations(
     # not opened at all (a catalog-only deployment must not 404 on a missing local
     # directory). Any other configuration keeps today's local resolution.
     ds = None
-    if version is not None or not settings.rest_catalog_mode:
+    if not settings.rest_catalog_mode:
         try:
             ds = table_dataset(handle, ANNOTATIONS_TABLE)
         except NotFoundError:
@@ -65,11 +65,20 @@ def annotations(
             return _empty_stream_response()
     where = chunk_key_filter(declared, doc_id, (speech_id, chunk_id))
     if version is not None:
+        if settings.rest_catalog_mode:
+            # Catalog-mode time-travel: the version pin on the catalog's /query —
+            # the SAME number-space the current-read header reports, so the panel
+            # can feed a listed version straight back here. A bad/reclaimed
+            # version (or a table the catalog doesn't know) is the catalog's 404,
+            # translated to ours — never a silent empty local fallback.
+            reader = open_catalog_reader(
+                table_id=settings.catalog_table_id(handle.id, ANNOTATIONS_TABLE), settings=settings
+            )
+            table = reader.to_table(filter=where, version=version)
+            return _annotations_response(table, version, source="catalog")
         # A historical read is a direct time-travel snapshot of the LOCAL lineage
-        # (read-only, off the hot path). Pre-merge scope: in catalog mode this is a
-        # DIFFERENT version number-space than the current-read header — the source
-        # header makes that explicit until the catalog's version routes take over.
-        assert ds is not None  # narrowed: the branch above always opened it
+        # (read-only, off the hot path) — its own number-space, named by the header.
+        assert ds is not None  # narrowed: the local branch above always opened it
         table = checkout(ds, version).to_table(filter=where)
         return _annotations_response(table, version, source="local")
     # Reads flow through the reader seam (direct default = byte-identical; the
@@ -113,6 +122,6 @@ def _annotations_response(table: pa.Table, version: int, *, source: str) -> Resp
         headers={
             "Cache-Control": "no-store",
             "X-Annotations-Version": str(version),
-            "X-Annotations-Version-Source": source,
+            VERSION_SOURCE_HEADER: source,
         },
     )

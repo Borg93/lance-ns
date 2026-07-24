@@ -1,31 +1,59 @@
-import { test, expect, type Route } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 
 // The estate shell in the MODELS zone: the cross-zone TopNavbar fed by a mocked /v1/me (hermetic —
 // the layout fetches it through this zone's /capi/v1/me pass-through), and the zone-scoped sidebar
 // carrying ONLY this zone's own routes.
+//
+// Under the three-trigger IA (8a0fbbc) this zone has no top-level entry of its own: the model
+// registry is the "Models" COLUMN of the Lakehouse panel, because a model is a catalog object over
+// the same estate. The bar stays three words wide however many routes the product grows.
 
 const json = (route: Route, body: unknown, status = 200) =>
 	route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-test('an estate admin gets the full navbar entry set + the models sidebar leaves', async ({
+/** Open a navbar panel and hand back its viewport.
+ *
+ * The triggers are server-rendered, so on a loaded machine a click can land before bits-ui has
+ * attached its handlers: the markup is inert rather than broken and the panel silently never
+ * opens. Retrying the click rides out that race — what must hold (the panel DOES open, and carries
+ * the rows asserted by the caller) is unchanged; only the delivery is made robust. It clicks only
+ * while the panel is closed, so a retry can never toggle an already-open panel back shut. */
+const openPanel = async (page: Page, name: string) => {
+	const trigger = page
+		.getByRole('navigation', { name: 'Zones' })
+		.getByRole('button', { name, exact: true });
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	await expect(async () => {
+		if (!(await panel.isVisible())) await trigger.click();
+		await expect(panel).toBeVisible({ timeout: 1_000 });
+	}).toPass({ timeout: 20_000 });
+	return panel;
+};
+
+const ADMIN = {
+	sub: 'user:alice',
+	name: 'Alice',
+	email: 'alice@example.com',
+	estate_admin: true,
+	projects: [{ project: 'acme', role: 'admin' }],
+};
+
+test('an estate admin gets the three domain triggers + the models sidebar leaves', async ({
 	page,
 }) => {
-	await page.route('**/capi/v1/me', (route) =>
-		json(route, {
-			sub: 'user:alice',
-			name: 'Alice',
-			email: 'alice@example.com',
-			estate_admin: true,
-			projects: [{ project: 'acme', role: 'admin' }],
-		}),
-	);
+	await page.route('**/capi/v1/me', (route) => json(route, ADMIN));
 	await page.goto('/models');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	// Models has a single surface, so it stays a plain link; Admin carries sub-areas and is a
-	// NavigationMenu trigger.
-	await expect(nav.getByRole('link', { name: 'Models', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toBeVisible();
-	// Access is NOT a top-level entry (4b2af0e: it folds into the admin zone) — in either shape.
+	// Three domain triggers, even for an estate admin — the extra surfaces are panel columns, not
+	// new entries. Every one carries sub-areas, so every one is a button; with the panels closed
+	// the bar holds no links at all (Home is the product mark, not an entry).
+	for (const domain of ['Lakehouse', 'Lineage', 'Media']) {
+		await expect(nav.getByRole('button', { name: domain, exact: true })).toBeVisible();
+	}
+	await expect(nav.getByRole('button')).toHaveCount(3);
+	await expect(nav.getByRole('link')).toHaveCount(0);
+	// This zone is NOT its own entry any more, and Access is not one either (in any shape).
+	await expect(nav.getByRole('link', { name: 'Models', exact: true })).toHaveCount(0);
 	await expect(nav.getByRole('link', { name: 'Access', exact: true })).toHaveCount(0);
 	await expect(nav.getByRole('button', { name: 'Access', exact: true })).toHaveCount(0);
 	// The sidebar renders ONLY this zone's own routes.
@@ -34,34 +62,36 @@ test('an estate admin gets the full navbar entry set + the models sidebar leaves
 	await expect(page.getByRole('link', { name: 'Experiments' })).toBeVisible();
 });
 
-test('a signed-out / unresolved identity renders the base entries only (fail-closed)', async ({
+test('a signed-out / unresolved identity gets no governance column (fail-closed)', async ({
 	page,
 }) => {
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/models');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('button', { name: 'Data', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
-	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
+	// The bar looks identical whoever is looking — privilege shows up only INSIDE the panel, so
+	// that is where the fail-closed assertion has to bite.
+	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button')).toHaveCount(3);
 	await expect(nav.getByText('Access')).toHaveCount(0);
+	const panel = await openPanel(page, 'Lakehouse');
+	// The non-admin panel is the tighter two-column one: catalog + models, nothing governing.
+	await expect(panel.getByText('Catalog', { exact: true })).toBeVisible();
+	await expect(panel.getByText('Models', { exact: true })).toBeVisible();
+	await expect(panel.getByText('Governance', { exact: true })).toHaveCount(0);
+	await expect(panel.getByText('Operations', { exact: true })).toHaveCount(0);
+	await expect(panel.locator('a[href^="/admin"]')).toHaveCount(0);
 });
 
-test("Access is reachable only from inside Admin's panel, never as its own navbar entry", async ({
+test("Access is reachable only from Lakehouse's Governance column, never as its own navbar entry", async ({
 	page,
 }) => {
-	await page.route('**/capi/v1/me', (route) =>
-		json(route, {
-			sub: 'user:alice',
-			name: 'Alice',
-			email: 'alice@example.com',
-			estate_admin: true,
-			projects: [{ project: 'acme', role: 'admin' }],
-		}),
-	);
+	await page.route('**/capi/v1/me', (route) => json(route, ADMIN));
 	await page.goto('/models');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await nav.getByRole('button', { name: 'Admin', exact: true }).click();
-	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	const panel = await openPanel(page, 'Lakehouse');
+	// Access rides in Governance, alongside the rest of the estate-admin surfaces…
+	await expect(panel.getByText('Governance', { exact: true })).toBeVisible();
+	await expect(panel.getByText('Operations', { exact: true })).toBeVisible();
 	await expect(panel.locator('a[href="/admin/access"]')).toBeVisible();
 	for (const row of ['/admin/tenants', '/admin/audit', '/admin/streams', '/admin/dlq']) {
 		await expect(panel.locator(`a[href="${row}"]`)).toBeVisible();
@@ -70,6 +100,39 @@ test("Access is reachable only from inside Admin's panel, never as its own navba
 	await page.keyboard.press('Escape');
 	await expect(panel).toBeHidden();
 	await expect(nav.getByText('Access')).toHaveCount(0);
+});
+
+test('this zone is a ROW of the Lakehouse panel, and its rows link where they claim', async ({
+	page,
+}) => {
+	// The growth rule the IA rests on: a new route becomes a row in a column, never a new top-level
+	// entry. The models zone is the first zone to have been folded in that way, so assert its rows
+	// actually resolve to this zone rather than merely being labelled for it.
+	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
+	await page.goto('/models');
+	const panel = await openPanel(page, 'Lakehouse');
+	for (const [row, href] of [
+		['Registry', '/models'],
+		['Experiments', '/models/experiments'],
+		['Pipeline', '/models/pipeline'],
+	] as const) {
+		await expect(panel.getByRole('link', { name: new RegExp(`^${row}`) })).toHaveAttribute(
+			'href',
+			href,
+		);
+	}
+	// Registry IS this zone's root, so it is reachable exactly once — no duplicate synthesized row.
+	await expect(panel.locator('a[href="/models"]')).toHaveCount(1);
+	// These rows stay INSIDE this app's route manifest, so they soft-navigate (no reload marker);
+	// the catalog rows in the same panel cross zones and must carry one.
+	await expect(panel.locator('a[href="/models/pipeline"]')).not.toHaveAttribute(
+		'data-sveltekit-reload',
+		'',
+	);
+	await expect(panel.locator('a[href="/data/tables"]')).toHaveAttribute(
+		'data-sveltekit-reload',
+		'',
+	);
 });
 
 test('the project switcher heads the navbar row — it no longer lives in the sidebar', async ({

@@ -25,30 +25,38 @@ test('GET /auth/logout clears the session and redirects home', async ({ page, ba
 	expect(page.url()).toBe(`${baseURL}/`);
 });
 
-test('the navbar lists the base zones and hides the estate-admin entries for an anonymous visitor', async ({
+test('the navbar carries the three domain triggers and no governance column for an anonymous visitor', async ({
 	page,
 }) => {
 	await page.goto('/');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	await expect(nav).toBeVisible();
-	// A zone with sub-areas is a NavigationMenu trigger (a button opening a panel); a zone with a
-	// single surface stays a plain link.
-	for (const zone of ['Home', 'Models', 'Annotator']) {
-		await expect(nav.getByRole('link', { name: zone, exact: true })).toBeVisible();
+	// The IA is three DOMAIN triggers (8a0fbbc) — every one carries sub-areas, so every one is a
+	// NavigationMenu trigger opening a panel. The old flat per-zone links are gone: Models and
+	// Annotate are now rows inside a panel, and Home is the product mark, not an entry at all.
+	for (const domain of ['Lakehouse', 'Lineage', 'Media']) {
+		await expect(nav.getByRole('button', { name: domain, exact: true })).toBeVisible();
 	}
-	for (const zone of ['Data', 'Lineage', 'Media']) {
-		await expect(nav.getByRole('button', { name: zone, exact: true })).toBeVisible();
-	}
-	// fetchMe resolves null (no session, no catalog) → estate_admin is unknowable → fail-closed:
-	// no Admin entry in either shape, and no Access anywhere (its only home is Admin's panel).
-	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
-	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
+	await expect(nav.getByRole('button')).toHaveCount(3);
+	await expect(nav.getByRole('link', { name: 'Home', exact: true })).toHaveCount(0);
+	// fetchMe resolves null (no session, no catalog) → estate_admin is unknowable → fail-closed.
+	// Access has no home outside the estate-admin Governance column, so it is nowhere in this bar…
 	await expect(nav.getByText('Access')).toHaveCount(0);
-	// Cross-zone navbar links hard-navigate out of the home zone's route manifest.
-	await expect(nav.getByRole('link', { name: 'Models', exact: true })).toHaveAttribute(
-		'data-sveltekit-reload',
-		'',
-	);
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	// This zone SSRs the resolved triggers (fetchMe has nothing to wait for auth-off), so the
+	// buttons are in the markup before the client bundle has attached bits-ui's handlers — clicking
+	// straight away lands on inert HTML and the panel silently never opens. Let the module load.
+	await page.waitForLoadState('networkidle');
+	await nav.getByRole('button', { name: 'Lakehouse', exact: true }).click();
+	await expect(panel).toBeVisible();
+	// …and opening the one trigger that WOULD carry them proves the columns never rendered.
+	await expect(panel.getByText('Catalog', { exact: true })).toBeVisible();
+	await expect(panel.getByText('Governance', { exact: true })).toHaveCount(0);
+	await expect(panel.getByText('Operations', { exact: true })).toHaveCount(0);
+	await expect(panel.locator('a[href^="/admin"]')).toHaveCount(0);
+	// Every panel row leaves the home zone's route manifest, so it must hard-navigate.
+	await expect(panel.getByRole('link', { name: /^Registry/ })).toHaveAttribute('href', '/models');
+	await expect(panel.locator('a[href="/models"]')).toHaveAttribute('data-sveltekit-reload', '');
 });
 
 test('the landing shows the gallery empty state and NO auth control when auth is off', async ({

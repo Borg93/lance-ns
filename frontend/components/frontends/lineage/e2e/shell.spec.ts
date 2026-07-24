@@ -1,12 +1,35 @@
-import { test, expect, type Route } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 
 // The estate shell in the LINEAGE zone: the cross-zone TopNavbar fed by a mocked /v1/me (hermetic —
 // the layout fetches it through this zone's /capi/v1/me pass-through), the zone-scoped sidebar
 // carrying exactly this zone's views (Datasets / Jobs / Runs / Columns + the Graph at the root), and
 // the two-row header — navbar row above, breadcrumb bar below.
+//
+// The bar's IA (8a0fbbc) is THREE domain triggers — Lakehouse (Catalog + Models, plus Governance +
+// Operations for an estate admin), Lineage, Media — never a flat list of zones. Every entry carries
+// sub-areas, so every entry is a NavigationMenu trigger; Home is the product mark, not an entry.
 
 const json = (route: Route, body: unknown, status = 200) =>
 	route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+/** Open a navbar panel and hand back its viewport.
+ *
+ * The triggers are server-rendered, so on a loaded machine a click can land before bits-ui has
+ * attached its handlers: the markup is inert rather than broken and the panel silently never
+ * opens. Retrying the click rides out that race — what must hold (the panel DOES open, and carries
+ * the rows asserted by the caller) is unchanged; only the delivery is made robust. It clicks only
+ * while the panel is closed, so a retry can never toggle an already-open panel back shut. */
+const openPanel = async (page: Page, name: string) => {
+	const trigger = page
+		.getByRole('navigation', { name: 'Zones' })
+		.getByRole('button', { name, exact: true });
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	await expect(async () => {
+		if (!(await panel.isVisible())) await trigger.click();
+		await expect(panel).toBeVisible({ timeout: 1_000 });
+	}).toPass({ timeout: 20_000 });
+	return panel;
+};
 
 test.beforeEach(async ({ page }) => {
 	// The explorer's own backend calls — empty world is fine for shell assertions.
@@ -18,7 +41,7 @@ test.beforeEach(async ({ page }) => {
 	});
 });
 
-test('an estate admin gets the full navbar entry set + the Marquez-parity sidebar leaves', async ({
+test('an estate admin gets the three domain triggers + the Marquez-parity sidebar leaves', async ({
 	page,
 }) => {
 	await page.route('**/capi/v1/me', (route) =>
@@ -32,9 +55,15 @@ test('an estate admin gets the full navbar entry set + the Marquez-parity sideba
 	);
 	await page.goto('/lineage');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	// Lineage and Admin both carry sub-areas, so they are NavigationMenu triggers, not links.
-	await expect(nav.getByRole('button', { name: 'Lineage', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toBeVisible();
+	// The bar is three DOMAIN triggers and nothing else — even for an estate admin, whose extra
+	// surfaces arrive as columns inside Lakehouse's panel rather than as new top-level entries.
+	// All three carry sub-areas, so all three are NavigationMenu triggers (buttons), never links.
+	for (const domain of ['Lakehouse', 'Lineage', 'Media']) {
+		await expect(nav.getByRole('button', { name: domain, exact: true })).toBeVisible();
+	}
+	await expect(nav.getByRole('button')).toHaveCount(3);
+	// Home is the product mark, not a nav entry: with every panel closed the bar holds no links.
+	await expect(nav.getByRole('link')).toHaveCount(0);
 	// The zone sidebar lists exactly the four first-class views + the Graph (active at the root).
 	// Scoped to the sidebar: page content may legitimately link to the same views (e.g. the graph
 	// header's capped hint links to Datasets), which would trip strict mode on a page-wide query.
@@ -55,49 +84,133 @@ test('the Datasets leaf lights on its list page and stays lit on a nested detail
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Datasets' })).toBeVisible();
 });
 
-test('a signed-out / unresolved identity renders the base entries only (fail-closed)', async ({
+test('a signed-out / unresolved identity gets NO governance column (fail-closed)', async ({
 	page,
 }) => {
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/lineage');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('button', { name: 'Data', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
-	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
+	// The bar never advertises privilege — the same three triggers whoever is looking…
+	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button')).toHaveCount(3);
+	// …so the fail-closed guarantee now lives one level in, on Lakehouse's COLUMNS. This is what
+	// the old "no Admin entry in the bar" assertion stood for: with the admin surfaces folded into
+	// a shared trigger, hiding them means the Governance/Operations columns never render at all and
+	// not one /admin row is reachable for an unresolved identity.
+	const panel = await openPanel(page, 'Lakehouse');
+	await expect(panel.getByText('Catalog', { exact: true })).toBeVisible();
+	await expect(panel.getByText('Models', { exact: true })).toBeVisible();
+	await expect(panel.getByText('Governance', { exact: true })).toHaveCount(0);
+	await expect(panel.getByText('Operations', { exact: true })).toHaveCount(0);
+	await expect(panel.locator('a[href^="/admin"]')).toHaveCount(0);
 });
 
-test('a zone with sub-areas opens a panel of them — pointer and keyboard, cross-zone rows reloading', async ({
+test('an estate admin gets the Governance + Operations columns inside the Lakehouse panel', async ({
+	page,
+}) => {
+	// The positive half of the guarantee above: the admin surfaces DO exist, and they are rows in
+	// Lakehouse's panel — never a top-level entry, and never anywhere else in the bar.
+	await page.route('**/capi/v1/me', (route) =>
+		json(route, {
+			sub: 'user:alice',
+			name: 'Alice',
+			email: 'alice@example.com',
+			estate_admin: true,
+			projects: [{ project: 'acme', role: 'admin' }],
+		}),
+	);
+	await page.goto('/lineage');
+	const nav = page.getByRole('navigation', { name: 'Zones' });
+	const panel = await openPanel(page, 'Lakehouse');
+	for (const label of ['Catalog', 'Models', 'Governance', 'Operations']) {
+		await expect(panel.getByText(label, { exact: true })).toBeVisible();
+	}
+	// Each governance/operations row links where it claims.
+	for (const [row, href] of [
+		['Access', '/admin/access'],
+		['Tenants', '/admin/tenants'],
+		['Audit', '/admin/audit'],
+		['Events', '/admin/events'],
+		['Streams', '/admin/streams'],
+		['DLQ', '/admin/dlq'],
+	] as const) {
+		await expect(panel.getByRole('link', { name: new RegExp(`^${row}`) })).toHaveAttribute(
+			'href',
+			href,
+		);
+	}
+	// …and with the panel closed the bar itself still carries no Access entry of any shape.
+	await page.keyboard.press('Escape');
+	await expect(panel).toBeHidden();
+	await expect(nav.getByText('Access')).toHaveCount(0);
+});
+
+test('a domain trigger opens a panel of its rows — pointer and keyboard, cross-zone rows reloading', async ({
 	page,
 }) => {
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/lineage');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	const data = nav.getByRole('button', { name: 'Data', exact: true });
+	const lakehouse = nav.getByRole('button', { name: 'Lakehouse', exact: true });
 	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
 	// Closed by default: the panel's rows are not in the document at all (nothing to tab into).
 	await expect(panel).toHaveCount(0);
 
-	await data.click();
-	await expect(panel).toBeVisible();
-	for (const row of ['Projects', 'Tables', 'Namespaces', 'Warehouses']) {
-		await expect(panel.getByRole('link', { name: new RegExp(`^${row}`) })).toBeVisible();
+	// Pointer half: a click on the trigger opens it (retried only against the pre-hydration race).
+	await openPanel(page, 'Lakehouse');
+	// The rows link where they claim — the Catalog column over /data, the Models column over
+	// /models, both under the one trigger.
+	for (const [row, href] of [
+		['Projects', '/data/projects'],
+		['Tables', '/data/tables'],
+		['Namespaces', '/data/namespaces'],
+		['Warehouses', '/data/warehouses'],
+		['Registry', '/models'],
+		['Experiments', '/models/experiments'],
+		['Pipeline', '/models/pipeline'],
+	] as const) {
+		await expect(panel.getByRole('link', { name: new RegExp(`^${row}`) })).toHaveAttribute(
+			'href',
+			href,
+		);
 	}
-	// Each row leaves THIS zone's route manifest, so it must hard-navigate…
+	// Each row leaves THIS zone's route manifest, so it must hard-navigate.
 	await expect(panel.locator('a[href="/data/tables"]')).toHaveAttribute(
 		'data-sveltekit-reload',
 		'',
 	);
-	// …and the zone root stays reachable, because the trigger itself is a button, not a link. Data
-	// has no row at /data, so the panel adds the root row — exactly one of it.
-	await expect(panel.locator('a[href="/data"]')).toHaveCount(1);
 
 	// Escape closes it, and the trigger is still the focused element.
 	await page.keyboard.press('Escape');
 	await expect(panel).toBeHidden();
 	// Keyboard-only open: focus the trigger and press Enter.
-	await data.focus();
+	await lakehouse.focus();
 	await page.keyboard.press('Enter');
 	await expect(page.locator('[data-slot="navigation-menu-viewport"]')).toBeVisible();
+});
+
+test('a panel reaches its own zone root exactly once — the trigger is a button, not a link', async ({
+	page,
+}) => {
+	// The trigger opens a panel instead of navigating, so the zone ROOT has to be a row or it
+	// becomes unreachable from the bar. Lineage's root IS a row (Graph = /lineage), so the panel
+	// must not also synthesize a header row for it — exactly one link to the root, no duplicate.
+	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
+	await page.goto('/lineage');
+	const panel = await openPanel(page, 'Lineage');
+	await expect(panel.locator('a[href="/lineage"]')).toHaveCount(1);
+	await expect(panel.getByRole('link', { name: /^Graph/ })).toHaveAttribute('href', '/lineage');
+	for (const [row, href] of [
+		['Datasets', '/lineage/datasets'],
+		['Jobs', '/lineage/jobs'],
+		['Runs', '/lineage/runs'],
+		['Columns', '/lineage/columns'],
+	] as const) {
+		await expect(panel.getByRole('link', { name: new RegExp(`^${row}`) })).toHaveAttribute(
+			'href',
+			href,
+		);
+	}
 });
 
 test('the loading skeleton reserves the resolved entry widths — no shift when /v1/me lands', async ({
@@ -106,19 +219,52 @@ test('the loading skeleton reserves the resolved entry widths — no shift when 
 	// The 4b2af0e no-CLS contract, re-proven against the NavigationMenu chrome: the skeleton pills
 	// must reserve the resolved entries' exact box, chevrons included, so the navbar does not jump
 	// when the identity resolves. Held open until the loading geometry has been measured.
+	//
+	// Resolved as an ESTATE ADMIN on purpose — that is the only identity whose IA differs, and
+	// under the three-trigger bar its extra surfaces must land as columns INSIDE the Lakehouse
+	// panel. So the admin case is exactly the one that would shift the bar if the panel content
+	// ever leaked back out into a top-level entry, which makes it the strongest no-shift probe.
 	let release = () => {};
 	const gate = new Promise<void>((resolve) => (release = resolve));
 	await page.route('**/capi/v1/me', async (route) => {
 		await gate;
-		return json(route, { detail: 'anon' }, 401);
+		return json(route, {
+			sub: 'user:alice',
+			name: 'Alice',
+			email: 'alice@example.com',
+			estate_admin: true,
+			projects: [{ project: 'acme', role: 'admin' }],
+		});
 	});
 	await page.goto('/lineage');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	await expect(nav.locator('[data-slot="skeleton"]').first()).toBeVisible();
+	// Measure only once the SHELL around the navbar has finished laying out. The skeleton is in the
+	// SSR markup, so it is visible before hydration has sized the sidebar — sampling there records
+	// an x that is one sidebar-width (256px) off and reports it as a navbar shift that never
+	// happened. Settling first keeps the assertion below exact (<=1px) instead of padding it.
+	await expect(page.locator('[data-sidebar="content"]')).toBeVisible();
+	const settled = async () => {
+		let last = -1;
+		await expect
+			.poll(
+				async () => {
+					const x = (await nav.boundingBox())!.x;
+					const stable = x === last;
+					last = x;
+					return stable;
+				},
+				{ timeout: 15_000 },
+			)
+			.toBe(true);
+	};
+	await settled();
 	const loading = (await nav.boundingBox())!;
 
 	release();
-	await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
+	// The resolved bar carries the same three triggers the skeleton reserved — no earned entry.
+	await expect(nav.getByRole('button')).toHaveCount(3);
 	const resolved = (await nav.boundingBox())!;
 	expect(Math.abs(resolved.width - loading.width)).toBeLessThanOrEqual(1);
 	expect(Math.abs(resolved.x - loading.x)).toBeLessThanOrEqual(1);

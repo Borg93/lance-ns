@@ -3,8 +3,24 @@
 	// physical tenancy), activate/deactivate lifecycle, namespace binding, and provisioning. Reads
 	// are session-forwarded; writes are project-admin gated by the catalog (can_create_warehouse /
 	// can_administer) — a non-admin sees the denial banner, never a silent no-op.
+	import {
+		createSvelteTable,
+		DataTable,
+		DataTableHeaderButton,
+		DataTableTextFilter,
+		getCoreRowModel,
+		getFilteredRowModel,
+		getPaginationRowModel,
+		getSortedRowModel,
+		renderComponent,
+		renderSnippet,
+		type ColumnDef,
+		type PaginationState,
+		type SortingState,
+	} from '@rask/ui/data-table';
 	import { Select } from '@rask/ui/select';
 	import { RefreshCw, ShieldAlert, Warehouse as WarehouseIcon } from '@lucide/svelte';
+	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import {
 		bindWarehouseNamespace,
@@ -104,6 +120,87 @@
 		}
 	}
 
+	// ── the DataTable (goal cond 4): sortable/searchable warehouse rows, id linking into the
+	// hierarchy's warehouse page, the activate/deactivate lifecycle action preserved. ──
+	let sorting = $state<SortingState>([]);
+	let globalFilter = $state('');
+	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
+
+	const sortableHeader =
+		(label: string) =>
+		({
+			column,
+		}: {
+			column: {
+				getIsSorted(): false | 'asc' | 'desc';
+				getToggleSortingHandler(): ((e: Event) => void) | undefined;
+			};
+		}) =>
+			renderComponent(DataTableHeaderButton, {
+				label,
+				sorted: column.getIsSorted(),
+				onclick: column.getToggleSortingHandler(),
+			});
+
+	const columns: ColumnDef<Warehouse>[] = [
+		{
+			id: 'id',
+			accessorKey: 'id',
+			header: sortableHeader('id'),
+			cell: ({ row }) => renderSnippet(idCell, row.original),
+		},
+		{
+			id: 'project',
+			accessorKey: 'project',
+			header: sortableHeader('project'),
+			meta: { cellClass: 'font-mono' },
+		},
+		{
+			id: 'bucket',
+			accessorKey: 'bucket',
+			header: sortableHeader('bucket'),
+			meta: { cellClass: 'font-mono' },
+		},
+		{
+			id: 'status',
+			accessorFn: (w) => statusOf(w),
+			header: sortableHeader('status'),
+			cell: ({ row }) => renderSnippet(statusCell, row.original),
+			meta: { headerClass: 'w-28' },
+		},
+		{
+			id: 'actions',
+			header: '',
+			cell: ({ row }) => renderSnippet(actionsCell, row.original),
+			meta: { headerClass: 'w-28', cellClass: 'text-right' },
+		},
+	];
+
+	const whTable = createSvelteTable({
+		get data() {
+			return warehouses ?? [];
+		},
+		columns,
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get globalFilter() {
+				return globalFilter;
+			},
+			get pagination() {
+				return pagination;
+			},
+		},
+		onSortingChange: (u) => (sorting = typeof u === 'function' ? u(sorting) : u),
+		onGlobalFilterChange: (u) => (globalFilter = typeof u === 'function' ? u(globalFilter) : u),
+		onPaginationChange: (u) => (pagination = typeof u === 'function' ? u(pagination) : u),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
+
 	async function bind(): Promise<void> {
 		if (busy || !bindDraft.warehouse || !bindDraft.namespace.trim()) return;
 		busy = true;
@@ -124,6 +221,18 @@
 		}
 	}
 </script>
+
+{#snippet idCell(w: Warehouse)}
+	<a class="whlink mono" href={`${base}/warehouses/${encodeURIComponent(w.id)}`}>{w.id}</a>
+{/snippet}
+{#snippet statusCell(w: Warehouse)}
+	<span class="chip mono" class:off={statusOf(w) !== 'active'}>{statusOf(w)}</span>
+{/snippet}
+{#snippet actionsCell(w: Warehouse)}
+	<button class="btn ghost" disabled={busy} onclick={() => toggleActive(w)}>
+		{statusOf(w) === 'active' ? 'deactivate' : 'activate'}
+	</button>
+{/snippet}
 
 <div class="page">
 	<header>
@@ -150,36 +259,15 @@
 			<RefreshCw size={16} />
 			<p>Catalog unreachable (HTTP {lastStatus}) — retrying.</p>
 		</div>
-	{:else if warehouses === null}
-		<div class="empty"><p>Loading…</p></div>
 	{:else}
-		{#if warehouses.length === 0}
-			<div class="empty"><p>No warehouses provisioned — the form below creates the first.</p></div>
-		{:else}
-			<table>
-				<thead>
-					<tr><th>id</th><th>project</th><th>bucket</th><th>status</th><th></th></tr>
-				</thead>
-				<tbody>
-					{#each warehouses as w (w.id)}
-						<tr>
-							<td class="mono">{w.id}</td>
-							<td class="mono">{w.project}</td>
-							<td class="mono">{w.bucket}</td>
-							<td
-								><span class="chip mono" class:off={statusOf(w) !== 'active'}>{statusOf(w)}</span
-								></td
-							>
-							<td class="actions">
-								<button class="btn ghost" disabled={busy} onclick={() => toggleActive(w)}>
-									{statusOf(w) === 'active' ? 'deactivate' : 'activate'}
-								</button>
-							</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		{/if}
+		<div class="toolbar">
+			<DataTableTextFilter bind:value={globalFilter} placeholder="Search warehouses…" />
+		</div>
+		<DataTable
+			table={whTable}
+			loading={warehouses === null}
+			emptyMessage="No warehouses provisioned — the form below creates the first."
+		/>
 
 		<section>
 			<h2>Provision</h2>
@@ -226,7 +314,7 @@
 					bind:value={bindDraft.warehouse}
 					ariaLabel="Warehouse"
 					placeholder="warehouse…"
-					options={warehouses.map((w) => ({ value: w.id, label: w.id }))}
+					options={(warehouses ?? []).map((w) => ({ value: w.id, label: w.id }))}
 				/>
 				<input
 					class="mono"
@@ -292,22 +380,6 @@
 		border-color: color-mix(in srgb, var(--fail) 45%, var(--line));
 		color: var(--fail);
 	}
-	table {
-		border-collapse: collapse;
-		font-size: 12px;
-		width: 100%;
-	}
-	th {
-		text-align: left;
-		color: var(--faint);
-		font-weight: 500;
-		padding: 3px 14px 3px 0;
-		border-bottom: 1px solid var(--line);
-	}
-	td {
-		padding: 5px 14px 5px 0;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
-	}
 	.chip {
 		background: var(--panel-2);
 		border: 1px solid color-mix(in srgb, var(--ok) 45%, var(--line));
@@ -354,7 +426,17 @@
 		color: var(--mut);
 		padding: 32px 0;
 	}
-	.actions {
-		text-align: right;
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
+	.whlink {
+		color: var(--ink);
+		text-decoration: none;
+	}
+	.whlink:hover {
+		text-decoration: underline;
 	}
 </style>

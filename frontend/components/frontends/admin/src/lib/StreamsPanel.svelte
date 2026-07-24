@@ -12,6 +12,7 @@
 	import { page } from '$app/state';
 	import { JetStreamOverviewSchema, type JetStreamOverview } from './jetstream';
 	import { requestJSON } from './http';
+	import StreamConsumers from './StreamConsumers.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -96,17 +97,6 @@
 			? 'messages added since last refresh'
 			: 'messages removed since last refresh (retention, purge, or a drain)';
 
-	// A consumer whose last delivery activity is >10 min behind the monitor's own clock (`overview.now`,
-	// not the browser clock — no client-skew false positives) is rendered dimmed with a "stale" chip: on
-	// an active fabric that usually means its app stopped reading (wedged/crashlooping subscriber).
-	const STALE_MS = 10 * 60 * 1000;
-	function isStale(lastActive: string | undefined, now: string): boolean {
-		if (!lastActive) return false;
-		const active = new Date(lastActive).getTime();
-		const ref = new Date(now).getTime();
-		return !Number.isNaN(active) && !Number.isNaN(ref) && ref - active > STALE_MS;
-	}
-
 	function fmtBytes(n: number): string {
 		if (n < 1024) return `${n} B`;
 		if (n < 1024 ** 2) return `${(n / 1024).toFixed(1)} KiB`;
@@ -121,11 +111,6 @@
 		if (s < 3600) return `${Math.round(s / 60)}m`;
 		if (s < 86400) return `${Math.round(s / 3600)}h`;
 		return `${Math.round(s / 86400)}d`;
-	}
-	function when(ts: string | undefined): string {
-		if (!ts) return '—';
-		const d = new Date(ts);
-		return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
 	}
 </script>
 
@@ -232,41 +217,9 @@
 						{#if s.consumers.length === 0}
 							<div class="noconsumers">No consumers bound ({s.state.consumer_count} reported).</div>
 						{:else}
-							<table>
-								<thead>
-									<tr>
-										<th>service</th><th>consumer</th><th class="num">pending</th>
-										<th class="num">ack-pending</th><th class="num">redelivered</th><th
-											>last active</th
-										>
-									</tr>
-								</thead>
-								<tbody>
-									{#each s.consumers as c (c.name)}
-										<tr class:stale={isStale(c.last_active, overview.now)}>
-											<td class="mono service">{c.service}</td>
-											<td class="mono">
-												{c.durable ? c.name : `${c.name} (ephemeral)`}
-											</td>
-											<td class="num mono" class:pend={c.num_pending > 0}>{c.num_pending}</td>
-											<td class="num mono" class:pend={c.num_ack_pending > 0}
-												>{c.num_ack_pending}</td
-											>
-											<td class="num mono" class:warn={c.num_redelivered > 0}
-												>{c.num_redelivered}</td
-											>
-											<td class="mono faint">
-												{when(c.last_active)}
-												{#if isStale(c.last_active, overview.now)}
-													<span class="stalechip" title="No delivery activity for over 10 minutes"
-														>stale</span
-													>
-												{/if}
-											</td>
-										</tr>
-									{/each}
-								</tbody>
-							</table>
+							<!-- Goal cond 4: the consumer rows on the shared DataTable (sortable; same
+							     pressure/wedge/stale semantics, judged against the monitor's clock). -->
+							<StreamConsumers consumers={s.consumers} now={overview.now} />
 						{/if}
 					</section>
 				{/each}
@@ -412,59 +365,5 @@
 		font-size: 12px;
 		color: var(--faint);
 		padding: 4px 0;
-	}
-	table {
-		border-collapse: collapse;
-		font-size: 12px;
-		width: 100%;
-	}
-	th {
-		text-align: left;
-		color: var(--faint);
-		font-weight: 500;
-		padding: 4px 14px 4px 0;
-		border-bottom: 1px solid var(--line);
-	}
-	td {
-		padding: 4px 14px 4px 0;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
-	}
-	tr:last-child td {
-		border-bottom: none;
-	}
-	th.num,
-	td.num {
-		text-align: right;
-	}
-	td.num {
-		color: var(--faint);
-	}
-	td.pend {
-		color: var(--mut);
-	}
-	td.warn {
-		color: var(--warn, #d18b28);
-	}
-	td.service {
-		color: var(--ink);
-	}
-	/* Stale consumer: dimmed row (still legible) + a warn-toned chip on the last-active cell. */
-	tr.stale td {
-		opacity: 0.55;
-	}
-	.stalechip {
-		display: inline-block;
-		border: 1px solid color-mix(in srgb, var(--warn, #d18b28) 60%, var(--line));
-		border-radius: var(--radius-sm);
-		color: var(--warn, #d18b28);
-		font-size: 10px;
-		text-transform: uppercase;
-		letter-spacing: 0.04em;
-		padding: 0 5px;
-		margin-left: 6px;
-	}
-	.faint {
-		color: var(--faint);
-		white-space: nowrap;
 	}
 </style>

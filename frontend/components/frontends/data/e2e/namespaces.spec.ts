@@ -45,18 +45,24 @@ test('the client fetches the BFF under the zone base path, not a bare /capi', as
 	await expect.poll(() => lastCapiPath).toBe('/data/capi/v1/table');
 });
 
-test('groups the catalog tables by namespace with per-namespace table counts', async ({ page }) => {
+test('lists one sortable row per namespace with table counts + tier badges', async ({ page }) => {
 	await page.goto('/data/namespaces');
 	await expect(page.getByRole('heading', { name: 'Namespaces' })).toBeVisible();
-	const bronze = page.locator('section.ns', { hasText: 'bronze' });
-	await expect(bronze).toContainText('1 table');
-	const gold = page.locator('section.ns', { hasText: 'gold' });
-	await expect(gold).toContainText('2 tables');
-	// tables link into the detail view
-	await expect(gold.locator('a', { hasText: 'gold$catalog' })).toHaveAttribute(
+	// One DataTable row per namespace (goal cond 4), derived from the registry ids.
+	const bronze = page.locator('tr', { has: page.locator('a.ns-name', { hasText: 'bronze' }) });
+	await expect(bronze).toContainText('1');
+	await expect(bronze.locator('.stage')).toHaveText('bronze'); // the derived medallion tier badge
+	const gold = page.locator('tr', { has: page.locator('a.ns-name', { hasText: /^gold$/ }) });
+	await expect(gold).toContainText('2');
+	// the name links into the namespace detail view
+	await expect(page.locator('a.ns-name', { hasText: 'bronze' })).toHaveAttribute(
 		'href',
-		'/data/tables/gold%24catalog',
+		'/data/namespaces/bronze',
 	);
+	// the text search narrows the rows
+	await page.getByPlaceholder('Search namespaces…').fill('bronze');
+	await expect(page.locator('a.ns-name', { hasText: /^gold$/ })).toHaveCount(0);
+	await expect(page.locator('a.ns-name', { hasText: 'bronze' })).toBeVisible();
 });
 
 test('the New-namespace affordance points at the governed warehouse-bind flow', async ({
@@ -75,7 +81,7 @@ test('drop confirms via the AlertDialog, posts the cascade behavior, and the row
 	page,
 }) => {
 	await page.goto('/data/namespaces');
-	await expect(page.locator('section.ns', { hasText: 'bronze' })).toBeVisible();
+	await expect(page.locator('a.ns-name', { hasText: 'bronze' })).toBeVisible();
 	await page.getByRole('button', { name: 'Drop namespace bronze' }).click();
 	// The confirm is the portalled @rask/ui AlertDialog — drive it by role, not the trigger row.
 	const dialog = page.getByRole('alertdialog');
@@ -90,8 +96,8 @@ test('drop confirms via the AlertDialog, posts the cascade behavior, and the row
 	// second confirm-free fire (audit: major).
 	await expect(page.getByRole('alertdialog')).toHaveCount(0);
 	// The success re-load renders the post-drop registry: bronze gone, gold intact.
-	await expect(page.locator('section.ns', { hasText: 'bronze' })).toHaveCount(0);
-	await expect(page.locator('section.ns', { hasText: 'gold' })).toBeVisible();
+	await expect(page.locator('a.ns-name', { hasText: 'bronze' })).toHaveCount(0);
+	await expect(page.locator('a.ns-name', { hasText: /^gold$/ })).toBeVisible();
 	await expect(page.locator('.banner.ok')).toContainText('namespace bronze dropped (cascade)');
 });
 
@@ -117,7 +123,7 @@ test('cancelling the confirm never posts the drop', async ({ page }) => {
 	await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
 	await expect(page.getByRole('alertdialog')).toHaveCount(0);
 	expect(dropPost).toBeNull();
-	await expect(page.locator('section.ns', { hasText: 'gold' })).toBeVisible();
+	await expect(page.locator('a.ns-name', { hasText: /^gold$/ })).toBeVisible();
 });
 
 test('a 403 drop surfaces the forbidden state and keeps the namespace listed', async ({ page }) => {
@@ -130,7 +136,7 @@ test('a 403 drop surfaces the forbidden state and keeps the namespace listed', a
 	await expect(page.locator('.banner.fail')).toContainText(
 		'Denied: dropping gold needs the owner rung (can_delete).',
 	);
-	await expect(page.locator('section.ns', { hasText: 'gold' })).toBeVisible();
+	await expect(page.locator('a.ns-name', { hasText: /^gold$/ })).toBeVisible();
 });
 
 test('the shared sidebar marks the Namespaces leaf active', async ({ page }) => {

@@ -3,6 +3,21 @@
 	// `lance.audit` logger → OTLP → GreptimeDB (`opentelemetry_logs`); the /api/audit BFF queries them
 	// server-side and returns parsed {timestamp, action, outcome, subject, resource}. No credential reaches
 	// the browser. Governed without a session → 401; no observability stack → 501; auth-off dev → open.
+	import {
+		createSvelteTable,
+		DataTable,
+		DataTableHeaderButton,
+		DataTableTextFilter,
+		getCoreRowModel,
+		getFilteredRowModel,
+		getPaginationRowModel,
+		getSortedRowModel,
+		renderComponent,
+		renderSnippet,
+		type ColumnDef,
+		type PaginationState,
+		type SortingState,
+	} from '@rask/ui/data-table';
 	import { Select } from '@rask/ui/select';
 	import { RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
@@ -77,7 +92,102 @@
 		const d = new Date(ts);
 		return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
 	}
+
+	// ── the DataTable (goal cond 4): sortable columns + a client-side text search over the
+	// server-filtered window (the Search button's filters stay the GreptimeDB-side query). ──
+	let sorting = $state<SortingState>([]);
+	let globalFilter = $state('');
+	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
+
+	const sortableHeader =
+		(label: string) =>
+		({
+			column,
+		}: {
+			column: {
+				getIsSorted(): false | 'asc' | 'desc';
+				getToggleSortingHandler(): ((e: Event) => void) | undefined;
+			};
+		}) =>
+			renderComponent(DataTableHeaderButton, {
+				label,
+				sorted: column.getIsSorted(),
+				onclick: column.getToggleSortingHandler(),
+			});
+
+	const columns: ColumnDef<AuditEvent>[] = [
+		{
+			id: 'when',
+			accessorKey: 'timestamp',
+			header: sortableHeader('when'),
+			cell: ({ row }) => renderSnippet(whenCell, row.original),
+			meta: { cellClass: 'whitespace-nowrap' },
+		},
+		{
+			id: 'action',
+			accessorKey: 'action',
+			header: sortableHeader('action'),
+			cell: ({ row }) => renderSnippet(plainCell, row.original.action),
+			meta: { cellClass: 'font-mono' },
+		},
+		{
+			id: 'outcome',
+			accessorKey: 'outcome',
+			header: sortableHeader('outcome'),
+			cell: ({ row }) => renderSnippet(outcomeCell, row.original),
+			meta: { headerClass: 'w-28' },
+		},
+		{
+			id: 'subject',
+			accessorKey: 'subject',
+			header: sortableHeader('subject'),
+			cell: ({ row }) => renderSnippet(plainCell, row.original.subject),
+			meta: { cellClass: 'font-mono' },
+		},
+		{
+			id: 'resource',
+			accessorKey: 'resource',
+			header: sortableHeader('resource'),
+			cell: ({ row }) => renderSnippet(plainCell, row.original.resource),
+			meta: { cellClass: 'font-mono' },
+		},
+	];
+
+	const table = createSvelteTable({
+		get data() {
+			return events ?? [];
+		},
+		columns,
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get globalFilter() {
+				return globalFilter;
+			},
+			get pagination() {
+				return pagination;
+			},
+		},
+		onSortingChange: (u) => (sorting = typeof u === 'function' ? u(sorting) : u),
+		onGlobalFilterChange: (u) => (globalFilter = typeof u === 'function' ? u(globalFilter) : u),
+		onPaginationChange: (u) => (pagination = typeof u === 'function' ? u(pagination) : u),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
 </script>
+
+{#snippet whenCell(e: AuditEvent)}
+	<span class="mono when">{when(e.timestamp)}</span>
+{/snippet}
+{#snippet plainCell(value: string)}
+	<span class="mono">{value || '—'}</span>
+{/snippet}
+{#snippet outcomeCell(e: AuditEvent)}
+	<span class="mono {tone(e.outcome)}">{e.outcome || '—'}</span>
+{/snippet}
 
 <div class="page">
 	<header>
@@ -133,30 +243,15 @@
 		<div class="empty">The audit viewer needs the observability stack (GreptimeDB).</div>
 	{:else if offline}
 		<div class="empty"><RefreshCw size={15} /> Audit store unreachable (HTTP {lastStatus}).</div>
-	{:else if events === null}
-		<div class="empty">Loading the audit trail…</div>
-	{:else if events.length === 0}
-		<div class="empty">
-			No audit events match — widen the filters, or the trail is empty for this window.
-		</div>
 	{:else}
-		<table>
-			<thead
-				><tr><th>when</th><th>action</th><th>outcome</th><th>subject</th><th>resource</th></tr
-				></thead
-			>
-			<tbody>
-				{#each events as e, i (e.timestamp + e.action + e.subject + i)}
-					<tr>
-						<td class="mono when">{when(e.timestamp)}</td>
-						<td class="mono">{e.action || '—'}</td>
-						<td class="mono {tone(e.outcome)}">{e.outcome || '—'}</td>
-						<td class="mono">{e.subject || '—'}</td>
-						<td class="mono">{e.resource || '—'}</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
+		<div class="toolbar">
+			<DataTableTextFilter bind:value={globalFilter} placeholder="Search this window…" />
+		</div>
+		<DataTable
+			{table}
+			loading={events === null}
+			emptyMessage="No audit events match — widen the filters, or the trail is empty for this window."
+		/>
 	{/if}
 </div>
 
@@ -213,30 +308,20 @@
 		font-size: 13px;
 		padding: 30px 0;
 	}
-	table {
-		border-collapse: collapse;
-		font-size: 12px;
-		width: 100%;
-	}
-	th {
-		text-align: left;
-		color: var(--faint);
-		font-weight: 500;
-		padding: 4px 14px 4px 0;
-		border-bottom: 1px solid var(--line);
-	}
-	td {
-		padding: 4px 14px 4px 0;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
 	}
 	.when {
 		color: var(--faint);
 		white-space: nowrap;
 	}
-	td.allow {
+	.allow {
 		color: var(--ok);
 	}
-	td.deny {
+	.deny {
 		color: var(--fail);
 	}
 </style>

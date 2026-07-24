@@ -1,7 +1,23 @@
 <script lang="ts">
-	// `/tenants` — the estate's tenants, enumerated from the catalog's first-class projects API
-	// (grouped warehouse registry + FGA admins; estate-admin gated BY THE CATALOG — the BFF only
-	// bearer-forwards). Read-only observability: creation stays implicit via the warehouse-bind flow.
+	// `/tenants` — the estate's tenants on the shared @rask/ui DataTable (goal cond 4): one
+	// sortable/searchable row per warehouse with its owning project + the project's effective FGA
+	// admins (estate-admin gated BY THE CATALOG — the BFF only bearer-forwards). Read-only
+	// observability: creation stays implicit via the warehouse-bind flow.
+	import {
+		createSvelteTable,
+		DataTable,
+		DataTableHeaderButton,
+		DataTableTextFilter,
+		getCoreRowModel,
+		getFilteredRowModel,
+		getPaginationRowModel,
+		getSortedRowModel,
+		renderComponent,
+		renderSnippet,
+		type ColumnDef,
+		type PaginationState,
+		type SortingState,
+	} from '@rask/ui/data-table';
 	import { Building2, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { parse } from '@rask/api';
 	import { page } from '$app/state';
@@ -46,7 +62,126 @@
 	$effect(() => {
 		load();
 	});
+
+	// One row per WAREHOUSE (project repeated) — flat rows sort/filter honestly; a project with no
+	// warehouses still surfaces as a single warehouse-less row.
+	type Row = {
+		project: string;
+		warehouse: string | null;
+		bucket: string | null;
+		status: string | null;
+		admins: string[];
+	};
+	const rows = $derived.by((): Row[] =>
+		(projects ?? []).flatMap((p): Row[] =>
+			p.warehouses.length === 0
+				? [{ project: p.project, warehouse: null, bucket: null, status: null, admins: p.admins }]
+				: p.warehouses.map((w) => ({
+						project: p.project,
+						warehouse: w.id,
+						bucket: w.bucket,
+						status: w.status,
+						admins: p.admins,
+					})),
+		),
+	);
+
+	let sorting = $state<SortingState>([]);
+	let globalFilter = $state('');
+	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
+
+	const sortableHeader =
+		(label: string) =>
+		({
+			column,
+		}: {
+			column: {
+				getIsSorted(): false | 'asc' | 'desc';
+				getToggleSortingHandler(): ((e: Event) => void) | undefined;
+			};
+		}) =>
+			renderComponent(DataTableHeaderButton, {
+				label,
+				sorted: column.getIsSorted(),
+				onclick: column.getToggleSortingHandler(),
+			});
+
+	const columns: ColumnDef<Row>[] = [
+		{
+			id: 'project',
+			accessorKey: 'project',
+			header: sortableHeader('project'),
+			meta: { cellClass: 'font-mono font-semibold' },
+		},
+		{
+			id: 'warehouse',
+			accessorFn: (r) => r.warehouse ?? '',
+			header: sortableHeader('warehouse'),
+			cell: ({ row }) => renderSnippet(warehouseCell, row.original),
+		},
+		{
+			id: 'bucket',
+			accessorFn: (r) => r.bucket ?? '',
+			header: sortableHeader('bucket'),
+			meta: { cellClass: 'font-mono' },
+		},
+		{
+			id: 'status',
+			accessorFn: (r) => r.status ?? '',
+			header: sortableHeader('status'),
+			cell: ({ row }) => renderSnippet(statusCell, row.original),
+			meta: { headerClass: 'w-28' },
+		},
+		{
+			id: 'admins',
+			accessorFn: (r) => r.admins.join(' '),
+			header: 'admins',
+			cell: ({ row }) => renderSnippet(adminsCell, row.original),
+		},
+	];
+
+	const table = createSvelteTable({
+		get data() {
+			return rows;
+		},
+		columns,
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get globalFilter() {
+				return globalFilter;
+			},
+			get pagination() {
+				return pagination;
+			},
+		},
+		onSortingChange: (u) => (sorting = typeof u === 'function' ? u(sorting) : u),
+		onGlobalFilterChange: (u) => (globalFilter = typeof u === 'function' ? u(globalFilter) : u),
+		onPaginationChange: (u) => (pagination = typeof u === 'function' ? u(pagination) : u),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
 </script>
+
+{#snippet warehouseCell(row: Row)}
+	{#if row.warehouse}<span class="mono">{row.warehouse}</span>{:else}<span class="mut"
+			>(no warehouses)</span
+		>{/if}
+{/snippet}
+{#snippet statusCell(row: Row)}
+	{#if row.status}<span class="mono" class:warn={row.status !== 'active'}>{row.status}</span
+		>{:else}<span class="mut">—</span>{/if}
+{/snippet}
+{#snippet adminsCell(row: Row)}
+	{#if row.admins.length === 0}
+		<span class="mut">(none listed — FGA off or unavailable)</span>
+	{:else}
+		{#each row.admins as a (a)}<span class="chip mono">{a}</span>{/each}
+	{/if}
+{/snippet}
 
 <div class="page">
 	<header>
@@ -57,6 +192,9 @@
 
 	<div class="bar">
 		<button class="btn" onclick={load}><RefreshCw size={13} /> Refresh</button>
+		<!-- Cross-zone jumps hard-navigate (they leave this zone's route manifest). -->
+		<a class="jump" href="/data/warehouses" data-sveltekit-reload>warehouses ↗</a>
+		<a class="jump" href="/data/namespaces" data-sveltekit-reload>namespaces ↗</a>
 	</div>
 
 	{#if unauthorized}
@@ -73,45 +211,15 @@
 		</div>
 	{:else if offline}
 		<div class="empty"><RefreshCw size={15} /> Catalog unreachable (HTTP {lastStatus}).</div>
-	{:else if projects === null}
-		<div class="empty">Loading tenants…</div>
-	{:else if projects.length === 0}
-		<div class="empty">
-			No projects yet — the first warehouse-create brings its project into existence.
-		</div>
 	{:else}
-		{#each projects as p (p.project)}
-			<section class="tenant">
-				<div class="head">
-					<span class="name mono">{p.project}</span>
-					<span class="count">
-						{p.warehouses.length} warehouse{p.warehouses.length === 1 ? '' : 's'}
-					</span>
-				</div>
-				<table>
-					<thead><tr><th>warehouse</th><th>bucket</th><th>status</th></tr></thead>
-					<tbody>
-						{#each p.warehouses as w (w.id)}
-							<tr>
-								<td class="mono">{w.id}</td>
-								<td class="mono">{w.bucket}</td>
-								<td class:warn={w.status !== 'active'}>{w.status}</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-				<div class="admins">
-					admins:
-					{#if p.admins.length === 0}
-						<span class="mut">(none listed — FGA off or unavailable)</span>
-					{:else}
-						{#each p.admins as a (a)}<span class="chip mono">{a}</span>{/each}
-					{/if}
-					<a class="jump" href="/data/warehouses" data-sveltekit-reload>warehouses ↗</a>
-					<a class="jump" href="/data/namespaces" data-sveltekit-reload>namespaces ↗</a>
-				</div>
-			</section>
-		{/each}
+		<div class="toolbar">
+			<DataTableTextFilter bind:value={globalFilter} placeholder="Search tenants…" />
+		</div>
+		<DataTable
+			{table}
+			loading={projects === null}
+			emptyMessage="No projects yet — the first warehouse-create brings its project into existence."
+		/>
 	{/if}
 </div>
 
@@ -137,6 +245,7 @@
 	}
 	.bar {
 		display: flex;
+		align-items: center;
 		gap: 8px;
 		margin-bottom: 14px;
 	}
@@ -152,6 +261,12 @@
 		padding: 4px 12px;
 		cursor: pointer;
 	}
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
+	}
 	.empty {
 		display: flex;
 		align-items: center;
@@ -160,54 +275,8 @@
 		font-size: 13px;
 		padding: 30px 0;
 	}
-	.tenant {
-		border: 1px solid var(--line);
-		border-radius: var(--radius-sm);
-		padding: 12px 14px;
-		margin-bottom: 12px;
-	}
-	.head {
-		display: flex;
-		align-items: baseline;
-		gap: 10px;
-		margin-bottom: 8px;
-	}
-	.name {
-		font-size: 14px;
-		font-weight: 600;
-		color: var(--ink);
-	}
-	.count {
-		color: var(--faint);
-		font-size: 12px;
-	}
-	table {
-		border-collapse: collapse;
-		font-size: 12px;
-		width: 100%;
-		margin-bottom: 8px;
-	}
-	th {
-		text-align: left;
-		color: var(--faint);
-		font-weight: 500;
-		padding: 3px 14px 3px 0;
-		border-bottom: 1px solid var(--line);
-	}
-	td {
-		padding: 3px 14px 3px 0;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
-	}
-	td.warn {
-		color: var(--warn);
-	}
-	.admins {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		flex-wrap: wrap;
-		color: var(--faint);
-		font-size: 12px;
+	.warn {
+		color: var(--warn, #d18b28);
 	}
 	.chip {
 		background: var(--panel-2);
@@ -215,6 +284,7 @@
 		border-radius: 999px;
 		padding: 1px 8px;
 		color: var(--ink);
+		margin-right: 4px;
 	}
 	.mut {
 		color: var(--mut);
@@ -223,6 +293,7 @@
 		margin-left: auto;
 		color: var(--mut);
 		text-decoration: none;
+		font-size: 12px;
 	}
 	.jump + .jump {
 		margin-left: 0;

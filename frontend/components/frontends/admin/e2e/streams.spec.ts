@@ -83,7 +83,7 @@ test('renders stream cards with consumer lag rows', async ({ page }) => {
 	await expect(lineage).toContainText('limits');
 	// Consumer lag rows: SERVICE first (the BFF-derived estate service), then the consumer name.
 	await expect(lineage.locator('th').first()).toHaveText('service');
-	await expect(lineage.locator('td.service')).toHaveText('lance-ray');
+	await expect(lineage.locator('.service')).toHaveText('lance-ray');
 	await expect(lineage.locator('table')).toContainText('lance-ray-durable');
 
 	// The DLQ stream is visually flagged, and its ephemeral consumer shows backlog + redeliveries; a
@@ -91,9 +91,9 @@ test('renders stream cards with consumer lag rows', async ({ page }) => {
 	const dlq = page.getByLabel('Stream DLQ');
 	await expect(dlq).toContainText('DLQ');
 	await expect(dlq.locator('.badge.dlqbadge')).toBeVisible();
-	await expect(dlq.locator('td.service')).toHaveText('(ephemeral)');
+	await expect(dlq.locator('.service')).toHaveText('(ephemeral)');
 	await expect(dlq.locator('table')).toContainText('fR9hEVt8 (ephemeral)');
-	await expect(dlq.locator('td.warn')).toHaveText('2'); // redelivered > 0 highlighted
+	await expect(dlq.locator('.warn')).toHaveText('2'); // redelivered > 0 highlighted
 
 	// No expected consumer is missing and nothing is stale in the base fixture.
 	await expect(page.locator('.missingbanner')).toHaveCount(0);
@@ -153,10 +153,11 @@ test('a consumer inactive for over 10 minutes renders dimmed with a stale chip',
 	await page.goto('/admin/streams');
 
 	const lineage = page.getByLabel('Stream LINEAGE');
-	await expect(lineage.locator('tr.stale')).toHaveCount(1);
+	// The DataTable rows dim per-CELL (.stale spans) with one chip on the last-active cell.
+	await expect(lineage.locator('.stalechip')).toHaveCount(1);
 	await expect(lineage.locator('.stalechip')).toHaveText('stale');
 	// The DLQ consumer (active ~6 min before `now`) stays fresh — staleness is per-consumer.
-	await expect(page.getByLabel('Stream DLQ').locator('tr.stale')).toHaveCount(0);
+	await expect(page.getByLabel('Stream DLQ').locator('.stalechip')).toHaveCount(0);
 });
 
 test('Refresh re-queries the BFF and shows +N delta chips', async ({ page }) => {

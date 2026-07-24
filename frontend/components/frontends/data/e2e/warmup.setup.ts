@@ -10,6 +10,9 @@ test('warm the dev server routes', async ({ page }) => {
 		'/data/namespaces',
 		'/data/namespaces/gold',
 		'/data/warehouses',
+		'/data/warehouses/acme-wh',
+		'/data/projects',
+		'/data/projects/acme',
 	]) {
 		await page.goto(path).catch(() => {});
 	}

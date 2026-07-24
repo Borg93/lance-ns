@@ -1,14 +1,31 @@
 <script lang="ts">
-	// `/tables` — the catalog table registry (#52): every table the catalog's own backend lists,
-	// linking into the detail view. Same stack-mode states as the models page: governed without a
-	// session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data or the honest empty state.
-	// #85: the "Declare table" form is the browser-shaped create — declare_table takes a JSON body
-	// (no Arrow payload), reserves the id, and seeds the caller's ownership; location left empty lets
-	// the catalog pick. Gated can_create_table on the parent namespace (session-only BFF).
+	// `/tables` — the catalog table registry (#52) on the shared @rask/ui DataTable (goal cond 4):
+	// sortable columns, a text search, and a medallion STAGE filter (goal cond 3 — the stage is
+	// derived from the namespace segment, shown as a tier badge per row). Same stack-mode states as
+	// before: governed without a session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data or the
+	// honest empty state. The #85 "Declare table" form (the browser-shaped create) is preserved.
+	import {
+		createSvelteTable,
+		DataTable,
+		DataTableHeaderButton,
+		DataTableTextFilter,
+		getCoreRowModel,
+		getFilteredRowModel,
+		getPaginationRowModel,
+		getSortedRowModel,
+		renderComponent,
+		renderSnippet,
+		type ColumnDef,
+		type PaginationState,
+		type SortingState,
+	} from '@rask/ui/data-table';
+	import { Select } from '@rask/ui/select';
 	import { Plus, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { declareTable, fetchTables } from './catalog';
+	import { namespaceOfTable, stageOfTable, type StageInfo } from './stage';
+	import StageBadge from './StageBadge.svelte';
 
 	const POLL_MS = 5000;
 
@@ -84,7 +101,98 @@
 			declBusy = false;
 		}
 	}
+
+	// ── the DataTable (goal cond 4) ──
+	type Row = { id: string; namespace: string; stage: StageInfo | null };
+	const rows = $derived.by((): Row[] => {
+		const all = (tables ?? []).map((id): Row => ({
+			id,
+			namespace: namespaceOfTable(id),
+			stage: stageOfTable(id),
+		}));
+		return stageFilter ? all.filter((r) => r.stage?.stage === stageFilter) : all;
+	});
+
+	let sorting = $state<SortingState>([]);
+	let globalFilter = $state('');
+	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
+	let stageFilter = $state(''); // '' = any stage
+
+	const columns: ColumnDef<Row>[] = [
+		{
+			id: 'table',
+			accessorKey: 'id',
+			header: ({ column }) =>
+				renderComponent(DataTableHeaderButton, {
+					label: 'table',
+					sorted: column.getIsSorted(),
+					onclick: column.getToggleSortingHandler(),
+				}),
+			cell: ({ row }) => renderSnippet(tableCell, row.original),
+		},
+		{
+			id: 'stage',
+			accessorFn: (r) => r.stage?.stage ?? '',
+			header: ({ column }) =>
+				renderComponent(DataTableHeaderButton, {
+					label: 'stage',
+					sorted: column.getIsSorted(),
+					onclick: column.getToggleSortingHandler(),
+				}),
+			cell: ({ row }) => renderSnippet(stageCell, row.original),
+			meta: { headerClass: 'w-28' },
+		},
+		{
+			id: 'namespace',
+			accessorKey: 'namespace',
+			header: ({ column }) =>
+				renderComponent(DataTableHeaderButton, {
+					label: 'namespace',
+					sorted: column.getIsSorted(),
+					onclick: column.getToggleSortingHandler(),
+				}),
+			cell: ({ row }) => renderSnippet(nsCell, row.original),
+			meta: { headerClass: 'w-48' },
+		},
+	];
+
+	const table = createSvelteTable({
+		get data() {
+			return rows;
+		},
+		columns,
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get globalFilter() {
+				return globalFilter;
+			},
+			get pagination() {
+				return pagination;
+			},
+		},
+		onSortingChange: (u) => (sorting = typeof u === 'function' ? u(sorting) : u),
+		onGlobalFilterChange: (u) => (globalFilter = typeof u === 'function' ? u(globalFilter) : u),
+		onPaginationChange: (u) => (pagination = typeof u === 'function' ? u(pagination) : u),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
 </script>
+
+{#snippet tableCell(row: Row)}
+	<a class="rowlink mono" href={`${base}/tables/${encodeURIComponent(row.id)}`}>{row.id}</a>
+{/snippet}
+{#snippet stageCell(row: Row)}
+	{#if row.stage}<StageBadge info={row.stage} />{:else}<span class="mut">—</span>{/if}
+{/snippet}
+{#snippet nsCell(row: Row)}
+	<a class="nslink mono" href={`${base}/namespaces/${encodeURIComponent(row.namespace)}`}
+		>{row.namespace}</a
+	>
+{/snippet}
 
 <div class="page">
 	<header>
@@ -135,18 +243,27 @@
 			<RefreshCw size={16} />
 			<p>Catalog unreachable (HTTP {lastStatus}) — retrying.</p>
 		</div>
-	{:else if tables === null}
-		<div class="empty"><p>Loading…</p></div>
-	{:else if tables.length === 0}
-		<div class="empty">
-			<p>No tables registered — a create (or the medallion cascade's gold sink) makes the first.</p>
-		</div>
 	{:else}
-		<ul class="list">
-			{#each tables as t (t)}
-				<li><a class="row mono" href={`${base}/tables/${encodeURIComponent(t)}`}>{t}</a></li>
-			{/each}
-		</ul>
+		<div class="toolbar">
+			<DataTableTextFilter bind:value={globalFilter} placeholder="Search tables…" />
+			<Select
+				bind:value={stageFilter}
+				ariaLabel="Stage filter"
+				placeholder="any stage"
+				options={[
+					{ value: '', label: 'any stage' },
+					{ value: 'raw', label: 'raw' },
+					{ value: 'bronze', label: 'bronze' },
+					{ value: 'silver', label: 'silver' },
+					{ value: 'gold', label: 'gold' },
+				]}
+			/>
+		</div>
+		<DataTable
+			{table}
+			loading={tables === null}
+			emptyMessage="No tables registered — a create (or the medallion cascade's gold sink) makes the first."
+		/>
 	{/if}
 </div>
 
@@ -232,21 +349,28 @@
 		border-color: color-mix(in srgb, var(--fail) 45%, var(--line));
 		color: var(--fail);
 	}
-	.list {
-		list-style: none;
-		margin: 0;
-		padding: 0;
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
 	}
-	.row {
-		display: block;
-		padding: 7px 10px;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+	.rowlink {
 		color: var(--ink);
 		text-decoration: none;
-		font-size: 13px;
 	}
-	.row:hover {
-		background: var(--panel-2);
+	.rowlink:hover {
+		text-decoration: underline;
+	}
+	.nslink {
+		color: var(--mut);
+		text-decoration: none;
+	}
+	.nslink:hover {
+		color: var(--ink);
+	}
+	.mut {
+		color: var(--faint);
 	}
 	.empty {
 		display: flex;

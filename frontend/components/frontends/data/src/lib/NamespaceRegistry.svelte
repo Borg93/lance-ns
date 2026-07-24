@@ -1,18 +1,32 @@
 <script lang="ts">
-	// `/namespaces` — the catalog's namespaces (#64 admin surface), grouped from the table registry
-	// (`<namespace>$<table>`). There is no root-namespace list endpoint (the catalog's `list_namespaces`
-	// needs a parent id), so we derive the namespaces from the tables the catalog lists: every namespace
-	// that holds at least one table, with its tables linked into the detail view. Same stack-mode states
-	// as the tables page — governed without a session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data.
-	// Lifecycle (#85): drop with an AlertDialog confirm (Restrict by default; Cascade opt-in — the
-	// catalog's dir backend errors a Restrict drop of a non-empty namespace). Creation deliberately has
-	// NO surface here — the governed path is the warehouse-bind flow (/warehouses), which the "New
-	// namespace" affordance points at; a bare create would bypass the bucket-per-warehouse tenancy.
+	// `/namespaces` — the catalog's namespaces on the shared @rask/ui DataTable (goal cond 4):
+	// one sortable/searchable row per namespace (derived from the table registry's
+	// `<namespace>$<table>` ids — there is no root-namespace list endpoint), with the medallion
+	// tier badge (goal cond 3) and the #85 drop action preserved (AlertDialog confirm; Restrict by
+	// default, Cascade opt-in). Creation deliberately has NO surface here — the governed path is
+	// the warehouse-bind flow (/warehouses), which the "New namespace" affordance points at.
 	import { AlertDialog } from '@rask/ui/alert-dialog';
-	import { Boxes, Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
+	import {
+		createSvelteTable,
+		DataTable,
+		DataTableHeaderButton,
+		DataTableTextFilter,
+		getCoreRowModel,
+		getFilteredRowModel,
+		getPaginationRowModel,
+		getSortedRowModel,
+		renderComponent,
+		renderSnippet,
+		type ColumnDef,
+		type PaginationState,
+		type SortingState,
+	} from '@rask/ui/data-table';
+	import { Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { dropNamespace, fetchTables } from './catalog';
+	import { namespaceOfTable, stageOf, type StageInfo } from './stage';
+	import StageBadge from './StageBadge.svelte';
 
 	const POLL_MS = 5000;
 
@@ -31,18 +45,6 @@
 	const unauthorized = $derived(tables === null && lastStatus === 401);
 	const offline = $derived(tables === null && settled && lastStatus !== 401);
 
-	// Group by the namespace segment (before the first `$`); a bare name with no delimiter is its own root.
-	const groups = $derived.by(() => {
-		const m = new Map<string, string[]>();
-		for (const t of tables ?? []) {
-			const ns = t.includes('$') ? t.slice(0, t.indexOf('$')) : t;
-			const arr = m.get(ns);
-			if (arr) arr.push(t);
-			else m.set(ns, [t]);
-		}
-		return [...m.entries()].sort(([a], [b]) => a.localeCompare(b));
-	});
-
 	async function load(): Promise<void> {
 		const res = await fetchTables();
 		settled = true;
@@ -60,9 +62,22 @@
 		return () => clearInterval(timer);
 	});
 
+	// Group by the namespace segment (before the first `$`); a bare name with no delimiter is its own root.
+	type Row = { ns: string; count: number; stage: StageInfo | null };
+	const rows = $derived.by((): Row[] => {
+		const m = new Map<string, number>();
+		for (const t of tables ?? []) {
+			const ns = namespaceOfTable(t);
+			m.set(ns, (m.get(ns) ?? 0) + 1);
+		}
+		return [...m.entries()]
+			.map(([ns, count]): Row => ({ ns, count, stage: stageOf(ns) }))
+			.sort((a, b) => a.ns.localeCompare(b.ns));
+	});
+
 	// Tables inside the namespace queued for drop — sizes the Cascade choice honestly.
 	const targetCount = $derived(
-		dropTarget === null ? 0 : (groups.find(([ns]) => ns === dropTarget)?.[1].length ?? 0),
+		dropTarget === null ? 0 : (rows.find((r) => r.ns === dropTarget)?.count ?? 0),
 	);
 
 	function openDrop(ns: string): void {
@@ -107,7 +122,96 @@
 			dropTarget = null;
 		}
 	}
+
+	let sorting = $state<SortingState>([]);
+	let globalFilter = $state('');
+	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
+
+	const columns: ColumnDef<Row>[] = [
+		{
+			id: 'namespace',
+			accessorKey: 'ns',
+			header: ({ column }) =>
+				renderComponent(DataTableHeaderButton, {
+					label: 'namespace',
+					sorted: column.getIsSorted(),
+					onclick: column.getToggleSortingHandler(),
+				}),
+			cell: ({ row }) => renderSnippet(nsCell, row.original),
+		},
+		{
+			id: 'stage',
+			accessorFn: (r) => r.stage?.stage ?? '',
+			header: ({ column }) =>
+				renderComponent(DataTableHeaderButton, {
+					label: 'stage',
+					sorted: column.getIsSorted(),
+					onclick: column.getToggleSortingHandler(),
+				}),
+			cell: ({ row }) => renderSnippet(stageCell, row.original),
+			meta: { headerClass: 'w-28' },
+		},
+		{
+			id: 'tables',
+			accessorKey: 'count',
+			header: ({ column }) =>
+				renderComponent(DataTableHeaderButton, {
+					label: 'tables',
+					sorted: column.getIsSorted(),
+					onclick: column.getToggleSortingHandler(),
+				}),
+			meta: { headerClass: 'w-24', cellClass: 'tabular-nums' },
+		},
+		{
+			id: 'actions',
+			header: '',
+			cell: ({ row }) => renderSnippet(actionsCell, row.original),
+			meta: { headerClass: 'w-20', cellClass: 'text-right' },
+		},
+	];
+
+	const table = createSvelteTable({
+		get data() {
+			return rows;
+		},
+		columns,
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get globalFilter() {
+				return globalFilter;
+			},
+			get pagination() {
+				return pagination;
+			},
+		},
+		onSortingChange: (u) => (sorting = typeof u === 'function' ? u(sorting) : u),
+		onGlobalFilterChange: (u) => (globalFilter = typeof u === 'function' ? u(globalFilter) : u),
+		onPaginationChange: (u) => (pagination = typeof u === 'function' ? u(pagination) : u),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
 </script>
+
+{#snippet nsCell(row: Row)}
+	<a class="ns-name mono" href={`${base}/namespaces/${encodeURIComponent(row.ns)}`}>{row.ns}</a>
+{/snippet}
+{#snippet stageCell(row: Row)}
+	{#if row.stage}<StageBadge info={row.stage} />{:else}<span class="mut">—</span>{/if}
+{/snippet}
+{#snippet actionsCell(row: Row)}
+	<button
+		class="drop"
+		aria-label={`Drop namespace ${row.ns}`}
+		disabled={busy}
+		onclick={() => openDrop(row.ns)}
+	>
+		<Trash2 size={12} /> drop
+	</button>
+{/snippet}
 
 <div class="page">
 	<header>
@@ -141,37 +245,15 @@
 			<RefreshCw size={16} />
 			<p>Catalog unreachable (HTTP {lastStatus}) — retrying.</p>
 		</div>
-	{:else if tables === null}
-		<div class="empty"><p>Loading…</p></div>
-	{:else if groups.length === 0}
-		<div class="empty">
-			<p>
-				No namespaces yet — <a href={`${base}/warehouses`}>bind one to a warehouse</a> to create the first.
-			</p>
-		</div>
 	{:else}
-		{#each groups as [ns, members] (ns)}
-			<section class="ns">
-				<div class="ns-head">
-					<Boxes size={13} />
-					<a class="mono ns-name" href={`${base}/namespaces/${encodeURIComponent(ns)}`}>{ns}</a>
-					<span class="count">{members.length} table{members.length === 1 ? '' : 's'}</span>
-					<button
-						class="drop"
-						aria-label={`Drop namespace ${ns}`}
-						disabled={busy}
-						onclick={() => openDrop(ns)}
-					>
-						<Trash2 size={12} /> drop
-					</button>
-				</div>
-				<ul class="list">
-					{#each members as t (t)}
-						<li><a class="row mono" href={`${base}/tables/${encodeURIComponent(t)}`}>{t}</a></li>
-					{/each}
-				</ul>
-			</section>
-		{/each}
+		<div class="toolbar">
+			<DataTableTextFilter bind:value={globalFilter} placeholder="Search namespaces…" />
+		</div>
+		<DataTable
+			{table}
+			loading={tables === null}
+			emptyMessage="No namespaces yet — bind one to a warehouse to create the first."
+		/>
 	{/if}
 </div>
 
@@ -251,39 +333,21 @@
 		border-color: color-mix(in srgb, var(--fail) 45%, var(--line));
 		color: var(--fail);
 	}
-	.ns {
-		margin-bottom: 18px;
-	}
-	.ns-head {
+	.toolbar {
 		display: flex;
 		align-items: center;
-		gap: 7px;
-		margin-bottom: 4px;
-		color: var(--mut);
+		gap: 8px;
+		margin-bottom: 10px;
 	}
 	.ns-name {
-		font-size: 13px;
-		color: var(--ink);
-	}
-	.count {
-		font-size: 11px;
-		color: var(--faint);
-	}
-	.list {
-		list-style: none;
-		margin: 0;
-		padding: 0 0 0 20px;
-	}
-	.row {
-		display: block;
-		padding: 6px 10px;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
 		color: var(--ink);
 		text-decoration: none;
-		font-size: 13px;
 	}
-	.row:hover {
-		background: var(--panel-2);
+	.ns-name:hover {
+		text-decoration: underline;
+	}
+	.mut {
+		color: var(--faint);
 	}
 	.empty {
 		display: flex;
@@ -296,7 +360,6 @@
 		display: inline-flex;
 		align-items: center;
 		gap: 4px;
-		margin-left: auto;
 		background: none;
 		border: none;
 		border-radius: var(--radius-sm);

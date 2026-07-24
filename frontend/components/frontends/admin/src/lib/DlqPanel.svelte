@@ -5,6 +5,21 @@
 	// an operator replay one on demand (re-ingest + drop) instead of waiting for the next tick. The list is
 	// governed per-dataset by the service; replay forwards the signed-in user's bearer through a session-only
 	// BFF route (never the service token). Governed without a session → 401.
+	import {
+		createSvelteTable,
+		DataTable,
+		DataTableHeaderButton,
+		DataTableTextFilter,
+		getCoreRowModel,
+		getFilteredRowModel,
+		getPaginationRowModel,
+		getSortedRowModel,
+		renderComponent,
+		renderSnippet,
+		type ColumnDef,
+		type PaginationState,
+		type SortingState,
+	} from '@rask/ui/data-table';
 	import { RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { fetchDlq, replayDlq } from './api';
@@ -73,7 +88,122 @@
 		if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
 		return `${Math.round(seconds / 86400)}d`;
 	}
+
+	// ── the DataTable (goal cond 4): sortable/searchable at-risk rows, replay action preserved. ──
+	let sorting = $state<SortingState>([]);
+	let globalFilter = $state('');
+	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
+
+	const sortableHeader =
+		(label: string) =>
+		({
+			column,
+		}: {
+			column: {
+				getIsSorted(): false | 'asc' | 'desc';
+				getToggleSortingHandler(): ((e: Event) => void) | undefined;
+			};
+		}) =>
+			renderComponent(DataTableHeaderButton, {
+				label,
+				sorted: column.getIsSorted(),
+				onclick: column.getToggleSortingHandler(),
+			});
+
+	const columns: ColumnDef<DlqEvent>[] = [
+		{
+			id: 'run',
+			accessorKey: 'run_id',
+			header: sortableHeader('run'),
+			cell: ({ row }) => renderSnippet(runCell, row.original),
+			meta: { cellClass: 'whitespace-nowrap' },
+		},
+		{
+			id: 'type',
+			accessorFn: (e) => (e.parseable ? (e.event_type ?? '') : 'poison'),
+			header: sortableHeader('type'),
+			cell: ({ row }) => renderSnippet(typeCell, row.original),
+		},
+		{
+			id: 'job',
+			accessorFn: (e) => e.job ?? '',
+			header: sortableHeader('job'),
+			cell: ({ row }) => renderSnippet(jobCell, row.original),
+		},
+		{
+			id: 'outputs',
+			accessorFn: (e) => (e.outputs ?? []).join(', '),
+			header: 'outputs',
+			cell: ({ row }) => renderSnippet(listCell, row.original.outputs ?? []),
+		},
+		{
+			id: 'inputs',
+			accessorFn: (e) => (e.inputs ?? []).join(', '),
+			header: 'inputs',
+			cell: ({ row }) => renderSnippet(listCell, row.original.inputs ?? []),
+		},
+		{
+			id: 'actions',
+			header: '',
+			cell: ({ row }) => renderSnippet(actionsCell, row.original),
+			meta: { headerClass: 'w-28', cellClass: 'text-right' },
+		},
+	];
+
+	const table = createSvelteTable({
+		get data() {
+			return backlog?.events ?? [];
+		},
+		columns,
+		state: {
+			get sorting() {
+				return sorting;
+			},
+			get globalFilter() {
+				return globalFilter;
+			},
+			get pagination() {
+				return pagination;
+			},
+		},
+		onSortingChange: (u) => (sorting = typeof u === 'function' ? u(sorting) : u),
+		onGlobalFilterChange: (u) => (globalFilter = typeof u === 'function' ? u(globalFilter) : u),
+		onPaginationChange: (u) => (pagination = typeof u === 'function' ? u(pagination) : u),
+		getCoreRowModel: getCoreRowModel(),
+		getSortedRowModel: getSortedRowModel(),
+		getFilteredRowModel: getFilteredRowModel(),
+		getPaginationRowModel: getPaginationRowModel(),
+	});
 </script>
+
+{#snippet runCell(e: DlqEvent)}
+	<span class="mono run">{e.run_id}</span>
+{/snippet}
+{#snippet typeCell(e: DlqEvent)}
+	<span class="mono" class:poison={!e.parseable}
+		>{e.parseable ? (e.event_type ?? '—') : 'poison'}</span
+	>
+{/snippet}
+{#snippet jobCell(e: DlqEvent)}
+	<span class="mono">{e.job ?? '—'}</span>
+{/snippet}
+{#snippet listCell(items: string[])}
+	<span class="mono">{items.join(', ') || '—'}</span>
+{/snippet}
+{#snippet actionsCell(e: DlqEvent)}
+	{#if e.parseable}
+		<button
+			class="btn ghost"
+			disabled={busy !== null}
+			aria-label="Replay {e.run_id}"
+			onclick={() => replay(e)}><RotateCcw size={12} /> {busy === e.run_id ? '…' : 'Replay'}</button
+		>
+	{:else}
+		<span class="mut" title="An unparseable object can't be replayed; the relay drops it."
+			>unreplayable</span
+		>
+	{/if}
+{/snippet}
 
 <div class="page">
 	<header>
@@ -101,47 +231,15 @@
 		</div>
 	{:else if offline}
 		<div class="empty"><RefreshCw size={15} /> DLQ store unreachable (HTTP {lastStatus}).</div>
-	{:else if backlog === null}
-		<div class="empty">Loading the outbox backlog…</div>
-	{:else if backlog.events.length === 0}
-		<div class="empty">
-			The outbox is empty — every committed write's lineage has been delivered. Nothing to replay.
-		</div>
 	{:else}
-		<table>
-			<thead
-				><tr><th>run</th><th>type</th><th>job</th><th>outputs</th><th>inputs</th><th></th></tr
-				></thead
-			>
-			<tbody>
-				{#each backlog.events as e (e.run_id)}
-					<tr class:poison={!e.parseable}>
-						<td class="mono run">{e.run_id}</td>
-						<td class="mono">{e.parseable ? (e.event_type ?? '—') : 'poison'}</td>
-						<td class="mono">{e.job ?? '—'}</td>
-						<td class="mono">{(e.outputs ?? []).join(', ') || '—'}</td>
-						<td class="mono">{(e.inputs ?? []).join(', ') || '—'}</td>
-						<td class="actions">
-							{#if e.parseable}
-								<button
-									class="btn ghost"
-									disabled={busy !== null}
-									aria-label="Replay {e.run_id}"
-									onclick={() => replay(e)}
-									><RotateCcw size={12} /> {busy === e.run_id ? '…' : 'Replay'}</button
-								>
-							{:else}
-								<span
-									class="mut"
-									title="An unparseable object can't be replayed; the relay drops it."
-									>unreplayable</span
-								>
-							{/if}
-						</td>
-					</tr>
-				{/each}
-			</tbody>
-		</table>
+		<div class="toolbar">
+			<DataTableTextFilter bind:value={globalFilter} placeholder="Search at-risk events…" />
+		</div>
+		<DataTable
+			{table}
+			loading={backlog === null}
+			emptyMessage="The outbox is empty — every committed write's lineage has been delivered. Nothing to replay."
+		/>
 	{/if}
 </div>
 
@@ -215,33 +313,20 @@
 		font-size: 13px;
 		padding: 30px 0;
 	}
-	table {
-		border-collapse: collapse;
-		font-size: 12px;
-		width: 100%;
-	}
-	th {
-		text-align: left;
-		color: var(--faint);
-		font-weight: 500;
-		padding: 4px 14px 4px 0;
-		border-bottom: 1px solid var(--line);
-	}
-	td {
-		padding: 4px 14px 4px 0;
-		border-bottom: 1px solid color-mix(in srgb, var(--line) 45%, transparent);
+	.toolbar {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		margin-bottom: 10px;
 	}
 	.run {
 		color: var(--faint);
 		white-space: nowrap;
 	}
-	tr.poison td {
+	.poison {
 		color: var(--fail);
 	}
 	.mut {
 		color: var(--faint);
-	}
-	.actions {
-		text-align: right;
 	}
 </style>

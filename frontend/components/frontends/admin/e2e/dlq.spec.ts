@@ -63,7 +63,7 @@ test('replay POSTs to the BFF and the drained event leaves the list', async ({ p
 
 test('a poison object is not replayable', async ({ page }) => {
 	await page.goto('/admin/dlq');
-	const poisonRow = page.locator('tr.poison');
+	const poisonRow = page.locator('tr', { has: page.locator('.poison') });
 	await expect(poisonRow).toContainText('unreplayable');
 	await expect(poisonRow.getByRole('button', { name: /Replay/ })).toHaveCount(0);
 });

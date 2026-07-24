@@ -31,14 +31,21 @@ test('the navbar lists the base zones and hides the estate-admin entries for an 
 	await page.goto('/');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	await expect(nav).toBeVisible();
-	for (const zone of ['Home', 'Data', 'Lineage', 'Models', 'Media', 'Annotator']) {
+	// A zone with sub-areas is a NavigationMenu trigger (a button opening a panel); a zone with a
+	// single surface stays a plain link.
+	for (const zone of ['Home', 'Models', 'Annotator']) {
 		await expect(nav.getByRole('link', { name: zone, exact: true })).toBeVisible();
 	}
-	// fetchMe resolves null (no session, no catalog) → estate_admin is unknowable → fail-closed.
+	for (const zone of ['Data', 'Lineage', 'Media']) {
+		await expect(nav.getByRole('button', { name: zone, exact: true })).toBeVisible();
+	}
+	// fetchMe resolves null (no session, no catalog) → estate_admin is unknowable → fail-closed:
+	// no Admin entry in either shape, and no Access anywhere (its only home is Admin's panel).
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
 	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
-	await expect(nav.getByRole('link', { name: 'Access', exact: true })).toHaveCount(0);
+	await expect(nav.getByText('Access')).toHaveCount(0);
 	// Cross-zone navbar links hard-navigate out of the home zone's route manifest.
-	await expect(nav.getByRole('link', { name: 'Data', exact: true })).toHaveAttribute(
+	await expect(nav.getByRole('link', { name: 'Models', exact: true })).toHaveAttribute(
 		'data-sveltekit-reload',
 		'',
 	);

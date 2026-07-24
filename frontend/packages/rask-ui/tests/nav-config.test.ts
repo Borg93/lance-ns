@@ -51,6 +51,62 @@ describe('topNav', () => {
 		expect(home.match('/data')).toBe(false);
 	});
 
+	it('carries panel sub-areas for the zones that have them, plain links for the rest', () => {
+		const byTitle = Object.fromEntries(topNav(true).map((e) => [e.title, e]));
+		expect(byTitle.Data!.items?.map((i) => i.title)).toEqual([
+			'Projects',
+			'Tables',
+			'Namespaces',
+			'Warehouses',
+		]);
+		expect(byTitle.Lineage!.items?.map((i) => i.title)).toEqual([
+			'Datasets',
+			'Jobs',
+			'Runs',
+			'Columns',
+			'Graph',
+		]);
+		expect(byTitle.Media!.items?.map((i) => i.title)).toEqual([
+			'Search',
+			'Atlas',
+			'Tree',
+			'Graph',
+			'Workflow',
+		]);
+		expect(byTitle.Admin!.items?.map((i) => i.title)).toEqual([
+			'Tenants',
+			'Audit',
+			'Streams',
+			'DLQ',
+			'Events',
+			'Access',
+		]);
+		// A zone with a single surface stays a plain link — no one-row dropdown.
+		for (const title of ['Home', 'Models', 'Annotator']) {
+			expect(byTitle[title]!.items).toBeUndefined();
+		}
+	});
+
+	it('every panel row is an absolute path inside its own zone, and each carries a description', () => {
+		for (const entry of topNav(true)) {
+			for (const item of entry.items ?? []) {
+				expect(item.href.startsWith(entry.href)).toBe(true);
+				expect(item.description.length).toBeGreaterThan(0);
+			}
+		}
+	});
+
+	it('Access is a row of the Admin panel only — never a navbar entry of its own', () => {
+		const admin = topNav(true).find((e) => e.title === 'Admin')!;
+		expect(admin.items?.find((i) => i.title === 'Access')?.href).toBe('/admin/access');
+		// …and a non-admin gets no panel carrying it at all.
+		expect(
+			topNav(false)
+				.flatMap((e) => e.items ?? [])
+				.map((i) => i.href),
+		).not.toContain('/admin/access');
+	});
+
 	it('active-match: Admin covers the WHOLE /admin subtree, /admin/access included', () => {
 		const admin = topNav(true).find((e) => e.title === 'Admin')!;
 		expect(admin.match('/admin')).toBe(true);

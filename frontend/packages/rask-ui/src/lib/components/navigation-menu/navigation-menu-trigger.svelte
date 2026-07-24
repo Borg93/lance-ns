@@ -7,7 +7,7 @@
 	 *  a trigger — the row cannot drift between the two kinds of entry. House tokens, not
 	 *  shadcn's raw defaults: `h-8`/`rounded-lg`/`px-2.5`/`ring-3` mirror the Button base. */
 	export const navigationMenuTriggerStyle = tv({
-		base: 'hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 text-muted-foreground group inline-flex h-8 w-max items-center justify-center gap-1 rounded-lg border border-transparent px-2.5 text-sm font-medium transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
+		base: 'hover:bg-muted hover:text-foreground focus-visible:bg-muted focus-visible:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground data-[active]:bg-muted data-[active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 text-muted-foreground group inline-flex h-8 w-max flex-row items-center justify-center gap-1 rounded-lg border border-transparent px-2.5 text-sm font-medium whitespace-nowrap transition-colors outline-none focus-visible:ring-3 disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0',
 	});
 </script>
 

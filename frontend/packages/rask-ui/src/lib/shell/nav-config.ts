@@ -62,34 +62,115 @@ export const under =
 	(p: string) =>
 		prefixes.some((pre) => norm(p) === pre || norm(p).startsWith(pre + '/'));
 
+/** One sub-area inside a zone's navbar panel — a first-class view of that zone, with a one-line
+ *  description so the panel explains the estate instead of just listing words. */
+export type TopNavItem = { title: string; href: string; description: string };
+
 /** One top-navbar entry — a whole microfrontend zone (cross-zone = hard nav). */
 export type TopNavEntry = {
 	title: string;
 	href: string;
 	match: (p: string) => boolean;
+	/** The zone's sub-areas. Present → the navbar renders a NavigationMenu trigger opening a panel
+	 *  of these; absent → a plain link, because the zone has a single surface and a dropdown with
+	 *  one row in it would be noise. Deliberately a SUBSET of the zone's own sidebar (`ZoneNav`):
+	 *  this is the cross-zone jump list, not a mirror of in-zone navigation. */
+	items?: TopNavItem[];
 };
+
+const DATA_ITEMS: TopNavItem[] = [
+	{
+		title: 'Projects',
+		href: '/data/projects',
+		description: 'Tenants, their warehouses and their members.',
+	},
+	{ title: 'Tables', href: '/data/tables', description: 'The governed table registry.' },
+	{
+		title: 'Namespaces',
+		href: '/data/namespaces',
+		description: 'Medallion namespaces and their maintenance policies.',
+	},
+	{
+		title: 'Warehouses',
+		href: '/data/warehouses',
+		description: 'Storage bindings — one bucket per project.',
+	},
+];
+
+const LINEAGE_ITEMS: TopNavItem[] = [
+	{
+		title: 'Datasets',
+		href: '/lineage/datasets',
+		description: 'Every dataset the cascade has read or written.',
+	},
+	{
+		title: 'Jobs',
+		href: '/lineage/jobs',
+		description: 'The compute identities that produce them.',
+	},
+	{
+		title: 'Runs',
+		href: '/lineage/runs',
+		description: 'Individual executions, with state and errors.',
+	},
+	{
+		title: 'Columns',
+		href: '/lineage/columns',
+		description: 'Field-level lineage across the estate.',
+	},
+	{ title: 'Graph', href: '/lineage', description: 'The whole medallion DAG on one canvas.' },
+];
+
+const MEDIA_ITEMS: TopNavItem[] = [
+	{ title: 'Search', href: '/media', description: 'Semantic search over the corpus.' },
+	{ title: 'Atlas', href: '/media/atlas', description: 'The embedding map of the corpus.' },
+	{ title: 'Tree', href: '/media/tree', description: 'The corpus by topic hierarchy.' },
+	{ title: 'Graph', href: '/media/graph', description: 'Relations between media entities.' },
+	{ title: 'Workflow', href: '/media/workflow', description: 'The derivation pipeline.' },
+];
+
+const ADMIN_ITEMS: TopNavItem[] = [
+	{
+		title: 'Tenants',
+		href: '/admin/tenants',
+		description: 'Warehouses per project, and who administers them.',
+	},
+	{ title: 'Audit', href: '/admin/audit', description: 'The compliance trail — who did what.' },
+	{ title: 'Streams', href: '/admin/streams', description: 'JetStream consumers and their lag.' },
+	{ title: 'DLQ', href: '/admin/dlq', description: 'Dead-lettered lineage runs, with replay.' },
+	{ title: 'Events', href: '/admin/events', description: 'The live control-event feed.' },
+	{
+		title: 'Access',
+		href: '/admin/access',
+		description: 'The FGA workbench: check, tuples, graph.',
+	},
+];
 
 /**
  * The top-navbar IA: one entry per microfrontend zone (cohesion, low coupling — each zone is a
  * SEPARATE SvelteKit app under `/<domain>`; Home owns the origin root). The zones-in-sidebar list
  * this replaces is gone: the sidebar now renders only the CURRENT zone's own routes (`ZoneNav`).
  *
+ * A zone with sub-areas carries `items`, and the navbar renders it as a NavigationMenu trigger with
+ * a panel — so the estate's shape is reachable from any zone in one hop instead of landing on a
+ * zone root and hunting through its sidebar. Zones with a single surface stay plain links.
+ *
  * Admin appends ONLY for an estate admin (`me.estate_admin` from the frozen `/v1/me` contract) —
  * fail-closed: an unresolved/absent `me` renders the base entries. Access is NOT a top-level
- * entry: it lives inside the admin zone's own sidebar (/admin/access), so Admin covers the whole
- * /admin subtree here.
+ * entry: it lives inside the admin zone (/admin/access), so Admin covers the whole /admin subtree
+ * here and Access appears only as one row of Admin's panel.
  */
 export function topNav(estateAdmin: boolean): TopNavEntry[] {
 	const entries: TopNavEntry[] = [
 		{ title: 'Home', href: '/', match: (p) => norm(p) === '/' },
-		{ title: 'Data', href: '/data', match: under('/data') },
-		{ title: 'Lineage', href: '/lineage', match: under('/lineage') },
+		{ title: 'Data', href: '/data', match: under('/data'), items: DATA_ITEMS },
+		{ title: 'Lineage', href: '/lineage', match: under('/lineage'), items: LINEAGE_ITEMS },
 		{ title: 'Models', href: '/models', match: under('/models') },
-		{ title: 'Media', href: '/media', match: under('/media') },
+		{ title: 'Media', href: '/media', match: under('/media'), items: MEDIA_ITEMS },
 		{ title: 'Annotator', href: '/annotator', match: under('/annotator') },
 	];
 	if (estateAdmin) {
-		entries.push({ title: 'Admin', href: '/admin', match: under('/admin') });
+		entries.push({ title: 'Admin', href: '/admin', match: under('/admin'), items: ADMIN_ITEMS });
 	}
 	return entries;
 }

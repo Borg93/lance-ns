@@ -21,10 +21,12 @@ test('a non-estate-admin sees ForbiddenPage on every admin route + no admin nav 
 		await expect(page.getByRole('heading', { name: 'Audit log' })).toHaveCount(0);
 	}
 	// The navbar hides the admin surfaces from a non-admin (fail-closed IA, not just the door).
+	// Zones with sub-areas render as NavigationMenu triggers, so assert BOTH shapes are absent.
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('link', { name: 'Data' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Admin' })).toHaveCount(0);
-	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
+	await expect(nav.getByRole('button', { name: 'Data', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
+	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
+	await expect(nav.getByText('Access')).toHaveCount(0);
 });
 
 test('an estate admin passes the door and gets the Admin navbar entry', async ({ page }) => {
@@ -35,11 +37,14 @@ test('an estate admin passes the door and gets the Admin navbar entry', async ({
 	await page.goto('/admin/tenants');
 	await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('link', { name: 'Admin' })).toBeVisible();
-	// Access is NOT a top-level navbar entry (4b2af0e): it lives in this zone's own sidebar.
-	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toBeVisible();
+	// Access is NOT a top-level navbar entry (4b2af0e): it lives in this zone's own sidebar…
+	await expect(nav.getByRole('link', { name: 'Access', exact: true })).toHaveCount(0);
+	await expect(nav.getByRole('button', { name: 'Access', exact: true })).toHaveCount(0);
 	// …as this zone's own sidebar leaf instead.
-	await expect(page.getByRole('link', { name: 'Access', exact: true })).toBeVisible();
+	await expect(
+		page.locator('[data-sidebar="content"]').getByRole('link', { name: 'Access' }),
+	).toBeVisible();
 });
 
 test('an unresolvable identity (catalog outage) fails CLOSED, never open', async ({ page }) => {

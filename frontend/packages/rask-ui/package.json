@@ -108,6 +108,10 @@
 		"./sheet": {
 			"types": "./dist/components/sheet/index.d.ts",
 			"svelte": "./dist/components/sheet/index.js"
+		},
+		"./navigation-menu": {
+			"types": "./dist/components/navigation-menu/index.d.ts",
+			"svelte": "./dist/components/navigation-menu/index.js"
 		}
 	},
 	"scripts": {

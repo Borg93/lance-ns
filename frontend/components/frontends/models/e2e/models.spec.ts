@@ -143,9 +143,18 @@ test('the shared sidebar marks Registry active and links to Lineage as a cross-z
 	await page.goto('/models');
 	// On the models zone root the Registry leaf is active (exact-match — not lit on sibling sub-routes).
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Registry' })).toBeVisible();
-	// Lineage is a DIFFERENT MFE zone: its sidebar link is a full-document reload (data-sveltekit-reload),
-	// not a soft SPA nav, so leaving this app's route manifest re-bootstraps the lineage app.
-	const lineage = page.getByRole('link', { name: 'Lineage' });
-	await expect(lineage).toHaveAttribute('href', '/lineage');
-	await expect(lineage).toHaveAttribute('data-sveltekit-reload', '');
+	// Lineage is a DIFFERENT MFE zone: leaving this app's route manifest must be a full-document
+	// reload (data-sveltekit-reload), not a soft SPA nav, or the lineage app never bootstraps. It
+	// carries sub-areas, so the navbar renders it as a panel trigger and the links live inside.
+	await page
+		.getByRole('navigation', { name: 'Zones' })
+		.getByRole('button', { name: 'Lineage' })
+		.click();
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	// The zone root appears exactly once (lineage's Graph row IS /lineage — no duplicate header row).
+	await expect(panel.locator('a[href="/lineage"]')).toHaveAttribute('data-sveltekit-reload', '');
+	await expect(panel.locator('a[href="/lineage/datasets"]')).toHaveAttribute(
+		'data-sveltekit-reload',
+		'',
+	);
 });

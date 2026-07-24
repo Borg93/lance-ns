@@ -1,21 +1,36 @@
 <script lang="ts">
-	import { NavigationMenu } from 'bits-ui';
+	import * as NavigationMenu from '../components/navigation-menu/index.js';
+	import { navigationMenuTriggerStyle } from '../components/navigation-menu/index.js';
 	import { Skeleton } from '../components/skeleton/index.js';
 	import NavbarUser from './navbar-user.svelte';
 	import { cn } from '../utils/cn.js';
-	import { prefetchOnIntent, topNav, zoneOf, type Me, type NavUser } from './nav-config.js';
+	import { ChevronDown } from '@lucide/svelte';
+	import {
+		norm,
+		prefetchOnIntent,
+		topNav,
+		under,
+		zoneOf,
+		type Me,
+		type NavUser,
+		type TopNavEntry,
+		type TopNavItem,
+	} from './nav-config.js';
 
-	// The shared top navbar — the cross-zone IA (bits-ui NavigationMenu). One entry per microfrontend
-	// zone; Admin appears only for an estate admin (`me.estate_admin`, the frozen /v1/me contract —
-	// fail-closed: no `me`, no admin entry). The identity/theme control (the old sidebar footer
-	// nav-user) lives on the right side. Bare flex chrome on purpose: the mount decides the framing
-	// (AppShell sits it in the inset header row).
+	// The shared top navbar — the cross-zone IA on the shadcn-svelte NavigationMenu shape. One entry
+	// per microfrontend zone; a zone that carries `items` renders as a trigger opening a panel of its
+	// sub-areas (so the estate is one hop away from anywhere), and a zone with a single surface stays
+	// a plain link. Admin appears only for an estate admin (`me.estate_admin`, the frozen /v1/me
+	// contract — fail-closed: no `me`, no admin entry); Access is never a top-level entry, it is one
+	// row of Admin's panel. The identity/theme control (the old sidebar footer nav-user) lives on the
+	// right side. Bare flex chrome on purpose: the mount decides the framing (AppShell sits it on the
+	// header's navbar row).
 	//
 	// `me` is the RESOLVED identity (null = signed out / lookup failed); `meLoading` renders the BASE
-	// entry titles as invisible text under skeleton pills instead — the same pill markup and classes
-	// as the resolved links, so loading and resolved chrome have IDENTICAL dimensions (no layout
-	// shift when /v1/me lands) and a zone streaming `fetchMe()` never flashes the non-admin entry set
-	// pretending to be the truth.
+	// entry titles as invisible text under skeleton pills instead — the same chrome classes and the
+	// same chevron reservation as the resolved entries, so loading and resolved states have IDENTICAL
+	// dimensions (no layout shift when /v1/me lands) and a zone streaming `fetchMe()` never flashes
+	// the non-admin entry set pretending to be the truth.
 	let {
 		pathname = '',
 		me = null,
@@ -39,9 +54,10 @@
 	// (an admin's extra entry appends on resolve — earned content, not reserved chrome).
 	const placeholders = topNav(false);
 	// Cross-zone links leave THIS app's route manifest → hard nav (data-sveltekit-reload); the home
-	// zone owns the origin root, so its zone key is ''.
-	const currentZone = $derived(zoneOf(pathname));
-	const crossZone = (href: string) => zoneOf(href) !== currentZone;
+	// zone owns the origin root, so its zone key is ''. A plain function over the `pathname` prop, not
+	// a `$derived`: the panel rows render inside bits-ui's portalled Content, and a derived read from
+	// there warns (`derived_inert`) as the panel tears down.
+	const crossZone = (href: string) => zoneOf(href) !== zoneOf(pathname);
 
 	// Warm a cross-zone target document on intent (hover/focus): rel=prefetch of the zone root —
 	// see prefetchDocument for the honest browser-support scope. Same-zone links already preload
@@ -50,20 +66,32 @@
 	const warm = (href: string) => (el: HTMLElement) =>
 		crossZone(href) ? prefetchOnIntent(href)(el) : undefined;
 
-	// One pill class list for BOTH the resolved links and the loading placeholders, so the two
-	// states cannot drift apart dimensionally.
-	const pill =
-		'inline-flex h-7 items-center rounded-lg border border-transparent px-2.5 text-sm font-medium';
+	// A panel row is lit when the current path is under it — except a row that IS the zone root
+	// (Lineage's Graph, Media's Search), which matches exactly or it would light up on every sibling.
+	const itemActive = (entry: TopNavEntry, item: TopNavItem) =>
+		item.href === entry.href ? norm(pathname) === item.href : under(item.href)(pathname);
+
+	// One chrome class list for the resolved entries AND the loading placeholders, so the two states
+	// cannot drift apart dimensionally — and shared with the plain links, so a link and a trigger are
+	// the same box.
+	const chrome = navigationMenuTriggerStyle();
 </script>
 
-<nav aria-label="Zones" class={cn('flex min-w-0 flex-1 items-center gap-2', className)}>
-	<NavigationMenu.Root class="min-w-0">
-		<NavigationMenu.List class="flex items-center gap-0.5">
+<div class={cn('flex min-w-0 items-center gap-2', className)}>
+	<!-- `aria-label` overrides the primitive's default "main", so this IS the zones landmark — one
+	     nav element, not a nav nested inside a nav. -->
+	<NavigationMenu.Root aria-label="Zones" class="min-w-0">
+		<NavigationMenu.List class="justify-start gap-0.5">
 			{#if meLoading}
 				{#each placeholders as entry (entry.title)}
 					<li aria-hidden="true">
-						<span class={cn(pill, 'relative')}>
+						<span class={cn(chrome, 'relative')}>
 							<span class="invisible">{entry.title}</span>
+							{#if entry.items}
+								<!-- Reserve the trigger's chevron too, or an entry with a panel would grow by
+								     its width the moment the identity lands. -->
+								<ChevronDown class="invisible size-3" />
+							{/if}
 							<Skeleton class="absolute inset-0 rounded-lg" />
 						</span>
 					</li>
@@ -71,18 +99,61 @@
 			{:else}
 				{#each entries as entry (entry.title)}
 					<NavigationMenu.Item>
-						<NavigationMenu.Link
-							href={entry.href}
-							active={entry.match(pathname)}
-							data-sveltekit-reload={crossZone(entry.href) ? '' : undefined}
-							{@attach warm(entry.href)}
-							class={cn(
-								pill,
-								'text-muted-foreground hover:bg-muted hover:text-foreground data-[active]:bg-muted data-[active]:text-foreground focus-visible:border-ring focus-visible:ring-ring/50 transition-colors outline-none focus-visible:ring-3',
-							)}
-						>
-							{entry.title}
-						</NavigationMenu.Link>
+						{#if entry.items}
+							<NavigationMenu.Trigger data-active={entry.match(pathname) ? '' : undefined}>
+								{entry.title}
+							</NavigationMenu.Trigger>
+							<NavigationMenu.Content>
+								<ul class="grid gap-1 p-2 md:w-[30rem] md:grid-cols-2">
+									{#if !entry.items.some((i) => i.href === entry.href)}
+										<!-- The zone root itself — a panel must not be the only way in, and the
+										     trigger is a button, not a link. Skipped when a row already IS the
+										     root (lineage's Graph, media's Search), so no href appears twice. -->
+										<li class="md:col-span-2">
+											<NavigationMenu.Link
+												href={entry.href}
+												active={norm(pathname) === entry.href}
+												data-sveltekit-reload={crossZone(entry.href) ? '' : undefined}
+												{@attach warm(entry.href)}
+												class="bg-muted/40 p-3"
+											>
+												<span class="text-foreground text-sm leading-none font-medium"
+													>{entry.title}</span
+												>
+												<span class="text-muted-foreground text-xs leading-snug">
+													Open the {entry.title.toLowerCase()} zone.
+												</span>
+											</NavigationMenu.Link>
+										</li>
+									{/if}
+									{#each entry.items as item (item.href)}
+										<li>
+											<NavigationMenu.Link
+												href={item.href}
+												active={itemActive(entry, item)}
+												data-sveltekit-reload={crossZone(item.href) ? '' : undefined}
+												{@attach warm(item.href)}
+											>
+												<span class="text-sm leading-none font-medium">{item.title}</span>
+												<span class="text-muted-foreground line-clamp-2 text-xs leading-snug">
+													{item.description}
+												</span>
+											</NavigationMenu.Link>
+										</li>
+									{/each}
+								</ul>
+							</NavigationMenu.Content>
+						{:else}
+							<NavigationMenu.Link
+								href={entry.href}
+								active={entry.match(pathname)}
+								data-sveltekit-reload={crossZone(entry.href) ? '' : undefined}
+								{@attach warm(entry.href)}
+								class={chrome}
+							>
+								{entry.title}
+							</NavigationMenu.Link>
+						{/if}
 					</NavigationMenu.Item>
 				{/each}
 			{/if}
@@ -96,4 +167,4 @@
 			<NavbarUser {user} {authEnabled} {pathname} />
 		{/if}
 	</div>
-</nav>
+</div>

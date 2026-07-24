@@ -32,8 +32,9 @@ test('an estate admin gets the full navbar entry set + the Marquez-parity sideba
 	);
 	await page.goto('/lineage');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('link', { name: 'Lineage' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Admin' })).toBeVisible();
+	// Lineage and Admin both carry sub-areas, so they are NavigationMenu triggers, not links.
+	await expect(nav.getByRole('button', { name: 'Lineage', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toBeVisible();
 	// The zone sidebar lists exactly the four first-class views + the Graph (active at the root).
 	// Scoped to the sidebar: page content may legitimately link to the same views (e.g. the graph
 	// header's capped hint links to Datasets), which would trip strict mode on a page-wide query.
@@ -60,8 +61,67 @@ test('a signed-out / unresolved identity renders the base entries only (fail-clo
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/lineage');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('link', { name: 'Data' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Admin' })).toHaveCount(0);
+	await expect(nav.getByRole('button', { name: 'Data', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
+	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
+});
+
+test('a zone with sub-areas opens a panel of them — pointer and keyboard, cross-zone rows reloading', async ({
+	page,
+}) => {
+	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
+	await page.goto('/lineage');
+	const nav = page.getByRole('navigation', { name: 'Zones' });
+	const data = nav.getByRole('button', { name: 'Data', exact: true });
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	// Closed by default: the panel's rows are not in the document at all (nothing to tab into).
+	await expect(panel).toHaveCount(0);
+
+	await data.click();
+	await expect(panel).toBeVisible();
+	for (const row of ['Projects', 'Tables', 'Namespaces', 'Warehouses']) {
+		await expect(panel.getByRole('link', { name: new RegExp(`^${row}`) })).toBeVisible();
+	}
+	// Each row leaves THIS zone's route manifest, so it must hard-navigate…
+	await expect(panel.locator('a[href="/data/tables"]')).toHaveAttribute(
+		'data-sveltekit-reload',
+		'',
+	);
+	// …and the zone root stays reachable, because the trigger itself is a button, not a link. Data
+	// has no row at /data, so the panel adds the root row — exactly one of it.
+	await expect(panel.locator('a[href="/data"]')).toHaveCount(1);
+
+	// Escape closes it, and the trigger is still the focused element.
+	await page.keyboard.press('Escape');
+	await expect(panel).toBeHidden();
+	// Keyboard-only open: focus the trigger and press Enter.
+	await data.focus();
+	await page.keyboard.press('Enter');
+	await expect(page.locator('[data-slot="navigation-menu-viewport"]')).toBeVisible();
+});
+
+test('the loading skeleton reserves the resolved entry widths — no shift when /v1/me lands', async ({
+	page,
+}) => {
+	// The 4b2af0e no-CLS contract, re-proven against the NavigationMenu chrome: the skeleton pills
+	// must reserve the resolved entries' exact box, chevrons included, so the navbar does not jump
+	// when the identity resolves. Held open until the loading geometry has been measured.
+	let release = () => {};
+	const gate = new Promise<void>((resolve) => (release = resolve));
+	await page.route('**/capi/v1/me', async (route) => {
+		await gate;
+		return json(route, { detail: 'anon' }, 401);
+	});
+	await page.goto('/lineage');
+	const nav = page.getByRole('navigation', { name: 'Zones' });
+	await expect(nav.locator('[data-slot="skeleton"]').first()).toBeVisible();
+	const loading = (await nav.boundingBox())!;
+
+	release();
+	await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+	const resolved = (await nav.boundingBox())!;
+	expect(Math.abs(resolved.width - loading.width)).toBeLessThanOrEqual(1);
+	expect(Math.abs(resolved.x - loading.x)).toBeLessThanOrEqual(1);
 });
 
 test('the breadcrumb bar is its OWN row below the zone links — never overlapping, even narrow', async ({

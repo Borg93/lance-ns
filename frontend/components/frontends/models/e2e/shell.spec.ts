@@ -21,10 +21,13 @@ test('an estate admin gets the full navbar entry set + the models sidebar leaves
 	);
 	await page.goto('/models');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('link', { name: 'Models' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Admin' })).toBeVisible();
-	// Access is NOT a top-level entry (4b2af0e: it folds into the admin zone's own sidebar).
-	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
+	// Models has a single surface, so it stays a plain link; Admin carries sub-areas and is a
+	// NavigationMenu trigger.
+	await expect(nav.getByRole('link', { name: 'Models', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toBeVisible();
+	// Access is NOT a top-level entry (4b2af0e: it folds into the admin zone) — in either shape.
+	await expect(nav.getByRole('link', { name: 'Access', exact: true })).toHaveCount(0);
+	await expect(nav.getByRole('button', { name: 'Access', exact: true })).toHaveCount(0);
 	// The sidebar renders ONLY this zone's own routes.
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Registry' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Pipeline' })).toBeVisible();
@@ -37,9 +40,36 @@ test('a signed-out / unresolved identity renders the base entries only (fail-clo
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/models');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	await expect(nav.getByRole('link', { name: 'Data' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Admin' })).toHaveCount(0);
-	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
+	await expect(nav.getByRole('button', { name: 'Data', exact: true })).toBeVisible();
+	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
+	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
+	await expect(nav.getByText('Access')).toHaveCount(0);
+});
+
+test("Access is reachable only from inside Admin's panel, never as its own navbar entry", async ({
+	page,
+}) => {
+	await page.route('**/capi/v1/me', (route) =>
+		json(route, {
+			sub: 'user:alice',
+			name: 'Alice',
+			email: 'alice@example.com',
+			estate_admin: true,
+			projects: [{ project: 'acme', role: 'admin' }],
+		}),
+	);
+	await page.goto('/models');
+	const nav = page.getByRole('navigation', { name: 'Zones' });
+	await nav.getByRole('button', { name: 'Admin', exact: true }).click();
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	await expect(panel.locator('a[href="/admin/access"]')).toBeVisible();
+	for (const row of ['/admin/tenants', '/admin/audit', '/admin/streams', '/admin/dlq']) {
+		await expect(panel.locator(`a[href="${row}"]`)).toBeVisible();
+	}
+	// …and with the panel closed again the navbar row itself carries no Access entry of any kind.
+	await page.keyboard.press('Escape');
+	await expect(panel).toBeHidden();
+	await expect(nav.getByText('Access')).toHaveCount(0);
 });
 
 test('the project switcher heads the navbar row — it no longer lives in the sidebar', async ({

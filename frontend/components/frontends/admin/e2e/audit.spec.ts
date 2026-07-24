@@ -39,6 +39,36 @@ test.beforeEach(async ({ context, page }) => {
 	});
 });
 
+test('a raw GreptimeDB nanosecond timestamp renders as a time, not as an integer', async ({
+	page,
+}) => {
+	// The real BFF returns GreptimeDB's `timestamp` column verbatim: a NANOSECOND epoch integer.
+	// `new Date(...)` cannot parse it, so the viewer used to print the integer at the operator.
+	const nanos = `${Date.now() - 5 * 60_000}000000`;
+	await page.route('**/api/audit**', (route) =>
+		json(route, {
+			events: [
+				{
+					timestamp: nanos,
+					action: 'can_read_data',
+					outcome: 'ALLOW',
+					subject: 'user:alice',
+					resource: 'table:db1$t',
+				},
+			],
+		}),
+	);
+	await page.goto('/admin/audit');
+	const cell = page.locator('tbody tr').first().locator('td').first();
+	await expect(cell).not.toContainText(nanos);
+	await expect(cell).toContainText('5m ago');
+	// …and the exact stamp is one hover away, as YYYY-MM-DD HH:mm:ss.
+	await expect(cell.locator('[title]')).toHaveAttribute(
+		'title',
+		/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/,
+	);
+});
+
 test('renders the audit trail rows', async ({ page }) => {
 	await page.goto('/admin/audit');
 	await expect(page.getByRole('heading', { name: 'Audit log' })).toBeVisible();

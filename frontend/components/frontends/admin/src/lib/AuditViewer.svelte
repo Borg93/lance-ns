@@ -20,6 +20,7 @@
 	} from '@rask/ui/data-table';
 	import { Select } from '@rask/ui/select';
 	import * as Sheet from '@rask/ui/sheet';
+	import { formatAbsolute, formatTimestamp } from '@rask/ui/utils';
 	import { ExternalLink, Filter, RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -92,10 +93,10 @@
 		if (o === 'ALLOW' || o === 'SUCCESS') return 'allow';
 		return '';
 	}
-	function when(ts: string): string {
-		const d = new Date(ts);
-		return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
-	}
+	// GreptimeDB's `timestamp` column arrives as a raw NANOSECOND epoch integer, which `new Date()`
+	// cannot parse — the old local `when()` fell through to printing `1753387234123456789` at the
+	// operator. The shared @rask/ui formatter reads the unit off the magnitude and returns both
+	// forms: the row shows the distance and hangs the exact stamp in its tooltip.
 
 	// ── the DataTable (goal cond 4): sortable columns + a client-side text search over the
 	// server-filtered window (the Search button's filters stay the GreptimeDB-side query). ──
@@ -122,7 +123,10 @@
 	const columns: ColumnDef<AuditEvent>[] = [
 		{
 			id: 'when',
-			accessorKey: 'timestamp',
+			// Sort and search on the ABSOLUTE stamp, not the raw column: `YYYY-MM-DD HH:mm:ss` sorts
+			// chronologically as plain text, and the window search then matches a date an operator can
+			// actually type — over a nanosecond integer it matched nothing a human would enter.
+			accessorFn: (e) => formatAbsolute(e.timestamp),
 			header: sortableHeader('when'),
 			cell: ({ row }) => renderSnippet(whenCell, row.original),
 			meta: { cellClass: 'whitespace-nowrap' },
@@ -212,7 +216,8 @@
 </script>
 
 {#snippet whenCell(e: AuditEvent)}
-	<span class="mono when">{when(e.timestamp)}</span>
+	{@const t = formatTimestamp(e.timestamp)}
+	<span class="mono when" title={t.title}>{t.relative}</span>
 {/snippet}
 {#snippet plainCell(value: string)}
 	<span class="mono">{value || '—'}</span>
@@ -305,7 +310,12 @@
 			<div class="drawer-body">
 				<dl class="record">
 					<dt>when</dt>
-					<dd class="mono">{when(drawerEvent.timestamp)}</dd>
+					<!-- The drawer is the full record, so it leads with the exact stamp and carries the
+					     distance beside it rather than hiding it in a tooltip. -->
+					<dd class="mono">
+						{formatTimestamp(drawerEvent.timestamp).absolute}
+						<span class="faint">({formatTimestamp(drawerEvent.timestamp).relative})</span>
+					</dd>
 					<dt>action</dt>
 					<dd class="mono">{drawerEvent.action || '—'}</dd>
 					<dt>outcome</dt>
@@ -404,6 +414,9 @@
 	.when {
 		color: var(--faint);
 		white-space: nowrap;
+	}
+	.faint {
+		color: var(--faint);
 	}
 	.allow {
 		color: var(--ok);

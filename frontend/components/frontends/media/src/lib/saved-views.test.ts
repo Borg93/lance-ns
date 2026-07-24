@@ -35,7 +35,7 @@ describe('upsert / remove / forDataset', () => {
 		expect(views.map((v) => v.name)).toEqual(['b', 'a']);
 		views = upsertView(views, { name: 'a', dataset: 'd1', spec: { q: 'updated' } as SearchSpec });
 		expect(views).toHaveLength(2); // overwrote, not duplicated
-		expect(views[0].spec.q).toBe('updated'); // and moved to front
+		expect(views[0]?.spec.q).toBe('updated'); // and moved to front
 	});
 
 	it('a same-named view in a DIFFERENT dataset is independent', () => {

@@ -88,6 +88,7 @@ test('a grant POSTs the exact {user, relation} body to the NAMESPACE access rout
 	page,
 }) => {
 	await page.goto('/data/namespaces/gold');
+	await page.getByRole('tab', { name: 'access' }).click();
 	await page.getByRole('button', { name: 'Access review' }).click();
 	await expect(page.locator('table.acl')).toContainText('can_delete');
 	await page.getByPlaceholder('user (e.g. alice), or role:… / team:…#member').last().fill('bob');
@@ -139,6 +140,7 @@ test('a 403 access review renders the denial state, never the ACL', async ({ pag
 		json(route, { detail: 'forbidden' }, 403),
 	);
 	await page.goto('/data/namespaces/gold');
+	await page.getByRole('tab', { name: 'access' }).click();
 	await page.getByRole('button', { name: 'Access review' }).click();
 	await expect(
 		page.getByText('Owner access required to review who can reach this namespace.'),

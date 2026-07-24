@@ -304,6 +304,16 @@ export const dropTableIndex = (table: string, name: string) =>
 /** Warehouse admin (#3-A UI): reads for any signed-in user the catalog allows; writes are
  * project-admin gated by the catalog (can_create_warehouse / can_administer). */
 export const fetchWarehouses = () => requestJSON<Warehouse[]>('v1/warehouses');
+/** One warehouse record — the hierarchy drill-down's warehouse page (can_get_metadata gated). */
+export const fetchWarehouse = (id: string) => requestJSON<Warehouse>(`v1/warehouses/${enc(id)}`);
+
+export type ProjectSummary = components['schemas']['ProjectResponse'];
+
+/** The estate's tenants (estate-observer gated by the catalog — a member sees 403, handled). */
+export const fetchProjects = () => requestJSON<ProjectSummary[]>('v1/projects');
+/** One tenant: its warehouses + effective admins — the hierarchy drill-down's project page. */
+export const fetchProject = (project: string) =>
+	requestJSON<ProjectSummary>(`v1/projects/${enc(project)}`);
 export const createWarehouse = (body: CreateWarehouse) =>
 	requestJSON<Warehouse>('v1/warehouses', {
 		method: 'POST',

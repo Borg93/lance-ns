@@ -10,6 +10,9 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchTables } from '$lib/catalog';
+	import DetailTabs from '$lib/DetailTabs.svelte';
+	import StageBadge from '$lib/StageBadge.svelte';
+	import { stageOf } from '$lib/stage';
 	import {
 		type AccessGraph,
 		checkAccess,
@@ -25,6 +28,11 @@
 	} from '$lib/namespace';
 
 	const ns = $derived(page.params.id ?? '');
+
+	// Goal cond 3: the FGA view lives on an Access TAB (overview stays the default); the medallion
+	// stage badge is derived from the namespace name.
+	let tab = $state('overview');
+	const stageInfo = $derived(stageOf(ns));
 
 	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
 	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
@@ -148,6 +156,7 @@
 		// Reset every piece of state on a namespace change — including the edit form, or an editor
 		// opened on A would survive into B and Save would write A's draft to B (the TableDetail audit).
 		void ns;
+		tab = 'overview';
 		tables = null;
 		lastStatus = 0;
 		settled = false;
@@ -241,6 +250,7 @@
 		<span class="sep">/</span>
 		<Boxes size={15} />
 		<h1 class="mono">{ns}</h1>
+		{#if stageInfo}<StageBadge info={stageInfo} />{/if}
 		{#if tables !== null}
 			<span class="count">{members.length} table{members.length === 1 ? '' : 's'}</span>
 		{/if}
@@ -261,161 +271,165 @@
 	{:else if tables === null}
 		<div class="empty"><p>Loading…</p></div>
 	{:else}
-		<section>
-			<h2>Tables</h2>
-			{#if members.length === 0}
-				<p class="mut">No tables in this namespace.</p>
-			{:else}
-				<ul class="list">
-					{#each members as t (t)}
-						<li>
-							<a class="row mono" href={`${base}/tables/${encodeURIComponent(t)}`}>{t}</a>
-						</li>
-					{/each}
-				</ul>
-			{/if}
-		</section>
+		<!-- Goal cond 3: overview (default) | access — the FGA view moved onto its own tab. -->
+		<DetailTabs tabs={['overview', 'access']} bind:active={tab} />
+		{#if tab === 'overview'}
+			<section>
+				<h2>Tables</h2>
+				{#if members.length === 0}
+					<p class="mut">No tables in this namespace.</p>
+				{:else}
+					<ul class="list">
+						{#each members as t (t)}
+							<li>
+								<a class="row mono" href={`${base}/tables/${encodeURIComponent(t)}`}>{t}</a>
+							</li>
+						{/each}
+					</ul>
+				{/if}
+			</section>
 
-		<section>
-			<h2>Maintenance policy</h2>
-			<p class="mut">
-				A namespace policy governs every dataset under <span class="mono">{ns}</span> unless a table policy
-				overrides it; tag-pinned versions (e.g. blessed) are never cleaned up.
-			</p>
-			{#if editingPolicy}
-				<div class="policy-edit">
-					<label
-						>retention days <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={draft.retention_days}
-							placeholder="global default"
-						/></label
-					>
-					<label
-						>retain versions <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={draft.retain_versions}
-							placeholder="—"
-						/></label
-					>
-					<label
-						>compact every (h) <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={draft.interval}
-							placeholder="every sweep"
-						/></label
-					>
-					<label
-						>target rows/fragment <input
-							class="mono"
-							type="number"
-							min="1024"
-							bind:value={draft.target}
-							placeholder="Lance default"
-						/></label
-					>
-					<label class="check"
-						><input type="checkbox" bind:checked={draft.enabled} /> maintenance enabled</label
-					>
-					<div class="btnrow">
-						<button class="btn" disabled={busy} onclick={savePolicy}>Save policy</button>
-						<button class="btn ghost" onclick={() => (editingPolicy = false)}>Cancel</button>
+			<section>
+				<h2>Maintenance policy</h2>
+				<p class="mut">
+					A namespace policy governs every dataset under <span class="mono">{ns}</span> unless a table
+					policy overrides it; tag-pinned versions (e.g. blessed) are never cleaned up.
+				</p>
+				{#if editingPolicy}
+					<div class="policy-edit">
+						<label
+							>retention days <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={draft.retention_days}
+								placeholder="global default"
+							/></label
+						>
+						<label
+							>retain versions <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={draft.retain_versions}
+								placeholder="—"
+							/></label
+						>
+						<label
+							>compact every (h) <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={draft.interval}
+								placeholder="every sweep"
+							/></label
+						>
+						<label
+							>target rows/fragment <input
+								class="mono"
+								type="number"
+								min="1024"
+								bind:value={draft.target}
+								placeholder="Lance default"
+							/></label
+						>
+						<label class="check"
+							><input type="checkbox" bind:checked={draft.enabled} /> maintenance enabled</label
+						>
+						<div class="btnrow">
+							<button class="btn" disabled={busy} onclick={savePolicy}>Save policy</button>
+							<button class="btn ghost" onclick={() => (editingPolicy = false)}>Cancel</button>
+						</div>
 					</div>
-				</div>
-			{:else if policyPart === 'loading'}
-				<p class="mut">Loading policy…</p>
-			{:else if policyPart === 'denied'}
-				<p class="mut">{policyDenied}</p>
-			{:else if policyPart === 'unavailable'}
-				<p class="mut">
-					Policy unavailable right now — not shown to avoid an overwriting edit against a stale
-					read.
-				</p>
-			{:else if policy}
-				<div class="refs">
-					{#if policy.retention_days}<span class="chip mono"
-							>retention {policy.retention_days}d</span
-						>{/if}
-					{#if policy.retain_versions}<span class="chip mono"
-							>keep last {policy.retain_versions}</span
-						>{/if}
-					{#if policy.compact_interval_hours}<span class="chip mono"
-							>every {policy.compact_interval_hours}h</span
-						>{/if}
-					{#if policy.target_rows_per_fragment}<span class="chip mono"
-							>target {policy.target_rows_per_fragment} rows/frag</span
-						>{/if}
-					{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
-					<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
-					<button class="btn ghost danger" disabled={busy} onclick={removePolicy}>
-						<Trash2 size={12} /> Remove
-					</button>
-				</div>
-			{:else}
-				<p class="mut">
-					No policy — the sweep applies the global defaults.
-					<button class="btn ghost" onclick={startPolicyEdit}>Set policy</button>
-				</p>
-			{/if}
-			{#if policyError}<p class="error">{policyError}</p>{/if}
-		</section>
-
-		<section>
-			<h2>Access</h2>
-			<GrantsPanel dataset={ns} kind="namespace" client={grantsClient} />
-			<!-- #81 one hop of the authorization graph, lazy-loaded as a compact list card. -->
-			<button class="btn ghost graphtoggle" onclick={toggleGraph}>
-				{showGraph ? 'Hide' : 'Show'} authorization graph
-			</button>
-			{#if showGraph}
-				<div class="graphcard">
-					<header class="graphhead">
-						<Network size={14} />
-						<h3>Authorization graph</h3>
-						<span class="mut mono">who holds which rung · one hop around {ns}</span>
-					</header>
-					{#if graphStatus === 'denied'}
-						<p class="mut">
-							<ShieldAlert size={13} /> Owner access is required to view the graph.
-						</p>
-					{:else if graphStatus === 'offline'}
-						<p class="mut">Graph unavailable right now — reopen to retry.</p>
-					{:else if graphStatus === 'loading'}
-						<p class="mut">Loading the authorization graph…</p>
-					{:else if graph}
-						{#if grantEdges.length === 0}
-							<p class="mut">No direct grants on this namespace.</p>
-						{:else}
-							<ul class="edges">
-								{#each grantEdges as e (`${e.source}:${e.relation}`)}
-									<li class="mono">
-										<span class="subject">{graphLabel(e.source)}</span>
-										<span class="chip rel">{e.relation}</span>
-										<span class="mut">on {graphLabel(e.target)}</span>
-									</li>
-								{/each}
-							</ul>
+				{:else if policyPart === 'loading'}
+					<p class="mut">Loading policy…</p>
+				{:else if policyPart === 'denied'}
+					<p class="mut">{policyDenied}</p>
+				{:else if policyPart === 'unavailable'}
+					<p class="mut">
+						Policy unavailable right now — not shown to avoid an overwriting edit against a stale
+						read.
+					</p>
+				{:else if policy}
+					<div class="refs">
+						{#if policy.retention_days}<span class="chip mono"
+								>retention {policy.retention_days}d</span
+							>{/if}
+						{#if policy.retain_versions}<span class="chip mono"
+								>keep last {policy.retain_versions}</span
+							>{/if}
+						{#if policy.compact_interval_hours}<span class="chip mono"
+								>every {policy.compact_interval_hours}h</span
+							>{/if}
+						{#if policy.target_rows_per_fragment}<span class="chip mono"
+								>target {policy.target_rows_per_fragment} rows/frag</span
+							>{/if}
+						{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
+						<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
+						<button class="btn ghost danger" disabled={busy} onclick={removePolicy}>
+							<Trash2 size={12} /> Remove
+						</button>
+					</div>
+				{:else}
+					<p class="mut">
+						No policy — the sweep applies the global defaults.
+						<button class="btn ghost" onclick={startPolicyEdit}>Set policy</button>
+					</p>
+				{/if}
+				{#if policyError}<p class="error">{policyError}</p>{/if}
+			</section>
+		{:else}
+			<section>
+				<h2>Access</h2>
+				<GrantsPanel dataset={ns} kind="namespace" client={grantsClient} />
+				<!-- #81 one hop of the authorization graph, lazy-loaded as a compact list card. -->
+				<button class="btn ghost graphtoggle" onclick={toggleGraph}>
+					{showGraph ? 'Hide' : 'Show'} authorization graph
+				</button>
+				{#if showGraph}
+					<div class="graphcard">
+						<header class="graphhead">
+							<Network size={14} />
+							<h3>Authorization graph</h3>
+							<span class="mut mono">who holds which rung · one hop around {ns}</span>
+						</header>
+						{#if graphStatus === 'denied'}
+							<p class="mut">
+								<ShieldAlert size={13} /> Owner access is required to view the graph.
+							</p>
+						{:else if graphStatus === 'offline'}
+							<p class="mut">Graph unavailable right now — reopen to retry.</p>
+						{:else if graphStatus === 'loading'}
+							<p class="mut">Loading the authorization graph…</p>
+						{:else if graph}
+							{#if grantEdges.length === 0}
+								<p class="mut">No direct grants on this namespace.</p>
+							{:else}
+								<ul class="edges">
+									{#each grantEdges as e (`${e.source}:${e.relation}`)}
+										<li class="mono">
+											<span class="subject">{graphLabel(e.source)}</span>
+											<span class="chip rel">{e.relation}</span>
+											<span class="mut">on {graphLabel(e.target)}</span>
+										</li>
+									{/each}
+								</ul>
+							{/if}
+							{#if containerEdges.length > 0}
+								<ul class="edges">
+									{#each containerEdges as e (`${e.relation}:${e.target}`)}
+										<li class="mono">
+											<span class="mut">{e.relation} →</span>
+											<span class="subject">{graphLabel(e.target)}</span>
+										</li>
+									{/each}
+								</ul>
+							{/if}
 						{/if}
-						{#if containerEdges.length > 0}
-							<ul class="edges">
-								{#each containerEdges as e (`${e.relation}:${e.target}`)}
-									<li class="mono">
-										<span class="mut">{e.relation} →</span>
-										<span class="subject">{graphLabel(e.target)}</span>
-									</li>
-								{/each}
-							</ul>
-						{/if}
-					{/if}
-				</div>
-			{/if}
-		</section>
+					</div>
+				{/if}
+			</section>
+		{/if}
 	{/if}
 </div>
 

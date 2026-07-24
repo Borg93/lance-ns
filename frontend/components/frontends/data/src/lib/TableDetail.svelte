@@ -53,9 +53,17 @@
 		runMaintenance,
 		setTablePolicy,
 	} from './catalog';
+	import DetailTabs from './DetailTabs.svelte';
+	import StageBadge from './StageBadge.svelte';
+	import { stageOfTable } from './stage';
 	import TableProperties from './TableProperties.svelte';
 
 	let { table }: { table: string } = $props();
+
+	// Goal cond 3: the FGA view lives on an Access TAB (overview stays the default); the medallion
+	// stage badge is derived from the table's namespace segment.
+	let tab = $state('overview');
+	const stageInfo = $derived(stageOfTable(table));
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -321,6 +329,7 @@
 		// Reset every piece of state on a table change — including the edit form, or an editor opened
 		// on A would survive into B and Save would write A's draft to B (audit 2026-07-16).
 		void table;
+		tab = 'overview';
 		detail = null;
 		lastStatus = 0;
 		editingPolicy = false;
@@ -896,6 +905,7 @@
 	<header>
 		<Database size={16} />
 		<h1 class="mono">{table}</h1>
+		{#if stageInfo}<StageBadge info={stageInfo} />{/if}
 		{#if detail?.describe.version != null}
 			<span class="sub mono">v{detail.describe.version}</span>
 		{/if}
@@ -933,720 +943,742 @@
 	{:else if detail === null}
 		<div class="empty"><p>Loading…</p></div>
 	{:else}
-		<section>
-			<h2>Stats</h2>
-			{#if partErrored(detail.stats)}
-				<p class="mut">Stats unavailable right now.</p>
-			{:else}
-				<div class="stats mono">
-					<span>{stats?.num_rows ?? '—'} rows</span>
-					<span>{fmtBytes(stats?.total_bytes)}</span>
-					<span>{stats?.num_indices ?? 0} indices</span>
-					<!-- #78 the catalog's fixed file format (Lance columnar, storage 2.2) — never a silent guess. -->
-					{#if detail.format}
-						<span
-							class="fmt"
-							title="This catalog stores Lance only; format-selecting properties are rejected."
-							>{detail.format.name} · storage v{detail.format.storage_version}</span
-						>
-					{/if}
-					<!-- scope #6 quality gate — the validator's dataQualityAssertions verdict on the latest
+		<!-- Goal cond 3: overview (default) | access — the FGA view moved onto its own tab. -->
+		<DetailTabs tabs={['overview', 'access']} bind:active={tab} />
+		{#if tab === 'access'}
+			<section>
+				<h2>Access</h2>
+				<GrantsPanel dataset={table} client={grantsClient} />
+				<ReadersPanel dataset={table} />
+				<!-- #81 the relationship graph is heavy (SvelteFlow) — lazy-mount behind a toggle. -->
+				<button class="btn ghost graphtoggle" onclick={() => (showGraph = !showGraph)}>
+					{showGraph ? 'Hide' : 'Show'} authorization graph
+				</button>
+				{#if showGraph}<AccessGraph dataset={table} />{/if}
+			</section>
+		{:else}
+			<section>
+				<h2>Stats</h2>
+				{#if partErrored(detail.stats)}
+					<p class="mut">Stats unavailable right now.</p>
+				{:else}
+					<div class="stats mono">
+						<span>{stats?.num_rows ?? '—'} rows</span>
+						<span>{fmtBytes(stats?.total_bytes)}</span>
+						<span>{stats?.num_indices ?? 0} indices</span>
+						<!-- #78 the catalog's fixed file format (Lance columnar, storage 2.2) — never a silent guess. -->
+						{#if detail.format}
+							<span
+								class="fmt"
+								title="This catalog stores Lance only; format-selecting properties are rejected."
+								>{detail.format.name} · storage v{detail.format.storage_version}</span
+							>
+						{/if}
+						<!-- scope #6 quality gate — the validator's dataQualityAssertions verdict on the latest
 					     producing run (from lineage). A plain catalog table has none, stated honestly. -->
-					{#if quality}
-						<span
-							class="qual {quality.passed ? 'ok' : 'bad'}"
-							title="Validator dataQualityAssertions on the latest producing run (lineage)."
-							>quality {quality.passed ? 'passed' : 'blocked'}{quality.assertions
-								? ` · ${quality.assertions} check${quality.assertions === 1 ? '' : 's'}`
-								: ''}</span
-						>
-					{:else}
-						<span class="qual none" title="No producing run has recorded dataQualityAssertions."
-							>no quality gate</span
-						>
-					{/if}
-					{#if detail.describe.location}<span class="loc">{detail.describe.location}</span>{/if}
-				</div>
-			{/if}
-		</section>
+						{#if quality}
+							<span
+								class="qual {quality.passed ? 'ok' : 'bad'}"
+								title="Validator dataQualityAssertions on the latest producing run (lineage)."
+								>quality {quality.passed ? 'passed' : 'blocked'}{quality.assertions
+									? ` · ${quality.assertions} check${quality.assertions === 1 ? '' : 's'}`
+									: ''}</span
+							>
+						{:else}
+							<span class="qual none" title="No producing run has recorded dataQualityAssertions."
+								>no quality gate</span
+							>
+						{/if}
+						{#if detail.describe.location}<span class="loc">{detail.describe.location}</span>{/if}
+					</div>
+				{/if}
+			</section>
 
-		<section>
-			<h2>Schema</h2>
-			{#if schemaFields.length === 0}
-				<p class="mut">Schema unavailable for this table.</p>
-			{:else}
-				<table>
-					<thead><tr><th>field</th><th>type</th><th>nullable</th><th></th></tr></thead>
-					<tbody>
-						{#each schemaFields as f (f.name)}
-							<tr>
-								<td class="mono">{f.name}</td>
-								<td class="mono">{typeName(f.type)}</td>
-								<td class="mono">{f.nullable ? 'yes' : 'no'}</td>
-								<td class="actions">
-									{#if renaming === f.name}
-										<input
-											class="mono rn"
-											bind:value={renameTo}
-											placeholder="new name"
-											aria-label="rename {f.name} to"
-											onkeydown={(e) => e.key === 'Enter' && runRenameColumn()}
-										/>
-										<button
-											class="btn ghost"
-											disabled={colBusy || !renameTo.trim()}
-											onclick={runRenameColumn}>save</button
-										>
-										<button class="btn ghost" onclick={() => (renaming = null)}>×</button>
-									{:else if retyping === f.name}
-										<!-- #74 tail — re-type via alter_columns; the target is a scalar Arrow type the
-										     catalog's _SCALAR_ARROW map accepts. An impossible cast 400s and surfaces. -->
-										<div class="retype">
-											<Select
-												bind:value={retypeTo}
-												ariaLabel="re-type {f.name} to"
-												placeholder="new type"
-												options={RETYPE_TYPES.map((t) => ({ value: t, label: t }))}
+			<section>
+				<h2>Schema</h2>
+				{#if schemaFields.length === 0}
+					<p class="mut">Schema unavailable for this table.</p>
+				{:else}
+					<table>
+						<thead><tr><th>field</th><th>type</th><th>nullable</th><th></th></tr></thead>
+						<tbody>
+							{#each schemaFields as f (f.name)}
+								<tr>
+									<td class="mono">{f.name}</td>
+									<td class="mono">{typeName(f.type)}</td>
+									<td class="mono">{f.nullable ? 'yes' : 'no'}</td>
+									<td class="actions">
+										{#if renaming === f.name}
+											<input
+												class="mono rn"
+												bind:value={renameTo}
+												placeholder="new name"
+												aria-label="rename {f.name} to"
+												onkeydown={(e) => e.key === 'Enter' && runRenameColumn()}
 											/>
 											<button
 												class="btn ghost"
-												disabled={colBusy || !retypeTo}
-												onclick={runRetypeColumn}>save</button
+												disabled={colBusy || !renameTo.trim()}
+												onclick={runRenameColumn}>save</button
 											>
-											<button class="btn ghost" onclick={() => (retyping = null)}>×</button>
-										</div>
-									{:else if backfilling === f.name}
-										<!-- #85 backfill — async native job over the column; the optional `where` bounds it. -->
-										<input
-											class="mono rn"
-											bind:value={backfillWhere}
-											placeholder="where (optional)"
-											aria-label="backfill {f.name} where"
-											onkeydown={(e) => e.key === 'Enter' && runBackfill()}
-										/>
-										<button class="btn ghost" disabled={colBusy} onclick={runBackfill}>run</button>
-										<button class="btn ghost" onclick={() => (backfilling = null)}>×</button>
-									{:else}
-										<button
-											class="chip-x"
-											title="rename column"
-											aria-label="rename {f.name}"
-											disabled={colBusy}
-											onclick={() => {
-												renaming = f.name;
-												renameTo = '';
-											}}>✎</button
-										>
-										<button
-											class="chip-x"
-											title="re-type column"
-											aria-label="re-type {f.name}"
-											disabled={colBusy}
-											onclick={() => {
-												retyping = f.name;
-												retypeTo = '';
-											}}>⇄</button
-										>
-										<button
-											class="chip-x"
-											title="backfill column"
-											aria-label="backfill {f.name}"
-											disabled={colBusy}
-											onclick={() => {
-												backfilling = f.name;
-												backfillWhere = '';
-											}}>⤵</button
-										>
-										<button
-											class="chip-x"
-											title="drop column"
-											aria-label="drop {f.name}"
-											disabled={colBusy}
-											onclick={() => runDropColumn(f.name)}>×</button
-										>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-			{/if}
-			<!-- #74 add a SQL-expression column (e.g. price * 2, cast(null as int)). Writer-gated. -->
-			<form
-				class="row addcol"
-				onsubmit={(e) => {
-					e.preventDefault();
-					runAddColumn();
-				}}
-			>
-				<input
-					class="mono"
-					bind:value={addColName}
-					placeholder="new column"
-					aria-label="New column name"
-				/>
-				<input
-					class="mono"
-					bind:value={addColExpr}
-					placeholder="SQL expression (e.g. cast(null as int))"
-					aria-label="Column SQL expression"
-				/>
-				<button
-					class="btn"
-					type="submit"
-					disabled={colBusy || !addColName.trim() || !addColExpr.trim()}
-				>
-					Add column
-				</button>
-			</form>
-			{#if colError}<p class="error">{colError}</p>{/if}
-			{#if backfillMsg}<p class="mut">{backfillMsg}</p>{/if}
-		</section>
-
-		<!-- #74 tail — table + per-column property editor (writer-gated; session-only /capi BFF). -->
-		<TableProperties {table} fields={schemaFields} {tableMeta} onchange={load} />
-
-		<section>
-			<h2>Insert rows</h2>
-			<p class="mut">Append rows as a JSON array of objects whose keys match the schema.</p>
-			<textarea class="mono ins" bind:value={insertJson} placeholder={'[{ "id": 1, "name": "a" }]'}
-			></textarea>
-			<div class="ins-row">
-				<button class="btn" disabled={insertBusy || !insertJson.trim()} onclick={runInsert}>
-					{insertBusy ? '…' : 'Insert'}
-				</button>
-				{#if insertMsg}<span class="ins-msg" class:okmsg={insertMsg.ok} class:error={!insertMsg.ok}
-						>{insertMsg.text}</span
-					>{/if}
-			</div>
-		</section>
-
-		<section>
-			<h2>Update / delete rows</h2>
-			<p class="mut">
-				SQL predicate over the table's columns (e.g. <span class="mono">id &gt; 3</span>). Update
-				applies the SET pairs to matching rows (empty predicate = all rows); delete removes them
-				(predicate required). Both are writer-gated.
-			</p>
-			<input
-				class="mono pred"
-				bind:value={rowPredicate}
-				placeholder="predicate (e.g. id > 3)"
-				aria-label="Row predicate"
-			/>
-			{#each rowSets as s, i (i)}
-				<div class="row setpair">
-					<input
-						class="mono"
-						bind:value={s.column}
-						placeholder="column"
-						aria-label="SET column {i + 1}"
-					/>
-					<input
-						class="mono"
-						bind:value={s.expression}
-						placeholder="SQL expression (e.g. price * 2)"
-						aria-label="SET expression {i + 1}"
-					/>
-				</div>
-			{/each}
-			<button
-				class="btn ghost"
-				onclick={() => (rowSets = [...rowSets, { column: '', expression: '' }])}
-			>
-				+ add SET pair
-			</button>
-			{#if rowSetPartial}
-				<p class="mut" role="status">
-					A SET pair is only half-filled — complete (or clear) both its column and expression;
-					partial pairs are never silently dropped.
-				</p>
-			{/if}
-			<div class="ins-row">
-				<button
-					class="btn"
-					disabled={rowBusy || rowSetPairs.length === 0 || rowSetPartial}
-					onclick={runUpdateRows}
-				>
-					{rowBusy ? '…' : 'Update rows'}
-				</button>
-				{#if rowDeleteConfirm}
-					<button
-						class="btn danger"
-						disabled={rowBusy || !rowPredicate.trim()}
-						onclick={runDeleteRows}
-					>
-						confirm delete
-					</button>
-					<button class="btn ghost" onclick={() => (rowDeleteConfirm = false)}>cancel</button>
-				{:else}
-					<button
-						class="btn danger"
-						disabled={rowBusy || !rowPredicate.trim()}
-						onclick={() => (rowDeleteConfirm = true)}
-					>
-						Delete rows
-					</button>
+											<button class="btn ghost" onclick={() => (renaming = null)}>×</button>
+										{:else if retyping === f.name}
+											<!-- #74 tail — re-type via alter_columns; the target is a scalar Arrow type the
+										     catalog's _SCALAR_ARROW map accepts. An impossible cast 400s and surfaces. -->
+											<div class="retype">
+												<Select
+													bind:value={retypeTo}
+													ariaLabel="re-type {f.name} to"
+													placeholder="new type"
+													options={RETYPE_TYPES.map((t) => ({ value: t, label: t }))}
+												/>
+												<button
+													class="btn ghost"
+													disabled={colBusy || !retypeTo}
+													onclick={runRetypeColumn}>save</button
+												>
+												<button class="btn ghost" onclick={() => (retyping = null)}>×</button>
+											</div>
+										{:else if backfilling === f.name}
+											<!-- #85 backfill — async native job over the column; the optional `where` bounds it. -->
+											<input
+												class="mono rn"
+												bind:value={backfillWhere}
+												placeholder="where (optional)"
+												aria-label="backfill {f.name} where"
+												onkeydown={(e) => e.key === 'Enter' && runBackfill()}
+											/>
+											<button class="btn ghost" disabled={colBusy} onclick={runBackfill}>run</button
+											>
+											<button class="btn ghost" onclick={() => (backfilling = null)}>×</button>
+										{:else}
+											<button
+												class="chip-x"
+												title="rename column"
+												aria-label="rename {f.name}"
+												disabled={colBusy}
+												onclick={() => {
+													renaming = f.name;
+													renameTo = '';
+												}}>✎</button
+											>
+											<button
+												class="chip-x"
+												title="re-type column"
+												aria-label="re-type {f.name}"
+												disabled={colBusy}
+												onclick={() => {
+													retyping = f.name;
+													retypeTo = '';
+												}}>⇄</button
+											>
+											<button
+												class="chip-x"
+												title="backfill column"
+												aria-label="backfill {f.name}"
+												disabled={colBusy}
+												onclick={() => {
+													backfilling = f.name;
+													backfillWhere = '';
+												}}>⤵</button
+											>
+											<button
+												class="chip-x"
+												title="drop column"
+												aria-label="drop {f.name}"
+												disabled={colBusy}
+												onclick={() => runDropColumn(f.name)}>×</button
+											>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
 				{/if}
-				{#if rowMsg}<span class="ins-msg" class:okmsg={rowMsg.ok} class:error={!rowMsg.ok}
-						>{rowMsg.text}</span
-					>{/if}
-			</div>
-		</section>
-
-		<section>
-			<h2>Blob preview</h2>
-			{#if blobColumns.length === 0}
-				<p class="mut">No blob columns on this table.</p>
-			{:else}
-				<div class="refs tagform">
-					<Select
-						bind:value={blobCol}
-						ariaLabel="Blob column"
-						placeholder="column…"
-						options={blobColumns.map((c) => ({ value: c, label: c }))}
+				<!-- #74 add a SQL-expression column (e.g. price * 2, cast(null as int)). Writer-gated. -->
+				<form
+					class="row addcol"
+					onsubmit={(e) => {
+						e.preventDefault();
+						runAddColumn();
+					}}
+				>
+					<input
+						class="mono"
+						bind:value={addColName}
+						placeholder="new column"
+						aria-label="New column name"
 					/>
-					<input class="mono" type="number" min="0" placeholder="row" bind:value={blobRow} />
-					<button class="btn" disabled={!blobCol || blobRow == null} onclick={previewBlob}
-						>Preview</button
+					<input
+						class="mono"
+						bind:value={addColExpr}
+						placeholder="SQL expression (e.g. cast(null as int))"
+						aria-label="Column SQL expression"
+					/>
+					<button
+						class="btn"
+						type="submit"
+						disabled={colBusy || !addColName.trim() || !addColExpr.trim()}
 					>
+						Add column
+					</button>
+				</form>
+				{#if colError}<p class="error">{colError}</p>{/if}
+				{#if backfillMsg}<p class="mut">{backfillMsg}</p>{/if}
+			</section>
+
+			<!-- #74 tail — table + per-column property editor (writer-gated; session-only /capi BFF). -->
+			<TableProperties {table} fields={schemaFields} {tableMeta} onchange={load} />
+
+			<section>
+				<h2>Insert rows</h2>
+				<p class="mut">Append rows as a JSON array of objects whose keys match the schema.</p>
+				<textarea
+					class="mono ins"
+					bind:value={insertJson}
+					placeholder={'[{ "id": 1, "name": "a" }]'}></textarea>
+				<div class="ins-row">
+					<button class="btn" disabled={insertBusy || !insertJson.trim()} onclick={runInsert}>
+						{insertBusy ? '…' : 'Insert'}
+					</button>
+					{#if insertMsg}<span
+							class="ins-msg"
+							class:okmsg={insertMsg.ok}
+							class:error={!insertMsg.ok}>{insertMsg.text}</span
+						>{/if}
 				</div>
-				{#if blobSrc}
-					{#if blobFailed}
-						<p class="mut">
-							Not an inline-previewable image — <a href={blobSrc}>open the blob</a>.
-						</p>
-					{:else}
-						<img
-							class="blob"
-							src={blobSrc}
-							alt="blob preview"
-							onerror={() => (blobFailed = true)}
+			</section>
+
+			<section>
+				<h2>Update / delete rows</h2>
+				<p class="mut">
+					SQL predicate over the table's columns (e.g. <span class="mono">id &gt; 3</span>). Update
+					applies the SET pairs to matching rows (empty predicate = all rows); delete removes them
+					(predicate required). Both are writer-gated.
+				</p>
+				<input
+					class="mono pred"
+					bind:value={rowPredicate}
+					placeholder="predicate (e.g. id > 3)"
+					aria-label="Row predicate"
+				/>
+				{#each rowSets as s, i (i)}
+					<div class="row setpair">
+						<input
+							class="mono"
+							bind:value={s.column}
+							placeholder="column"
+							aria-label="SET column {i + 1}"
 						/>
+						<input
+							class="mono"
+							bind:value={s.expression}
+							placeholder="SQL expression (e.g. price * 2)"
+							aria-label="SET expression {i + 1}"
+						/>
+					</div>
+				{/each}
+				<button
+					class="btn ghost"
+					onclick={() => (rowSets = [...rowSets, { column: '', expression: '' }])}
+				>
+					+ add SET pair
+				</button>
+				{#if rowSetPartial}
+					<p class="mut" role="status">
+						A SET pair is only half-filled — complete (or clear) both its column and expression;
+						partial pairs are never silently dropped.
+					</p>
+				{/if}
+				<div class="ins-row">
+					<button
+						class="btn"
+						disabled={rowBusy || rowSetPairs.length === 0 || rowSetPartial}
+						onclick={runUpdateRows}
+					>
+						{rowBusy ? '…' : 'Update rows'}
+					</button>
+					{#if rowDeleteConfirm}
+						<button
+							class="btn danger"
+							disabled={rowBusy || !rowPredicate.trim()}
+							onclick={runDeleteRows}
+						>
+							confirm delete
+						</button>
+						<button class="btn ghost" onclick={() => (rowDeleteConfirm = false)}>cancel</button>
+					{:else}
+						<button
+							class="btn danger"
+							disabled={rowBusy || !rowPredicate.trim()}
+							onclick={() => (rowDeleteConfirm = true)}
+						>
+							Delete rows
+						</button>
+					{/if}
+					{#if rowMsg}<span class="ins-msg" class:okmsg={rowMsg.ok} class:error={!rowMsg.ok}
+							>{rowMsg.text}</span
+						>{/if}
+				</div>
+			</section>
+
+			<section>
+				<h2>Blob preview</h2>
+				{#if blobColumns.length === 0}
+					<p class="mut">No blob columns on this table.</p>
+				{:else}
+					<div class="refs tagform">
+						<Select
+							bind:value={blobCol}
+							ariaLabel="Blob column"
+							placeholder="column…"
+							options={blobColumns.map((c) => ({ value: c, label: c }))}
+						/>
+						<input class="mono" type="number" min="0" placeholder="row" bind:value={blobRow} />
+						<button class="btn" disabled={!blobCol || blobRow == null} onclick={previewBlob}
+							>Preview</button
+						>
+					</div>
+					{#if blobSrc}
+						{#if blobFailed}
+							<p class="mut">
+								Not an inline-previewable image — <a href={blobSrc}>open the blob</a>.
+							</p>
+						{:else}
+							<img
+								class="blob"
+								src={blobSrc}
+								alt="blob preview"
+								onerror={() => (blobFailed = true)}
+							/>
+						{/if}
 					{/if}
 				{/if}
-			{/if}
-		</section>
+			</section>
 
-		<section>
-			<h2>Indexes</h2>
-			{#if indexes.length === 0}
-				<p class="mut">No indexes on this table.</p>
-			{:else}
-				<div class="refs">
-					{#each indexes as ix (ix.index_name)}
-						<span class="chip mono"
-							>{ix.index_name}<span class="mut">
-								· {(ix.columns ?? []).join(', ')}{ix.index_type ? ` · ${ix.index_type}` : ''}</span
+			<section>
+				<h2>Indexes</h2>
+				{#if indexes.length === 0}
+					<p class="mut">No indexes on this table.</p>
+				{:else}
+					<div class="refs">
+						{#each indexes as ix (ix.index_name)}
+							<span class="chip mono"
+								>{ix.index_name}<span class="mut">
+									· {(ix.columns ?? []).join(', ')}{ix.index_type
+										? ` · ${ix.index_type}`
+										: ''}</span
+								>
+								<button
+									class="chip-x"
+									title="drop index"
+									aria-label="drop index {ix.index_name}"
+									disabled={ixBusy}
+									onclick={() => runDropIndex(ix.index_name)}>×</button
+								></span
 							>
+						{/each}
+					</div>
+				{/if}
+				<!-- #73 build an index — scalar (BTREE/BITMAP/INVERTED/NGRAM) or vector (IVF/HNSW). Writer-gated. -->
+				<form
+					class="row"
+					onsubmit={(e) => {
+						e.preventDefault();
+						runCreateIndex();
+					}}
+				>
+					<input
+						class="mono"
+						bind:value={ixColumn}
+						placeholder="column"
+						aria-label="Index column"
+					/>
+					<Select
+						bind:value={ixType}
+						ariaLabel="Index type"
+						options={[
+							...SCALAR_TYPES.map((t) => ({ value: t, label: `scalar · ${t}` })),
+							...VECTOR_TYPES.map((t) => ({ value: t, label: `vector · ${t}` })),
+						]}
+					/>
+					{#if !ixScalar}
+						<Select
+							bind:value={ixDistance}
+							ariaLabel="Distance type"
+							options={[
+								{ value: 'cosine', label: 'cosine' },
+								{ value: 'l2', label: 'l2' },
+								{ value: 'dot', label: 'dot' },
+							]}
+						/>
+					{/if}
+					<button class="btn" type="submit" disabled={ixBusy || !ixColumn.trim()}>
+						{ixBusy ? '…' : 'Build index'}
+					</button>
+				</form>
+				{#if ixError}<p class="error">{ixError}</p>{/if}
+			</section>
+
+			<section>
+				<h2>Versions, branches & tags</h2>
+				{#if versions.length === 0}
+					<p class="mut">No version history available.</p>
+				{:else}
+					<p class="mut">
+						{versions.length} version{versions.length === 1 ? '' : 's'} — most recent first, one Lance
+						manifest per commit:
+					</p>
+					<table>
+						<thead><tr><th>version</th><th>committed</th><th>manifest</th><th></th></tr></thead>
+						<tbody>
+							{#each versions.slice().reverse().slice(0, 10) as v (v.version)}
+								<tr>
+									<td class="mono">v{v.version}</td>
+									<td class="mono">{fmtEpoch(v.timestamp_millis, 'ms')}</td>
+									<td class="mono">{fmtBytes(v.manifest_size)}</td>
+									<td class="act">
+										{#if restoreConfirm === v.version}
+											<button
+												class="btn tiny danger"
+												disabled={restoreBusy}
+												onclick={() => runRestore(v.version)}
+											>
+												{restoreBusy ? '…' : 'confirm restore'}
+											</button>
+											<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}>
+												cancel
+											</button>
+										{:else}
+											<button
+												class="btn tiny ghost"
+												onclick={() => {
+													restoreConfirm = v.version ?? null;
+													restoreError = null;
+												}}
+											>
+												restore
+											</button>
+										{/if}
+									</td>
+								</tr>
+							{/each}
+						</tbody>
+					</table>
+					{#if versions.length > 10}<p class="mut">…and {versions.length - 10} older.</p>{/if}
+					{#if restoreError}<p class="error">{restoreError}</p>{/if}
+				{/if}
+
+				<div class="refs br">
+					<span class="mut">branches:</span>
+					<span class="chip mono">main</span>
+					{#each branches as [name, b] (name)}
+						<span class="chip branch mono"
+							>{name}<span class="mut"> · {fmtBytes(b.manifestSize)}</span>
 							<button
 								class="chip-x"
-								title="drop index"
-								aria-label="drop index {ix.index_name}"
-								disabled={ixBusy}
-								onclick={() => runDropIndex(ix.index_name)}>×</button
+								title="delete branch"
+								aria-label="delete branch {name}"
+								disabled={refBusy}
+								onclick={() => runDeleteBranch(name)}>×</button
 							></span
 						>
 					{/each}
 				</div>
-			{/if}
-			<!-- #73 build an index — scalar (BTREE/BITMAP/INVERTED/NGRAM) or vector (IVF/HNSW). Writer-gated. -->
-			<form
-				class="row"
-				onsubmit={(e) => {
-					e.preventDefault();
-					runCreateIndex();
-				}}
-			>
-				<input class="mono" bind:value={ixColumn} placeholder="column" aria-label="Index column" />
-				<Select
-					bind:value={ixType}
-					ariaLabel="Index type"
-					options={[
-						...SCALAR_TYPES.map((t) => ({ value: t, label: `scalar · ${t}` })),
-						...VECTOR_TYPES.map((t) => ({ value: t, label: `vector · ${t}` })),
-					]}
-				/>
-				{#if !ixScalar}
-					<Select
-						bind:value={ixDistance}
-						ariaLabel="Distance type"
-						options={[
-							{ value: 'cosine', label: 'cosine' },
-							{ value: 'l2', label: 'l2' },
-							{ value: 'dot', label: 'dot' },
-						]}
-					/>
-				{/if}
-				<button class="btn" type="submit" disabled={ixBusy || !ixColumn.trim()}>
-					{ixBusy ? '…' : 'Build index'}
-				</button>
-			</form>
-			{#if ixError}<p class="error">{ixError}</p>{/if}
-		</section>
-
-		<section>
-			<h2>Versions, branches & tags</h2>
-			{#if versions.length === 0}
-				<p class="mut">No version history available.</p>
-			{:else}
-				<p class="mut">
-					{versions.length} version{versions.length === 1 ? '' : 's'} — most recent first, one Lance manifest
-					per commit:
-				</p>
-				<table>
-					<thead><tr><th>version</th><th>committed</th><th>manifest</th><th></th></tr></thead>
-					<tbody>
-						{#each versions.slice().reverse().slice(0, 10) as v (v.version)}
-							<tr>
-								<td class="mono">v{v.version}</td>
-								<td class="mono">{fmtEpoch(v.timestamp_millis, 'ms')}</td>
-								<td class="mono">{fmtBytes(v.manifest_size)}</td>
-								<td class="act">
-									{#if restoreConfirm === v.version}
-										<button
-											class="btn tiny danger"
-											disabled={restoreBusy}
-											onclick={() => runRestore(v.version)}
-										>
-											{restoreBusy ? '…' : 'confirm restore'}
-										</button>
-										<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}>
-											cancel
-										</button>
-									{:else}
-										<button
-											class="btn tiny ghost"
-											onclick={() => {
-												restoreConfirm = v.version ?? null;
-												restoreError = null;
-											}}
-										>
-											restore
-										</button>
-									{/if}
-								</td>
-							</tr>
-						{/each}
-					</tbody>
-				</table>
-				{#if versions.length > 10}<p class="mut">…and {versions.length - 10} older.</p>{/if}
-				{#if restoreError}<p class="error">{restoreError}</p>{/if}
-			{/if}
-
-			<div class="refs br">
-				<span class="mut">branches:</span>
-				<span class="chip mono">main</span>
-				{#each branches as [name, b] (name)}
-					<span class="chip branch mono"
-						>{name}<span class="mut"> · {fmtBytes(b.manifestSize)}</span>
-						<button
-							class="chip-x"
-							title="delete branch"
-							aria-label="delete branch {name}"
-							disabled={refBusy}
-							onclick={() => runDeleteBranch(name)}>×</button
-						></span
-					>
-				{/each}
-			</div>
-			<!-- #74 create a branch from a version (owner-gated can_create_branch). -->
-			<form
-				class="row addcol"
-				onsubmit={(e) => {
-					e.preventDefault();
-					runCreateBranch();
-				}}
-			>
-				<input
-					class="mono"
-					bind:value={newBranch}
-					placeholder="new branch"
-					aria-label="New branch name"
-				/>
-				<Select
-					bind:value={newBranchFrom}
-					ariaLabel="Branch from version"
-					placeholder="from version (latest)"
-					options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
-				/>
-				<button class="btn" type="submit" disabled={refBusy || !newBranch.trim()}
-					>Create branch</button
+				<!-- #74 create a branch from a version (owner-gated can_create_branch). -->
+				<form
+					class="row addcol"
+					onsubmit={(e) => {
+						e.preventDefault();
+						runCreateBranch();
+					}}
 				>
-			</form>
-
-			<div class="refs">
-				{#if tags.length === 0}
-					<span class="mut">No tags — a promotion pins its version with one (e.g. blessed).</span>
-				{:else}
-					{#each tags as [name, t] (name)}
-						{#if movingTag === name}
-							<span class="chip tag mono">
-								{name} →
-								<span class="movesel">
-									<Select
-										bind:value={moveTo}
-										ariaLabel="move {name} to version"
-										placeholder="version"
-										options={versions.map((v) => ({
-											value: String(v.version),
-											label: `v${v.version}`,
-										}))}
-									/>
-								</span>
-								<button class="chip-x" disabled={refBusy || !moveTo} onclick={runMoveTag}
-									>save</button
-								>
-								<button class="chip-x" onclick={() => (movingTag = null)}>×</button>
-							</span>
-						{:else}
-							<span class="chip tag mono"
-								>{name} → v{t.version}
-								<button
-									class="chip-x"
-									title="move tag"
-									aria-label="move tag {name}"
-									disabled={refBusy}
-									onclick={() => {
-										movingTag = name;
-										moveTo = '';
-									}}>↪</button
-								>
-								<button
-									class="chip-x"
-									title="delete tag"
-									aria-label="delete tag {name}"
-									disabled={refBusy}
-									onclick={() => runDeleteTag(name)}>×</button
-								></span
-							>
-						{/if}
-					{/each}
-				{/if}
-			</div>
-			{#if refError}<p class="error">{refError}</p>{/if}
-
-			{#if versions.length > 0}
-				<div class="refs tagform">
-					<input class="mono" placeholder="tag name (e.g. blessed)" bind:value={tagName} />
+					<input
+						class="mono"
+						bind:value={newBranch}
+						placeholder="new branch"
+						aria-label="New branch name"
+					/>
 					<Select
-						bind:value={tagVersion}
-						ariaLabel="Version to tag"
-						placeholder="version…"
+						bind:value={newBranchFrom}
+						ariaLabel="Branch from version"
+						placeholder="from version (latest)"
 						options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
 					/>
-					<button class="btn" disabled={tagBusy || !tagName.trim() || !tagVersion} onclick={runTag}>
-						{tagBusy ? '…' : 'Tag version'}
-					</button>
-					{#if tagError}<span class="error">{tagError}</span>{/if}
-				</div>
-			{/if}
-		</section>
+					<button class="btn" type="submit" disabled={refBusy || !newBranch.trim()}
+						>Create branch</button
+					>
+				</form>
 
-		<section>
-			<h2>Maintenance policy</h2>
-			{#if editingPolicy}
-				<div class="policy-edit">
-					<label
-						>retention days <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={draft.retention_days}
-							placeholder="global default"
-						/></label
-					>
-					<label
-						>retain versions <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={draft.retain_versions}
-							placeholder="—"
-						/></label
-					>
-					<label
-						>compact every (h) <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={draft.interval}
-							placeholder="every sweep"
-						/></label
-					>
-					<label
-						>target rows/fragment <input
-							class="mono"
-							type="number"
-							min="1024"
-							bind:value={draft.target}
-							placeholder="Lance default"
-						/></label
-					>
-					<label class="check"
-						><input type="checkbox" bind:checked={draft.enabled} /> maintenance enabled</label
-					>
-					<div class="row">
-						<button class="btn" disabled={busy} onclick={savePolicy}>Save policy</button>
-						<button class="btn ghost" onclick={() => (editingPolicy = false)}>Cancel</button>
-					</div>
-				</div>
-			{:else if policyUnavailable}
-				<p class="mut">
-					Policy unavailable right now — not shown to avoid an overwriting edit against a stale
-					read.
-				</p>
-			{:else if policy}
 				<div class="refs">
-					{#if policy.retention_days}<span class="chip mono"
-							>retention {policy.retention_days}d</span
-						>{/if}
-					{#if policy.retain_versions}<span class="chip mono"
-							>keep last {policy.retain_versions}</span
-						>{/if}
-					{#if policy.compact_interval_hours}<span class="chip mono"
-							>every {policy.compact_interval_hours}h</span
-						>{/if}
-					{#if policy.target_rows_per_fragment}<span class="chip mono"
-							>target {policy.target_rows_per_fragment} rows/frag</span
-						>{/if}
-					{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
-					<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
-					<button class="btn ghost danger" disabled={busy} onclick={removePolicy}>
-						<Trash2 size={12} /> Remove
-					</button>
+					{#if tags.length === 0}
+						<span class="mut">No tags — a promotion pins its version with one (e.g. blessed).</span>
+					{:else}
+						{#each tags as [name, t] (name)}
+							{#if movingTag === name}
+								<span class="chip tag mono">
+									{name} →
+									<span class="movesel">
+										<Select
+											bind:value={moveTo}
+											ariaLabel="move {name} to version"
+											placeholder="version"
+											options={versions.map((v) => ({
+												value: String(v.version),
+												label: `v${v.version}`,
+											}))}
+										/>
+									</span>
+									<button class="chip-x" disabled={refBusy || !moveTo} onclick={runMoveTag}
+										>save</button
+									>
+									<button class="chip-x" onclick={() => (movingTag = null)}>×</button>
+								</span>
+							{:else}
+								<span class="chip tag mono"
+									>{name} → v{t.version}
+									<button
+										class="chip-x"
+										title="move tag"
+										aria-label="move tag {name}"
+										disabled={refBusy}
+										onclick={() => {
+											movingTag = name;
+											moveTo = '';
+										}}>↪</button
+									>
+									<button
+										class="chip-x"
+										title="delete tag"
+										aria-label="delete tag {name}"
+										disabled={refBusy}
+										onclick={() => runDeleteTag(name)}>×</button
+									></span
+								>
+							{/if}
+						{/each}
+					{/if}
 				</div>
-				<p class="mut">
-					Enforced by the compaction sweep; tag-pinned versions (e.g. blessed) are never cleaned up.
-				</p>
-			{:else}
-				<p class="mut">
-					No policy — the sweep applies the global defaults.
-					<button class="btn ghost" onclick={startPolicyEdit}>Set policy</button>
-				</p>
-			{/if}
-			{#if policyError}<p class="error">{policyError}</p>{/if}
+				{#if refError}<p class="error">{refError}</p>{/if}
 
-			<!-- #75 on-demand GC: dry-run reclaimable versions, then reclaim (owner-gated, destructive). -->
-			<div class="gc">
-				<h3>Garbage collection</h3>
-				<div class="row">
-					<label
-						>older than (days) <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={gcDays}
-							placeholder="any age"
-						/></label
-					>
-					<label
-						>keep last <input
-							class="mono"
-							type="number"
-							min="1"
-							bind:value={gcKeep}
-							placeholder="—"
-						/></label
-					>
-					<button class="btn ghost" disabled={gcBusy || !gcHasBound} onclick={runGcPreview}>
-						Preview
-					</button>
-				</div>
-				{#if gcPreview}
+				{#if versions.length > 0}
+					<div class="refs tagform">
+						<input class="mono" placeholder="tag name (e.g. blessed)" bind:value={tagName} />
+						<Select
+							bind:value={tagVersion}
+							ariaLabel="Version to tag"
+							placeholder="version…"
+							options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
+						/>
+						<button
+							class="btn"
+							disabled={tagBusy || !tagName.trim() || !tagVersion}
+							onclick={runTag}
+						>
+							{tagBusy ? '…' : 'Tag version'}
+						</button>
+						{#if tagError}<span class="error">{tagError}</span>{/if}
+					</div>
+				{/if}
+			</section>
+
+			<section>
+				<h2>Maintenance policy</h2>
+				{#if editingPolicy}
+					<div class="policy-edit">
+						<label
+							>retention days <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={draft.retention_days}
+								placeholder="global default"
+							/></label
+						>
+						<label
+							>retain versions <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={draft.retain_versions}
+								placeholder="—"
+							/></label
+						>
+						<label
+							>compact every (h) <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={draft.interval}
+								placeholder="every sweep"
+							/></label
+						>
+						<label
+							>target rows/fragment <input
+								class="mono"
+								type="number"
+								min="1024"
+								bind:value={draft.target}
+								placeholder="Lance default"
+							/></label
+						>
+						<label class="check"
+							><input type="checkbox" bind:checked={draft.enabled} /> maintenance enabled</label
+						>
+						<div class="row">
+							<button class="btn" disabled={busy} onclick={savePolicy}>Save policy</button>
+							<button class="btn ghost" onclick={() => (editingPolicy = false)}>Cancel</button>
+						</div>
+					</div>
+				{:else if policyUnavailable}
 					<p class="mut">
-						{gcPreview.eligible_versions.length} version{gcPreview.eligible_versions.length === 1
-							? ''
-							: 's'} reclaimable
-						{#if gcPreview.eligible_versions.length}(v{gcPreview.eligible_versions.join(
-								', v',
-							)}){/if}
-						· {gcPreview.total_versions} total, current v{gcPreview.current_version}.
-						{#if Object.keys(gcPreview.protected_tags).length}
-							Protected by tags: {Object.entries(gcPreview.protected_tags)
-								.map(([t, v]) => `${t}→v${v}`)
-								.join(', ')}.
-						{/if}
+						Policy unavailable right now — not shown to avoid an overwriting edit against a stale
+						read.
 					</p>
-					{#if gcPreview.eligible_versions.length}
-						{#if gcConfirm}
-							<div class="row">
-								<span class="mut"
-									>Permanently reclaim {gcPreview.eligible_versions.length} version(s)?</span
-								>
-								<button class="btn danger" disabled={gcBusy} onclick={runGc}>Confirm reclaim</button
-								>
-								<button class="btn ghost" onclick={() => (gcConfirm = false)}>Cancel</button>
-							</div>
-						{:else}
-							<button class="btn" disabled={gcBusy} onclick={() => (gcConfirm = true)}>
-								<Trash2 size={12} /> Reclaim now
-							</button>
+				{:else if policy}
+					<div class="refs">
+						{#if policy.retention_days}<span class="chip mono"
+								>retention {policy.retention_days}d</span
+							>{/if}
+						{#if policy.retain_versions}<span class="chip mono"
+								>keep last {policy.retain_versions}</span
+							>{/if}
+						{#if policy.compact_interval_hours}<span class="chip mono"
+								>every {policy.compact_interval_hours}h</span
+							>{/if}
+						{#if policy.target_rows_per_fragment}<span class="chip mono"
+								>target {policy.target_rows_per_fragment} rows/frag</span
+							>{/if}
+						{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
+						<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
+						<button class="btn ghost danger" disabled={busy} onclick={removePolicy}>
+							<Trash2 size={12} /> Remove
+						</button>
+					</div>
+					<p class="mut">
+						Enforced by the compaction sweep; tag-pinned versions (e.g. blessed) are never cleaned
+						up.
+					</p>
+				{:else}
+					<p class="mut">
+						No policy — the sweep applies the global defaults.
+						<button class="btn ghost" onclick={startPolicyEdit}>Set policy</button>
+					</p>
+				{/if}
+				{#if policyError}<p class="error">{policyError}</p>{/if}
+
+				<!-- #75 on-demand GC: dry-run reclaimable versions, then reclaim (owner-gated, destructive). -->
+				<div class="gc">
+					<h3>Garbage collection</h3>
+					<div class="row">
+						<label
+							>older than (days) <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={gcDays}
+								placeholder="any age"
+							/></label
+						>
+						<label
+							>keep last <input
+								class="mono"
+								type="number"
+								min="1"
+								bind:value={gcKeep}
+								placeholder="—"
+							/></label
+						>
+						<button class="btn ghost" disabled={gcBusy || !gcHasBound} onclick={runGcPreview}>
+							Preview
+						</button>
+					</div>
+					{#if gcPreview}
+						<p class="mut">
+							{gcPreview.eligible_versions.length} version{gcPreview.eligible_versions.length === 1
+								? ''
+								: 's'} reclaimable
+							{#if gcPreview.eligible_versions.length}(v{gcPreview.eligible_versions.join(
+									', v',
+								)}){/if}
+							· {gcPreview.total_versions} total, current v{gcPreview.current_version}.
+							{#if Object.keys(gcPreview.protected_tags).length}
+								Protected by tags: {Object.entries(gcPreview.protected_tags)
+									.map(([t, v]) => `${t}→v${v}`)
+									.join(', ')}.
+							{/if}
+						</p>
+						{#if gcPreview.eligible_versions.length}
+							{#if gcConfirm}
+								<div class="row">
+									<span class="mut"
+										>Permanently reclaim {gcPreview.eligible_versions.length} version(s)?</span
+									>
+									<button class="btn danger" disabled={gcBusy} onclick={runGc}
+										>Confirm reclaim</button
+									>
+									<button class="btn ghost" onclick={() => (gcConfirm = false)}>Cancel</button>
+								</div>
+							{:else}
+								<button class="btn" disabled={gcBusy} onclick={() => (gcConfirm = true)}>
+									<Trash2 size={12} /> Reclaim now
+								</button>
+							{/if}
 						{/if}
 					{/if}
-				{/if}
-				{#if gcResult}<p class="mut">{gcResult}</p>{/if}
+					{#if gcResult}<p class="mut">{gcResult}</p>{/if}
 
-				<!-- #76 compact-now: merge small fragments (non-destructive), using the policy's target size. -->
-				<div class="row gc-compact">
-					<button class="btn ghost" disabled={compactBusy} onclick={runCompact}>
-						{compactBusy ? 'compacting…' : 'Compact now'}
-					</button>
-					{#if compactResult}<span class="mut">{compactResult}</span>{/if}
+					<!-- #76 compact-now: merge small fragments (non-destructive), using the policy's target size. -->
+					<div class="row gc-compact">
+						<button class="btn ghost" disabled={compactBusy} onclick={runCompact}>
+							{compactBusy ? 'compacting…' : 'Compact now'}
+						</button>
+						{#if compactResult}<span class="mut">{compactResult}</span>{/if}
+					</div>
+					{#if gcError}<p class="error">{gcError}</p>{/if}
 				</div>
-				{#if gcError}<p class="error">{gcError}</p>{/if}
-			</div>
-		</section>
+			</section>
 
-		<section>
-			<h2>Access</h2>
-			<GrantsPanel dataset={table} client={grantsClient} />
-			<ReadersPanel dataset={table} />
-			<!-- #81 the relationship graph is heavy (SvelteFlow) — lazy-mount behind a toggle. -->
-			<button class="btn ghost graphtoggle" onclick={() => (showGraph = !showGraph)}>
-				{showGraph ? 'Hide' : 'Show'} authorization graph
-			</button>
-			{#if showGraph}<AccessGraph dataset={table} />{/if}
-		</section>
-
-		<!-- #85 danger zone — rename navigates to the new id; drop/deregister confirm via AlertDialog. -->
-		<section class="dangerzone">
-			<h2>Danger zone</h2>
-			<form
-				class="row"
-				onsubmit={(e) => {
-					e.preventDefault();
-					runRenameTable();
-				}}
-			>
-				<input
-					class="mono"
-					bind:value={renameTableTo}
-					placeholder="new table name"
-					aria-label="Rename table to"
-				/>
-				<button class="btn" type="submit" disabled={dangerBusy || !renameTableTo.trim()}>
-					Rename
-				</button>
-			</form>
-			<p class="mut">
-				Rename relocates the table within its namespace and navigates to the new id (owner-gated:
-				can_drop on the source + can_create_table on the destination).
-			</p>
-			<div class="row">
-				<button class="btn danger" disabled={dangerBusy} onclick={() => openDanger('deregister')}>
-					Deregister
-				</button>
-				<button class="btn danger" disabled={dangerBusy} onclick={() => openDanger('drop')}>
-					<Trash2 size={12} /> Drop table
-				</button>
-			</div>
-			<p class="mut">
-				Deregister detaches the table from the catalog (data stays on storage); drop deletes it
-				permanently.
-			</p>
-			{#if dangerError}<p class="error">{dangerError}</p>{/if}
-		</section>
+			<!-- #85 danger zone — rename navigates to the new id; drop/deregister confirm via AlertDialog. -->
+			<section class="dangerzone">
+				<h2>Danger zone</h2>
+				<form
+					class="row"
+					onsubmit={(e) => {
+						e.preventDefault();
+						runRenameTable();
+					}}
+				>
+					<input
+						class="mono"
+						bind:value={renameTableTo}
+						placeholder="new table name"
+						aria-label="Rename table to"
+					/>
+					<button class="btn" type="submit" disabled={dangerBusy || !renameTableTo.trim()}>
+						Rename
+					</button>
+				</form>
+				<p class="mut">
+					Rename relocates the table within its namespace and navigates to the new id (owner-gated:
+					can_drop on the source + can_create_table on the destination).
+				</p>
+				<div class="row">
+					<button class="btn danger" disabled={dangerBusy} onclick={() => openDanger('deregister')}>
+						Deregister
+					</button>
+					<button class="btn danger" disabled={dangerBusy} onclick={() => openDanger('drop')}>
+						<Trash2 size={12} /> Drop table
+					</button>
+				</div>
+				<p class="mut">
+					Deregister detaches the table from the catalog (data stays on storage); drop deletes it
+					permanently.
+				</p>
+				{#if dangerError}<p class="error">{dangerError}</p>{/if}
+			</section>
+		{/if}
 	{/if}
 </div>
 

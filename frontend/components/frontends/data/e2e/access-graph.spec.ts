@@ -61,6 +61,7 @@ test('lazy-shows the authorization graph with the focus object + subject nodes',
 	page,
 }) => {
 	await page.goto('/data/tables/db1%24t');
+	await page.getByRole('tab', { name: 'access' }).click();
 	await page.getByRole('button', { name: 'Show authorization graph' }).click();
 	const graph = page.locator('.ag');
 	await expect(graph.getByRole('heading', { name: 'Authorization graph' })).toBeVisible();
@@ -72,6 +73,7 @@ test('lazy-shows the authorization graph with the focus object + subject nodes',
 
 test('inline grant on the graph posts through the BFF', async ({ page }) => {
 	await page.goto('/data/tables/db1%24t');
+	await page.getByRole('tab', { name: 'access' }).click();
 	await page.getByRole('button', { name: 'Show authorization graph' }).click();
 	const graph = page.locator('.ag');
 	await graph.getByPlaceholder('user (e.g. alice), or role:… / team:…#member').fill('carol');

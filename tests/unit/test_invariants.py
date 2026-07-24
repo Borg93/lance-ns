@@ -96,6 +96,12 @@ def _first_party_source() -> str:
     substring match over source is the right check — not os.environ lookups.
     """
     parts = [p.read_text(errors="ignore") for p in SERVICES.rglob("*.py")]
+    # The model runners (runners/<name>/) are first-party too — the chart injects their env
+    # (ASSIST_FRAME_BASE) and only runner code reads it, so excluding them would flag live
+    # config as dead.
+    runners = REPO / "runners"
+    if runners.exists():
+        parts += [p.read_text(errors="ignore") for p in runners.rglob("*.py")]
     fe = REPO / "frontend"
     if fe.exists():
         for ext in ("*.ts", "*.svelte", "*.js"):

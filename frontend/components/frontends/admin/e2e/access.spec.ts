@@ -102,14 +102,25 @@ test('the Graph tab seeds from any object id and re-seeds from a neighbor click'
 	await expect(flow).toContainText('bob');
 	await expect(flow).toContainText('db1'); // the parent namespace node
 	await expect(flow).toContainText('owner');
-	// The wire calls are the contract: inbound (object=) + outbound (user=) filtered reads.
+	// The wire calls are the contract: inbound is one {object} read; outbound fans out one
+	// {user, object_type} read per model type — the API rejects a bare user filter by design.
 	expect(tupleQueries.some((q) => q.includes('object=table%3Adb1%24t'))).toBe(true);
-	expect(tupleQueries.some((q) => q.includes('user=table%3Adb1%24t'))).toBe(true);
+	expect(
+		tupleQueries.some((q) => q.includes('user=table%3Adb1%24t') && q.includes('object_type=table')),
+	).toBe(true);
+	expect(
+		tupleQueries.some((q) => q.includes('user=table%3Adb1%24t') && q.includes('object_type=user')),
+	).toBe(true);
+	expect(tupleQueries.every((q) => !q.includes('user=') || q.includes('object_type='))).toBe(true);
 	// A free-typed seed works too — the workbench is not table-scoped.
 	await page.getByLabel('Graph seed object').fill('user:alice');
 	await page.getByRole('button', { name: 'Seed', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'user:alice', exact: true })).toBeVisible();
-	await expect.poll(() => tupleQueries.some((q) => q.includes('user=user%3Aalice'))).toBe(true);
+	await expect
+		.poll(() =>
+			tupleQueries.some((q) => q.includes('user=user%3Aalice') && q.includes('object_type=')),
+		)
+		.toBe(true);
 });
 
 test('the Tuples tab lists, filters server-side, grants via the dialog and revokes behind a confirm', async ({

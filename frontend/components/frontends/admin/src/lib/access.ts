@@ -29,6 +29,18 @@ export const AccessModelSchema = v.object({
 });
 export type AccessModel = v.InferOutput<typeof AccessModelSchema>;
 
+/** The type names declared by the model DSL's `type <name>` lines. GET /v1/access/tuples rejects a
+ * bare `user` filter by design (an OpenFGA Read needs an object type), so user-scoped readers fan
+ * out one {user, objectType} request per model type — bounded by the model itself. */
+export const parseModelTypes = (dsl: string): string[] => [
+	...new Set(
+		dsl
+			.split('\n')
+			.map((line) => /^\s*type\s+(\S+)\s*$/.exec(line)?.[1])
+			.filter((t): t is string => t !== undefined),
+	),
+];
+
 export const CheckVerdictSchema = v.object({
 	allowed: v.boolean(),
 	checked: TupleSchema, // the exact triple the catalog evaluated — echoed so the UI can't lie

@@ -18,7 +18,14 @@
 	import { parse } from '@rask/api';
 	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
-	import { fetchTuples, type Tuple, TuplesPageSchema } from './access';
+	import {
+		AccessModelSchema,
+		fetchAccessModel,
+		fetchTuples,
+		parseModelTypes,
+		type Tuple,
+		TuplesPageSchema,
+	} from './access';
 	import FlowAutoFit from './FlowAutoFit.svelte';
 
 	let { object, onseed }: { object: string; onseed: (id: string) => void } = $props();
@@ -33,6 +40,9 @@
 	let status = $state<'loading' | 'ok' | 'denied' | 'offline'>('loading');
 	let truncated = $state(false);
 	let empty = $state(false);
+	// Outbound legs that failed (or 'model' when the type list itself was unreadable) — the graph
+	// still renders what arrived, flagged partial, instead of going dark on one bad leg.
+	let failedLegs = $state<string[]>([]);
 
 	const idType = (id: string): string => id.split(':')[0] || 'unknown';
 	const idLabel = (id: string): string => (id.includes(':') ? id.slice(id.indexOf(':') + 1) : id);
@@ -66,22 +76,63 @@
 
 	async function load(): Promise<void> {
 		const seed = object;
-		// Two filtered reads make the hop: tuples ON the seed (inbound) + tuples BY the seed (outbound).
-		const [inRes, outRes] = await Promise.all([
+		// The hop: tuples ON the seed (inbound, one {object} read) + tuples BY the seed (outbound).
+		// The API rejects a bare `user` filter by design (an OpenFGA Read needs an object type), so
+		// the outbound side fans out one {user, objectType} read per model type — bounded by the
+		// model DSL, read off the same /v1/access/model the Model tab shows.
+		const [inRes, modelRes] = await Promise.all([
 			fetchTuples({ object: seed, pageSize: PAGE }),
-			fetchTuples({ user: seed, pageSize: PAGE }),
+			fetchAccessModel(),
 		]);
 		if (object !== seed) return; // re-seeded mid-flight — drop stale
-		if (!inRes.ok || !outRes.ok) {
-			const bad = !inRes.ok ? inRes : (outRes as { ok: false; status: number });
-			status = bad.status === 401 || bad.status === 403 ? 'denied' : 'offline';
+		if (!inRes.ok) {
+			status = inRes.status === 401 || inRes.status === 403 ? 'denied' : 'offline';
 			return;
+		}
+		if (!modelRes.ok && (modelRes.status === 401 || modelRes.status === 403)) {
+			status = 'denied';
+			return;
+		}
+		let types: string[] = [];
+		let modelFailed = !modelRes.ok;
+		if (modelRes.ok) {
+			try {
+				types = parseModelTypes(parse(AccessModelSchema, modelRes.data).dsl);
+			} catch (err) {
+				console.error(`access model parse failure: ${String(err)}`);
+				modelFailed = true;
+			}
+		}
+		const outLegs = await Promise.all(
+			types.map(async (t) => ({
+				type: t,
+				res: await fetchTuples({ user: seed, objectType: t, pageSize: PAGE }),
+			})),
+		);
+		if (object !== seed) return; // re-seeded mid-flight — drop stale
+		// Partial results beat none: a failed type-leg is named in the header, not fatal.
+		const outbound: Tuple[] = [];
+		const failed: string[] = modelFailed ? ['model'] : [];
+		let outTruncated = false;
+		for (const leg of outLegs) {
+			if (!leg.res.ok) {
+				failed.push(leg.type);
+				continue;
+			}
+			try {
+				const pageData = parse(TuplesPageSchema, leg.res.data);
+				outbound.push(...pageData.tuples);
+				if (pageData.continuation !== null) outTruncated = true;
+			} catch (err) {
+				console.error(`access graph parse failure (${leg.type} leg): ${String(err)}`);
+				failed.push(leg.type);
+			}
 		}
 		try {
 			const inbound = parse(TuplesPageSchema, inRes.data);
-			const outbound = parse(TuplesPageSchema, outRes.data);
-			truncated = inbound.continuation !== null || outbound.continuation !== null;
-			rebuild(seed, inbound.tuples, outbound.tuples);
+			truncated = inbound.continuation !== null || outTruncated;
+			failedLegs = failed;
+			rebuild(seed, inbound.tuples, outbound);
 			status = 'ok';
 		} catch (err) {
 			console.error(`access graph parse failure: ${String(err)}`);
@@ -92,6 +143,8 @@
 	$effect(() => {
 		void object;
 		status = 'loading';
+		truncated = false;
+		failedLegs = [];
 		load();
 	});
 
@@ -111,6 +164,14 @@
 		{#if truncated}
 			<span class="trunc mono" title="More tuples exist than one page — the hop is truncated">
 				truncated at {PAGE}/side
+			</span>
+		{/if}
+		{#if failedLegs.length}
+			<span
+				class="trunc mono"
+				title="Part of the outbound hop failed to load — the graph shows what arrived"
+			>
+				partial · {failedLegs.join(', ')} failed
 			</span>
 		{/if}
 	</header>

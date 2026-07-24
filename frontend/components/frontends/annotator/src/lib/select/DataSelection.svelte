@@ -18,7 +18,16 @@
 	import DocTile from './DocTile.svelte';
 	import ChunkPicker from './ChunkPicker.svelte';
 
-	let { onopen }: { onopen: (keys: string[]) => void } = $props();
+	let {
+		onopen,
+		initialDataset = null,
+	}: {
+		/** Open these key-paths in the canvas; `dataset` = the picked dataset's selector
+		 *  (null for the backend default) so the deep link carries `?dataset=`. */
+		onopen: (keys: string[], dataset: string | null) => void;
+		/** Dataset to restore on mount (the URL's `?dataset=` — e.g. exiting the canvas). */
+		initialDataset?: string | null;
+	} = $props();
 
 	interface DatasetEntry {
 		id: string;
@@ -87,7 +96,8 @@
 					.replace(/\.lance$/, '')
 					.split('/')
 					.pop() ?? null;
-			const first = ds.find((d) => d.id === defaultId) ?? ds[0];
+			const first =
+				ds.find((d) => d.id === initialDataset) ?? ds.find((d) => d.id === defaultId) ?? ds[0];
 			if (first) await selectDataset(first.id, defaultId);
 			else error = 'No datasets available from the viewer service.';
 		} catch (e) {
@@ -98,7 +108,13 @@
 
 <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4" data-testid="data-selection">
 	{#if openDoc && view}
-		<ChunkPicker {view} doc={openDoc} {onopen} onback={() => (openDoc = null)} />
+		<!-- The handoff carries the picked dataset: default ⇒ null (no ?dataset= param). -->
+		<ChunkPicker
+			{view}
+			doc={openDoc}
+			onopen={(keys) => onopen(keys, view!.datasetParam())}
+			onback={() => (openDoc = null)}
+		/>
 	{:else}
 		<div class="flex shrink-0 flex-wrap items-center gap-3">
 			<div>

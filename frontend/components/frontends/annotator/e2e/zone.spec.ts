@@ -71,8 +71,9 @@ test.beforeEach(async ({ page }) => {
 	await page.route('**/annotator/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.route('**/annotator/api/**', (route) => {
 		const req = route.request();
-		apiPaths.push(new URL(req.url()).pathname);
-		if (req.method() !== 'GET') apiWrites.push(new URL(req.url()).pathname);
+		const u = new URL(req.url());
+		apiPaths.push(u.pathname + u.search); // query included: the dataset selector must ride
+		if (req.method() !== 'GET') apiWrites.push(u.pathname);
 		return json(route, { detail: 'unstubbed' }, 404);
 	});
 	await page.route('**/annotator/api/config', (route) =>
@@ -87,7 +88,8 @@ test.beforeEach(async ({ page }) => {
 		route.fulfill({ status: 200, contentType: 'image/png', body: PNG }),
 	);
 	await page.route('**/annotator/api/chunk-frame/**', (route) => {
-		apiPaths.push(new URL(route.request().url()).pathname);
+		const u = new URL(route.request().url());
+		apiPaths.push(u.pathname + u.search);
 		return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
 	});
 	// The annotations GET 404s (the generic route): the viewer's documented failure
@@ -119,6 +121,8 @@ test('landing = data selection: dataset → document → chunk → the annotate 
 	// boots, loading the unit through the zone-based BFF paths.
 	await page.getByTestId('chunk-row').click();
 	await expect(page).toHaveURL(new RegExp(`keys=${encodeURIComponent(KEY)}`));
+	// The DEFAULT dataset's deep link stays byte-identical — no ?dataset= param.
+	expect(page.url()).not.toContain('dataset=');
 	await expect(page.getByTitle('Redo (Ctrl+Shift+Z)')).toBeVisible();
 	await expect.poll(() => apiPaths).toContain(`/annotator/api/annotations/${KEY}`);
 	expect(apiWrites).toHaveLength(0);
@@ -132,6 +136,19 @@ test('?keys= deep link opens the canvas directly (the read-plane bridge)', async
 	await expect(page.getByTitle('Redo (Ctrl+Shift+Z)')).toBeVisible();
 	await expect(page.getByTestId('data-selection')).not.toBeVisible();
 	await expect.poll(() => apiPaths).toContain(`/annotator/api/annotations/${KEY}`);
+	expect(apiWrites).toHaveLength(0);
+});
+
+test('?dataset= deep link targets the picked dataset (frame + annotations carry it)', async ({
+	page,
+}) => {
+	// A NON-default dataset picked in the selection view rides the deep link; the canvas
+	// must fetch frame AND annotations (the save/versions endpoint) with ?dataset= — not
+	// silently the default dataset's.
+	await page.goto(`/annotator/?dataset=other&keys=${KEY}`);
+	await expect(page.getByTitle('Redo (Ctrl+Shift+Z)')).toBeVisible();
+	await expect.poll(() => apiPaths).toContain(`/annotator/api/annotations/${KEY}?dataset=other`);
+	await expect.poll(() => apiPaths).toContain(`/annotator/api/chunk-frame/${KEY}?dataset=other`);
 	expect(apiWrites).toHaveLength(0);
 });
 

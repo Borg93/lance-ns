@@ -14,23 +14,34 @@ import type { MediaKind, MediaUnit } from '$lib/viewer/types';
  *  BFF proxy routes at `/annotator/api/*`). Modality defaults to image/document (our
  *  corpus); `kind` selects the temporal viewers (audio waveform / video frame-overlay),
  *  whose media source defaults to the doc's `/api/media` stream — `mediaUrl` overrides
- *  it (a deep-link can annotate any same-origin media, e.g. a fixture clip). */
-export function unitFromKey(key: string, kind: MediaKind = 'image', mediaUrl?: string): MediaUnit {
+ *  it (a deep-link can annotate any same-origin media, e.g. a fixture clip). A
+ *  non-default `dataset` rides every URL as `?dataset=` (the media services' selector;
+ *  omitted ⇒ the backend default dataset), so frame/annotations/save all target the
+ *  dataset the unit was picked from — never silently the default one. */
+export function unitFromKey(
+	key: string,
+	kind: MediaKind = 'image',
+	mediaUrl?: string,
+	dataset?: string | null,
+): MediaUnit {
 	const doc = key.split('/')[0];
+	const ds = dataset ? `?dataset=${encodeURIComponent(dataset)}` : '';
 	return {
 		kind,
 		key,
-		imageUrl: `${base}/api/chunk-frame/${key}`,
+		imageUrl: `${base}/api/chunk-frame/${key}${ds}`,
 		...(kind === 'audio' || kind === 'video'
-			? { mediaUrl: mediaUrl ?? `${base}/api/media/${doc}` }
+			? { mediaUrl: mediaUrl ?? `${base}/api/media/${doc}${ds}` }
 			: {}),
-		annotationsUrl: `${base}/api/annotations/${key}`,
+		annotationsUrl: `${base}/api/annotations/${key}${ds}`,
 	};
 }
 
 class ReviewSelection {
 	units = $state<MediaUnit[]>([]);
 	index = $state(0);
+	/** Dataset the open units belong to — null for the backend default (no `?dataset=`). */
+	dataset = $state<string | null>(null);
 
 	get active(): MediaUnit | null {
 		return this.units[this.index] ?? null;
@@ -39,10 +50,17 @@ class ReviewSelection {
 		return this.units.length;
 	}
 
-	/** Open a selection of key-paths for review (from the read plane). `kind`/`mediaUrl`
-	 *  apply to every unit (the deep-link's modality + media-source overrides). */
-	openKeys(keys: string[], kind: MediaKind = 'image', mediaUrl?: string): void {
-		this.units = keys.filter(Boolean).map((k) => unitFromKey(k, kind, mediaUrl));
+	/** Open a selection of key-paths for review (from the read plane). `kind`/`mediaUrl`/
+	 *  `dataset` apply to every unit (the deep-link's modality, media-source and
+	 *  dataset-selector overrides). */
+	openKeys(
+		keys: string[],
+		kind: MediaKind = 'image',
+		mediaUrl?: string,
+		dataset?: string | null,
+	): void {
+		this.dataset = dataset ?? null;
+		this.units = keys.filter(Boolean).map((k) => unitFromKey(k, kind, mediaUrl, dataset));
 		this.index = 0;
 	}
 	go(i: number): void {
@@ -51,6 +69,7 @@ class ReviewSelection {
 	clear(): void {
 		this.units = [];
 		this.index = 0;
+		this.dataset = null;
 	}
 }
 

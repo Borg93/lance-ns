@@ -20,12 +20,14 @@
 			return;
 		}
 		// Beyond `keys`, the deep-link takes a modality override (`kind=audio|video` → the
-		// temporal viewers) and an optional same-origin `media=` source (a specific clip).
+		// temporal viewers), an optional same-origin `media=` source (a specific clip) and
+		// the picked dataset (`dataset=` — absent for the backend default), so a reload
+		// reopens the same unit IN the same dataset (frame/annotations/save alike).
 		const rawKind = params.get('kind');
 		const kind: MediaKind = rawKind === 'audio' || rawKind === 'video' ? rawKind : 'image';
 		const rawMedia = params.get('media');
 		const media = rawMedia?.startsWith('/') ? rawMedia : undefined; // same-origin only
-		reviewSelection.openKeys(keys.split(','), kind, media);
+		reviewSelection.openKeys(keys.split(','), kind, media, params.get('dataset'));
 	}
 
 	// Init synchronously (before first render) so a deep link never flashes the landing.
@@ -36,18 +38,29 @@
 	// openKeys (empty segments dropped), otherwise a hand-edited link such as
 	// `?keys=doc/0/1,` would never equal the held keys and the effect would loop.
 	$effect(() => {
-		const wanted = (page.url.searchParams.get('keys') ?? '').split(',').filter(Boolean).join(',');
+		const params = page.url.searchParams;
+		const wanted = (params.get('keys') ?? '').split(',').filter(Boolean).join(',');
 		const held = reviewSelection.units.map((u) => u.key).join(',');
-		if (wanted !== held) openFromParams(page.url.searchParams);
+		const datasetDrifted =
+			wanted !== '' && (params.get('dataset') ?? '') !== (reviewSelection.dataset ?? '');
+		if (wanted !== held || datasetDrifted) openFromParams(params);
 	});
 
 	const unit = $derived(reviewSelection.active);
 
-	function open(keys: string[]): void {
-		void goto(`?keys=${encodeURIComponent(keys.join(','))}`, { keepFocus: true, noScroll: true });
+	// A non-default dataset rides the deep link (`?dataset=…&keys=…`) so the canvas —
+	// and a reload of its URL — targets the picked dataset; the default keeps the bare
+	// `?keys=` link byte-identical. Exit keeps the dataset so the landing re-picks it.
+	function open(keys: string[], dataset: string | null): void {
+		const ds = dataset ? `dataset=${encodeURIComponent(dataset)}&` : '';
+		void goto(`?${ds}keys=${encodeURIComponent(keys.join(','))}`, {
+			keepFocus: true,
+			noScroll: true,
+		});
 	}
 	function exit(): void {
-		void goto('?', { keepFocus: true, noScroll: true });
+		const ds = reviewSelection.dataset;
+		void goto(ds ? `?dataset=${encodeURIComponent(ds)}` : '?', { keepFocus: true, noScroll: true });
 	}
 </script>
 
@@ -56,5 +69,5 @@
 		<AnnotatorShell {unit} onexit={exit} />
 	{/key}
 {:else}
-	<DataSelection onopen={open} />
+	<DataSelection onopen={open} initialDataset={page.url.searchParams.get('dataset')} />
 {/if}

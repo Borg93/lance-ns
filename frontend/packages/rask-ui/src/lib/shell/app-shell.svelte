@@ -3,9 +3,10 @@
 	import * as Sidebar from '../components/sidebar/index.js';
 	import { Separator } from '../components/separator/index.js';
 	import AppSidebar from './app-sidebar.svelte';
+	import TopNavbar from './top-navbar.svelte';
 	import { ChevronRight } from '@lucide/svelte';
 	import { gsap } from 'gsap';
-	import type { Project, NavUser } from './nav-config.js';
+	import type { Me, Project, NavUser, ZoneNav } from './nav-config.js';
 	import { pathCrumbs, projectFromHost } from './breadcrumb.js';
 
 	// Subtle content settle-in. Runs once when the shell MOUNTS — i.e. on a fresh
@@ -30,22 +31,33 @@
 		return () => tween.kill();
 	}
 
-	// The shared application shell: ONE grouped sidebar + a content inset with an
-	// integrated breadcrumb top bar. Every microfrontend wraps its routes in this so
-	// they share identical chrome (no drift). `pathname` comes from the consuming
-	// app's $app/state and drives the breadcrumb + active nav.
+	// The shared application shell: a zone-scoped sidebar (the CURRENT zone's routes, from `zoneNav`)
+	// + a content inset whose top bar carries the breadcrumb AND the cross-zone TopNavbar (with the
+	// identity/theme control on its right — the old sidebar-footer nav-user). Every microfrontend
+	// wraps its routes in this so they share identical chrome (no drift). `pathname` comes from the
+	// consuming app's $app/state and drives the breadcrumb + active nav; `me`/`meLoading` come from
+	// the zone's fetchMe() and gate the navbar's admin entries.
 	let {
 		pathname = '',
 		project = { name: 'Default', subtitle: 'Project' },
 		user = { name: 'rask', email: 'local', initials: 'RA' },
 		authEnabled = false,
+		zoneNav = null,
+		me = null,
+		meLoading = false,
 		children,
 	}: {
 		pathname?: string;
 		project?: Project;
-		// `null` = auth-on but signed out (nav-user shows "Sign in"); the default identity is the auth-off local placeholder.
+		// `null` = auth-on but signed out (the navbar user menu shows "Sign in"); the default identity is the auth-off local placeholder.
 		user?: NavUser | null;
 		authEnabled?: boolean;
+		/** The CURRENT zone's own sidebar routes; null renders an empty sidebar (pre-wiring). */
+		zoneNav?: ZoneNav | null;
+		/** The frozen /v1/me identity for the navbar (null = signed out / unresolved). */
+		me?: Me | null;
+		/** True while the zone's fetchMe() is in flight — the navbar renders skeletons. */
+		meLoading?: boolean;
 		children: Snippet;
 	} = $props();
 
@@ -64,14 +76,15 @@
 </script>
 
 <Sidebar.Provider class="h-svh overflow-hidden">
-	<AppSidebar {pathname} project={sidebarProject} {user} {authEnabled} />
+	<AppSidebar {pathname} project={sidebarProject} {zoneNav} />
 	<Sidebar.Inset class="flex min-w-0 flex-col overflow-hidden">
 		<!-- Integrated top bar (sidebar-07): no border, h-16 → h-12 when the sidebar is
-		     icon-collapsed. Trigger + breadcrumb; theme/profile live in the footer. -->
+		     icon-collapsed. Trigger + breadcrumb on the left; the cross-zone TopNavbar
+		     (zones + identity/theme) fills the right. -->
 		<header
 			class="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
 		>
-			<div class="flex items-center gap-2 px-4">
+			<div class="flex w-full min-w-0 items-center gap-2 px-4">
 				<Sidebar.Trigger class="text-muted-foreground hover:text-foreground -ml-1" />
 				<Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
 				<nav aria-label="Breadcrumb" class="flex min-w-0 items-center gap-1.5 text-sm">
@@ -81,6 +94,14 @@
 						<span class="text-foreground truncate font-medium capitalize">{crumb.label}</span>
 					{/each}
 				</nav>
+				<TopNavbar
+					{pathname}
+					{me}
+					{meLoading}
+					{user}
+					{authEnabled}
+					class="ml-auto flex-initial justify-end"
+				/>
 			</div>
 		</header>
 		<div class="content-enter flex min-h-0 flex-1 flex-col overflow-hidden" {@attach contentEnter}>

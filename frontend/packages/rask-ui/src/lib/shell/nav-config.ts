@@ -1,112 +1,103 @@
-import { Database, GitBranch, Boxes, ShieldCheck } from '@lucide/svelte';
+import { Database } from '@lucide/svelte';
 
 /** All lucide icons share one component signature, so any icon's type fits. */
-type IconComponent = typeof Database;
+export type IconComponent = typeof Database;
 
-/** A leaf route inside a collapsible domain item. */
-export type NavLeaf = {
+/** A leaf route inside the CURRENT zone's sidebar — always same-zone (soft nav). */
+export type ZoneNavLeaf = {
 	title: string;
 	/** ABSOLUTE, domain-relative href (e.g. /data/tables). */
 	href: string;
 	/** Active predicate vs the FULL pathname. */
 	match: (p: string) => boolean;
+	icon?: IconComponent;
 };
 
-/** A top-level sidebar item — a domain. With `items` it renders as a collapsible
- *  accordion (sidebar-07 NavMain); without, as a direct link. */
-export type NavItem = {
+/** The per-zone sidebar config: each zone passes ITS OWN routes to the shared AppShell. The zone
+ *  list itself lives in the top navbar (`topNav`) — the sidebar never renders other zones. */
+export type ZoneNav = {
+	/** The zone's display name — the sidebar group label (e.g. "Data"). */
 	title: string;
-	icon: IconComponent;
-	href: string;
-	match: (p: string) => boolean;
-	items?: NavLeaf[];
+	leaves: ZoneNavLeaf[];
 };
 
 /** A selectable project — the sidebar header switcher. One implicit "default" today. */
 export type Project = { name: string; subtitle?: string };
 
-/** The footer profile identity — populated from the OIDC session (per-zone +layout). */
+/** The navbar profile identity — populated from the OIDC session (per-zone +layout). */
 export type NavUser = { name: string; email?: string; initials?: string };
+
+/** One project membership row from `/v1/me` — the tenant and the caller's role in it. */
+export type MeProject = { project: string; role: 'admin' | 'member' };
+
+/** The frozen `GET /v1/me` identity contract, mirrored structurally from @rask/api (the shared shell
+ *  never imports app data — same seam as `NavUser`): any verified caller's sub/name/email, whether
+ *  they hold the estate-admin privilege, and their project memberships. */
+export type Me = {
+	sub: string;
+	name: string | null;
+	email: string | null;
+	estate_admin: boolean;
+	projects: MeProject[];
+};
 
 /** Drop a single trailing slash (except on root "/"). A zone served under a base path reports its ROOT
  *  as `page.url.pathname === '/models/'` (trailing slash), which would fail an exact compare against
  *  '/models'; normalizing here makes every matcher trailing-slash-robust. */
-const norm = (p: string) => (p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p);
+export const norm = (p: string) => (p.length > 1 && p.endsWith('/') ? p.slice(0, -1) : p);
 /** prefix-segment match: active when the path equals the href or is nested under it. */
-const seg = (href: string) => (p: string) => norm(p) === href || norm(p).startsWith(href + '/');
+export const seg = (href: string) => (p: string) =>
+	norm(p) === href || norm(p).startsWith(href + '/');
 /** exact match: active ONLY on this exact path. Used for a root leaf whose href equals its own
- *  domain's href (e.g. Registry=/models, Graph=/lineage) — `seg` there would over-match every sibling
+ *  zone's href (e.g. Registry=/models, Graph=/lineage) — `seg` there would over-match every sibling
  *  sub-route (/models/pipeline would light up Registry too), so those leaves match exactly. */
-const exact = (href: string) => (p: string) => norm(p) === href;
+export const exact = (href: string) => (p: string) => norm(p) === href;
 /** domain match: active when the path is under any of the given prefixes. */
-const under =
+export const under =
 	(...prefixes: string[]) =>
 	(p: string) =>
 		prefixes.some((pre) => norm(p) === pre || norm(p).startsWith(pre + '/'));
 
+/** One top-navbar entry — a whole microfrontend zone (cross-zone = hard nav). */
+export type TopNavEntry = {
+	title: string;
+	href: string;
+	match: (p: string) => boolean;
+};
+
 /**
- * The lance micro-frontend zones (cohesion, low coupling). Each domain is a SEPARATE
- * SvelteKit app under `/<domain>`; every href is domain-relative and cross-zone nav is a
- * full-document reload (the shared shell sets data-sveltekit-reload; the cross-zone-reload
- * eslint rule guards hand-written links). The sidebar renders identically in every zone —
- * one AppShell, zero drift.
+ * The top-navbar IA: one entry per microfrontend zone (cohesion, low coupling — each zone is a
+ * SEPARATE SvelteKit app under `/<domain>`; Home owns the origin root). The zones-in-sidebar list
+ * this replaces is gone: the sidebar now renders only the CURRENT zone's own routes (`ZoneNav`).
+ *
+ * Admin + Access append ONLY for an estate admin (`me.estate_admin` from the frozen `/v1/me`
+ * contract) — fail-closed: an unresolved/absent `me` renders the base entries. Access is the
+ * estate access-review surface inside the admin zone, so Admin's own match excludes it (one lit
+ * entry per route).
  */
-export function navMain(): NavItem[] {
-	const b = '';
-	return [
-		{
-			title: 'Data',
-			icon: Database,
-			href: `${b}/data`,
-			match: under(`${b}/data`),
-			items: [
-				{ title: 'Tables', href: `${b}/data/tables`, match: seg(`${b}/data/tables`) },
-				{ title: 'Namespaces', href: `${b}/data/namespaces`, match: seg(`${b}/data/namespaces`) },
-				{ title: 'Warehouses', href: `${b}/data/warehouses`, match: seg(`${b}/data/warehouses`) },
-			],
-		},
-		{
-			title: 'Lineage',
-			icon: GitBranch,
-			href: `${b}/lineage`,
-			match: under(`${b}/lineage`),
-			items: [
-				{ title: 'Graph', href: `${b}/lineage`, match: exact(`${b}/lineage`) },
-				// ('Runs' and 'Events' leaves used to point at /lineage/runs and /lineage/events, which have no
-				// route in any zone — the runs board and event feed render inside the explorer at /lineage.
-				// Removed rather than advertising a 404, same as the Access leaf below.)
-			],
-		},
-		{
-			title: 'Models',
-			icon: Boxes,
-			href: `${b}/models`,
-			match: under(`${b}/models`),
-			items: [
-				{ title: 'Registry', href: `${b}/models`, match: exact(`${b}/models`) },
-				{
-					title: 'Experiments',
-					href: `${b}/models/experiments`,
-					match: seg(`${b}/models/experiments`),
-				},
-				{ title: 'Pipeline', href: `${b}/models/pipeline`, match: seg(`${b}/models/pipeline`) },
-			],
-		},
-		{
-			title: 'Admin',
-			icon: ShieldCheck,
-			href: `${b}/admin`,
-			match: under(`${b}/admin`),
-			items: [
-				{ title: 'Audit', href: `${b}/admin/audit`, match: seg(`${b}/admin/audit`) },
-				{ title: 'DLQ', href: `${b}/admin/dlq`, match: seg(`${b}/admin/dlq`) },
-				// (an 'Access' leaf used to point at /admin/access, which has no route anywhere — the access
-				// surfaces live in the data zone's table detail + FGA graph; a namespace/access admin page is
-				// tracked in task #85. Removed rather than advertising a 404.)
-				{ title: 'Events', href: `${b}/admin/events`, match: seg(`${b}/admin/events`) },
-				{ title: 'Streams', href: `${b}/admin/streams`, match: seg(`${b}/admin/streams`) },
-				{ title: 'Tenants', href: `${b}/admin/tenants`, match: seg(`${b}/admin/tenants`) },
-			],
-		},
+export function topNav(estateAdmin: boolean): TopNavEntry[] {
+	const entries: TopNavEntry[] = [
+		{ title: 'Home', href: '/', match: (p) => norm(p) === '/' },
+		{ title: 'Data', href: '/data', match: under('/data') },
+		{ title: 'Lineage', href: '/lineage', match: under('/lineage') },
+		{ title: 'Models', href: '/models', match: under('/models') },
+		{ title: 'Media', href: '/media', match: under('/media') },
+		{ title: 'Annotator', href: '/annotator', match: under('/annotator') },
 	];
+	if (estateAdmin) {
+		entries.push(
+			{
+				title: 'Admin',
+				href: '/admin',
+				match: (p) => under('/admin')(p) && !seg('/admin/access')(p),
+			},
+			{ title: 'Access', href: '/admin/access', match: seg('/admin/access') },
+		);
+	}
+	return entries;
 }
+
+/** The first path segment = the owning zone ('' = the home zone at the origin root). A link whose
+ *  zone differs from the current pathname's leaves this app's route manifest, so it must hard-nav
+ *  (data-sveltekit-reload); same-zone links stay soft for SPA speed. */
+export const zoneOf = (p: string) => p.split('/').filter(Boolean)[0] ?? '';

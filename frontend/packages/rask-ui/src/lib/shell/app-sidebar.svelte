@@ -1,23 +1,20 @@
 <script lang="ts">
 	import * as Sidebar from '../components/sidebar/index.js';
 	import ProjectSwitcher from './project-switcher.svelte';
-	import NavMain from './nav-main.svelte';
-	import NavUser from './nav-user.svelte';
-	import type { Project, NavUser as NavUserData } from './nav-config.js';
+	import ZoneNav from './zone-nav.svelte';
+	import type { Project, ZoneNav as ZoneNavConfig } from './nav-config.js';
 
-	// The shadcn sidebar-07 structure: collapsible-to-icon sidebar with a project
-	// switcher (header), an accordion NavMain (content), and a profile dropdown
-	// (footer). Pure shared shell — `pathname` comes from the app's $app/state.
+	// The zone-scoped sidebar: collapsible-to-icon with a project switcher (header) and the CURRENT
+	// zone's own routes (content, from the `zoneNav` prop each zone passes). The cross-zone list and
+	// the identity/theme footer both moved to the top navbar — the sidebar is in-zone navigation only.
 	let {
 		pathname = '',
 		project,
-		user,
-		authEnabled = false,
+		zoneNav = null,
 	}: {
 		pathname?: string;
 		project?: Project;
-		user?: NavUserData | null;
-		authEnabled?: boolean;
+		zoneNav?: ZoneNavConfig | null;
 	} = $props();
 </script>
 
@@ -26,10 +23,7 @@
 		<ProjectSwitcher {project} />
 	</Sidebar.Header>
 	<Sidebar.Content>
-		<NavMain {pathname} />
+		<ZoneNav {pathname} nav={zoneNav} />
 	</Sidebar.Content>
-	<Sidebar.Footer>
-		<NavUser {user} {authEnabled} {pathname} />
-	</Sidebar.Footer>
 	<Sidebar.Rail />
 </Sidebar.Root>

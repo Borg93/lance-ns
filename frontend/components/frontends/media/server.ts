@@ -20,10 +20,10 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 // ─── CLI args ────────────────────────────────────────────────────────────
 const args = Object.fromEntries(
-  process.argv
-    .slice(2)
-    .map((a, i, all) => (a.startsWith('--') ? [a.slice(2), all[i + 1]] : null))
-    .filter((x): x is [string, string] => x !== null),
+	process.argv
+		.slice(2)
+		.map((a, i, all) => (a.startsWith('--') ? [a.slice(2), all[i + 1]] : null))
+		.filter((x): x is [string, string] => x !== null),
 );
 // Per-domain upstreams — the zone map, identical to the dev vite proxy. A real
 // prod gateway would own this routing; the thin server keeps dev/prod parity so
@@ -36,14 +36,14 @@ const ANNOTATE_ZONE = (args['annotate-zone'] ?? 'http://127.0.0.1:5176').replace
 
 /** Route an /api/* path to the service that owns that domain. */
 function apiUpstream(pathname: string): string {
-  if (
-    pathname.startsWith('/api/annotations') ||
-    pathname.startsWith('/api/assist') ||
-    pathname.startsWith('/api/jobs')
-  )
-    return ANNOTATOR;
-  if (pathname.startsWith('/api/search')) return SEARCH;
-  return VIEWER;
+	if (
+		pathname.startsWith('/api/annotations') ||
+		pathname.startsWith('/api/assist') ||
+		pathname.startsWith('/api/jobs')
+	)
+		return ANNOTATOR;
+	if (pathname.startsWith('/api/search')) return SEARCH;
+	return VIEWER;
 }
 const PORT = Number(args.port ?? 3000);
 
@@ -51,10 +51,10 @@ const PORT = Number(args.port ?? 3000);
 // Generated into ./build at build time; a dynamic import by absolute path keeps
 // this file type-checkable/lintable without the build artifact present.
 const { getHandler } = (await import(resolve(here, 'build/handler.js'))) as {
-  getHandler: () => {
-    fetch: (req: Request, server: unknown) => Response | Promise<Response>;
-    websocket?: unknown;
-  };
+	getHandler: () => {
+		fetch: (req: Request, server: unknown) => Response | Promise<Response>;
+		websocket?: unknown;
+	};
 };
 const app = getHandler();
 
@@ -63,35 +63,35 @@ const app = getHandler();
 // based path (/annotator/_app/…), so the annotator zone is forwarded verbatim —
 // no base-stripping needed.
 async function proxy(req: Request, base: string): Promise<Response> {
-  const url = new URL(req.url);
-  const pathname = url.pathname;
-  const headers = new Headers(req.headers);
-  headers.delete('host');
-  const upstream = await fetch(`${base}${pathname}${url.search}`, {
-    method: req.method,
-    headers,
-    body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body,
-  });
-  // fetch() auto-decompresses the body, so the upstream's content-encoding /
-  // content-length now describe bytes that no longer exist — forwarding them
-  // makes the browser try to gunzip plain bytes (ERR_CONTENT_DECODING_FAILED).
-  const respHeaders = new Headers(upstream.headers);
-  respHeaders.delete('content-encoding');
-  respHeaders.delete('content-length');
-  return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
+	const url = new URL(req.url);
+	const pathname = url.pathname;
+	const headers = new Headers(req.headers);
+	headers.delete('host');
+	const upstream = await fetch(`${base}${pathname}${url.search}`, {
+		method: req.method,
+		headers,
+		body: req.method === 'GET' || req.method === 'HEAD' ? undefined : req.body,
+	});
+	// fetch() auto-decompresses the body, so the upstream's content-encoding /
+	// content-length now describe bytes that no longer exist — forwarding them
+	// makes the browser try to gunzip plain bytes (ERR_CONTENT_DECODING_FAILED).
+	const respHeaders = new Headers(upstream.headers);
+	respHeaders.delete('content-encoding');
+	respHeaders.delete('content-length');
+	return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
 }
 
 // ─── Router: /api → per-domain service, /annotator → annotator zone, else app ──
 Bun.serve({
-  port: PORT,
-  websocket: app.websocket as never,
-  async fetch(req, server) {
-    const { pathname } = new URL(req.url);
-    if (pathname.startsWith('/api/')) return proxy(req, apiUpstream(pathname));
-    if (pathname === '/annotator' || pathname.startsWith('/annotator/'))
-      return proxy(req, ANNOTATE_ZONE);
-    return app.fetch(req, server);
-  },
+	port: PORT,
+	websocket: app.websocket as never,
+	async fetch(req, server) {
+		const { pathname } = new URL(req.url);
+		if (pathname.startsWith('/api/')) return proxy(req, apiUpstream(pathname));
+		if (pathname === '/annotator' || pathname.startsWith('/annotator/'))
+			return proxy(req, ANNOTATE_ZONE);
+		return app.fetch(req, server);
+	},
 });
 
 console.log(`→ frontend:  http://localhost:${PORT}  (svelte-adapter-bun)`);

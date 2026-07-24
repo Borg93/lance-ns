@@ -37,60 +37,57 @@
  *   Drives: manual set/verdict, interactive assist (SAM click / INSID3 on the page).
  */
 export type ChunkSelection =
-  | { level: "chunks"; keys: string[] }
-  | { level: "scope"; where: string }
-  | { level: "corpus" };
+	{ level: 'chunks'; keys: string[] } | { level: 'scope'; where: string } | { level: 'corpus' };
 
 export type AnnoSelection =
-  | { level: "one"; index: number }
-  | { level: "picked"; indices: number[] };
+	{ level: 'one'; index: number } | { level: 'picked'; indices: number[] };
 
 export type Selection = ChunkSelection | AnnoSelection;
 
 /** Chunk-level selections are corpus-scale ⇒ batch; annotation-level run interactively. */
 export const isChunkSelection = (s: Selection): s is ChunkSelection =>
-  s.level === "chunks" || s.level === "scope" || s.level === "corpus";
+	s.level === 'chunks' || s.level === 'scope' || s.level === 'corpus';
 
 /** Who assigns the label — and the provenance stamp it writes to `annotations.source`. */
-export type ProducerKind = "human" | "model" | "propagate" | "judge";
+export type ProducerKind = 'human' | 'model' | 'propagate' | 'judge';
 
 /** What happens to the target. */
-export type Op = "set" | "verdict" | "predict" | "propagate" | "judge";
+export type Op = 'set' | 'verdict' | 'predict' | 'propagate' | 'judge';
 
 /** Where the op runs. Interactive = local-first overlay → Save (merge_insert);
  *  batch = a silver deriver / lance-ray job (async, replace-protects-humans). */
-export type Execution = "interactive" | "batch";
+export type Execution = 'interactive' | 'batch';
 
 /** One labeling operation — the single verb spanning all three modes. */
 export interface LabelOp {
-  target: Selection;
-  /** Registry key of the producer (see producers.ts). */
-  producer: string;
-  op: Op;
-  execution: Execution;
-  payload: {
-    /** set / verdict — the field changes (e.g. {status:"accepted"}). */
-    fields?: Record<string, string>;
-    /** predict — open-vocab / VLM prompt (grounding-dino text, HTR none). */
-    prompt?: string;
-    /** propagate — annotation indices used as the few-shot reference (INSID3). */
-    exemplars?: number[];
-  };
+	target: Selection;
+	/** Registry key of the producer (see producers.ts). */
+	producer: string;
+	op: Op;
+	execution: Execution;
+	payload: {
+		/** set / verdict — the field changes (e.g. {status:"accepted"}). */
+		fields?: Record<string, string>;
+		/** predict — open-vocab / VLM prompt (grounding-dino text, HTR none). */
+		prompt?: string;
+		/** propagate — annotation indices used as the few-shot reference (INSID3). */
+		exemplars?: number[];
+	};
 }
 
 /** The mode-blind result of applying an op — annotation field deltas keyed by row
  *  index (interactive) or id (batch merge). Status/source/confidence come from the
  *  producer, not the caller. */
 export interface LabelDelta {
-  index?: number;
-  id?: string;
-  fields: Record<string, string | number>;
+	index?: number;
+	id?: string;
+	fields: Record<string, string | number>;
 }
 
 /** Outcome of dispatching a LabelOp. Interactive ops apply immediately (deltas land
  *  in the overlay); batch ops are enqueued and surface asynchronously by media id +
  *  Lance version. */
 export type LabelOutcome =
-  | { status: "applied"; deltas: LabelDelta[] }
-  | { status: "queued"; job: string; note: string }
-  | { status: "unsupported"; reason: string };
+	| { status: 'applied'; deltas: LabelDelta[] }
+	| { status: 'queued'; job: string; note: string }
+	| { status: 'unsupported'; reason: string };

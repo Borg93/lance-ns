@@ -2,11 +2,11 @@
  *  module so the toolbar button and the palette component (mounted at page
  *  level) share it without prop-drilling through the canvas. */
 class CommandMenuState {
-  open = $state(false);
+	open = $state(false);
 
-  toggle(): void {
-    this.open = !this.open;
-  }
+	toggle(): void {
+		this.open = !this.open;
+	}
 }
 
 export const commandMenu = new CommandMenuState();

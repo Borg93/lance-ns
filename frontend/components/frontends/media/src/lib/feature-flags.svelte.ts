@@ -7,9 +7,9 @@
  */
 
 class FeatureFlags {
-  /** True when any /api/chunk-frame fetch has returned 404 — implies
+	/** True when any /api/chunk-frame fetch has returned 404 — implies
         `extract-chunk-frames` hasn't been run yet. */
-  framesUnavailable = $state(false);
+	framesUnavailable = $state(false);
 }
 
 export const features = new FeatureFlags();

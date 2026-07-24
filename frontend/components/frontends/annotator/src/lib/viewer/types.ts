@@ -9,36 +9,36 @@
  */
 
 /** Media modality of a unit to annotate — the sole per-modality fork point. */
-export type MediaKind = "image" | "audio" | "video";
+export type MediaKind = 'image' | 'audio' | 'video';
 
 /** Everything a viewer needs to render + annotate one unit, resolved from the
  *  descriptor upstream so the viewer itself is decoupled from routing/data. */
 export interface MediaUnit {
-  kind: MediaKind;
-  /** Stable id (doc + identity keys joined) — the annotation key scope. */
-  key: string;
-  /** Backdrop image URL: the page image (image) or the current frame (video). */
-  imageUrl?: string;
-  /** Time-media URL: the `<audio>`/`<video>` source (audio, video). */
-  mediaUrl?: string;
-  /** Arrow-IPC endpoint for this unit's annotations. */
-  annotationsUrl: string;
-  /** Natural media dimensions when known. */
-  width?: number;
-  height?: number;
+	kind: MediaKind;
+	/** Stable id (doc + identity keys joined) — the annotation key scope. */
+	key: string;
+	/** Backdrop image URL: the page image (image) or the current frame (video). */
+	imageUrl?: string;
+	/** Time-media URL: the `<audio>`/`<video>` source (audio, video). */
+	mediaUrl?: string;
+	/** Arrow-IPC endpoint for this unit's annotations. */
+	annotationsUrl: string;
+	/** Natural media dimensions when known. */
+	width?: number;
+	height?: number;
 }
 
 /** The props EVERY viewer component accepts — the decoupling contract. A new
  *  modality's component takes exactly these, so the shell/route never special-cases. */
 export interface ViewerProps {
-  unit: MediaUnit;
-  /** Fired once the viewer has loaded + rendered (`count` = annotations shown). */
-  onload?: (count: number) => void;
-  /** Optional route-level annotator facade. A spatial viewer `attach`es its engine
-   *  + loaded table here so the ra-anno layout (toolbar/sidebar/zoom/layers) can bind
-   *  to a single reactive source; temporal viewers may attach their own surface later.
-   *  Omitted ⇒ the viewer renders read-only, exactly as before. */
-  controller?: import("./annotator.svelte").AnnotatorController;
+	unit: MediaUnit;
+	/** Fired once the viewer has loaded + rendered (`count` = annotations shown). */
+	onload?: (count: number) => void;
+	/** Optional route-level annotator facade. A spatial viewer `attach`es its engine
+	 *  + loaded table here so the ra-anno layout (toolbar/sidebar/zoom/layers) can bind
+	 *  to a single reactive source; temporal viewers may attach their own surface later.
+	 *  Omitted ⇒ the viewer renders read-only, exactly as before. */
+	controller?: import('./annotator.svelte').AnnotatorController;
 }
 
 // NOTE: aspirational SpatialGeom/TemporalFacet/Annotation model types were removed

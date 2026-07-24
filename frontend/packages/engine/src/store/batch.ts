@@ -4,15 +4,15 @@
  * engine/index.ts — so the live code carries none of that dead weight.)
  */
 import {
-  type Data,
-  makeBuilder,
-  makeData,
-  RecordBatch,
-  type Schema,
-  Struct,
-  type Table,
-  Table as ArrowTable,
-} from "apache-arrow";
+	type Data,
+	makeBuilder,
+	makeData,
+	RecordBatch,
+	type Schema,
+	Struct,
+	type Table,
+	Table as ArrowTable,
+} from 'apache-arrow';
 
 /**
  * Build a Table containing only `rows`, using `schema`'s EXACT field types
@@ -21,19 +21,19 @@ import {
  * O(rows), not O(total). Used by interactive appends AND streamed inference.
  */
 export function buildBatchTable(schema: Schema, rows: Record<string, unknown>[]): Table {
-  const children: Data[] = [];
-  for (const field of schema.fields) {
-    const builder = makeBuilder({
-      type: field.type,
-      nullValues: [null, undefined],
-    });
-    for (const row of rows) builder.append(row[field.name] ?? null);
-    children.push(builder.finish().flush());
-  }
-  const structData = makeData({
-    type: new Struct(schema.fields),
-    length: rows.length,
-    children,
-  });
-  return new ArrowTable(schema, new RecordBatch(schema, structData));
+	const children: Data[] = [];
+	for (const field of schema.fields) {
+		const builder = makeBuilder({
+			type: field.type,
+			nullValues: [null, undefined],
+		});
+		for (const row of rows) builder.append(row[field.name] ?? null);
+		children.push(builder.finish().flush());
+	}
+	const structData = makeData({
+		type: new Struct(schema.fields),
+		length: rows.length,
+		children,
+	});
+	return new ArrowTable(schema, new RecordBatch(schema, structData));
 }

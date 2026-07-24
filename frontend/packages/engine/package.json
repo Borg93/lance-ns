@@ -1,28 +1,28 @@
 {
-  "name": "@lance/engine",
-  "version": "0.0.0",
-  "private": true,
-  "type": "module",
-  "exports": {
-    ".": {
-      "types": "./src/index.ts",
-      "default": "./src/index.ts"
-    },
-    "./*": "./src/*"
-  },
-  "scripts": {
-    "check": "bunx tsc --noEmit",
-    "test": "vitest run"
-  },
-  "devDependencies": {
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
-  },
-  "dependencies": {
-    "apache-arrow": "^21.1.0",
-    "pixi.js": "^8.19.0",
-    "@techstark/opencv-js": "5.0.0-release.1",
-    "flatbush": "^4.6.2",
-    "wavesurfer.js": "^7.12.11"
-  }
+	"name": "@lance/engine",
+	"version": "0.0.0",
+	"private": true,
+	"type": "module",
+	"exports": {
+		".": {
+			"types": "./src/index.ts",
+			"default": "./src/index.ts"
+		},
+		"./*": "./src/*"
+	},
+	"scripts": {
+		"check": "bunx tsc --noEmit",
+		"test": "vitest run"
+	},
+	"devDependencies": {
+		"typescript": "^5.7.0",
+		"vitest": "^2.1.0"
+	},
+	"dependencies": {
+		"apache-arrow": "^21.1.0",
+		"pixi.js": "^8.19.0",
+		"@techstark/opencv-js": "5.0.0-release.1",
+		"flatbush": "^4.6.2",
+		"wavesurfer.js": "^7.12.11"
+	}
 }

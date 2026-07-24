@@ -8,21 +8,21 @@
  */
 
 export interface MaskRegion {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  /** base64 PNG data URL */
-  mask: string;
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	/** base64 PNG data URL */
+	mask: string;
 }
 
 function loadImage(src: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = reject;
-    img.src = src;
-  });
+	return new Promise((resolve, reject) => {
+		const img = new Image();
+		img.onload = () => resolve(img);
+		img.onerror = reject;
+		img.src = src;
+	});
 }
 
 /**
@@ -30,22 +30,22 @@ function loadImage(src: string): Promise<HTMLImageElement> {
  * covers both inputs. Idempotent where they overlap.
  */
 export async function unionMasks(a: MaskRegion, b: MaskRegion): Promise<MaskRegion> {
-  const x = Math.min(a.x, b.x);
-  const y = Math.min(a.y, b.y);
-  const x2 = Math.max(a.x + a.width, b.x + b.width);
-  const y2 = Math.max(a.y + a.height, b.y + b.height);
-  const width = Math.max(1, Math.ceil(x2 - x));
-  const height = Math.max(1, Math.ceil(y2 - y));
+	const x = Math.min(a.x, b.x);
+	const y = Math.min(a.y, b.y);
+	const x2 = Math.max(a.x + a.width, b.x + b.width);
+	const y2 = Math.max(a.y + a.height, b.y + b.height);
+	const width = Math.max(1, Math.ceil(x2 - x));
+	const height = Math.max(1, Math.ceil(y2 - y));
 
-  const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return b;
+	const canvas = document.createElement('canvas');
+	canvas.width = width;
+	canvas.height = height;
+	const ctx = canvas.getContext('2d');
+	if (!ctx) return b;
 
-  const [imgA, imgB] = await Promise.all([loadImage(a.mask), loadImage(b.mask)]);
-  ctx.drawImage(imgA, a.x - x, a.y - y);
-  ctx.drawImage(imgB, b.x - x, b.y - y);
+	const [imgA, imgB] = await Promise.all([loadImage(a.mask), loadImage(b.mask)]);
+	ctx.drawImage(imgA, a.x - x, a.y - y);
+	ctx.drawImage(imgB, b.x - x, b.y - y);
 
-  return { x, y, width, height, mask: canvas.toDataURL("image/png") };
+	return { x, y, width, height, mask: canvas.toDataURL('image/png') };
 }

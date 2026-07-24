@@ -44,3 +44,27 @@ export async function requestJSON<T>(
 		return { ok: false, status: 0, detail: String(err) };
 	}
 }
+
+/** The binary sibling of requestJSON — for BFF responses that are NOT JSON (the table-preview
+ * Arrow-IPC file). Success hands back the raw bytes; a failure still reads the JSON `detail`
+ * (error responses stay JSON on every BFF route), with the same 401 ≠ 403 ≠ 0 status split. */
+export async function requestBinary(
+	base: string,
+	path: string,
+	init?: RequestInit,
+): Promise<ApiResult<ArrayBuffer>> {
+	try {
+		const res = await fetch(`${bffPath(base)}/${path}`, {
+			...init,
+			signal: timeoutSignal(FETCH_TIMEOUT_MS),
+		});
+		if (!res.ok) {
+			const body = (await res.json().catch(() => ({}))) as Record<string, unknown>;
+			const detail = typeof body.detail === 'string' ? body.detail : `HTTP ${res.status}`;
+			return { ok: false, status: res.status, detail };
+		}
+		return { ok: true, data: await res.arrayBuffer() };
+	} catch (err) {
+		return { ok: false, status: 0, detail: String(err) };
+	}
+}

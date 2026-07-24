@@ -56,12 +56,15 @@
 	import DetailTabs from './DetailTabs.svelte';
 	import StageBadge from './StageBadge.svelte';
 	import { stageOfTable } from './stage';
+	import TablePreview from './TablePreview.svelte';
 	import TableProperties from './TableProperties.svelte';
 
 	let { table }: { table: string } = $props();
 
 	// Goal cond 3: the FGA view lives on an Access TAB (overview stays the default); the medallion
-	// stage badge is derived from the table's namespace segment.
+	// stage badge is derived from the table's namespace segment. Goal cond 5 adds the Preview tab.
+	// `?tab=` deep-links a tab (the registry drawer's "access" jump uses it).
+	const TABS = ['overview', 'preview', 'access'];
 	let tab = $state('overview');
 	const stageInfo = $derived(stageOfTable(table));
 
@@ -329,7 +332,9 @@
 		// Reset every piece of state on a table change — including the edit form, or an editor opened
 		// on A would survive into B and Save would write A's draft to B (audit 2026-07-16).
 		void table;
-		tab = 'overview';
+		// honour a ?tab= deep link (drawer jump links); anything unknown falls back to overview
+		const wanted = page.url.searchParams.get('tab') ?? 'overview';
+		tab = TABS.includes(wanted) ? wanted : 'overview';
 		detail = null;
 		lastStatus = 0;
 		editingPolicy = false;
@@ -943,9 +948,11 @@
 	{:else if detail === null}
 		<div class="empty"><p>Loading…</p></div>
 	{:else}
-		<!-- Goal cond 3: overview (default) | access — the FGA view moved onto its own tab. -->
-		<DetailTabs tabs={['overview', 'access']} bind:active={tab} />
-		{#if tab === 'access'}
+		<!-- Goal cond 3: overview (default) | preview (goal cond 5) | access — each on its own tab. -->
+		<DetailTabs tabs={TABS} bind:active={tab} />
+		{#if tab === 'preview'}
+			<TablePreview {table} />
+		{:else if tab === 'access'}
 			<section>
 				<h2>Access</h2>
 				<GrantsPanel dataset={table} client={grantsClient} />

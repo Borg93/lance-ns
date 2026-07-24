@@ -5,7 +5,7 @@
 import { parse } from '@rask/api';
 import * as v from 'valibot';
 import type { components } from './catalog.generated';
-import { type ApiResult, requestJSON as request } from './http';
+import { type ApiResult, requestBinary as requestBin, requestJSON as request } from './http';
 
 export type ModelSummary = components['schemas']['ModelSummary'];
 export type ModelsList = components['schemas']['ModelsListResponse'];
@@ -112,6 +112,17 @@ export const fetchTables = () => requestJSON<TablesList>('v1/table');
 /** One-round-trip detail aggregate for the table page (schema/stats/versions/tags/policy). */
 export const fetchTableDetail = (table: string) =>
 	requestJSON<TableDetail>(`v1/table/${enc(table)}/detail`);
+
+/** Preview: the first `limit` rows as an Arrow-IPC FILE (the catalog's query wire format), via this
+ * zone's explicit POST BFF route (`{"limit": N}` — a confused-deputy enumerated read: the BFF builds
+ * the catalog query itself and forwards nothing else). Reader-gated (can_read_data) at the catalog;
+ * session-only BFF. The caller parses the bytes with apache-arrow. */
+export const queryTableRows = (table: string, limit: number) =>
+	requestBin('/capi', `v1/table/${enc(table)}/query`, {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify({ limit }),
+	});
 
 /** Maintenance-policy writes (#50 UI): owner-gated by the catalog (can_drop), session-only BFF. */
 export const setTablePolicy = (table: string, policy: PolicyRequest) =>

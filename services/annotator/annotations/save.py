@@ -9,6 +9,7 @@ is the direct-write prototype, mirroring the direct read.)
 
 import logging
 from collections.abc import Mapping, Sequence
+from datetime import UTC, datetime
 
 import pyarrow as pa
 from common.deps import AuthorDep, DatasetParam, StateDep
@@ -90,12 +91,21 @@ def save_annotations(
     for tseg in body.temporal:
         edits_by_id.setdefault(tseg.id, {}).update({"t_start": tseg.t_start, "t_end": tseg.t_end})
     # Governance: the SERVER stamps who wrote each touched row (not the client's claim) —
-    # the per-user seam. lance-ns's OpenFGA keys on this author at merge.
+    # the per-user seam. lance-ns's OpenFGA keys on this author at merge. Row lifecycle
+    # is stamped the same way: updated_at on every touched row, created_at at row birth
+    # (build_delta/new_rows drop the keys when a pre-settle table lacks the columns).
+    now = datetime.now(UTC)
     for fields in edits_by_id.values():
         fields["reviewer"] = author
+        fields["updated_at"] = now
     parts = [build_delta(current, edits_by_id)]
     if body.inserts:
-        ident = {**identity_values(declared, doc_id, (speech_id, chunk_id)), "reviewer": author}
+        ident = {
+            **identity_values(declared, doc_id, (speech_id, chunk_id)),
+            "reviewer": author,
+            "created_at": now,
+            "updated_at": now,
+        }
         parts.append(new_rows(body.inserts, ident, current.schema))
     delta = pa.concat_tables(parts)
 

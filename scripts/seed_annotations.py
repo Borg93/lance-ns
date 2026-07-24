@@ -19,10 +19,10 @@ from __future__ import annotations
 import io
 import os
 import sys
+from datetime import UTC, datetime
 
 import lance
 import pyarrow as pa
-
 from annotator.annotations.schema import EMPTY_SCHEMA
 
 SCHEMA = pa.schema(
@@ -40,6 +40,7 @@ SCHEMA = pa.schema(
 
 def sample_table(doc_id: str) -> pa.Table:
     """3 sample rows: 2 model predictions (varying confidence/uncertainty) + 1 human-accepted."""
+    now = datetime.now(UTC)
     rows = {
         "doc_id": [doc_id] * 3,
         "speech_id": [0] * 3,
@@ -70,6 +71,8 @@ def sample_table(doc_id: str) -> pa.Table:
         "links": ["[]", "[]", "[]"],
         "mask": ["", "", ""],
         "metadata": ["{}", "{}", "{}"],
+        "created_at": [now] * 3,
+        "updated_at": [now] * 3,
     }
     return pa.table(rows, schema=SCHEMA)
 

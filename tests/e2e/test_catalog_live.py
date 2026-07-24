@@ -40,12 +40,10 @@ pytestmark = [
     pytest.mark.skipif(not CATALOG_URL, reason="MEDIA_CATALOG_URL not set — live lance-ns catalog required"),
 ]
 
-#: The milestone-1 annotations schema: descriptor identity + the 25 contract
-#: columns + the settle-while-empty additions (t_start/t_end/frame_idx already
-#: sit in the contract). created_at/updated_at are FIXTURE-ONLY here: they enter
-#: EMPTY_SCHEMA (and get stamped by the service) at the merge's table-create,
-#: per the handoff's settle-while-empty rule — the service today neither has nor
-#: writes them.
+#: The milestone-1 annotations schema: descriptor identity + the contract columns.
+#: The settle-while-empty additions are DONE — created_at/updated_at live in
+#: EMPTY_SCHEMA itself now (and the save paths stamp them), so this fixture is
+#: pure composition again: identity + the backend contract, nothing appended.
 SCHEMA = pa.schema(
     [
         ("doc_id", pa.string()),
@@ -53,8 +51,6 @@ SCHEMA = pa.schema(
         ("chunk_id", pa.int64()),
         ("frame_idx", pa.int64()),
         *EMPTY_SCHEMA,
-        ("created_at", pa.timestamp("us", tz="UTC")),
-        ("updated_at", pa.timestamp("us", tz="UTC")),
     ]
 )
 

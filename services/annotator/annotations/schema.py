@@ -131,6 +131,14 @@ class TagBatch(BaseModel):
 #: (confidence/uncertainty/source/model_version) so predictions round-trip and the
 #: review queue can rank by them. THE single backend source of truth —
 #: scripts/seed_annotations.py builds from this; tests assert the alignment.
+#:
+#: Settled while the table was still EMPTY (handoff Q1): ``created_at``/``updated_at``
+#: are part of the contract and are stamped server-side on the save paths. The four
+#: TRAINING columns — ``trained_in_version`` (int64 = Lance version), ``margin`` (f32),
+#: ``logits`` (list/blob), ``encoder_embedding`` (list/blob) — are deliberately NOT
+#: added here (handoff Q2): nothing defines or writes them anywhere yet, so they get
+#: defined (additive evolution, never blocked) the moment the training loop first
+#: needs them, not guessed now.
 EMPTY_SCHEMA = pa.schema(
     [
         ("id", pa.string()),
@@ -159,6 +167,10 @@ EMPTY_SCHEMA = pa.schema(
         ("links", pa.string()),
         ("mask", pa.string()),
         ("metadata", pa.string()),
+        # row lifecycle — stamped server-side (save/tags): both at row birth,
+        # updated_at again on every edit. Timezone-aware UTC, microseconds.
+        ("created_at", pa.timestamp("us", tz="UTC")),
+        ("updated_at", pa.timestamp("us", tz="UTC")),
     ]
 )
 

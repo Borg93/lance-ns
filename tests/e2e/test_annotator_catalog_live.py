@@ -49,9 +49,7 @@ def client():
     # answer, and undo() restores the env AND sys.path in one sweep.
     mp = pytest.MonkeyPatch()
     mp.syspath_prepend(str(Path(__file__).resolve().parents[2] / "scripts"))
-    from seed_annotations import (
-        seed_catalog,  # ty: ignore[unresolved-import] — scripts/ on sys.path above
-    )
+    from seed_annotations import seed_catalog  # ty: ignore[unresolved-import] — sys.path above
 
     namespace = f"m2_{uuid.uuid4().hex[:8]}"
     seed_catalog(CATALOG_URL, namespace, DOC)

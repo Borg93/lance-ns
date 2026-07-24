@@ -8,6 +8,7 @@ so it does NOT funnel through the jobs seam; the annotations table stays mode-bl
 
 import logging
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 import pyarrow as pa
@@ -65,11 +66,18 @@ def tag_rows(adds: Sequence[TagWrite], declared: Declared, *, author: str, schem
     defaults (human provenance, geometry/temporal zeroed) — the one row contract, not a
     parallel literal. Rows are DEDUPED by id (a batch may repeat a chunk+label): Lance
     merge_insert does not dedupe duplicate source keys, so two identical-id rows would
-    both insert — dedup here prevents that."""
+    both insert — dedup here prevents that. Lifecycle stamps land at row birth only —
+    the tag write is insert-only, so an existing row's timestamps are never touched."""
+    now = datetime.now(UTC)
     by_id: dict[str, dict[str, object]] = {}
     for w in adds:
         doc = validate_doc_key(declared, w.doc_id)
-        ident = {**identity_values(declared, doc, w.keys), "reviewer": author}
+        ident = {
+            **identity_values(declared, doc, w.keys),
+            "reviewer": author,
+            "created_at": now,
+            "updated_at": now,
+        }
         for label in w.labels:
             tid = tag_id(doc, w.keys, label)
             if tid in by_id:

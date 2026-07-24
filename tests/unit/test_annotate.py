@@ -53,6 +53,25 @@ def test_empty_schema_is_a_parseable_empty_stream() -> None:
     assert {"x", "y", "width", "height", "polygon", "shape_type", "status", "mask"} <= names
     # active-learning columns (the review queue ranks by these)
     assert {"confidence", "uncertainty", "source", "model_version"} <= names
+    # the settle-while-empty lifecycle columns (merge handoff Q1) — tz-aware UTC µs
+    for col in ("created_at", "updated_at"):
+        assert EMPTY_SCHEMA.field(col).type == pa.timestamp("us", tz="UTC")
+    # the four training columns are DELIBERATELY absent until the training loop
+    # defines them (handoff Q2) — pin the decision so an accidental guess fails here
+    assert not {"trained_in_version", "margin", "logits", "encoder_embedding"} & names
+
+
+def test_tag_rows_stamp_lifecycle_timestamps_at_row_birth() -> None:
+    # Insert-only tag rows are born with created_at == updated_at (both server-stamped);
+    # existing rows are never touched by the tag write, so birth is the only stamp.
+    tbl = tag_rows(
+        [TagWrite(doc_id="d1", keys=[0, 19], labels=["speech"])],
+        _MEDIA_DECLARED,
+        author="gabriel",
+        schema=_full_schema(),
+    )
+    row = tbl.to_pylist()[0]
+    assert row["created_at"] is not None and row["created_at"] == row["updated_at"]
 
 
 def _ann_table() -> pa.Table:

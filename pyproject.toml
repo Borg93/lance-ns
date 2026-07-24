@@ -34,6 +34,12 @@ dependencies = [
     "opentelemetry-instrumentation-logging>=0.64b0",
     "opentelemetry-instrumentation-grpc>=0.64b0",
     "pillow>=12.3.0",
+    # lance-media fold (viewer/search/annotator + common/lancekit). Light deps only —
+    # model stacks stay in runners/*/pyproject (their own images), and ray[data] +
+    # lance-ray arrive with the pipeline step, not here.
+    "lancedb>=0.34.0",
+    "python-multipart>=0.0.9",
+    "lance-graph>=0.5.4",
 ]
 
 [dependency-groups]
@@ -80,6 +86,7 @@ markers = [
     "ray_train: e2e for the Ray TRAIN path — governed train→candidate→blessed + reproducibility capture (pinned versions, OTLP metrics, validator gate) — make e2e-ray-train",
     "ray_batch: e2e for the Ray BATCH path — distributed Lance write/index/evolve/compact on a real KubeRay cluster — make e2e-ray-batch",
     "duckdb: e2e proving DuckDB's core lance extension reads lance-ns Lance datasets over the deployed S3 store — set LANCE_E2E_S3_*",
+    "media_catalog: e2e for the folded lance-media annotations plane against a live catalog — set MEDIA_CATALOG_URL",
 ]
 
 [tool.ty.environment]
@@ -90,7 +97,11 @@ root = ["services", "."]
 # The vulture whitelist is, by design, a file of BARE NAMES — that is how vulture marks a symbol as "used".
 # To a type-checker every line is an unresolved reference, so `ty check` fails on it. It is not real code and
 # is never imported; exclude it rather than contorting the file into something vulture no longer understands.
-exclude = [".vulture-whitelist.py"]
+# src/ratch + runners are the folded lance-media pipeline/runner trees: unwired (no service imports them,
+# not in any image) and their deps are deliberately absent here — runners are sealed-env model workers
+# (their own pyprojects → their own images; lance-audio excluded them from ty for the same reason), and
+# ratch's ray[data]/lance-ray/typer stack lands with the pipeline step. Include ratch when that wiring lands.
+exclude = [".vulture-whitelist.py", "src/ratch", "runners"]
 
 [tool.ruff]
 line-length = 110

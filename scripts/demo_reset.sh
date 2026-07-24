@@ -68,6 +68,9 @@ tmp = Path(os.environ["TMP"])
 root_bucket = os.environ["ROOT_BUCKET"]
 keep_projects = set(os.environ["KEEP_PROJECTS"].split())
 keep_warehouses = set(os.environ["KEEP_WAREHOUSES"].split())
+# Debris warehouses inside KEPT projects (test fixtures accumulated on a real tenant): dropped even
+# though their project survives. Explicit list, never a pattern — deleting data stays deliberate.
+drop_warehouses = set(os.environ.get("DROP_WAREHOUSES", "").split())
 
 s3 = boto3.client(
     "s3",
@@ -102,7 +105,12 @@ for key in list_keys(root_bucket, "_warehouses/"):
     except Exception as exc:  # noqa: BLE001 — an unreadable record is reported, never deleted blind
         print(f"   !! unreadable record {key} ({type(exc).__name__}) — left in place")
 
-keep = [r for r in records if r.get("project") in keep_projects or r.get("id") in keep_warehouses]
+keep = [
+    r
+    for r in records
+    if (r.get("project") in keep_projects or r.get("id") in keep_warehouses)
+    and r.get("id") not in drop_warehouses
+]
 remove = [r for r in records if r not in keep]
 kept_buckets = {r.get("bucket") for r in keep} | {root_bucket}
 for r in keep:
@@ -175,8 +183,13 @@ else
   # Enumerate every tuple whose USER or OBJECT references a removed warehouse/project — this catches the
   # owner grants + `project` parents on `warehouse:<id>` AND the tenant-seed links written FROM it
   # (`warehouse:<id> parent namespace:<p>-<stage>`), plus `project:<p>` admin grants/parent edges.
-  read_tuples() { # $1 = --user|--object, $2 = the subject/object id
-    "$FGA_BIN" tuple read --api-url "$OPENFGA_API_URL" --store-id "$SID" --max-pages 0 "$1" "$2" \
+  # The Read API REQUIRES an object TYPE whenever a tuple_key is sent — a user-only filter is a
+  # validation error. So the user-side sweeps name the object type their writes actually land on:
+  # `warehouse:<id>` appears as a USER only on `namespace:` objects (the tenant-seed parent links),
+  # and `project:<p>` as a USER only on `warehouse:` objects (the project parent edges).
+  read_tuples() { # $1 = --user|--object, $2 = the subject/object id, [$3 = object-type filter for --user]
+    "$FGA_BIN" tuple read --api-url "$OPENFGA_API_URL" --store-id "$SID" --max-pages 0 \
+      "$1" "$2" ${3:+--object "$3"} \
       | uv run --no-sync python -c "
 import sys, json
 for t in json.load(sys.stdin).get('tuples', []):
@@ -188,12 +201,12 @@ for t in json.load(sys.stdin).get('tuples', []):
   while IFS= read -r wh; do
     [ -n "$wh" ] || continue
     read_tuples --object "warehouse:$wh" >> "$TUPLES"
-    read_tuples --user "warehouse:$wh" >> "$TUPLES"
+    read_tuples --user "warehouse:$wh" "namespace:" >> "$TUPLES"
   done < "$TMP/removed_warehouses.txt"
   while IFS= read -r proj; do
     [ -n "$proj" ] || continue
     read_tuples --object "project:$proj" >> "$TUPLES"
-    read_tuples --user "project:$proj" >> "$TUPLES"
+    read_tuples --user "project:$proj" "warehouse:" >> "$TUPLES"
   done < "$TMP/removed_projects.txt"
   sort -u "$TUPLES" -o "$TUPLES"
   if [ ! -s "$TUPLES" ]; then

@@ -25,8 +25,7 @@ export type GalleryProject = {
 // own role where they hold one. Degrade, never 500: a failed estate listing falls back to the
 // membership list.
 export const load: PageServerLoad = async ({ parent, fetch }) => {
-	const { streamed } = await parent();
-	const me = await streamed.me;
+	const { me } = await parent();
 	if (!me) return { signedIn: false, estateAdmin: false, projects: [] as GalleryProject[] };
 
 	const memberships: GalleryProject[] = me.projects.map((p) => ({

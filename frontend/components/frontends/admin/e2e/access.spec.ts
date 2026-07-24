@@ -1,24 +1,36 @@
 import { expect, test } from '@playwright/test';
 import { mockMe, signIn } from './session';
 
-// `/admin/access` — the estate access surface: registry entry points, the #51 review through the
-// zone's narrow kinded pass-through, and the #68 check playground. Hermetic via page.route.
+// `/admin/access` — the FGA workbench (goal cond 4) against the frozen /v1/access contract, through
+// the zone's thin bearer-forwarding /capi routes. Hermetic via page.route: the four tabs (Graph /
+// Tuples / Check / Model) each drive their wire calls and the mock pins the REQUEST shapes — method,
+// path, query filters and JSON bodies are the contract.
 
-const ACL = {
-	object: 'table:db1$t',
-	grants: [{ relation: 'can_read_data', users: ['user:alice'] }],
-};
+const TUPLES = [
+	{ user: 'user:alice', relation: 'owner', object: 'table:db1$t' },
+	{ user: 'user:bob', relation: 'reader', object: 'table:db1$t' },
+	{ user: 'namespace:db1', relation: 'parent', object: 'table:db1$t' },
+];
 
-let checkPost: { user: string; relation: string } | null;
+type Tuple = { user: string; relation: string; object: string };
+
+let written: Tuple | null;
+let deleted: Tuple | null;
+let checked: Tuple | null;
+let tupleQueries: string[];
 
 test.beforeEach(async ({ context, page }) => {
 	await signIn(context);
 	await mockMe(page); // estate-admin identity: the admin layout door opens
-	checkPost = null;
+	written = null;
+	deleted = null;
+	checked = null;
+	tupleQueries = [];
 	await page.route('**/admin/capi/**', (route) => {
 		const req = route.request();
-		const path = new URL(req.url()).pathname.replace(/^.*\/capi/, '');
-		// The layout's identity fetch shares this glob and this handler REGISTERED LAST wins —
+		const url = new URL(req.url());
+		const path = url.pathname.replace(/^.*\/capi/, '');
+		// The layout's identity fetch shares this glob and the handler REGISTERED LAST wins —
 		// fall back to the mockMe route instead of 404ing the door shut.
 		if (path === '/v1/me') return route.fallback();
 		if (path === '/v1/table')
@@ -27,20 +39,48 @@ test.beforeEach(async ({ context, page }) => {
 				contentType: 'application/json',
 				body: JSON.stringify({ tables: ['db1$t'] }),
 			});
-		if (path === '/v1/table/db1%24t/access/list' || path === '/v1/table/db1$t/access/list')
+		if (path === '/v1/access/tuples' && req.method() === 'GET') {
+			tupleQueries.push(url.search);
+			const object = url.searchParams.get('object');
+			const user = url.searchParams.get('user');
+			const objectType = url.searchParams.get('object_type');
+			let tuples = TUPLES.concat(written ? [written] : []).filter(
+				(t) => !deleted || JSON.stringify(t) !== JSON.stringify(deleted),
+			);
+			if (object) tuples = tuples.filter((t) => t.object === object);
+			if (user) tuples = tuples.filter((t) => t.user === user);
+			if (objectType) tuples = tuples.filter((t) => t.object.startsWith(`${objectType}:`));
 			return route.fulfill({
 				status: 200,
 				contentType: 'application/json',
-				body: JSON.stringify(ACL),
-			});
-		if (path.endsWith('/access/check')) {
-			checkPost = req.postDataJSON() as { user: string; relation: string };
-			return route.fulfill({
-				status: 200,
-				contentType: 'application/json',
-				body: JSON.stringify({ user: checkPost.user, relation: checkPost.relation, allowed: true }),
+				body: JSON.stringify({ tuples, continuation: null }),
 			});
 		}
+		if (path === '/v1/access/tuples' && req.method() === 'POST') {
+			written = req.postDataJSON() as Tuple;
+			return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+		}
+		if (path === '/v1/access/tuples' && req.method() === 'DELETE') {
+			deleted = req.postDataJSON() as Tuple;
+			return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
+		}
+		if (path === '/v1/access/check' && req.method() === 'POST') {
+			checked = req.postDataJSON() as Tuple;
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({ allowed: checked.user === 'user:alice', checked }),
+			});
+		}
+		if (path === '/v1/access/model' && req.method() === 'GET')
+			return route.fulfill({
+				status: 200,
+				contentType: 'application/json',
+				body: JSON.stringify({
+					dsl: 'model\n  schema 1.1\n\ntype user\n\ntype table\n  relations\n    define owner: [user]',
+					authorization_model_id: '01JTESTMODEL',
+				}),
+			});
 		return route.fulfill({
 			status: 404,
 			contentType: 'application/json',
@@ -49,41 +89,91 @@ test.beforeEach(async ({ context, page }) => {
 	});
 });
 
-test('registry entries open the review panel and the check playground posts through the kinded route', async ({
+test('the Graph tab seeds from any object id and re-seeds from a neighbor click', async ({
 	page,
 }) => {
 	await page.goto('/admin/access');
-	// The registry offers the table (and its derived namespace) as one-click entries.
+	// The registry chips offer the estate's tables as one-click seeds.
 	await page.getByRole('button', { name: 'db1$t', exact: true }).click();
 	await expect(page.getByRole('heading', { name: 'table:db1$t' })).toBeVisible();
-	await page.getByRole('button', { name: 'Access review' }).click();
-	await expect(page.locator('table.acl')).toContainText('can_read_data');
-	// The #68 simulator: probe a (user, relation) — the wire body is the contract.
-	await page.getByPlaceholder('user (e.g. alice), or role:… / team:…#member').first().fill('bob');
-	// The simulator's action picker is the @rask/ui Select (bits-ui) — open by aria-label, pick option.
-	await page.getByLabel('Simulate action').click();
-	await page.getByRole('option', { name: 'can_read_data', exact: true }).click();
-	await page.getByRole('button', { name: 'Check', exact: true }).click();
-	await expect.poll(() => checkPost).toEqual({ user: 'bob', relation: 'can_read_data' });
+	// One hop off the tuple store: both grantees, the namespace container, the relation labels.
+	const flow = page.locator('.svelte-flow');
+	await expect(flow).toContainText('alice');
+	await expect(flow).toContainText('bob');
+	await expect(flow).toContainText('db1'); // the parent namespace node
+	await expect(flow).toContainText('owner');
+	// The wire calls are the contract: inbound (object=) + outbound (user=) filtered reads.
+	expect(tupleQueries.some((q) => q.includes('object=table%3Adb1%24t'))).toBe(true);
+	expect(tupleQueries.some((q) => q.includes('user=table%3Adb1%24t'))).toBe(true);
+	// A free-typed seed works too — the workbench is not table-scoped.
+	await page.getByLabel('Graph seed object').fill('user:alice');
+	await page.getByRole('button', { name: 'Seed', exact: true }).click();
+	await expect(page.getByRole('heading', { name: 'user:alice', exact: true })).toBeVisible();
+	await expect.poll(() => tupleQueries.some((q) => q.includes('user=user%3Aalice'))).toBe(true);
 });
 
-test('a manual namespace target loads the kind-generalized panel', async ({ page }) => {
-	await page.route('**/admin/capi/v1/namespace/gold/access/list', (route) =>
-		route.fulfill({
-			status: 200,
-			contentType: 'application/json',
-			body: JSON.stringify({
-				object: 'namespace:gold',
-				grants: [{ relation: 'can_delete', users: ['user:alice'] }],
-			}),
-		}),
-	);
+test('the Tuples tab lists, filters server-side, grants via the dialog and revokes behind a confirm', async ({
+	page,
+}) => {
 	await page.goto('/admin/access');
-	await page.getByLabel('Object kind').click();
-	await page.getByRole('option', { name: 'namespace', exact: true }).click();
-	await page.getByLabel('Object id').fill('gold');
-	await page.getByRole('button', { name: 'Load', exact: true }).click();
-	await expect(page.getByRole('heading', { name: 'namespace:gold' })).toBeVisible();
-	await page.getByRole('button', { name: 'Access review' }).click();
-	await expect(page.locator('table.acl')).toContainText('can_delete');
+	await page.getByRole('tab', { name: 'Tuples' }).click();
+	const table = page.locator('table');
+	await expect(table).toContainText('user:alice');
+	await expect(table).toContainText('namespace:db1');
+	// Server-side filter: the user filter re-queries with ?user=…
+	await page.getByLabel('User filter').fill('user:bob');
+	await page.getByRole('button', { name: 'Search', exact: true }).click();
+	await expect.poll(() => tupleQueries.some((q) => q.includes('user=user%3Abob'))).toBe(true);
+	await expect(table).not.toContainText('user:alice');
+	// Grant: the dialog POSTs the exact tuple body.
+	await page.getByLabel('User filter').clear();
+	await page.getByRole('button', { name: 'Grant', exact: true }).click();
+	await page.getByLabel('Grant user').fill('user:carol');
+	await page.getByLabel('Grant relation').fill('writer');
+	await page.getByLabel('Grant object').fill('table:db1$t');
+	await page.getByRole('button', { name: 'Write tuple', exact: true }).click();
+	await expect
+		.poll(() => written)
+		.toEqual({ user: 'user:carol', relation: 'writer', object: 'table:db1$t' });
+	await expect(table).toContainText('user:carol'); // the reload reflects the write
+	// Revoke: the row action confirms, then DELETEs the same tuple shape.
+	await page.getByLabel('Revoke user:bob reader table:db1$t').click();
+	await page.getByRole('button', { name: 'Revoke', exact: true }).last().click();
+	await expect
+		.poll(() => deleted)
+		.toEqual({ user: 'user:bob', relation: 'reader', object: 'table:db1$t' });
+	await expect(table).not.toContainText('user:bob');
+});
+
+test('the Check tab renders the big verdict and the echoed triple', async ({ page }) => {
+	await page.goto('/admin/access');
+	await page.getByRole('tab', { name: 'Check' }).click();
+	await page.getByLabel('Check user').fill('user:alice');
+	await page.getByLabel('Check relation').fill('can_read_data');
+	await page.getByLabel('Check object').fill('table:db1$t');
+	await page.getByRole('button', { name: 'Check', exact: true }).click();
+	await expect
+		.poll(() => checked)
+		.toEqual({ user: 'user:alice', relation: 'can_read_data', object: 'table:db1$t' });
+	await expect(page.locator('.verdict')).toContainText('ALLOWED');
+	// The triple rendered is the catalog's ECHO, not local form state.
+	await expect(page.getByLabel('Checked triple')).toContainText(
+		'(user:alice, can_read_data, table:db1$t)',
+	);
+	// And a denied probe flips the verdict.
+	await page.getByLabel('Check user').fill('user:mallory');
+	await page.getByRole('button', { name: 'Check', exact: true }).click();
+	await expect(page.locator('.verdict')).toContainText('DENIED');
+});
+
+test('the Model tab shows the read-only DSL with the code-migration note', async ({ page }) => {
+	await page.goto('/admin/access');
+	await page.getByRole('tab', { name: 'Model' }).click();
+	await expect(page.getByText('Model changes are code migrations.')).toBeVisible();
+	const dsl = page.getByLabel('Authorization model DSL');
+	await expect(dsl).toContainText('schema 1.1');
+	await expect(dsl).toContainText('define owner: [user]');
+	await expect(page.getByText('authorization_model_id: 01JTESTMODEL')).toBeVisible();
+	// Read-only: no edit affordance exists on this tab.
+	await expect(page.locator('.model textarea, .model input')).toHaveCount(0);
 });

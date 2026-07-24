@@ -1,18 +1,27 @@
 <script lang="ts">
-	// `/admin/access` — the estate access-review surface (goal cond 3): pick any catalog object
-	// (table or namespace) and host the shared GrantsPanel on it — the #51 review, the #68
-	// "who-can-do-what" check playground, and the #72 grant/revoke entries, all owner-gated BY THE
-	// CATALOG through this zone's narrow session-only pass-through. The registry list below offers
-	// tables as one-click entry points; namespaces are derived from the same ids.
-	import { GrantsPanel, type GrantsKind } from '@rask/ui/grants-panel';
-	import { Select } from '@rask/ui/select';
+	// `/admin/access` — the FGA workbench (goal cond 4): the estate's authorization system on one
+	// surface, against the catalog's frozen /v1/access API (estate-admin gated BY THE CATALOG, this
+	// zone only bearer-forwards the session). Four tabs:
+	//   Graph  — the SvelteFlow relationship explorer generalized to seed from ANY object id
+	//   Tuples — the raw store on the shared DataTable: filter / grant (dialog) / revoke (confirm)
+	//   Check  — user × relation × object → one live Check verdict, rendered big
+	//   Model  — the checked-in DSL, read-only ("model changes are code migrations")
 	import { ShieldCheck } from '@lucide/svelte';
-	import { accessClient, fetchTables } from '$lib/access';
+	import AccessCheck from '$lib/AccessCheck.svelte';
+	import AccessGraph from '$lib/AccessGraph.svelte';
+	import AccessModel from '$lib/AccessModel.svelte';
+	import AccessTuples from '$lib/AccessTuples.svelte';
+	import { fetchTables } from '$lib/access';
 
-	let kind = $state<string>('table');
-	let objectId = $state('');
-	// The LOADED target (kind + id frozen on Load), so typing doesn't re-key the panel mid-review.
-	let target = $state<{ kind: GrantsKind; id: string } | null>(null);
+	const TABS = ['Graph', 'Tuples', 'Check', 'Model'] as const;
+	type Tab = (typeof TABS)[number];
+	let tab = $state<Tab>('Graph');
+
+	// The graph seed — any FGA object id. The search box sets it; a node click re-seeds it; the
+	// registry chips below offer the estate's tables (and their derived namespaces) as one-click
+	// entry points so the first seed never needs typing.
+	let seedInput = $state('');
+	let seed = $state<string | null>(null);
 
 	let tables = $state<string[] | null>(null);
 	let registryStatus = $state(0);
@@ -39,16 +48,15 @@
 		].sort(),
 	);
 
-	function open(k: GrantsKind, id: string): void {
-		kind = k;
-		objectId = id;
-		target = { kind: k, id };
+	function load(): void {
+		const id = seedInput.trim();
+		if (!id) return;
+		seed = id;
 	}
 
-	function load(): void {
-		const id = objectId.trim();
-		if (!id) return;
-		target = { kind: kind as GrantsKind, id };
+	function reseed(id: string): void {
+		seedInput = id;
+		seed = id;
 	}
 </script>
 
@@ -58,65 +66,75 @@
 	<header>
 		<ShieldCheck size={16} />
 		<h1>Access</h1>
-		<span class="sub mono"
-			>estate access review · who-can-do-what playground · grants (#51/#68/#72)</span
-		>
+		<span class="sub mono">FGA workbench · graph / tuples / check / model (#51 #68 #72 #81)</span>
 	</header>
 
-	<form
-		class="picker"
-		onsubmit={(e) => {
-			e.preventDefault();
-			load();
-		}}
-	>
-		<Select
-			bind:value={kind}
-			ariaLabel="Object kind"
-			options={[
-				{ value: 'table', label: 'table' },
-				{ value: 'namespace', label: 'namespace' },
-			]}
-		/>
-		<input
-			class="mono"
-			bind:value={objectId}
-			placeholder={kind === 'table' ? 'namespace$table' : 'namespace'}
-			aria-label="Object id"
-		/>
-		<button class="btn" type="submit" disabled={!objectId.trim()}>Load</button>
-	</form>
+	<div class="tabs" role="tablist" aria-label="Access workbench tabs">
+		{#each TABS as t (t)}
+			<button
+				class="tab"
+				role="tab"
+				aria-selected={tab === t}
+				class:active={tab === t}
+				onclick={() => (tab = t)}>{t}</button
+			>
+		{/each}
+	</div>
 
-	{#if target}
-		<section class="panel">
-			<h2 class="mono">{target.kind}:{target.id}</h2>
-			{#key `${target.kind}:${target.id}`}
-				<GrantsPanel dataset={target.id} kind={target.kind} client={accessClient} />
+	{#if tab === 'Graph'}
+		<form
+			class="picker"
+			onsubmit={(e) => {
+				e.preventDefault();
+				load();
+			}}
+		>
+			<input
+				class="mono"
+				bind:value={seedInput}
+				placeholder="seed object id (e.g. table:db1$t, warehouse:acme-wh, user:alice)"
+				aria-label="Graph seed object"
+			/>
+			<button class="btn" type="submit" disabled={!seedInput.trim()}>Seed</button>
+		</form>
+
+		{#if seed}
+			{#key seed}
+				<section class="panel">
+					<h2 class="mono">{seed}</h2>
+					<AccessGraph object={seed} onseed={reseed} />
+				</section>
 			{/key}
-		</section>
-	{/if}
-
-	<section>
-		<h2>Registry entries</h2>
-		{#if tables === null}
-			<p class="mut">
-				{registryStatus === 0
-					? 'Loading the registry…'
-					: `Registry unavailable (HTTP ${registryStatus}) — enter an object id above.`}
-			</p>
-		{:else if tables.length === 0}
-			<p class="mut">No tables registered yet.</p>
-		{:else}
-			<div class="entries">
-				{#each namespaces as ns (ns)}
-					<button class="chip mono" onclick={() => open('namespace', ns)}>ns · {ns}</button>
-				{/each}
-				{#each tables as t (t)}
-					<button class="chip mono" onclick={() => open('table', t)}>{t}</button>
-				{/each}
-			</div>
 		{/if}
-	</section>
+
+		<section>
+			<h2>Registry entries</h2>
+			{#if tables === null}
+				<p class="mut">
+					{registryStatus === 0
+						? 'Loading the registry…'
+						: `Registry unavailable (HTTP ${registryStatus}) — seed any object id above.`}
+				</p>
+			{:else if tables.length === 0}
+				<p class="mut">No tables registered yet — seed any object id above.</p>
+			{:else}
+				<div class="entries">
+					{#each namespaces as ns (ns)}
+						<button class="chip mono" onclick={() => reseed(`namespace:${ns}`)}>ns · {ns}</button>
+					{/each}
+					{#each tables as t (t)}
+						<button class="chip mono" onclick={() => reseed(`table:${t}`)}>{t}</button>
+					{/each}
+				</div>
+			{/if}
+		</section>
+	{:else if tab === 'Tuples'}
+		<AccessTuples object={seed ?? ''} />
+	{:else if tab === 'Check'}
+		<AccessCheck />
+	{:else}
+		<AccessModel />
+	{/if}
 </div>
 
 <style>
@@ -129,7 +147,7 @@
 		display: flex;
 		align-items: baseline;
 		gap: 10px;
-		margin-bottom: 16px;
+		margin-bottom: 14px;
 	}
 	h1 {
 		font-size: 20px;
@@ -138,6 +156,25 @@
 	.sub {
 		color: var(--faint);
 		font-size: 12px;
+	}
+	.tabs {
+		display: flex;
+		gap: 4px;
+		border-bottom: 1px solid var(--line);
+		margin-bottom: 16px;
+	}
+	.tab {
+		background: none;
+		border: none;
+		border-bottom: 2px solid transparent;
+		color: var(--mut);
+		font-size: 13px;
+		padding: 6px 12px;
+		cursor: pointer;
+	}
+	.tab.active {
+		color: var(--ink);
+		border-bottom-color: var(--accent, #6aa9ff);
 	}
 	.picker {
 		display: flex;
@@ -152,7 +189,7 @@
 		color: var(--ink);
 		font-size: 12px;
 		padding: 4px 8px;
-		flex: 1 1 220px;
+		flex: 1 1 320px;
 	}
 	.btn {
 		background: var(--panel-2);

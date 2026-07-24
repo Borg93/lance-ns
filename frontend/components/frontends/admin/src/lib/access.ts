@@ -1,25 +1,86 @@
-import type { GrantsClient, GrantsKind } from '@rask/ui/grants-panel';
+import * as v from 'valibot';
+
 import { requestJSON } from './http';
 
-// The /admin/access catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API
-// client — the StatusBoard precedent). Everything goes through this zone's narrow /capi access
-// pass-through: session-only, owner-gated by the catalog.
-const enc = encodeURIComponent;
+// Wire contracts + client for the FGA workbench (`/admin/access`) — the catalog's estate-admin-gated
+// /v1/access API, reached through this zone's narrow /capi pass-through (session bearer-forwarded,
+// never a service token). The shapes are the frozen /v1/access contract, parsed (never cast) at the
+// browser boundary per the @rask/api parse-don't-validate rule — like jetstream.ts, hand-written
+// against the contract because the catalog OpenAPI dump has not yet caught up; swap to the generated
+// types once `bun run gen:types:catalog` carries them.
 
-const post = <T>(kind: GrantsKind, id: string, action: string, body?: unknown) =>
-	requestJSON<T>('/capi', `v1/${kind}/${enc(id)}/access/${action}`, {
-		method: 'POST',
-		...(body === undefined
-			? {}
-			: { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
-	});
+/** One relationship tuple — the atom of the whole authorization model. */
+export const TupleSchema = v.object({
+	user: v.string(), // e.g. user:alice, team:eng#member, namespace:db1
+	relation: v.string(), // e.g. owner, can_read_data, parent
+	object: v.string(), // e.g. table:db1$t, warehouse:acme-wh
+});
+export type Tuple = v.InferOutput<typeof TupleSchema>;
 
-export const accessClient: GrantsClient = {
-	fetchAccess: (kind, id) => post(kind, id, 'list'),
-	checkAccess: (kind, id, user, relation) => post(kind, id, 'check', { user, relation }),
-	grantAccess: (kind, id, user, relation) => post(kind, id, 'grant', { user, relation }),
-	revokeAccess: (kind, id, user, relation) => post(kind, id, 'revoke', { user, relation }),
+export const TuplesPageSchema = v.object({
+	tuples: v.array(TupleSchema),
+	continuation: v.nullable(v.string()),
+});
+export type TuplesPage = v.InferOutput<typeof TuplesPageSchema>;
+
+export const AccessModelSchema = v.object({
+	dsl: v.string(), // the checked-in model.fga text
+	authorization_model_id: v.string(),
+});
+export type AccessModel = v.InferOutput<typeof AccessModelSchema>;
+
+export const CheckVerdictSchema = v.object({
+	allowed: v.boolean(),
+	checked: TupleSchema, // the exact triple the catalog evaluated — echoed so the UI can't lie
+});
+export type CheckVerdict = v.InferOutput<typeof CheckVerdictSchema>;
+
+export type TupleFilter = {
+	objectType?: string;
+	user?: string;
+	object?: string;
+	pageSize?: number;
+	continuation?: string;
 };
 
-/** The catalog registry (`<ns>$<table>` ids) — the picker's clickable entry points. */
+/** One filtered page of tuples (server-side pagination via the opaque continuation token). */
+export const fetchTuples = (filter: TupleFilter = {}) => {
+	const q = new URLSearchParams();
+	if (filter.objectType) q.set('object_type', filter.objectType);
+	if (filter.user) q.set('user', filter.user);
+	if (filter.object) q.set('object', filter.object);
+	if (filter.pageSize) q.set('page_size', String(filter.pageSize));
+	if (filter.continuation) q.set('continuation', filter.continuation);
+	const qs = q.toString();
+	return requestJSON<unknown>('/capi', `v1/access/tuples${qs ? `?${qs}` : ''}`);
+};
+
+/** Grant: write one tuple. Session-only at the BFF; estate-admin gated by the catalog. */
+export const writeTuple = (tuple: Tuple) =>
+	requestJSON<unknown>('/capi', 'v1/access/tuples', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(tuple),
+	});
+
+/** Revoke: delete one tuple (same body as the write — the tuple IS the identity). */
+export const deleteTuple = (tuple: Tuple) =>
+	requestJSON<unknown>('/capi', 'v1/access/tuples', {
+		method: 'DELETE',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(tuple),
+	});
+
+/** A live OpenFGA Check on any (user, relation, object) triple — the workbench's probe. */
+export const checkAccess = (tuple: Tuple) =>
+	requestJSON<unknown>('/capi', 'v1/access/check', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(tuple),
+	});
+
+/** The authorization model itself (read-only — model changes are code migrations). */
+export const fetchAccessModel = () => requestJSON<unknown>('/capi', 'v1/access/model');
+
+/** The catalog registry (`<ns>$<table>` ids) — one-click graph seeds. */
 export const fetchTables = () => requestJSON<{ tables: string[] }>('/capi', 'v1/table');

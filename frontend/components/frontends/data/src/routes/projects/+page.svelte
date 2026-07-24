@@ -2,11 +2,13 @@
 	// `/projects` — the hierarchy root (goal cond 3): project → warehouse → namespace → table.
 	// An estate observer gets the full tenant list from /v1/projects; a plain member gets 403 there
 	// and falls back to their own memberships from the frozen /v1/me contract — degrade, never 500.
-	import { FolderKanban, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	// Estate admins (per /v1/me) additionally get the project-creation flow (goal cond 6).
+	import { FolderKanban, Plus, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchProjects, type ProjectSummary } from '$lib/catalog';
-	import { fetchMeViaBff } from '$lib/me';
+	import { fetchMeViaBff, type Me } from '$lib/me';
+	import ProjectCreateDialog from '$lib/ProjectCreateDialog.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -17,14 +19,19 @@
 	let lastStatus = $state(0);
 	let settled = $state(false);
 	let estateWide = $state(false);
+	let me = $state<Me | null>(null);
+	let creating = $state(false);
 
 	const unauthorized = $derived(rows === null && settled && lastStatus === 401);
 	const offline = $derived(rows === null && settled && ![200, 401, 403].includes(lastStatus));
+	// The initial-admin prefill in FGA subject form (`user:<sub>`; an already-typed sub passes through).
+	const meSubject = $derived(me === null ? '' : me.sub.includes(':') ? me.sub : `user:${me.sub}`);
 
 	async function load(): Promise<void> {
-		const [estate, me] = await Promise.all([fetchProjects(), fetchMeViaBff()]);
+		const [estate, meRes] = await Promise.all([fetchProjects(), fetchMeViaBff()]);
 		settled = true;
-		const roleOf = new Map((me?.projects ?? []).map((p) => [p.project, p.role]));
+		me = meRes;
+		const roleOf = new Map((meRes?.projects ?? []).map((p) => [p.project, p.role]));
 		if (estate.ok) {
 			estateWide = true;
 			rows = estate.data.map((p: ProjectSummary): Row => ({
@@ -33,10 +40,14 @@
 				warehouses: p.warehouses.length,
 			}));
 			lastStatus = 200;
-		} else if (estate.status === 403 && me) {
+		} else if (estate.status === 403 && meRes) {
 			// Not an estate observer — the caller's OWN memberships are the honest gallery.
 			estateWide = false;
-			rows = me.projects.map((p): Row => ({ project: p.project, role: p.role, warehouses: null }));
+			rows = meRes.projects.map((p): Row => ({
+				project: p.project,
+				role: p.role,
+				warehouses: null,
+			}));
 			lastStatus = 200;
 		} else {
 			lastStatus = estate.status;
@@ -58,6 +69,11 @@
 			>{estateWide ? 'every tenant in the estate' : 'your memberships'} · project → warehouse → namespace
 			→ table</span
 		>
+		{#if me?.estate_admin}
+			<button class="new" onclick={() => (creating = true)}>
+				<Plus size={12} /> New project
+			</button>
+		{/if}
 	</header>
 
 	{#if unauthorized}
@@ -95,6 +111,10 @@
 	{/if}
 </div>
 
+<!-- Goal cond 6 — visible only to estate admins (the /v1/me gate); the gallery reflects the new
+     project on the reload `oncreated` triggers. -->
+<ProjectCreateDialog bind:open={creating} defaultAdmin={meSubject} oncreated={load} />
+
 <style>
 	.page {
 		max-width: 860px;
@@ -114,6 +134,22 @@
 	.sub {
 		color: var(--faint);
 		font-size: 12px;
+	}
+	.new {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		margin-left: auto;
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		cursor: pointer;
+	}
+	.new:hover {
+		border-color: var(--mut);
 	}
 	.list {
 		list-style: none;

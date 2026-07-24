@@ -312,11 +312,19 @@ export const createTableIndex = (table: string, body: CreateIndexBody, scalar: b
 export const dropTableIndex = (table: string, name: string) =>
 	requestJSON<unknown>(`v1/table/${enc(table)}/index/${enc(name)}/drop`, { method: 'POST' });
 
+/** A warehouse record with the medallion serving class: `serving === "gold"` marks the project's
+ * per-tenant SERVING warehouse (the gold tier's separate bucket — DECISIONS "Medallion tiers");
+ * absent = a work warehouse. Additive over the generated shape until the spec regenerates. */
+export type WarehouseRecord = Warehouse & { serving?: string | null };
+/** The create body with the optional `serving: "gold"` class (same additive rationale). */
+export type CreateWarehouseBody = CreateWarehouse & { serving?: 'gold' };
+
 /** Warehouse admin (#3-A UI): reads for any signed-in user the catalog allows; writes are
  * project-admin gated by the catalog (can_create_warehouse / can_administer). */
-export const fetchWarehouses = () => requestJSON<Warehouse[]>('v1/warehouses');
+export const fetchWarehouses = () => requestJSON<WarehouseRecord[]>('v1/warehouses');
 /** One warehouse record — the hierarchy drill-down's warehouse page (can_get_metadata gated). */
-export const fetchWarehouse = (id: string) => requestJSON<Warehouse>(`v1/warehouses/${enc(id)}`);
+export const fetchWarehouse = (id: string) =>
+	requestJSON<WarehouseRecord>(`v1/warehouses/${enc(id)}`);
 
 export type ProjectSummary = components['schemas']['ProjectResponse'];
 
@@ -325,11 +333,26 @@ export const fetchProjects = () => requestJSON<ProjectSummary[]>('v1/projects');
 /** One tenant: its warehouses + effective admins — the hierarchy drill-down's project page. */
 export const fetchProject = (project: string) =>
 	requestJSON<ProjectSummary>(`v1/projects/${enc(project)}`);
-export const createWarehouse = (body: CreateWarehouse) =>
-	requestJSON<Warehouse>('v1/warehouses', {
+export const createWarehouse = (body: CreateWarehouseBody) =>
+	requestJSON<WarehouseRecord>('v1/warehouses', {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(body),
+	});
+
+/** One raw FGA tuple on the catalog's estate-admin access surface (`/v1/access/tuples`) — `user` in
+ * OpenFGA subject form (`user:alice`, or a userset like `team:x#member`), `object` fully typed
+ * (`project:acme`). */
+export type AccessTuple = { user: string; relation: string; object: string };
+
+/** Write one FGA tuple through this zone's explicit session-only BFF route. Estate-admin gated by
+ * the catalog (the same bar as /v1/events); the project-creation flow uses it for the initial
+ * `admin` grant on the new `project:<name>` object. */
+export const writeAccessTuple = (tuple: AccessTuple) =>
+	requestJSON<unknown>('v1/access/tuples', {
+		method: 'POST',
+		headers: { 'content-type': 'application/json' },
+		body: JSON.stringify(tuple),
 	});
 export const setWarehouseActive = (id: string, active: boolean) =>
 	requestJSON<Warehouse>(`v1/warehouses/${enc(id)}/${active ? 'activate' : 'deactivate'}`, {

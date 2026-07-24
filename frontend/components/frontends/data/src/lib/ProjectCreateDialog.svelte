@@ -1,0 +1,244 @@
+<script lang="ts">
+	// Project creation (goal cond 6) — an estate-admin flow that COMPOSES existing APIs: creating the
+	// first (work) warehouse under a new project name creates the project implicitly; an optional
+	// second create with serving:"gold" provisions the per-tenant gold serving warehouse (DECISIONS
+	// "Medallion tiers"); the initial admin grant is one raw FGA tuple on /v1/access/tuples
+	// (estate-admin gated, like /v1/events). Every step toasts success/failure honestly — a partial
+	// outcome (work warehouse up, gold or grant failed) is NAMED, never rolled into a fake success.
+	import { Dialog } from '@rask/ui/dialog';
+	import { toast } from 'svelte-sonner';
+	import { createWarehouse, writeAccessTuple } from './catalog';
+
+	let {
+		open = $bindable(false),
+		defaultAdmin = '',
+		oncreated,
+	}: {
+		open?: boolean;
+		/** Prefill for the initial admin grant — the signed-in caller in FGA subject form. */
+		defaultAdmin?: string;
+		oncreated?: () => void;
+	} = $props();
+
+	let name = $state('');
+	let whId = $state('');
+	let whBucket = $state('');
+	let goldId = $state('');
+	let goldBucket = $state('');
+	let admin = $state('');
+	let busy = $state(false);
+	let error = $state<string | null>(null);
+
+	// Prefill the admin subject on the closed→open TRANSITION only (kept editable — the estate admin
+	// may be provisioning for someone else, and clearing the field must stick: an unconditional
+	// refill would make an empty admin, i.e. "no initial grant", impossible to express).
+	let wasOpen = false;
+	$effect(() => {
+		if (open && !wasOpen) admin = defaultAdmin;
+		wasOpen = open;
+	});
+
+	function reset(): void {
+		name = '';
+		whId = '';
+		whBucket = '';
+		goldId = '';
+		goldBucket = '';
+		admin = '';
+		error = null;
+	}
+
+	function failText(what: string, status: number, detail: string): string {
+		if (status === 401) return `Sign in — ${what} is a per-user action.`;
+		if (status === 403) return `Denied: ${what} needs the estate/project-admin rung.`;
+		if (status === 409) return `Conflict: ${what} — the id already exists.`;
+		if (status === 0) return `Catalog unreachable — ${what} was not applied.`;
+		return detail;
+	}
+
+	async function create(): Promise<void> {
+		const project = name.trim();
+		const wh = whId.trim();
+		if (busy || !project || !wh) return;
+		busy = true;
+		error = null;
+		try {
+			// 1. The work warehouse — its `project` field is what brings the project into existence.
+			const first = await createWarehouse({ id: wh, project, bucket: whBucket.trim() || null });
+			if (!first.ok) {
+				// Nothing was created — stay open so the form can be corrected and retried.
+				error = failText(`provisioning warehouse ${wh}`, first.status, first.detail);
+				toast.error(error);
+				return;
+			}
+			const partials: string[] = [];
+			// 2. Optional gold serving warehouse (a second, serving-classed record).
+			const gold = goldId.trim();
+			if (gold) {
+				const res = await createWarehouse({
+					id: gold,
+					project,
+					bucket: goldBucket.trim() || null,
+					serving: 'gold',
+				});
+				if (!res.ok) {
+					partials.push(
+						`gold serving warehouse ${gold} failed: ${failText(`provisioning ${gold}`, res.status, res.detail)}`,
+					);
+				}
+			}
+			// 3. Initial admin grant — a raw admin tuple on the new project object.
+			const adminUser = admin.trim();
+			if (adminUser) {
+				const res = await writeAccessTuple({
+					user: adminUser,
+					relation: 'admin',
+					object: `project:${project}`,
+				});
+				if (!res.ok) {
+					partials.push(
+						`admin grant for ${adminUser} failed: ${failText('the admin grant', res.status, res.detail)}`,
+					);
+				}
+			}
+			if (partials.length > 0) {
+				// The project + work warehouse EXIST — say so, and name exactly what still needs doing.
+				toast.error(`Project ${project} created with ${wh}, but ${partials.join('; ')}`);
+			} else {
+				toast.success(
+					`Project ${project} created — warehouse ${wh}${gold ? `, gold serving ${gold}` : ''}${adminUser ? `, admin ${adminUser}` : ''}.`,
+				);
+			}
+			open = false;
+			reset();
+			oncreated?.();
+		} finally {
+			busy = false;
+		}
+	}
+</script>
+
+<Dialog.Root bind:open>
+	<Dialog.Content>
+		<Dialog.Title>New project</Dialog.Title>
+		<Dialog.Description>
+			Provisioning the first warehouse under a new project name creates the project; the optional
+			serving warehouse hosts the gold tier in its own bucket.
+		</Dialog.Description>
+		<form
+			class="form"
+			onsubmit={(e) => {
+				e.preventDefault();
+				create();
+			}}
+		>
+			<label
+				>project name
+				<input class="mono" bind:value={name} placeholder="acme" aria-label="Project name" />
+			</label>
+			<div class="pair">
+				<label
+					>first warehouse id
+					<input class="mono" bind:value={whId} placeholder="acme-wh" aria-label="Warehouse id" />
+				</label>
+				<label
+					>bucket (defaults to id)
+					<input class="mono" bind:value={whBucket} placeholder="—" aria-label="Warehouse bucket" />
+				</label>
+			</div>
+			<div class="pair">
+				<label
+					>gold serving warehouse (optional)
+					<input
+						class="mono"
+						bind:value={goldId}
+						placeholder="acme-gold"
+						aria-label="Gold serving warehouse id"
+					/>
+				</label>
+				<label
+					>serving bucket (defaults to id)
+					<input
+						class="mono"
+						bind:value={goldBucket}
+						placeholder="—"
+						aria-label="Gold serving bucket"
+					/>
+				</label>
+			</div>
+			<label
+				>initial admin (FGA subject)
+				<input
+					class="mono"
+					bind:value={admin}
+					placeholder="user:alice"
+					aria-label="Initial admin"
+				/>
+			</label>
+			{#if error}<p class="error">{error}</p>{/if}
+			<div class="actions">
+				<button type="button" class="btn ghost" disabled={busy} onclick={() => (open = false)}>
+					Cancel
+				</button>
+				<button class="btn" type="submit" disabled={busy || !name.trim() || !whId.trim()}>
+					{busy ? '…' : 'Create project'}
+				</button>
+			</div>
+		</form>
+	</Dialog.Content>
+</Dialog.Root>
+
+<style>
+	.form {
+		display: flex;
+		flex-direction: column;
+		gap: 10px;
+		font-size: 12px;
+		color: var(--mut);
+	}
+	label {
+		display: flex;
+		flex-direction: column;
+		gap: 3px;
+		flex: 1;
+	}
+	.pair {
+		display: flex;
+		gap: 10px;
+	}
+	input {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		padding: 5px 9px;
+		font-size: 12px;
+	}
+	.error {
+		color: var(--fail);
+		margin: 0;
+	}
+	.actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 4px;
+	}
+	.btn {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		cursor: pointer;
+	}
+	.btn:disabled {
+		opacity: 0.5;
+		cursor: default;
+	}
+	.btn.ghost {
+		background: none;
+		color: var(--mut);
+	}
+</style>

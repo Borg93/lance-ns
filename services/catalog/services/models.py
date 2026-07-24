@@ -154,6 +154,28 @@ def list_models(models_root: str, storage_options: dict[str, str]) -> list[str]:
     return sorted(info.base_name for info in infos if info.type == pafs.FileType.Directory)
 
 
+def list_artifacts(artifacts_uri: str, storage_options: dict[str, str]) -> list[dict[str, Any]]:
+    """Every artifact object under one model's plain-path tree (``<artifacts_root>/<model>/<token>/…``,
+    the #17/#92 layout), sorted by path.
+
+    A pure recursive storage listing (no dataset opens — the tree is OUTSIDE any Lance dataset by design):
+    each entry is the path relative to the model's tree (``<token>/weights.json``), its size, and its mtime
+    as ISO-8601 (``None`` when the filesystem reports none). An absent tree — nothing trained yet, or a
+    registry-only model — is ``[]``, never an error.
+    """
+    fs, base = fs_and_base(artifacts_uri, storage_options)
+    infos = fs.get_file_info(pafs.FileSelector(base, recursive=True, allow_not_found=True))
+    files = sorted((info for info in infos if info.type == pafs.FileType.File), key=lambda i: i.path)
+    return [
+        {
+            "path": info.path.removeprefix(base).lstrip("/"),
+            "size_bytes": int(info.size),
+            "updated_at": info.mtime.isoformat() if info.mtime is not None else None,
+        }
+        for info in files
+    ]
+
+
 def promote(
     model_uri: str,
     storage_options: dict[str, str],

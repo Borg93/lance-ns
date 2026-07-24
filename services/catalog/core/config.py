@@ -85,6 +85,13 @@ class Settings(BaseSettings):
     # only ``storage_options()`` (same constraint as multibase_data_bases).
     models_registry_root: str = Field(default="", alias="LANCE_MODELS_REGISTRY_ROOT")
 
+    # #17/#92 model ARTIFACTS — the plain-path weights/config objects the registry rows point at. The
+    # trainer lays them out OUTSIDE any Lance dataset (``models/<model>/<token>/…`` at the BUCKET root on
+    # s3; a ``model-artifacts`` sibling of the registry locally — medallion's ``artifact_base_for``), so
+    # the describe read lists them by object listing, never through the registry. Empty = derive the
+    # trainer's default layout from ``models_root``; override only when the artifact tree is zoned apart.
+    model_artifacts_base: str = Field(default="", alias="LANCE_MODEL_ARTIFACTS_ROOT")
+
     @property
     def registry_root(self) -> str:
         """Where warehouse records + namespace bindings live (defaults to the catalog `root` bucket)."""
@@ -113,6 +120,24 @@ class Settings(BaseSettings):
     def model_uri(self, model: str) -> str:
         """The explicit Lance-dataset URI for one model's registry: ``<models_root>/<model>``."""
         return f"{self.models_root}/{model}"
+
+    @property
+    def model_artifacts_root(self) -> str:
+        """Root of the per-model artifact trees (``<root>/<model>/<token>/…``) — the byte-for-byte mirror
+        of medallion's ``artifact_base_for`` so the catalog reads exactly where the trainer writes: on s3,
+        ``s3://<bucket>/models`` (the registry's bucket root — pointer targets must never sit inside a
+        Lance dataset, see #92); locally, a ``model-artifacts`` sibling under the registry's parent."""
+        if self.model_artifacts_base:
+            return self.model_artifacts_base.rstrip("/")
+        base = self.models_root.rsplit("/", 1)[0]  # the medallion base the registry sits under
+        if base.startswith("s3://"):
+            bucket = "/".join(base.split("/", 3)[:3])  # s3://<bucket>
+            return f"{bucket}/models"
+        return f"{base}/model-artifacts"
+
+    def model_artifacts_uri(self, model: str) -> str:
+        """One model's artifact tree: ``<model_artifacts_root>/<model>``."""
+        return f"{self.model_artifacts_root}/{model}"
 
     # Object store (MinIO / S3). Credentials are required — no default — so a
     # missing secret fails loudly at startup instead of silently using a default.

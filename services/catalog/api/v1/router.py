@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends
 from catalog.api.fga_deps import authorize
 from catalog.api.v1.endpoints import (
     access,
+    access_admin,
     branches,
     columns,
     credentials,
@@ -46,6 +47,7 @@ for _module in (
     models,
     policies,
     access,
+    access_admin,
     events,
     projects,
     me,

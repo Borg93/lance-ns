@@ -62,6 +62,7 @@ from tenacity import (
 log = logging.getLogger(__name__)
 
 _MODEL_PATH = Path(__file__).resolve().parent / "auth" / "model.json"
+_MODEL_DSL_PATH = _MODEL_PATH.with_name("model.fga")
 
 # Default resilience knobs. The real values are sourced from Settings and passed
 # into make_client / check / grant_on_create; these mirror the config defaults so
@@ -104,6 +105,13 @@ _MAX_REVOKE_PAGES = 100
 def load_model() -> dict[str, Any]:
     """Load the authorization model JSON shipped with the app."""
     return json.loads(_MODEL_PATH.read_text())
+
+
+def load_model_dsl() -> str:
+    """The checked-in authorization model DSL text (``model.fga``) — the human-readable twin of the
+    compiled ``model.json`` the app loads (the two are kept in sync; ``model.fga.yaml`` proves the
+    behaviour). Served read-only by the estate-admin ``GET /v1/access/model`` surface."""
+    return _MODEL_DSL_PATH.read_text()
 
 
 # --------------------------------------------------------------------------- #
@@ -486,6 +494,52 @@ async def read_object_tuples(
         return await _do_read()
     except _FAIL_CLOSED as exc:
         log.error("openfga_read_unavailable", extra={"object": obj}, exc_info=True)
+        raise ServiceUnavailableError("authorization service unavailable") from exc
+
+
+async def read_tuples(
+    client: OpenFgaClient,
+    *,
+    user: str | None = None,
+    obj: str | None = None,
+    page_size: int | None = None,
+    continuation_token: str | None = None,
+    retry_attempts: int = DEFAULT_RETRY_ATTEMPTS,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
+    retry_max_backoff_seconds: float = DEFAULT_RETRY_MAX_BACKOFF_SECONDS,
+) -> tuple[list[ClientTuple], str | None]:
+    """One page of the OpenFGA Read API — the DIRECT tuples matching the filter, plus the next-page token.
+
+    Unlike :func:`list_users`, Read never expands the model: the answer is the raw stored tuples (the
+    estate-admin tuple browser's primitive), paginated by the server. ``obj`` is either a full object
+    (``table:db1$t``) or a bare-type scan (``table:``); OpenFGA REQUIRES at least the object type whenever
+    a tuple filter is sent, so a user-only filter is rejected server-side — callers enforce that
+    precondition up front (the admin API maps it to a 400). No filter at all reads the whole store.
+    Read-only/idempotent, so it gets the same bounded retry + fail-closed treatment as :func:`check`
+    (outage → ``ServiceUnavailableError`` → 503, never an empty page that reads as "no grants").
+    """
+    tuple_key = ReadRequestTupleKey(user=user, object=obj)  # the SDK omits it when every field is None
+
+    @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
+    async def _do_read_page() -> tuple[list[ClientTuple], str | None]:
+        # Built INSIDE the retry closure: the SDK pops page_size/continuation_token out of the options
+        # dict it is handed, so a shared dict would silently lose the pagination on the second attempt.
+        options: dict[str, int | str | dict[str, int | str]] = {}
+        if page_size is not None:
+            options["page_size"] = page_size
+        if continuation_token:
+            options["continuation_token"] = continuation_token
+        response = await client.read(tuple_key, options=options or None)
+        page = [
+            ClientTuple(user=t.key.user, relation=t.key.relation, object=t.key.object)
+            for t in response.tuples or []
+        ]
+        return page, response.continuation_token or None
+
+    try:
+        return await _do_read_page()
+    except _FAIL_CLOSED as exc:
+        log.error("openfga_read_unavailable", extra={"object": obj, "user": user}, exc_info=True)
         raise ServiceUnavailableError("authorization service unavailable") from exc
 
 

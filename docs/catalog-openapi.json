@@ -48,6 +48,24 @@
         "title": "AccessCheckResponse",
         "type": "object"
       },
+      "AccessCheckResult": {
+        "description": "The estate-admin check verdict: ``checked`` echoes the exact resolved tuple that was probed (the\n``user`` after bare-id \u2192 ``user:<id>`` resolution), so a verdict can never be misread against a\ndifferent subject than the one OpenFGA saw.",
+        "properties": {
+          "allowed": {
+            "title": "Allowed",
+            "type": "boolean"
+          },
+          "checked": {
+            "$ref": "#/components/schemas/AccessTuple"
+          }
+        },
+        "required": [
+          "allowed",
+          "checked"
+        ],
+        "title": "AccessCheckResult",
+        "type": "object"
+      },
       "AccessGrantRequest": {
         "description": "Grant or revoke ONE base rung to a subject. ``user`` may be a bare id (``alice`` \u2192 ``user:alice``)\nor a fully-qualified userset (``role:project_admin#assignee``, ``team:acme#member``); ``relation`` must\nbe a grantable base rung the compiled model defines on the type (owner/writer/reader/validator) \u2014 never\na derived ``can_*`` action nor the structural ``parent`` edge.",
         "properties": {
@@ -143,6 +161,78 @@
           "grants"
         ],
         "title": "AccessListResponse",
+        "type": "object"
+      },
+      "AccessModelResponse": {
+        "description": "The authorization model: the checked-in ``model.fga`` DSL text and the model id the catalog's\nchecks are pinned to.",
+        "properties": {
+          "authorization_model_id": {
+            "title": "Authorization Model Id",
+            "type": "string"
+          },
+          "dsl": {
+            "title": "Dsl",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dsl",
+          "authorization_model_id"
+        ],
+        "title": "AccessModelResponse",
+        "type": "object"
+      },
+      "AccessTuple": {
+        "description": "One raw relationship tuple, verbatim (``user`` is a full subject \u2014 ``user:<id>`` or a userset like\n``team:acme#member``). The estate-admin tuple API's unit: the read page lists these, write/delete take\none as the body and echo it back, and a check verdict carries the exact tuple it probed.",
+        "properties": {
+          "object": {
+            "title": "Object",
+            "type": "string"
+          },
+          "relation": {
+            "title": "Relation",
+            "type": "string"
+          },
+          "user": {
+            "title": "User",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user",
+          "relation",
+          "object"
+        ],
+        "title": "AccessTuple",
+        "type": "object"
+      },
+      "AccessTuplesPage": {
+        "description": "One page of the raw tuple listing. ``continuation`` is the OpenFGA Read token for the next page \u2014\n``null`` on the last page.",
+        "properties": {
+          "continuation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Continuation"
+          },
+          "tuples": {
+            "items": {
+              "$ref": "#/components/schemas/AccessTuple"
+            },
+            "title": "Tuples",
+            "type": "array"
+          }
+        },
+        "required": [
+          "tuples",
+          "continuation"
+        ],
+        "title": "AccessTuplesPage",
         "type": "object"
       },
       "AddColumnsEntry": {
@@ -6413,8 +6503,46 @@
         "title": "MergeInsertIntoTableResponse",
         "type": "object"
       },
+      "ModelArtifact": {
+        "description": "One plain-path artifact object under the model's tree (the #17/#92 layout:\n``models/<model>/<token>/\u2026``). ``path`` is relative to the model's artifact root\n(``<token>/weights.json``); ``updated_at`` is the object's mtime as ISO-8601, ``null`` when the\nfilesystem reports none.",
+        "properties": {
+          "path": {
+            "title": "Path",
+            "type": "string"
+          },
+          "size_bytes": {
+            "title": "Size Bytes",
+            "type": "integer"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "path",
+          "size_bytes",
+          "updated_at"
+        ],
+        "title": "ModelArtifact",
+        "type": "object"
+      },
       "ModelDescribeResponse": {
         "properties": {
+          "artifacts": {
+            "items": {
+              "$ref": "#/components/schemas/ModelArtifact"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
           "blessed_metrics": {
             "anyOf": [
               {
@@ -8688,6 +8816,299 @@
         ]
       }
     },
+    "/v1/access/check": {
+      "post": {
+        "description": "One ``(user, relation, object)`` OpenFGA Check over ANY model type \u2014 the estate-wide extension of\nthe per-object ``\u2026/access/check`` playground (#68), which stays as-is for table/namespace owners.\n\nAny relation the compiled model defines on the type may be probed (base rungs included \u2014 an admin\ndebugging a cascade asks about ``writer``, not just ``can_write_data``); an unknown one is a clean 400.\n``checked`` echoes the resolved tuple so the verdict is unambiguous.",
+        "operationId": "check_access_v1_access_check_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTuple"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessCheckResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Check Access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/v1/access/model": {
+      "get": {
+        "description": "The authorization model \u2014 the checked-in ``model.fga`` DSL text plus the pinned model id.\n\nRead-only and estate-admin gated: the model reveals the whole privilege topology (which rungs derive\nwhich actions), the same platform-tier disclosure as the tuple listing.",
+        "operationId": "get_access_model_v1_access_model_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessModelResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Access Model",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/v1/access/tuples": {
+      "delete": {
+        "description": "Delete ONE raw tuple (idempotent \u2014 an already-absent tuple is success), echoing the tuple removed.",
+        "operationId": "delete_access_tuple_v1_access_tuples_delete",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTuple"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTuple"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Access Tuple",
+        "tags": [
+          "access"
+        ]
+      },
+      "get": {
+        "description": "One page of the raw tuple store, estate-admin gated.\n\nFilter combos follow OpenFGA Read's contract \u2014 the object side must carry at least a TYPE whenever any\nfilter is sent: ``object_type`` alone (whole-type scan), ``object`` alone (one object's tuples),\n``user`` combined with either (that subject's tuples there). A user-only filter is a 400 \u2014 OpenFGA's\nRead API cannot answer it (add ``object_type`` or ``object``; per-subject enumeration across all types\nis a ListObjects question, not a Read). No filter reads the whole store, paginated.",
+        "operationId": "read_access_tuples_v1_access_tuples_get",
+        "parameters": [
+          {
+            "description": "scan one whole type (e.g. 'table')",
+            "in": "query",
+            "name": "object_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "scan one whole type (e.g. 'table')",
+              "title": "Object Type"
+            }
+          },
+          {
+            "description": "filter by subject (bare id = user:<id>)",
+            "in": "query",
+            "name": "user",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filter by subject (bare id = user:<id>)",
+              "title": "User"
+            }
+          },
+          {
+            "description": "filter by one full object ('table:db1$t')",
+            "in": "query",
+            "name": "object",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "filter by one full object ('table:db1$t')",
+              "title": "Object"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page Size"
+            }
+          },
+          {
+            "description": "the previous page's continuation token",
+            "in": "query",
+            "name": "continuation",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "the previous page's continuation token",
+              "title": "Continuation"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTuplesPage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read Access Tuples",
+        "tags": [
+          "access"
+        ]
+      },
+      "post": {
+        "description": "Write ONE raw tuple (idempotent \u2014 a duplicate write is success), echoing the tuple as stored.\n\nOnly a directly-assignable relation the compiled model defines on the object's type is accepted (a\nderived ``can_*`` action or an unknown type/relation is a 400) \u2014 the raw-tuple analog of the\nper-object grant surface's grantable-rung guard, without its table/namespace restriction.",
+        "operationId": "write_access_tuple_v1_access_tuples_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AccessTuple"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessTuple"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Write Access Tuple",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/v1/events": {
       "get": {
         "description": "Return control-plane change-events after ``since`` for a platform (estate) administrator.\n\nFail-closed via FGA: a non-estate-admin gets 403, an OpenFGA outage 503, and the gate is a no-op only\nwhen FGA is off (parity with every other ``require_*`` site). The ring buffer is per-replica + in-memory,\nso ``cursor`` is a per-replica monotonic counter and ``reset`` means the client missed the buffer window\n(scaling the catalog past one replica needs session affinity or a shared buffer \u2014 see docs/DECISIONS.md\n#control-events--per-replica-cursor-boundary).",
@@ -8943,7 +9364,7 @@
     },
     "/v1/model/{model}": {
       "get": {
-        "description": "Registry summary: the latest (candidate) version, the blessed version (or null), and both metrics.\n\nReader-gated (``can_get_metadata``) \u2014 a reader may see which version is blessed and compare metrics; only\na validator may move the pointer.",
+        "description": "Registry summary: the latest (candidate) version, the blessed version (or null), both metrics, and\nthe model's plain-path artifact objects (path/size/mtime under ``models/<model>/<token>/\u2026`` \u2014 the\n#17/#92 layout; ``[]`` when none are laid out).\n\nReader-gated (``can_get_metadata``) \u2014 a reader may see which version is blessed and compare metrics; only\na validator may move the pointer.",
         "operationId": "describe_model_v1_model__model__get",
         "parameters": [
           {

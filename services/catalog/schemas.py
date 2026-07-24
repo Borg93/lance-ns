@@ -68,6 +68,41 @@ class AccessGrantResponse(BaseModel):
     granted: bool  # True after a grant, False after a revoke — the resulting state of the tuple
 
 
+class AccessTuple(BaseModel):
+    """One raw relationship tuple, verbatim (``user`` is a full subject — ``user:<id>`` or a userset like
+    ``team:acme#member``). The estate-admin tuple API's unit: the read page lists these, write/delete take
+    one as the body and echo it back, and a check verdict carries the exact tuple it probed."""
+
+    user: str
+    relation: str
+    object: str
+
+
+class AccessTuplesPage(BaseModel):
+    """One page of the raw tuple listing. ``continuation`` is the OpenFGA Read token for the next page —
+    ``null`` on the last page."""
+
+    tuples: list[AccessTuple]
+    continuation: str | None
+
+
+class AccessModelResponse(BaseModel):
+    """The authorization model: the checked-in ``model.fga`` DSL text and the model id the catalog's
+    checks are pinned to."""
+
+    dsl: str
+    authorization_model_id: str
+
+
+class AccessCheckResult(BaseModel):
+    """The estate-admin check verdict: ``checked`` echoes the exact resolved tuple that was probed (the
+    ``user`` after bare-id → ``user:<id>`` resolution), so a verdict can never be misread against a
+    different subject than the one OpenFGA saw."""
+
+    allowed: bool
+    checked: AccessTuple
+
+
 class GraphNode(BaseModel):
     """One node in the authorization graph — an FGA object or subject. ``type`` is the FGA type
     (user/role/team/table/namespace/warehouse/project), ``label`` the id without its ``type:`` prefix."""
@@ -213,6 +248,17 @@ class PromoteResponse(BaseModel):
     tag: str
 
 
+class ModelArtifact(BaseModel):
+    """One plain-path artifact object under the model's tree (the #17/#92 layout:
+    ``models/<model>/<token>/…``). ``path`` is relative to the model's artifact root
+    (``<token>/weights.json``); ``updated_at`` is the object's mtime as ISO-8601, ``null`` when the
+    filesystem reports none."""
+
+    path: str
+    size_bytes: int
+    updated_at: str | None
+
+
 class ModelDescribeResponse(BaseModel):
     model_config = ConfigDict(protected_namespaces=())
     model: str
@@ -220,6 +266,8 @@ class ModelDescribeResponse(BaseModel):
     blessed_version: int | None
     candidate_metrics: dict[str, Any] | None
     blessed_metrics: dict[str, Any] | None
+    # The registry rows point at these plain-path objects; [] when nothing is laid out (registry-only).
+    artifacts: list[ModelArtifact] = Field(default_factory=list)
 
 
 class ModelSummary(BaseModel):

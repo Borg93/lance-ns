@@ -30,6 +30,7 @@ from catalog.api.security import CurrentToken
 from catalog.core.config import Settings
 from catalog.core.lineage_emit import PROMOTE_MODEL, emit_write_event
 from catalog.schemas import (
+    ModelArtifact,
     ModelDescribeResponse,
     ModelsListResponse,
     ModelSummary,
@@ -158,7 +159,9 @@ async def describe_model(
     token: CurrentToken,
     client: FgaClientDep,
 ) -> ModelDescribeResponse:
-    """Registry summary: the latest (candidate) version, the blessed version (or null), and both metrics.
+    """Registry summary: the latest (candidate) version, the blessed version (or null), both metrics, and
+    the model's plain-path artifact objects (path/size/mtime under ``models/<model>/<token>/…`` — the
+    #17/#92 layout; ``[]`` when none are laid out).
 
     Reader-gated (``can_get_metadata``) — a reader may see which version is blessed and compare metrics; only
     a validator may move the pointer.
@@ -166,4 +169,5 @@ async def describe_model(
     segments = _segments(model)
     await fga_deps.require_can_get_metadata(client, settings, token, segments=segments)
     summary = await run_in_threadpool(registry.describe, settings.model_uri(model), so)
-    return ModelDescribeResponse(model=model, **summary)
+    artifacts = await run_in_threadpool(registry.list_artifacts, settings.model_artifacts_uri(model), so)
+    return ModelDescribeResponse(model=model, artifacts=[ModelArtifact(**a) for a in artifacts], **summary)

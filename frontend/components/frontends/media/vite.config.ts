@@ -11,19 +11,13 @@ export default defineConfig({
 		include: ['@techstark/opencv-js'],
 	},
 	server: {
-		// During `bun run dev`, proxy /api/* to the three lance-media services by
-		// path — the routing-based (zones) composition seam from the micro-frontends
-		// skill: annotator owns the write plane, search owns retrieval, viewer owns
-		// the rest. Production goes through frontend/server.ts with the same map.
+		// No /api dev proxy anymore: the zone's own BFF routes (src/routes/api/**) serve
+		// `${base}/api/*` in dev and prod alike, defaulting to the three local lance-media
+		// services (VIEWER_API :8101 · SEARCH_API :8102 · ANNOTATOR_API :8103).
 		proxy: {
 			// Zone composition: the annotator app owns /annotator (micro-frontends
 			// routing-based zones) — one origin, path-routed to the sibling app.
 			'/annotator': { target: 'http://127.0.0.1:5176', changeOrigin: true, ws: true },
-			'/api/annotations': { target: 'http://127.0.0.1:8103', changeOrigin: true },
-			'/api/assist': { target: 'http://127.0.0.1:8103', changeOrigin: true },
-			'/api/jobs': { target: 'http://127.0.0.1:8103', changeOrigin: true },
-			'/api/search': { target: 'http://127.0.0.1:8102', changeOrigin: true },
-			'/api': { target: 'http://127.0.0.1:8101', changeOrigin: true },
 		},
 	},
 });

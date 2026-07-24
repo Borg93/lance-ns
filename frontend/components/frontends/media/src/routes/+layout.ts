@@ -1,8 +1,13 @@
-// Client-rendered SPA on the Bun-server build target (svelte-adapter-bun):
-// `ssr = false` keeps every route browser-rendered (WebGPU, localStorage, and
-// the descriptor fetch never run server-side); the Bun server serves the shell
-// + assets and the client renders. `prerender = false` — the app is dynamic
-// (query-param driven, data from the backend), so there is nothing to bake at
-// build time; the server serves routes directly.
-export const ssr = false;
+import { base } from '$app/paths';
+import { setApiBase } from '@lance/api/base';
+
+// Every media-plane fetch (and every media/thumbnail/frame URL) goes through THIS zone's
+// same-origin BFF proxy routes at `${base}/api/*` — set the shared client's base once,
+// module-init on server and browser alike, before any page code builds a URL.
+setApiBase(base);
+
+// SSR on (the estate zone contract): hooks.server.ts runs on every request (real login
+// gate + session), the layout shell server-renders, and the BFF routes serve `/api/*`.
+// Client-heavy leaf pages that genuinely cannot SSR opt out per-page (+page.ts).
+export const ssr = true;
 export const prerender = false;

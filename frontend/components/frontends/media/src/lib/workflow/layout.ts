@@ -7,8 +7,11 @@
 import ELK from 'elkjs/lib/elk.bundled.js';
 import type { Edge, Node } from '@xyflow/svelte';
 
-/** One ELK instance (the bundled build runs layout in-process, no web worker). */
-const elk = new ELK();
+/** One ELK instance (the bundled build runs layout in-process, no web worker),
+ *  created LAZILY on first layout: the constructor probes `Worker`, which does not
+ *  exist server-side — a module-scope `new ELK()` would break SSR of any page that
+ *  imports this module (autoLayout itself only ever runs from the Tidy button). */
+let elk: InstanceType<typeof ELK> | null = null;
 
 /** Fallback box when a node hasn't been measured yet (pre-first-render). */
 const DEFAULT_W = 256;
@@ -45,6 +48,7 @@ export async function autoLayout(
 			.map((e) => ({ id: e.id, sources: [e.source], targets: [e.target] })),
 	};
 
+	elk ??= new ELK();
 	const laid = await elk.layout(graph);
 	// elkjs reports TOP-LEFT positions — Svelte Flow's convention — so no
 	// center→top-left offset (dagre needed one; elkjs does not).

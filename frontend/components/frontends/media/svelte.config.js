@@ -13,10 +13,9 @@ const config = {
 	preprocess: vitePreprocess(),
 	kit: {
 		// Bun-server output — the rask MFE build target (`svelte-adapter-bun`).
-		// The app stays client-rendered (`ssr = false` in src/routes/+layout.ts):
-		// the Bun server serves the shell + assets, the browser renders (WebGPU,
-		// localStorage, etc. never run server-side). `/api/*` is not this server's
-		// concern — dev proxies it (vite.config.ts), prod routes it at the gateway.
+		// SSR on (the estate zone contract): hooks.server.ts gates + hydrates the
+		// session per request, and the zone's OWN BFF routes serve `${base}/api/*`
+		// (src/routes/api/**) — client-only leaf pages opt out per-page (+page.ts).
 		adapter: adapter(),
 		// Zone base: this zone owns /media behind the lance ingress (same STATIC
 		// per-app asset prefix as the other domain zones). The workspace-patched

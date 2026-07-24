@@ -16,6 +16,7 @@
 		SquarePen,
 		type Icon as LucideIcon,
 	} from 'lucide-svelte';
+	import { Toaster } from 'svelte-sonner';
 	import * as Sidebar from '@lance/ui/sidebar';
 	import { TopNavbar } from '@rask/ui/shell';
 	import { MeSchema, parse, type Me } from '@rask/api';
@@ -121,6 +122,10 @@
 		void descriptor.load();
 	});
 </script>
+
+{#if browser}
+	<Toaster />
+{/if}
 
 <div class="flex h-svh flex-col overflow-hidden">
 	<!-- The cross-zone estate navbar — the one constant across every microfrontend. -->

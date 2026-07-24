@@ -11,6 +11,7 @@
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:tsgo": "tsgo --noEmit -p tsconfig.tsgo.json",
 		"test": "vitest run",
+		"test:e2e": "playwright test",
 		"test:e2e:live": "node e2e/annotator.e2e.mjs && node e2e/temporal.e2e.mjs && node e2e/read-plane.e2e.mjs",
 		"prepare": "svelte-kit sync"
 	},
@@ -27,6 +28,7 @@
 		"embedding-atlas": "^0.21.0",
 		"lucide-svelte": "^0.468.0",
 		"svelte": "^5.36.0",
+		"svelte-sonner": "^1.1.1",
 		"tailwind-merge": "^2.5.5",
 		"tailwind-variants": "^0.3.0",
 		"valibot": "^1.4.2",
@@ -39,6 +41,7 @@
 	},
 	"devDependencies": {
 		"@lance/config": "workspace:*",
+		"@playwright/test": "^1.61.1",
 		"@sveltejs/kit": "^2.27.0",
 		"@sveltejs/vite-plugin-svelte": "^6.0.0",
 		"@tailwindcss/vite": "^4.0.0",

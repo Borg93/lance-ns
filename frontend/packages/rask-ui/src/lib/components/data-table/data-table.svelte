@@ -42,7 +42,15 @@
 	const showPagination = $derived(totalRows > (PAGE_SIZES[0] ?? 10));
 </script>
 
-<div class="border-border overflow-x-auto rounded-lg border">
+<!-- The table CARD owns containment: `min-w-0` + `max-w-full` so a wide table can never push the
+     page (and with it the document) past the viewport, and `overflow-hidden` so the rounded border
+     clips cleanly. The horizontal scroll itself belongs to the inner `table-container` the Table
+     primitive already provides — the wide table scrolls INSIDE this card instead of slicing the
+     card off the right edge of the screen. -->
+<div
+	data-slot="data-table-card"
+	class="border-border w-full max-w-full min-w-0 overflow-hidden rounded-lg border"
+>
 	<TablePrimitive.Root>
 		<TablePrimitive.Header class="bg-muted/50">
 			{#each table.getHeaderGroups() as headerGroup (headerGroup.id)}
@@ -76,7 +84,10 @@
 				{/each}
 			{:else if error !== null}
 				<TablePrimitive.Row>
-					<TablePrimitive.Cell colspan={columnCount} class="px-3 py-8 text-center">
+					<TablePrimitive.Cell
+						colspan={columnCount}
+						class="px-3 py-8 text-center break-words whitespace-normal"
+					>
 						<div class="text-destructive inline-flex items-center gap-2 text-sm">
 							<TriangleAlert class="size-4 shrink-0" />
 							{error}
@@ -105,9 +116,12 @@
 					</TablePrimitive.Row>
 				{:else}
 					<TablePrimitive.Row>
+						<!-- `whitespace-normal`: the Cell primitive is nowrap by default (right for data
+						     cells, wrong for a sentence) — without it a long empty-state message widens the
+						     table past its card and reads as text sliced mid-word. -->
 						<TablePrimitive.Cell
 							colspan={columnCount}
-							class="text-muted-foreground px-3 py-8 text-center"
+							class="text-muted-foreground px-3 py-8 text-center break-words whitespace-normal"
 						>
 							{emptyMessage}
 						</TablePrimitive.Cell>
@@ -119,14 +133,16 @@
 </div>
 
 {#if footer || showPagination}
-	<div class="flex items-center justify-between gap-3 py-2">
-		<div class="text-muted-foreground flex items-center gap-4 text-sm">
+	<!-- Wraps rather than overflows: on a narrow viewport the footer counts and the pagination
+	     controls stack instead of pushing the page sideways. -->
+	<div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-2 py-2">
+		<div class="text-muted-foreground flex min-w-0 items-center gap-4 text-sm">
 			{#if footer}
 				{@render footer()}
 			{/if}
 		</div>
 		{#if showPagination}
-			<div class="flex items-center gap-3">
+			<div class="ml-auto flex items-center gap-3">
 				<label class="text-muted-foreground flex items-center gap-1.5 text-xs">
 					Rows
 					<select

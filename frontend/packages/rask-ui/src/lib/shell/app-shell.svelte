@@ -45,6 +45,7 @@
 		zoneNav = null,
 		me = null,
 		meLoading = false,
+		sidebarFooter,
 		children,
 	}: {
 		pathname?: string;
@@ -58,6 +59,8 @@
 		me?: Me | null;
 		/** True while the zone's fetchMe() is in flight — the navbar renders skeletons. */
 		meLoading?: boolean;
+		/** Optional zone-owned sidebar footer (e.g. media's live service-status popover). */
+		sidebarFooter?: Snippet;
 		children: Snippet;
 	} = $props();
 
@@ -76,7 +79,7 @@
 </script>
 
 <Sidebar.Provider class="h-svh overflow-hidden">
-	<AppSidebar {pathname} project={sidebarProject} {zoneNav} />
+	<AppSidebar {pathname} project={sidebarProject} {zoneNav} footer={sidebarFooter} />
 	<Sidebar.Inset class="flex min-w-0 flex-col overflow-hidden">
 		<!-- Integrated top bar (sidebar-07): no border, h-16 → h-12 when the sidebar is
 		     icon-collapsed. Trigger + breadcrumb on the left; the cross-zone TopNavbar

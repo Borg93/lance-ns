@@ -1,11 +1,14 @@
 <script lang="ts">
 	import * as Sidebar from '../components/sidebar/index.js';
-	import type { ZoneNav } from './nav-config.js';
+	import { prefetchOnIntent, type ZoneNav } from './nav-config.js';
 
 	// The CURRENT zone's own routes — a flat group under the zone's name. The cross-zone list moved to
-	// the top navbar (`TopNavbar`), so every leaf here is same-zone by construction and stays a SOFT
-	// nav (no data-sveltekit-reload — it would defeat the SPA router inside the zone). `pathname`
-	// drives the active leaf via the shared norm/exact/seg matchers each zone builds its config with.
+	// the top navbar (`TopNavbar`), so leaves here are same-zone by construction and stay SOFT navs
+	// (no data-sveltekit-reload — it would defeat the SPA router inside the zone) — EXCEPT a leaf that
+	// declares `reload`: that one points outside this zone's route manifest (e.g. media's Annotate →
+	// /annotator) and must hard-navigate, so it also warms the target document on intent like the
+	// navbar's cross-zone entries. `pathname` drives the active leaf via the shared norm/exact/seg
+	// matchers each zone builds its config with.
 	let { pathname = '', nav = null }: { pathname?: string; nav?: ZoneNav | null } = $props();
 </script>
 
@@ -17,7 +20,12 @@
 				<Sidebar.MenuItem>
 					<Sidebar.MenuButton tooltipContent={leaf.title} isActive={leaf.match(pathname)}>
 						{#snippet child({ props })}
-							<a href={leaf.href} {...props}>
+							<a
+								href={leaf.href}
+								data-sveltekit-reload={leaf.reload ? '' : undefined}
+								{...props}
+								{@attach (el) => (leaf.reload ? prefetchOnIntent(leaf.href)(el) : undefined)}
+							>
 								{#if leaf.icon}
 									<leaf.icon />
 								{/if}

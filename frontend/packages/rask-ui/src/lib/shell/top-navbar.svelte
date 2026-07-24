@@ -4,7 +4,8 @@
 	import { Skeleton } from '../components/skeleton/index.js';
 	import NavbarUser from './navbar-user.svelte';
 	import { cn } from '../utils/cn.js';
-	import { ChevronDown } from '@lucide/svelte';
+	import { IsMobile, SHELL_COLLAPSE_BREAKPOINT } from '../hooks/is-mobile.svelte.js';
+	import { ChevronDown, Menu } from '@lucide/svelte';
 	import {
 		norm,
 		prefetchOnIntent,
@@ -75,18 +76,47 @@
 	// cannot drift apart dimensionally — and shared with the plain links, so a link and a trigger are
 	// the same box.
 	const chrome = navigationMenuTriggerStyle();
+
+	// Below the shell breakpoint the whole bar folds into ONE overflow entry. The zone entries are
+	// `whitespace-nowrap` by design (a wrapped nav label is worse than no nav label), so they cannot
+	// share a narrow row with the project switcher and the account control — they used to simply
+	// overflow their container and run underneath the avatar. Collapsing is the only honest answer:
+	// one trigger, and every destination still one tap away inside its panel. Same constant the
+	// sidebar folds on, so the shell never disagrees with itself.
+	const narrow = new IsMobile(SHELL_COLLAPSE_BREAKPOINT);
+	const collapsed = $derived(narrow.current);
+
+	// The overflow panel is FLAT — one heading per zone, then its destinations. The desktop panels'
+	// group columns (Lakehouse's Catalog/Models/Governance/Operations) and the row descriptions are
+	// dropped: on a phone-width panel they cost a screenful of scrolling and buy nothing. The zone
+	// root is prepended when no row already is it, exactly like the desktop panel, so a trigger is
+	// never the only way into a zone.
+	const overflowItems = (entry: TopNavEntry): TopNavItem[] => {
+		const items = entry.groups ? entry.groups.flatMap((group) => group.items) : (entry.items ?? []);
+		if (items.some((item) => item.href === entry.href)) return items;
+		return [
+			{
+				title: `${entry.title} home`,
+				href: entry.href,
+				description: `Open the ${entry.title.toLowerCase()} zone.`,
+			},
+			...items,
+		];
+	};
 </script>
 
 <div class={cn('flex min-w-0 items-center gap-2', className)}>
 	<!-- `aria-label` overrides the primitive's default "main", so this IS the zones landmark — one
-	     nav element, not a nav nested inside a nav. -->
-	<NavigationMenu.Root aria-label="Zones" class="min-w-0">
+	     nav element, not a nav nested inside a nav. Collapsed, the root takes the whole row (the
+	     base `max-w-max` is dropped) so the shared panel viewport — which is `w-full` below `md` —
+	     is bounded by the row instead of by one narrow trigger, and cannot spill past the edge. -->
+	<NavigationMenu.Root aria-label="Zones" class={cn('min-w-0', collapsed && 'max-w-none flex-1')}>
 		<NavigationMenu.List class="justify-start gap-0.5">
 			{#if meLoading}
-				{#each placeholders as entry (entry.title)}
+				{#each collapsed ? placeholders.slice(0, 1) : placeholders as entry (entry.title)}
 					<li aria-hidden="true">
 						<span class={cn(chrome, 'relative')}>
-							<span class="invisible">{entry.title}</span>
+							<span class="invisible">{collapsed ? 'Menu' : entry.title}</span>
 							{#if entry.items || entry.groups}
 								<!-- Reserve the trigger's chevron too, or an entry with a panel would grow by
 								     its width the moment the identity lands. -->
@@ -96,6 +126,41 @@
 						</span>
 					</li>
 				{/each}
+			{:else if collapsed}
+				<!-- The narrow bar: ONE entry. Every zone and every sub-area it owns is a row in this
+				     panel, so nothing the wide bar reaches becomes unreachable here. -->
+				<NavigationMenu.Item>
+					<NavigationMenu.Trigger>
+						<Menu class="size-4" aria-hidden="true" />
+						Menu
+					</NavigationMenu.Trigger>
+					<NavigationMenu.Content>
+						<div class="max-h-[70svh] overflow-y-auto p-2">
+							{#each entries as entry (entry.title)}
+								<p
+									data-slot="navbar-overflow-group"
+									class="text-muted-foreground px-2 pt-1 pb-1.5 text-[0.6875rem] font-semibold tracking-wide uppercase"
+								>
+									{entry.title}
+								</p>
+								<ul class="grid gap-0.5 pb-1">
+									{#each overflowItems(entry) as item (item.href)}
+										<li>
+											<NavigationMenu.Link
+												href={item.href}
+												active={itemActive(entry, item)}
+												data-sveltekit-reload={crossZone(item.href) ? '' : undefined}
+												{@attach warm(item.href)}
+											>
+												<span class="truncate text-sm leading-none font-medium">{item.title}</span>
+											</NavigationMenu.Link>
+										</li>
+									{/each}
+								</ul>
+							{/each}
+						</div>
+					</NavigationMenu.Content>
+				</NavigationMenu.Item>
 			{:else}
 				{#each entries as entry (entry.title)}
 					<NavigationMenu.Item>

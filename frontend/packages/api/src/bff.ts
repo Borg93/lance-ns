@@ -135,7 +135,14 @@ export function makeBackendProxy(opts: {
 	serviceId?: string | undefined;
 }): RequestHandler {
 	return async ({ url, fetch, request, locals }) => {
-		const target = opts.backendUrl + url.pathname.replace(opts.stripPrefix, '') + url.search;
+		// Base-aware strip: under the patched svelte-adapter-bun the BUILT server sees the zone's
+		// BASED pathname (/data/capi/…) while dev sees the app-relative one (/capi/…) — so if the
+		// prefix doesn't match at position 0, drop the single zone-base segment and re-try; without
+		// this the full based path is forwarded verbatim and the backend 404s it (found live
+		// 2026-07-24, the first image rebuild after the adapter patch landed with the media fold).
+		const raw = url.pathname;
+		const appPath = opts.stripPrefix.test(raw) ? raw : raw.replace(/^\/[^/]+(?=\/)/, '');
+		const target = opts.backendUrl + appPath.replace(opts.stripPrefix, '') + url.search;
 		const isRead = request.method === 'GET' || request.method === 'HEAD';
 		const headers: Record<string, string> = {};
 		const session = (locals as unknown as AuthLocals).session;

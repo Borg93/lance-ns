@@ -19,7 +19,8 @@
 		type SortingState,
 	} from '@rask/ui/data-table';
 	import { Select } from '@rask/ui/select';
-	import { RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
+	import * as Sheet from '@rask/ui/sheet';
+	import { ExternalLink, Filter, RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { requestJSON } from './http';
@@ -40,11 +41,14 @@
 	let settled = $state(false);
 	let inflight = 0;
 
-	// Filters (applied server-side by the BFF over the returned columns).
-	let outcome = $state('');
-	let action = $state('');
-	let subject = $state('');
-	let resource = $state('');
+	// Filters (applied server-side by the BFF over the returned columns). Initialized once from the
+	// URL query so cross-page "related events" links (`/admin/audit?resource=…`, e.g. from the
+	// tenants drawer) land pre-filtered — after that the state is the user's.
+	const initial = page.url.searchParams;
+	let outcome = $state(initial.get('outcome') ?? '');
+	let action = $state(initial.get('action') ?? '');
+	let subject = $state(initial.get('subject') ?? '');
+	let resource = $state(initial.get('resource') ?? '');
 
 	const unauthorized = $derived(events === null && settled && lastStatus === 401);
 	const forbidden = $derived(events === null && settled && lastStatus === 403);
@@ -153,6 +157,34 @@
 		},
 	];
 
+	// ── the row drawer (goal cond 8): click an event → the full record + linked context. ──
+	let drawerEvent = $state<AuditEvent | null>(null);
+
+	/** Map an audit resource id to its estate page, when one exists (cross-zone → hard nav). */
+	function resourceHref(res: string): string | null {
+		if (res.startsWith('table:'))
+			return `/data/tables/${encodeURIComponent(res.slice('table:'.length))}`;
+		if (res.startsWith('namespace:'))
+			return `/data/namespaces/${encodeURIComponent(res.slice('namespace:'.length))}`;
+		if (res.startsWith('warehouse:')) return '/data/warehouses';
+		return null;
+	}
+
+	/** Related events: narrow the trail to this event's subject or resource (the drawer's pivot). */
+	function filterRelated(kind: 'subject' | 'resource'): void {
+		const e = drawerEvent;
+		if (!e) return;
+		if (kind === 'subject') {
+			subject = e.subject;
+			resource = '';
+		} else {
+			resource = e.resource;
+			subject = '';
+		}
+		drawerEvent = null;
+		load();
+	}
+
 	const table = createSvelteTable({
 		get data() {
 			return events ?? [];
@@ -250,10 +282,65 @@
 		<DataTable
 			{table}
 			loading={events === null}
+			onrowclick={(e) => (drawerEvent = e)}
 			emptyMessage="No audit events match — widen the filters, or the trail is empty for this window."
 		/>
 	{/if}
 </div>
+
+<Sheet.Root
+	open={drawerEvent !== null}
+	onOpenChange={(o) => {
+		if (!o) drawerEvent = null;
+	}}
+>
+	<Sheet.Content side="right">
+		{#if drawerEvent}
+			<Sheet.Header>
+				<Sheet.Title>Audit event</Sheet.Title>
+				<Sheet.Description>
+					One record off the #41 compliance trail — who did what, and how it was decided.
+				</Sheet.Description>
+			</Sheet.Header>
+			<div class="drawer-body">
+				<dl class="record">
+					<dt>when</dt>
+					<dd class="mono">{when(drawerEvent.timestamp)}</dd>
+					<dt>action</dt>
+					<dd class="mono">{drawerEvent.action || '—'}</dd>
+					<dt>outcome</dt>
+					<dd class="mono {tone(drawerEvent.outcome)}">{drawerEvent.outcome || '—'}</dd>
+					<dt>subject</dt>
+					<dd class="mono">{drawerEvent.subject || '—'}</dd>
+					<dt>resource</dt>
+					<dd class="mono">{drawerEvent.resource || '—'}</dd>
+				</dl>
+				<div class="drawer-links">
+					{#if drawerEvent.subject}
+						<button class="btn" onclick={() => filterRelated('subject')}>
+							<Filter size={12} /> Events by this subject
+						</button>
+					{/if}
+					{#if drawerEvent.resource}
+						<button class="btn" onclick={() => filterRelated('resource')}>
+							<Filter size={12} /> Events on this resource
+						</button>
+						{#if resourceHref(drawerEvent.resource)}
+							<!-- Cross-zone jump: leaves this zone's route manifest, so hard-navigate. -->
+							<a
+								class="btn jumplink"
+								href={resourceHref(drawerEvent.resource)}
+								data-sveltekit-reload
+							>
+								<ExternalLink size={12} /> Open resource ↗
+							</a>
+						{/if}
+					{/if}
+				</div>
+			</div>
+		{/if}
+	</Sheet.Content>
+</Sheet.Root>
 
 <style>
 	.page {
@@ -323,5 +410,47 @@
 	}
 	.deny {
 		color: var(--fail);
+	}
+	.drawer-body {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 0 16px 16px;
+		overflow-y: auto;
+	}
+	.record {
+		display: grid;
+		grid-template-columns: 84px 1fr;
+		gap: 6px 10px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.record dt {
+		color: var(--faint);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 10.5px;
+	}
+	.record dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.drawer-links {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
+	}
+	.drawer-links .btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+	}
+	.jumplink {
+		text-decoration: none;
+	}
+	.mono {
+		font-family: ui-monospace, monospace;
 	}
 </style>

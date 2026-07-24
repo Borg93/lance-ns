@@ -212,6 +212,27 @@ test('a shrinking stream renders a neutral negative delta with an accurate toolt
 	await expect(totalsDelta).toHaveClass(/neg/);
 });
 
+test('a consumer row click opens the drawer with the full record and diagnosis', async ({
+	page,
+}) => {
+	await page.route('**/admin/api/jetstream*', (route) => json(route, OVERVIEW));
+	await page.goto('/admin/streams');
+	await page.getByLabel('Stream DLQ').locator('tbody tr', { hasText: 'fR9hEVt8' }).click();
+	const drawer = page.locator('[data-slot="sheet-content"]');
+	await expect(drawer).toContainText('Consumer fR9hEVt8');
+	// The full record: stream, service, lag counters, and the wedge diagnosis for redelivered > 0.
+	await expect(drawer).toContainText('DLQ');
+	await expect(drawer).toContainText('(ephemeral)');
+	await expect(drawer.locator('.record')).toContainText('4'); // pending
+	await expect(drawer.locator('.record .warn')).toHaveText('2'); // redelivered, warn-toned
+	await expect(drawer.locator('.diagnosis')).toContainText('wedge signal');
+	// A DLQ-stream consumer links straight to the DLQ ops panel (same zone).
+	await expect(drawer.getByRole('link', { name: /DLQ ops panel/ })).toHaveAttribute(
+		'href',
+		'/admin/dlq',
+	);
+});
+
 test('a 403 from the BFF renders the forbidden state', async ({ page }) => {
 	await page.route('**/admin/api/jetstream*', (route) =>
 		json(route, { detail: 'the stream view is estate-admin only' }, 403),

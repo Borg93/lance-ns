@@ -20,7 +20,8 @@
 		type PaginationState,
 		type SortingState,
 	} from '@rask/ui/data-table';
-	import { RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
+	import * as Sheet from '@rask/ui/sheet';
+	import { ExternalLink, RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { fetchDlq, replayDlq } from './api';
 	import type { DlqBacklog, DlqEvent } from './types';
@@ -87,6 +88,16 @@
 		if (seconds < 3600) return `${Math.round(seconds / 60)}m`;
 		if (seconds < 86400) return `${Math.round(seconds / 3600)}h`;
 		return `${Math.round(seconds / 86400)}d`;
+	}
+
+	// ── the row drawer (goal cond 8): click an at-risk event → the staged payload + replay. ──
+	let drawerEvent = $state<DlqEvent | null>(null);
+
+	async function replayFromDrawer(): Promise<void> {
+		const e = drawerEvent;
+		if (!e) return;
+		drawerEvent = null; // the outcome lands in the bar message; the list refreshes underneath
+		await replay(e);
 	}
 
 	// ── the DataTable (goal cond 4): sortable/searchable at-risk rows, replay action preserved. ──
@@ -196,7 +207,11 @@
 			class="btn ghost"
 			disabled={busy !== null}
 			aria-label="Replay {e.run_id}"
-			onclick={() => replay(e)}><RotateCcw size={12} /> {busy === e.run_id ? '…' : 'Replay'}</button
+			onclick={(ev) => {
+				// The row itself opens the drawer — the inline replay must not also do that.
+				ev.stopPropagation();
+				replay(e);
+			}}><RotateCcw size={12} /> {busy === e.run_id ? '…' : 'Replay'}</button
 		>
 	{:else}
 		<span class="mut" title="An unparseable object can't be replayed; the relay drops it."
@@ -238,10 +253,73 @@
 		<DataTable
 			{table}
 			loading={backlog === null}
+			onrowclick={(e) => (drawerEvent = e)}
 			emptyMessage="The outbox is empty — every committed write's lineage has been delivered. Nothing to replay."
 		/>
 	{/if}
 </div>
+
+<Sheet.Root
+	open={drawerEvent !== null}
+	onOpenChange={(o) => {
+		if (!o) drawerEvent = null;
+	}}
+>
+	<Sheet.Content side="right">
+		{#if drawerEvent}
+			<Sheet.Header>
+				<Sheet.Title>Staged event {drawerEvent.run_id}</Sheet.Title>
+				<Sheet.Description>
+					{drawerEvent.parseable
+						? 'A committed write whose lineage is not yet confirmed delivered — replay re-ingests it now instead of waiting for the relay tick.'
+						: 'A poison object: unparseable, so it cannot be replayed — the relay drops it on its next pass.'}
+				</Sheet.Description>
+			</Sheet.Header>
+			<div class="drawer-body">
+				<dl class="record">
+					<dt>run</dt>
+					<dd class="mono">{drawerEvent.run_id}</dd>
+					<dt>type</dt>
+					<dd class="mono" class:poison={!drawerEvent.parseable}>
+						{drawerEvent.parseable ? (drawerEvent.event_type ?? '—') : 'poison'}
+					</dd>
+					<dt>event time</dt>
+					<dd class="mono">{drawerEvent.event_time ?? '—'}</dd>
+					<dt>job</dt>
+					<dd class="mono">{drawerEvent.job ?? '—'}</dd>
+					<dt>inputs</dt>
+					<dd class="mono">{(drawerEvent.inputs ?? []).join(', ') || '—'}</dd>
+					<dt>outputs</dt>
+					<dd class="mono">{(drawerEvent.outputs ?? []).join(', ') || '—'}</dd>
+				</dl>
+				<div>
+					<h4 class="drawer-h">Payload (parsed staged fields)</h4>
+					<pre class="payload" aria-label="Staged event payload"><code
+							>{JSON.stringify(drawerEvent, null, 2)}</code
+						></pre>
+				</div>
+				<div class="drawer-links">
+					{#if drawerEvent.parseable}
+						<button class="btn" disabled={busy !== null} onclick={replayFromDrawer}>
+							<RotateCcw size={12} /> Replay this event
+						</button>
+					{/if}
+					{#each drawerEvent.outputs ?? [] as out (out)}
+						<!-- Cross-zone jump to the output dataset's table page (hard nav). -->
+						<a
+							class="btn jumplink"
+							href={`/data/tables/${encodeURIComponent(out)}`}
+							data-sveltekit-reload
+						>
+							<ExternalLink size={12} />
+							{out} ↗
+						</a>
+					{/each}
+				</div>
+			</div>
+		{/if}
+	</Sheet.Content>
+</Sheet.Root>
 
 <style>
 	.page {
@@ -328,5 +406,61 @@
 	}
 	.mut {
 		color: var(--faint);
+	}
+	.drawer-body {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 0 16px 16px;
+		overflow-y: auto;
+	}
+	.record {
+		display: grid;
+		grid-template-columns: 84px 1fr;
+		gap: 6px 10px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.record dt {
+		color: var(--faint);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 10.5px;
+	}
+	.record dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.drawer-h {
+		font-size: 11px;
+		text-transform: uppercase;
+		letter-spacing: 0.06em;
+		color: var(--faint);
+		margin: 0 0 6px;
+	}
+	.payload {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 11px;
+		line-height: 1.5;
+		padding: 10px 12px;
+		margin: 0;
+		overflow-x: auto;
+		font-family: ui-monospace, monospace;
+	}
+	.drawer-links {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
+	}
+	.jumplink {
+		text-decoration: none;
+	}
+	.mono {
+		font-family: ui-monospace, monospace;
 	}
 </style>

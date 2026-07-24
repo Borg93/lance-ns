@@ -16,9 +16,13 @@
 		type PaginationState,
 		type SortingState,
 	} from '@rask/ui/data-table';
+	import * as Sheet from '@rask/ui/sheet';
+	import { ExternalLink } from '@lucide/svelte';
+	import { base } from '$app/paths';
 	import type { JetStreamConsumer } from './jetstream';
 
-	let { consumers, now }: { consumers: JetStreamConsumer[]; now: string } = $props();
+	let { consumers, now, stream }: { consumers: JetStreamConsumer[]; now: string; stream: string } =
+		$props();
 
 	// A consumer whose last delivery activity is >10 min behind the monitor's own clock is stale:
 	// on an active fabric that usually means its app stopped reading (wedged subscriber).
@@ -34,6 +38,9 @@
 		const d = new Date(ts);
 		return Number.isNaN(d.getTime()) ? ts : d.toLocaleString();
 	}
+
+	// ── the row drawer (goal cond 8): click a consumer → the full record + the lag diagnosis. ──
+	let drawerConsumer = $state<JetStreamConsumer | null>(null);
 
 	let sorting = $state<SortingState>([]);
 	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
@@ -138,7 +145,75 @@
 	</span>
 {/snippet}
 
-<DataTable {table} emptyMessage="No consumers bound." />
+<DataTable {table} onrowclick={(c) => (drawerConsumer = c)} emptyMessage="No consumers bound." />
+
+<Sheet.Root
+	open={drawerConsumer !== null}
+	onOpenChange={(o) => {
+		if (!o) drawerConsumer = null;
+	}}
+>
+	<Sheet.Content side="right">
+		{#if drawerConsumer}
+			<Sheet.Header>
+				<Sheet.Title>Consumer {drawerConsumer.name}</Sheet.Title>
+				<Sheet.Description>
+					One consumer on <span class="mono">{stream}</span> — pending is the pressure signal, redelivered
+					the wedge signal, staleness judged against the monitor's clock.
+				</Sheet.Description>
+			</Sheet.Header>
+			<div class="drawer-body">
+				<dl class="record">
+					<dt>stream</dt>
+					<dd class="mono">{stream}</dd>
+					<dt>service</dt>
+					<dd class="mono">{drawerConsumer.service}</dd>
+					<dt>consumer</dt>
+					<dd class="mono">
+						{drawerConsumer.durable ? drawerConsumer.name : `${drawerConsumer.name} (ephemeral)`}
+					</dd>
+					<dt>deliver group</dt>
+					<dd class="mono">{drawerConsumer.deliver_group ?? '—'}</dd>
+					<dt>pending</dt>
+					<dd class="mono">{drawerConsumer.num_pending}</dd>
+					<dt>ack-pending</dt>
+					<dd class="mono">{drawerConsumer.num_ack_pending}</dd>
+					<dt>redelivered</dt>
+					<dd class="mono" class:warn={drawerConsumer.num_redelivered > 0}>
+						{drawerConsumer.num_redelivered}
+					</dd>
+					<dt>last active</dt>
+					<dd class="mono">
+						{when(drawerConsumer.last_active)}
+						{#if isStale(drawerConsumer.last_active)}
+							<span class="stalechip" title="No delivery activity for over 10 minutes">stale</span>
+						{/if}
+					</dd>
+				</dl>
+				<p class="diagnosis">
+					{#if isStale(drawerConsumer.last_active)}
+						No delivery activity for over 10 minutes — on an active fabric that usually means the
+						subscriber stopped reading (wedged), even if its pod looks Ready.
+					{:else if drawerConsumer.num_redelivered > 0}
+						Redeliveries are the wedge signal: the app received these messages but did not ack them
+						in time.
+					{:else if drawerConsumer.num_pending > 0}
+						Backlog exists but delivery is active — pressure, not a wedge.
+					{:else}
+						Healthy: no backlog, no redeliveries, recent delivery activity.
+					{/if}
+				</p>
+				{#if stream === 'DLQ' || stream.startsWith('DLQ_')}
+					<div class="drawer-links">
+						<a class="btn jumplink" href="{base}/dlq">
+							<ExternalLink size={12} /> Open the DLQ ops panel
+						</a>
+					</div>
+				{/if}
+			</div>
+		{/if}
+	</Sheet.Content>
+</Sheet.Root>
 
 <style>
 	.service {
@@ -172,6 +247,57 @@
 	.faint {
 		color: var(--faint);
 		white-space: nowrap;
+	}
+	.drawer-body {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 0 16px 16px;
+		overflow-y: auto;
+	}
+	.record {
+		display: grid;
+		grid-template-columns: 96px 1fr;
+		gap: 6px 10px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.record dt {
+		color: var(--faint);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 10.5px;
+	}
+	.record dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.diagnosis {
+		color: var(--mut);
+		font-size: 12px;
+		margin: 0;
+	}
+	.drawer-links {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
+	}
+	.btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		cursor: pointer;
+	}
+	.jumplink {
+		text-decoration: none;
 	}
 	.mono {
 		font-family: ui-monospace, monospace;

@@ -18,8 +18,10 @@
 		type PaginationState,
 		type SortingState,
 	} from '@rask/ui/data-table';
-	import { Building2, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import * as Sheet from '@rask/ui/sheet';
+	import { Building2, ExternalLink, RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
 	import { parse } from '@rask/api';
+	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { ProjectsResponseSchema, type Project } from './tenants';
 	import { requestJSON } from './http';
@@ -85,6 +87,9 @@
 					})),
 		),
 	);
+
+	// ── the row drawer (goal cond 8): click a tenant row → the full record + linked context. ──
+	let drawerRow = $state<Row | null>(null);
 
 	let sorting = $state<SortingState>([]);
 	let globalFilter = $state('');
@@ -218,10 +223,77 @@
 		<DataTable
 			{table}
 			loading={projects === null}
+			onrowclick={(r) => (drawerRow = r)}
 			emptyMessage="No projects yet — the first warehouse-create brings its project into existence."
 		/>
 	{/if}
 </div>
+
+<Sheet.Root
+	open={drawerRow !== null}
+	onOpenChange={(o) => {
+		if (!o) drawerRow = null;
+	}}
+>
+	<Sheet.Content side="right">
+		{#if drawerRow}
+			<Sheet.Header>
+				<Sheet.Title>
+					{drawerRow.warehouse
+						? `Warehouse ${drawerRow.warehouse}`
+						: `Project ${drawerRow.project}`}
+				</Sheet.Title>
+				<Sheet.Description>
+					One tenant row off the registry + FGA — the project, its storage binding, and who
+					administers it.
+				</Sheet.Description>
+			</Sheet.Header>
+			<div class="drawer-body">
+				<dl class="record">
+					<dt>project</dt>
+					<dd class="mono">{drawerRow.project}</dd>
+					<dt>warehouse</dt>
+					<dd class="mono">{drawerRow.warehouse ?? '(no warehouses)'}</dd>
+					<dt>bucket</dt>
+					<dd class="mono">{drawerRow.bucket ?? '—'}</dd>
+					<dt>status</dt>
+					<dd class="mono" class:warn={drawerRow.status !== null && drawerRow.status !== 'active'}>
+						{drawerRow.status ?? '—'}
+					</dd>
+					<dt>admins</dt>
+					<dd>
+						{#if drawerRow.admins.length === 0}
+							<span class="mut">(none listed — FGA off or unavailable)</span>
+						{:else}
+							{#each drawerRow.admins as a (a)}<span class="chip mono">{a}</span>{/each}
+						{/if}
+					</dd>
+				</dl>
+				<div class="drawer-links">
+					{#if drawerRow.warehouse}
+						<!-- Same-zone filtered view of the related audit events (the viewer reads ?resource=). -->
+						<a
+							class="btn jumplink"
+							href={`${base}/audit?resource=${encodeURIComponent(drawerRow.warehouse)}`}
+						>
+							<ScrollText size={12} /> Audit events for this warehouse
+						</a>
+					{/if}
+					<a
+						class="btn jumplink"
+						href={`${base}/audit?resource=${encodeURIComponent(drawerRow.project)}`}
+					>
+						<ScrollText size={12} /> Audit events for this project
+					</a>
+					<!-- Cross-zone jump: the warehouse admin page lives in the data zone (hard nav). -->
+					<a class="btn jumplink" href="/data/warehouses" data-sveltekit-reload>
+						<ExternalLink size={12} /> Open warehouse admin ↗
+					</a>
+				</div>
+			</div>
+		{/if}
+	</Sheet.Content>
+</Sheet.Root>
 
 <style>
 	.page {
@@ -297,6 +369,45 @@
 	}
 	.jump + .jump {
 		margin-left: 0;
+	}
+	.drawer-body {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 0 16px 16px;
+		overflow-y: auto;
+	}
+	.record {
+		display: grid;
+		grid-template-columns: 84px 1fr;
+		gap: 6px 10px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.record dt {
+		color: var(--faint);
+		text-transform: uppercase;
+		letter-spacing: 0.05em;
+		font-size: 10.5px;
+	}
+	.record dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.drawer-links {
+		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
+		gap: 8px;
+	}
+	.drawer-links .btn {
+		display: inline-flex;
+		align-items: center;
+		gap: 5px;
+	}
+	.jumplink {
+		text-decoration: none;
 	}
 	.mono {
 		font-family: ui-monospace, monospace;

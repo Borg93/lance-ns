@@ -59,6 +59,30 @@ test('the outcome filter re-queries the BFF', async ({ page }) => {
 	await expect(page.locator('table')).toContainText('can_drop');
 });
 
+test('a row click opens the drawer with the full record and linked context', async ({ page }) => {
+	await page.goto('/admin/audit');
+	await page.locator('tbody tr', { hasText: 'can_drop' }).click();
+	// The drawer carries the full record…
+	const drawer = page.locator('[data-slot="sheet-content"]');
+	await expect(drawer).toContainText('user:bob');
+	await expect(drawer).toContainText('table:db1$t');
+	await expect(drawer).toContainText('DENY');
+	// …a cross-zone jump link to the resource page (hard nav)…
+	const jump = drawer.getByRole('link', { name: /Open resource/ });
+	await expect(jump).toHaveAttribute('href', '/data/tables/db1%24t');
+	await expect(jump).toHaveAttribute('data-sveltekit-reload', '');
+	// …and the "related events" pivot: filter to this subject re-queries the BFF.
+	await drawer.getByRole('button', { name: 'Events by this subject' }).click();
+	await expect.poll(() => lastQuery).toContain('subject=user%3Abob');
+	await expect(page.getByLabel('Subject filter')).toHaveValue('user:bob');
+});
+
+test('a ?resource= deep link lands pre-filtered (the drawers link into this)', async ({ page }) => {
+	await page.goto('/admin/audit?resource=table%3Adb1%24t');
+	await expect.poll(() => lastQuery).toContain('resource=table%3Adb1%24t');
+	await expect(page.getByLabel('Resource filter')).toHaveValue('table:db1$t');
+});
+
 test('the shared sidebar marks the Audit leaf active', async ({ page }) => {
 	await page.goto('/admin/audit');
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Audit' })).toBeVisible();

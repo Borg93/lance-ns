@@ -219,7 +219,7 @@
 						{:else}
 							<!-- Goal cond 4: the consumer rows on the shared DataTable (sortable; same
 							     pressure/wedge/stale semantics, judged against the monitor's clock). -->
-							<StreamConsumers consumers={s.consumers} now={overview.now} />
+							<StreamConsumers consumers={s.consumers} now={overview.now} stream={s.name} />
 						{/if}
 					</section>
 				{/each}

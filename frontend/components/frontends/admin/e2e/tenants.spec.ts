@@ -47,6 +47,26 @@ test('renders one sortable row per warehouse with project, status, and admins', 
 	await expect(page.locator('tr', { hasText: 'beta-wh' })).toBeVisible();
 });
 
+test('a row click opens the drawer with the full record and linked context', async ({ page }) => {
+	await page.route('**/admin/api/projects*', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(FIXTURE) }),
+	);
+	await page.goto('/admin/tenants');
+	await page.locator('tbody tr', { hasText: 'acme-cold' }).click();
+	const drawer = page.locator('[data-slot="sheet-content"]');
+	await expect(drawer).toContainText('Warehouse acme-cold');
+	await expect(drawer).toContainText('acme-archive');
+	await expect(drawer).toContainText('deactivated');
+	await expect(drawer.locator('.chip')).toHaveCount(2); // alice + bob
+	// Linked context: a same-zone filtered audit view + the cross-zone warehouse admin jump.
+	await expect(
+		drawer.getByRole('link', { name: 'Audit events for this warehouse' }),
+	).toHaveAttribute('href', '/admin/audit?resource=acme-cold');
+	const jump = drawer.getByRole('link', { name: /Open warehouse admin/ });
+	await expect(jump).toHaveAttribute('href', '/data/warehouses');
+	await expect(jump).toHaveAttribute('data-sveltekit-reload', '');
+});
+
 test('a non-estate-admin sees the forbidden state', async ({ page }) => {
 	await page.route('**/admin/api/projects*', (route) =>
 		route.fulfill({ status: 403, contentType: 'application/json', body: '{"detail":"forbidden"}' }),

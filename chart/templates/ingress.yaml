@@ -39,6 +39,36 @@ spec:
                   number: {{ $root.Values.frontend.service.port }}
           {{- end }}
           {{- end }}
+          {{- if .Values.media.enabled }}
+          {{- /* lance-media API plane (merged per docs/LANCE_NS_HANDOFF.md): the media/annotator zones
+                 are ssr=false SPAs with NO BFF — their root-absolute /api/* fetches route HERE, matching
+                 the zone map their dev proxy/server.ts used: annotations|assist|jobs → annotator,
+                 search → search, everything else under /api → viewer. Longest-prefix wins, so these
+                 sit above the "/" catch-all and the specific /api/<x> paths win over bare /api. */}}
+          {{- range $p := list "annotations" "assist" "jobs" }}
+          - path: /api/{{ $p }}
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" $root }}-annotator
+                port:
+                  number: {{ $root.Values.media.services.annotator.port }}
+          {{- end }}
+          - path: /api/search
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" $root }}-search
+                port:
+                  number: {{ $root.Values.media.services.search.port }}
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" $root }}-viewer
+                port:
+                  number: {{ $root.Values.media.services.viewer.port }}
+          {{- end }}
           {{- /* The catch-all home zone LAST: "/" (and anything not a domain zone). */}}
           {{- range .Values.frontend.apps }}
           {{- if .catchAll }}

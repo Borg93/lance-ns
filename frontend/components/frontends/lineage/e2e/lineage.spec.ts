@@ -174,6 +174,18 @@ test.beforeEach(async ({ page }) => {
 					: EDGES.filter((e) => e.target === id).map((e) => ({ name: e.source }));
 			return json(route, { dataset: id, related });
 		}
+		// The bulk estate read the DAG explorer polls (one request; per-node version/failed rollups).
+		if (path === '/graph' || path.startsWith('/graph?'))
+			return json(route, {
+				nodes: NODES.map((n) => ({
+					...n,
+					versions: n.id === 'silver$features' ? ['2', '3'] : [],
+					failed: false,
+				})),
+				edges: EDGES,
+				total: NODES.length,
+				capped: false,
+			});
 		const m = path.match(/^\/datasets\/([^/]+)\/(producers|graph|columns)/);
 		if (m) {
 			const id = decodeURIComponent(m[1]);
@@ -529,15 +541,8 @@ test('graph + columns layout builds stay cheap (measured, printed to stdout)', a
 		kind: 'derived_from',
 	}));
 	await page.route(
-		(url) => url.pathname.endsWith('/lineage/api/datasets'),
-		(route) =>
-			json(route, {
-				datasets: BIG_NODES.map((n) => ({ name: n.id, namespace: n.namespace, tags: [] })),
-				total: 60,
-			}),
-	);
-	await page.route('**/lineage/api/datasets/*/graph', (route) =>
-		json(route, { root: 'ds_0', nodes: BIG_NODES, edges: BIG_EDGES }),
+		(url) => url.pathname.endsWith('/lineage/api/graph'),
+		(route) => json(route, { nodes: BIG_NODES, edges: BIG_EDGES, total: 60, capped: false }),
 	);
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(60, { timeout: 20_000 });

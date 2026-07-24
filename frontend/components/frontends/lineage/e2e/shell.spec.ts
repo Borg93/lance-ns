@@ -34,8 +34,11 @@ test('an estate admin gets the full navbar entry set + the Marquez-parity sideba
 	await expect(nav.getByRole('link', { name: 'Lineage' })).toBeVisible();
 	await expect(nav.getByRole('link', { name: 'Admin' })).toBeVisible();
 	// The zone sidebar lists exactly the four first-class views + the Graph (active at the root).
+	// Scoped to the sidebar: page content may legitimately link to the same views (e.g. the graph
+	// header's capped hint links to Datasets), which would trip strict mode on a page-wide query.
+	const sidebar = page.locator('[data-sidebar="content"]');
 	for (const leaf of ['Datasets', 'Jobs', 'Runs', 'Columns', 'Graph']) {
-		await expect(page.getByRole('link', { name: leaf, exact: true })).toBeVisible();
+		await expect(sidebar.getByRole('link', { name: leaf, exact: true })).toBeVisible();
 	}
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Graph' })).toBeVisible();
 });

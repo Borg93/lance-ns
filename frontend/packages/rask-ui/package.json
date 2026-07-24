@@ -52,6 +52,10 @@
 			"types": "./dist/components/checkbox/index.d.ts",
 			"svelte": "./dist/components/checkbox/index.js"
 		},
+		"./data-table": {
+			"types": "./dist/components/data-table/index.d.ts",
+			"svelte": "./dist/components/data-table/index.js"
+		},
 		"./alert-dialog": {
 			"types": "./dist/components/alert-dialog/index.d.ts",
 			"svelte": "./dist/components/alert-dialog/index.js"
@@ -113,6 +117,7 @@
 	},
 	"dependencies": {
 		"@lucide/svelte": "^1.21.0",
+		"@tanstack/table-core": "^8.21.3",
 		"bits-ui": "^2.18.1",
 		"clsx": "^2.1.1",
 		"gsap": "^3.13.0",

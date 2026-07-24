@@ -14813,7 +14813,7 @@
         ]
       },
       "post": {
-        "description": "Provision a warehouse: create its physical bucket + register it + seed FGA. Admin-gated.\n\nOrder (fail-closed): authorize FIRST (``can_create_warehouse`` on the project), THEN provision the\nbucket (idempotent), write the registry record, and grant the caller ``owner`` on ``warehouse:<id>``\nwith a ``parent`` edge to the project. A re-run with the same id is idempotent (bucket + record both\noverwrite-safe).",
+        "description": "Provision a warehouse: create its physical bucket + register it + seed FGA. Admin-gated.\n\nOrder (fail-closed): authorize FIRST (``can_create_warehouse`` on the project, or \u2014 for a project that\ndoes not exist yet \u2014 the estate admin's ``can_observe_events`` on the root), THEN provision the bucket\n(idempotent), write the registry record, and grant the caller ``owner`` on ``warehouse:<id>`` with a\n``parent`` edge to the project. A re-run with the same id is idempotent (bucket + record both\noverwrite-safe).\n\nMinting a NEW tenant additionally grants the caller ``admin`` on ``project:<project>``: a brand-new\nproject has no tuples, so without that seed it would stay adminless forever (see\n``fga_deps.require_can_create_warehouse``). That bootstrap grant is audited + published like any other\ngrant.",
         "operationId": "create_warehouse_v1_warehouses_post",
         "requestBody": {
           "content": {

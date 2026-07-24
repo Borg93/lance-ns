@@ -189,6 +189,9 @@ def test_model_actually_defines_the_warehouse_relations() -> None:
     assert ("project", "can_create_warehouse") in defined
     assert ("warehouse", "can_get_metadata") in defined
     assert ("warehouse", "can_create_namespace") in defined
+    # The first-warehouse bootstrap door + the tenant-admin grant it seeds.
+    assert ("warehouse", "can_observe_events") in defined
+    assert ("project", "admin") in defined
 
 
 def test_seed_warehouse_writes_only_relations_the_model_defines(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -203,20 +206,279 @@ def test_seed_warehouse_writes_only_relations_the_model_defines(monkeypatch: pyt
         captured.extend(tuples)
 
     monkeypatch.setattr(fga_module, "write_tuples", rec_write)
-    asyncio.run(
-        fga_deps.seed_warehouse(MagicMock(), _fga_settings(), _TOKEN, warehouse_id="wh-a", project="acme")
+    # Drive the BOOTSTRAP variant: it is the widest tuple set the seed can emit (the two warehouse tuples
+    # plus the new project's admin grant), so one pass covers every relation this feature writes.
+    granted = asyncio.run(
+        fga_deps.seed_warehouse(
+            MagicMock(),
+            _fga_settings(),
+            _TOKEN,
+            warehouse_id="wh-a",
+            project="acme",
+            grant_project_admin=True,
+        )
     )
+    assert granted is True  # reported, so the caller only audits a grant that really happened
     assert captured, "seed_warehouse wrote no tuples"
     model = {t["type"]: set(t.get("relations") or {}) for t in fga_module.load_model()["type_definitions"]}
+    assignable = {
+        (t["type"], rel)
+        for t in fga_module.load_model()["type_definitions"]
+        for rel, meta in ((t.get("metadata") or {}).get("relations") or {}).items()
+        if meta.get("directly_related_user_types")
+    }
     for t in captured:
         obj_type = t.object.split(":", 1)[0]
         assert t.relation in model.get(obj_type, set()), (
             f"seed_warehouse writes {obj_type}#{t.relation}, NOT a relation on the compiled model — OpenFGA "
             f"would reject the seed (503). {obj_type} has: {sorted(model.get(obj_type, set()))}"
         )
+        # Defined is not enough: a DERIVED relation (a `can_*` action) accepts no direct tuple, so writing
+        # one is the same OpenFGA 400 → fail-closed 503. Every seeded relation must be directly assignable.
+        assert (obj_type, t.relation) in assignable, (
+            f"seed_warehouse writes {obj_type}#{t.relation}, a DERIVED relation that accepts no direct tuple"
+        )
     written = {(t.object.split(":", 1)[0], t.relation) for t in captured}
     assert ("warehouse", "project") in written  # the parent link uses the warehouse's real pointer relation
     assert ("warehouse", "parent") not in written  # ...never the namespace/table `parent` name (the old bug)
+    assert ("project", "admin") in written  # the tenant-bootstrap grant that makes the new project governable
+
+
+def test_seed_warehouse_omits_the_project_admin_grant_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An ADDITIONAL warehouse in a live tenant must not re-grant its creator project admin (that would let
+    # any warehouse-owner quietly escalate to tenant admin). Default off, and the return says so.
+    captured: list[Any] = []
+
+    async def rec_write(_client: object, tuples: list[Any], **_kw: object) -> None:
+        captured.extend(tuples)
+
+    monkeypatch.setattr(fga_module, "write_tuples", rec_write)
+    granted = asyncio.run(
+        fga_deps.seed_warehouse(MagicMock(), _fga_settings(), _TOKEN, warehouse_id="wh-a", project="acme")
+    )
+    assert granted is False
+    assert all(not t.object.startswith("project:") or t.relation != "admin" for t in captured)
+
+
+# --------------------------------------------------------------------------- #
+# first-warehouse bootstrap — a brand-new project has NO tuples, so the project-scoped
+# gate could only ever deny and NOBODY could mint a tenant (found live 2026-07-24: the
+# estate admin's own project create 403'd). The estate-admin door + the admin seed.
+# --------------------------------------------------------------------------- #
+
+#: The fixed FGA root object every estate-admin gate (/v1/events, /v1/access) checks against — the same
+#: default `Settings.fga_root_object` carries and `chart/templates/bootstrap-admin.yaml` grants `owner` on.
+_ROOT_OBJECT = "warehouse:lance_catalog"
+
+
+class _FakeStore:
+    """A minimal stand-in for the OpenFGA store: it records the tuples the seed writes and resolves the two
+    relations this flow checks against them — ``project#can_create_warehouse`` from a direct ``project#admin``
+    tuple and ``warehouse#can_observe_events`` from a direct ``owner`` on the root — both exactly as the
+    compiled model derives them. That makes the SEQUENCE provable offline: an estate admin mints a tenant,
+    and the tenant is then self-governing (the second warehouse passes on its OWN project rung, not the
+    estate door). A relation outside the pair is an error, so a silent gate change can't slip past."""
+
+    def __init__(self, *, estate_admins: tuple[str, ...] = ()) -> None:
+        self.tuples: set[tuple[str, str, str]] = {
+            (f"user:{sub}", "owner", _ROOT_OBJECT) for sub in estate_admins
+        }
+        self.checks: list[tuple[str, str, str]] = []
+
+    async def check(self, _client: object, *, user: str, relation: str, obj: str, **_kw: object) -> bool:
+        self.checks.append((user, relation, obj))
+        # The real `fga.check` qualifies a bare sub into `user:<sub>` (qualify=True) before it reaches the
+        # store; mirror that here so a checked subject and a seeded tuple are the same string.
+        subject = user if ":" in user else f"user:{user}"
+        if relation == "can_observe_events":
+            return (subject, "owner", obj) in self.tuples
+        if relation == "can_create_warehouse":
+            return (subject, "admin", obj) in self.tuples
+        raise AssertionError(f"the warehouse-create gate checked an unexpected relation: {relation}")
+
+    async def write(self, _client: object, tuples: list[Any], **_kw: object) -> None:
+        self.tuples.update((t.user, t.relation, t.object) for t in tuples)
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(fga_module, "check", self.check)
+        monkeypatch.setattr(fga_module, "write_tuples", self.write)
+
+
+def _governed_settings(tmp_path: Any) -> Settings:
+    return Settings.model_validate(
+        {
+            "warehouses_enabled": True,
+            "control_root": _root(tmp_path),
+            "fga_enabled": True,
+            "oidc_enabled": True,
+            "oidc_issuer": "https://idp",
+            "oidc_audience": "lance",
+            "s3_access_key_id": "x",
+            "s3_secret_access_key": "x",
+        }
+    )
+
+
+def _create_as(settings: Settings, sub: str, body: Any) -> Any:
+    from catalog.api.v1.endpoints import warehouses as wh_ep
+    from catalog.core.control_emit import NoopControlEmitter
+
+    return asyncio.run(
+        wh_ep.create_warehouse(
+            settings=settings,
+            token=IDToken(iss="i", sub=sub, aud="lance", exp=1, iat=1),
+            client=MagicMock(),
+            control=NoopControlEmitter(),
+            body=body,
+        )
+    )
+
+
+def test_bootstrap_gate_accepts_the_estate_admin_and_tries_the_project_door_first(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    store = _FakeStore(estate_admins=("alice",))
+    monkeypatch.setattr(fga_module, "check", store.check)
+    asyncio.run(
+        fga_deps.require_can_create_warehouse(
+            MagicMock(), _fga_settings(), _TOKEN, project="acme", bootstrap=True
+        )
+    )
+    # Project rung first (a pre-seeded project admin never touches the estate door), then the root fallback.
+    assert store.checks == [
+        ("alice", "can_create_warehouse", "project:acme"),
+        ("alice", "can_observe_events", _ROOT_OBJECT),
+    ]
+
+
+def test_bootstrap_gate_still_passes_a_preseeded_project_admin_without_the_estate_door(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The seed scripts write `project:<p> admin` BEFORE any warehouse exists (scripts/e2e_stack.sh); that
+    # path must keep working untouched — and must not need, or probe, the estate rung.
+    store = _FakeStore()
+    store.tuples.add(("user:alice", "admin", "project:acme"))
+    monkeypatch.setattr(fga_module, "check", store.check)
+    asyncio.run(
+        fga_deps.require_can_create_warehouse(
+            MagicMock(), _fga_settings(), _TOKEN, project="acme", bootstrap=True
+        )
+    )
+    assert store.checks == [("alice", "can_create_warehouse", "project:acme")]
+
+
+def test_bootstrap_gate_denies_an_ordinary_user(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Fail-closed: holding neither the project rung nor the estate rung is still a 403 — the extra door is
+    # for the platform admin, not an open self-serve tenant factory.
+    store = _FakeStore()
+    monkeypatch.setattr(fga_module, "check", store.check)
+    with pytest.raises(PermissionDeniedError):
+        asyncio.run(
+            fga_deps.require_can_create_warehouse(
+                MagicMock(), _fga_settings(), _TOKEN, project="acme", bootstrap=True
+            )
+        )
+    assert store.checks == [
+        ("alice", "can_create_warehouse", "project:acme"),
+        ("alice", "can_observe_events", _ROOT_OBJECT),
+    ]
+
+
+def test_bootstrap_gate_fails_closed_on_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    # An OpenFGA outage on the FIRST door must propagate as a 503, never fall through to the next door
+    # (an unavailable authz layer is not a denial of one rung — it is no decision at all).
+    probed: list[str] = []
+
+    async def outage(_c: object, *, user: str, relation: str, obj: str, **_kw: object) -> bool:
+        probed.append(relation)
+        raise ServiceUnavailableError("openfga down")
+
+    monkeypatch.setattr(fga_module, "check", outage)
+    with pytest.raises(ServiceUnavailableError):
+        asyncio.run(
+            fga_deps.require_can_create_warehouse(
+                MagicMock(), _fga_settings(), _TOKEN, project="acme", bootstrap=True
+            )
+        )
+    assert probed == ["can_create_warehouse"]
+
+
+def test_existing_project_gate_is_unchanged_and_ignores_the_estate_rung(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The extra door is bootstrap-ONLY: adding a warehouse to a LIVE tenant still requires that tenant's own
+    # admin rung, so the estate admin does not silently gain write rights inside every existing project.
+    store = _FakeStore(estate_admins=("alice",))
+    monkeypatch.setattr(fga_module, "check", store.check)
+    with pytest.raises(PermissionDeniedError):
+        asyncio.run(
+            fga_deps.require_can_create_warehouse(MagicMock(), _fga_settings(), _TOKEN, project="acme")
+        )
+    assert store.checks == [("alice", "can_create_warehouse", "project:acme")]
+
+
+def test_estate_admin_creates_a_project_and_the_project_then_governs_itself(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The reported bug, end to end: the estate admin's FIRST warehouse in a brand-new project used to 403.
+    # It now succeeds, seeds her as the project's admin, and the SECOND create (the flow's gold serving
+    # warehouse, against a project that now exists) passes on the project rung — no estate door involved.
+    from catalog.schemas import CreateWarehouseRequest
+
+    store = _FakeStore(estate_admins=("alice",))
+    store.install(monkeypatch)
+    monkeypatch.setattr(warehouses, "provision_bucket", lambda bucket, so: None)
+    settings = _governed_settings(tmp_path)
+
+    first = _create_as(settings, "alice", CreateWarehouseRequest(id="acme-wh", project="acme"))
+    assert first.id == "acme-wh"
+    assert ("user:alice", "admin", "project:acme") in store.tuples
+    assert ("user:alice", "owner", "warehouse:acme-wh") in store.tuples
+
+    store.checks.clear()
+    gold = _create_as(
+        settings, "alice", CreateWarehouseRequest(id="acme-gold", project="acme", serving="gold")
+    )
+    assert gold.serving == "gold"
+    assert store.checks == [("alice", "can_create_warehouse", "project:acme")]
+
+
+def test_an_ordinary_user_cannot_mint_a_tenant_through_the_endpoint(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Fail-closed at the endpoint, before ANY side effect: no bucket, no registry record, no tuple.
+    from catalog.schemas import CreateWarehouseRequest
+
+    store = _FakeStore(estate_admins=("alice",))
+    store.install(monkeypatch)
+    provisioned: list[str] = []
+    monkeypatch.setattr(warehouses, "provision_bucket", lambda bucket, so: provisioned.append(bucket))
+    settings = _governed_settings(tmp_path)
+
+    with pytest.raises(PermissionDeniedError):
+        _create_as(settings, "mallory", CreateWarehouseRequest(id="evil-wh", project="evil"))
+    assert provisioned == []
+    assert warehouses.list_warehouses(settings.registry_root, {}) == []
+    assert not any(t[2] == "project:evil" for t in store.tuples)
+
+
+def test_a_second_warehouse_in_a_live_tenant_still_needs_that_tenants_admin(
+    tmp_path: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Existing-project behaviour unchanged: once acme exists, an estate admin who is NOT acme's admin is
+    # refused — the bootstrap door is shut, and no project-admin tuple is minted behind it.
+    from catalog.schemas import CreateWarehouseRequest
+
+    store = _FakeStore(estate_admins=("alice", "carol"))
+    store.install(monkeypatch)
+    monkeypatch.setattr(warehouses, "provision_bucket", lambda bucket, so: None)
+    settings = _governed_settings(tmp_path)
+    _create_as(settings, "alice", CreateWarehouseRequest(id="acme-wh", project="acme"))
+
+    with pytest.raises(PermissionDeniedError):
+        _create_as(settings, "carol", CreateWarehouseRequest(id="acme-two", project="acme"))
+    assert ("user:carol", "admin", "project:acme") not in store.tuples
+    assert warehouses.get_warehouse(settings.registry_root, {}, "acme-two") is None
 
 
 # --------------------------------------------------------------------------- #

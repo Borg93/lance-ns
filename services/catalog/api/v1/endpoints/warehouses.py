@@ -9,7 +9,10 @@ backward-compatible.
 
 Authorization is DELIBERATELY stronger than the data plane: warehouse-create gates on the project's
 `can_create_warehouse` (= admin) — the model action that until now was defined but never enforced — not the
-writer-tier create-on-parent that guards tables/namespaces.
+writer-tier create-on-parent that guards tables/namespaces. The one exception is a project that does not
+exist yet: it has no tuples, so that check could only ever deny and NOBODY could create a tenant's first
+warehouse. There the estate admin (`can_observe_events` on the root, the `/v1/events` bar) is accepted too,
+and the create seeds the caller as the new project's `admin` so the tenant is self-sustaining from then on.
 """
 
 from __future__ import annotations
@@ -19,6 +22,7 @@ import re
 from datetime import UTC, datetime
 
 from common import fga
+from common.audit import SUCCESS, audit
 from common.oidc import IDToken
 from fastapi import APIRouter, Request
 from fastapi.concurrency import run_in_threadpool
@@ -100,10 +104,16 @@ async def create_warehouse(
 ) -> WarehouseResponse:
     """Provision a warehouse: create its physical bucket + register it + seed FGA. Admin-gated.
 
-    Order (fail-closed): authorize FIRST (``can_create_warehouse`` on the project), THEN provision the
-    bucket (idempotent), write the registry record, and grant the caller ``owner`` on ``warehouse:<id>``
-    with a ``parent`` edge to the project. A re-run with the same id is idempotent (bucket + record both
-    overwrite-safe)."""
+    Order (fail-closed): authorize FIRST (``can_create_warehouse`` on the project, or — for a project that
+    does not exist yet — the estate admin's ``can_observe_events`` on the root), THEN provision the bucket
+    (idempotent), write the registry record, and grant the caller ``owner`` on ``warehouse:<id>`` with a
+    ``parent`` edge to the project. A re-run with the same id is idempotent (bucket + record both
+    overwrite-safe).
+
+    Minting a NEW tenant additionally grants the caller ``admin`` on ``project:<project>``: a brand-new
+    project has no tuples, so without that seed it would stay adminless forever (see
+    ``fga_deps.require_can_create_warehouse``). That bootstrap grant is audited + published like any other
+    grant."""
     _require_enabled(settings)
     warehouse_id = _validate_id(body.id, what="warehouse id")
     project = _validate_id(body.project, what="project id")
@@ -113,9 +123,20 @@ async def create_warehouse(
     # matches (an unroutable warehouse), so it is rejected up front like a malformed id.
     if body.serving is not None and body.serving != "gold":
         raise InvalidInputError(f"invalid serving {body.serving!r}: only 'gold' is supported")
-    await fga_deps.require_can_create_warehouse(client, settings, token, project=project)
 
     so = settings.storage_options()
+    # Does this project exist yet? The estate stores no project records — a project EXISTS exactly when a
+    # warehouse record claims it (endpoints/projects.py) — so the registry listing IS the answer, and it is
+    # read BEFORE the gate because the gate's shape depends on it: a not-yet-existing project has no tuples,
+    # so only the estate admin can mint it (a project-scoped check could only ever deny). The read is
+    # side-effect-free and discloses nothing (no response either way), and the router-level authn floor has
+    # already run; the listing is reused below for the bucket-claim guard rather than re-read.
+    records = await run_in_threadpool(warehouses.list_warehouses, settings.registry_root, so)
+    project_exists = any(record.get("project") == project for record in records)
+    await fga_deps.require_can_create_warehouse(
+        client, settings, token, project=project, bootstrap=not project_exists
+    )
+
     # Cross-tenant takeover guard: `can_create_warehouse` gates on the caller-named `project`, so an admin of
     # ANY project could otherwise re-POST an EXISTING warehouse id under their own project — the seed ADDS
     # `warehouse:<id> project project:<theirs>` alongside the original owner's tuples, making their project's
@@ -141,7 +162,6 @@ async def create_warehouse(
     # other key: `bucket` is caller-chosen and provisioning an EXISTING bucket is a silent no-op, so without
     # this scan Mallory registers `wh-evil` over the victim's `acme-wh` bucket and her project policy (via
     # set_project_policy's registry resolution) governs — and can destroy version history in — acme's data.
-    records = await run_in_threadpool(warehouses.list_warehouses, settings.registry_root, so)
     rival_claims = warehouses.projects_claiming_bucket(records, bucket) - {project}
     if rival_claims:
         raise NamespaceAlreadyExistsError(
@@ -172,16 +192,46 @@ async def create_warehouse(
     if serving:
         record["serving"] = serving
     await run_in_threadpool(warehouses.put_warehouse, settings.registry_root, so, record)
-    await fga_deps.seed_warehouse(client, settings, token, warehouse_id=warehouse_id, project=project)
+    bootstrapped_admin = await fga_deps.seed_warehouse(
+        client,
+        settings,
+        token,
+        warehouse_id=warehouse_id,
+        project=project,
+        grant_project_admin=not project_exists,
+    )
     log.info("warehouse_created", extra={"warehouse": warehouse_id, "bucket": bucket, "project": project})
+    actor = f"user:{token.sub}" if token else None
     await emit_control(
         control,
         action="warehouse_created",
         object_type="warehouse",
         object_id=f"warehouse:{warehouse_id}",
-        actor=f"user:{token.sub}" if token else None,
+        actor=actor,
         extra={"bucket": bucket, "project": project},
     )
+    if bootstrapped_admin:
+        # The tenant-bootstrap grant is a real ACL change, so it gets the SAME treatment as one made through
+        # /v1/access/grant: the `access_grant` audit action (one compliance vocabulary, queryable together)
+        # carrying the reason that distinguishes it, plus the grant_added control event the console keys its
+        # refresh off. Only ever emitted when seed_warehouse reports the tuple was actually written.
+        audit(
+            "access_grant",
+            SUCCESS,
+            subject=actor,
+            resource=f"project:{project}",
+            grantee=actor,
+            relation="admin",
+            reason="project_bootstrap",
+        )
+        await emit_control(
+            control,
+            action="grant_added",
+            object_type="grant",
+            object_id=f"project:{project}",
+            actor=actor,
+            extra={"relation": "admin", "subject": actor, "reason": "project_bootstrap"},
+        )
     return WarehouseResponse(**record)
 
 

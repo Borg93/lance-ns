@@ -228,6 +228,33 @@ async def _require(client: OpenFgaClient, *, user: str, relation: str, obj: str)
         raise PermissionDeniedError(f"{relation} required on {obj}")
 
 
+async def _require_any(client: OpenFgaClient, *, user: str, doors: list[tuple[str, str]]) -> None:
+    """Allow if ANY ``(relation, object)`` door checks out; audit the decision, and raise 403 otherwise.
+
+    :func:`_require` expresses a single rung; a two-door gate (the project's own admin OR the estate admin)
+    cannot be built by chaining it, because the first call would raise on the door the caller did not come
+    through. Chaining with a swallowed 403 is no better: it writes a DENY into the #41 compliance trail for
+    a legitimate admin's allowed request. Here exactly ONE ALLOW record is written, naming the door that
+    decided; a full denial writes one DENY per door probed, so the trail still says precisely which rungs
+    the caller lacked. Fail-closed identically to :func:`_require`: an OpenFGA outage on ANY probe audits a
+    FAILURE and propagates (503) rather than falling through to the next door.
+    """
+    for relation, obj in doors:
+        try:
+            allowed = await fga.check(client, user=user, relation=relation, obj=obj)
+        except ServiceUnavailableError:  # authz layer down mid-decision — audit, then fail closed
+            audit(relation, FAILURE, subject=user, resource=obj, reason="authz_unavailable")
+            raise
+        if allowed:
+            audit(relation, ALLOW, subject=user, resource=obj)
+            return
+    for relation, obj in doors:  # reaching here means every door was probed and every one denied
+        audit(relation, DENY, subject=user, resource=obj)
+    wanted = " or ".join(f"{relation} on {obj}" for relation, obj in doors)
+    log.info("access_denied", extra={"sub": user, "relation": "any_of", "object": wanted})
+    raise PermissionDeniedError(f"one of [{wanted}] required")
+
+
 async def _authorize_transaction(
     client: OpenFgaClient, settings: Settings, segments: list[str], suffix: str, *, user: str
 ) -> None:
@@ -563,6 +590,7 @@ async def require_can_create_warehouse(
     token: IDToken | None,
     *,
     project: str,
+    bootstrap: bool = False,
 ) -> None:
     """Gate the #3-A admin control-plane warehouse-create on ``project#can_create_warehouse``.
 
@@ -571,10 +599,34 @@ async def require_can_create_warehouse(
     physical bucket is a platform/project-admin operation, not the writer-tier create-on-parent that guards
     tables/namespaces. Fail-closed like every other gate: 403 on deny, 503 on an OpenFGA outage (via
     ``_require``/``fga.check``). No-op when FGA is off / unwired / unauthenticated (parity with the other
-    ``require_*`` deps — those postures are enforced at the boot/authn layer)."""
+    ``require_*`` deps — those postures are enforced at the boot/authn layer).
+
+    ``bootstrap=True`` marks a project that does NOT exist yet (no warehouse record claims it — the estate
+    keeps no project records, so a project exists exactly when a warehouse claims it, see
+    ``endpoints/projects.py``). Such a project has no tuples at all, so ``can_create_warehouse`` on it can
+    only ever deny — which made a tenant's FIRST warehouse uncreatable by anyone, estate admin included
+    (found live 2026-07-24: every project create 403'd). The bootstrap case therefore opens ONE additional
+    door: ``can_observe_events`` on the fixed root object — the very bar ``/v1/events`` and ``/v1/access``
+    use for "platform admin", an owner-tier grant on ``settings.fga_root_object`` that only the estate's
+    bootstrapped admin holds (``chart/templates/bootstrap-admin.yaml``). The project's own door stays open
+    first, so a pre-seeded project admin (the seed scripts write ``project:<p> admin`` before any warehouse
+    exists) keeps minting their tenant exactly as before; an ordinary user clears NEITHER door and gets the
+    same 403 as today. The extra door SHUTS the moment the project exists: adding a second warehouse to a
+    live tenant remains that tenant's admins' call, unchanged."""
     if not (settings.fga_enabled and client is not None and token is not None):
         return
-    await _require(client, user=token.sub, relation="can_create_warehouse", obj=f"project:{project}")
+    obj = f"project:{project}"
+    if not bootstrap:
+        await _require(client, user=token.sub, relation="can_create_warehouse", obj=obj)
+        return
+    await _require_any(
+        client,
+        user=token.sub,
+        doors=[
+            ("can_create_warehouse", obj),
+            ("can_observe_events", settings.fga_root_object),
+        ],
+    )
 
 
 async def seed_warehouse(
@@ -584,7 +636,8 @@ async def seed_warehouse(
     *,
     warehouse_id: str,
     project: str,
-) -> None:
+    grant_project_admin: bool = False,
+) -> bool:
     """Grant the creator ``owner`` on the new ``warehouse:<id>`` and link it to its ``project:<project>``
     parent, so the concentric cascade (project → warehouse → namespace → table) reaches everything created
     under it. No-op when FGA is off / unauthenticated / unwired.
@@ -593,14 +646,25 @@ async def seed_warehouse(
     ``services/common/auth/model.fga``) — NOT the ``parent`` name that namespaces/tables use. So this writes
     the two tuples directly rather than via :func:`fga.grant_on_create` (whose parent edge is hardcoded to
     ``parent``, a relation the ``warehouse`` type does not define — writing it makes OpenFGA reject the whole
-    seed → 503). Idempotent: ``write_tuples`` swallows duplicate-tuple writes on a create retry."""
+    seed → 503). Idempotent: ``write_tuples`` swallows duplicate-tuple writes on a create retry.
+
+    ``grant_project_admin`` additionally writes ``user:<sub> admin project:<project>`` — the tuple that makes
+    a brand-new tenant self-sustaining. It rides the SAME write batch as the warehouse tuples (one call, one
+    failure mode) and is set only when the warehouse being created is the project's FIRST, i.e. exactly the
+    :func:`require_can_create_warehouse` ``bootstrap`` case. Without it a project minted by an estate admin
+    would have no admin of its own: the estate-admin door shuts as soon as the project exists, so the very
+    next warehouse (the flow's optional gold serving one) would 403 and no project-scoped grant could ever be
+    made from inside the project. Returns ``True`` when that bootstrap tuple was actually written, so the
+    caller can audit/announce a grant that really happened (never one an FGA-off stack silently skipped)."""
     if not (settings.fga_enabled and token is not None and client is not None):
-        return
+        return False
     obj = f"warehouse:{warehouse_id}"
-    await fga.write_tuples(
-        client,
-        [
-            fga.ClientTuple(user=f"user:{token.sub}", relation="owner", object=obj),
-            fga.ClientTuple(user=f"project:{project}", relation="project", object=obj),
-        ],
-    )
+    project_obj = f"project:{project}"
+    tuples = [
+        fga.ClientTuple(user=f"user:{token.sub}", relation="owner", object=obj),
+        fga.ClientTuple(user=project_obj, relation="project", object=obj),
+    ]
+    if grant_project_admin:
+        tuples.append(fga.ClientTuple(user=f"user:{token.sub}", relation="admin", object=project_obj))
+    await fga.write_tuples(client, tuples)
+    return grant_project_admin

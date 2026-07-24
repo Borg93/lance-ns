@@ -50,7 +50,7 @@
 	import { Select } from '@rask/ui/select';
 	import type { SelectOption } from '@lance/ui';
 	import { Loader2, Lasso, X, Hand, Settings2 } from '@lucide/svelte';
-	import { useColorMode } from '$lib/theme.svelte';
+	import { useColorMode } from '@rask/ui/color-mode';
 
 	let {
 		active = $bindable(null),

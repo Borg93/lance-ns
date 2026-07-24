@@ -16,7 +16,7 @@
 		type EdgeTypes,
 	} from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
-	import { useColorMode } from '$lib/theme.svelte';
+	import { useColorMode } from '@rask/ui/color-mode';
 	import { graph, isNodeKind } from '$lib/workflow/graph.svelte';
 	import { nodeTypes } from '$lib/workflow/node-types';
 	import { ARROW_MARKER } from '$lib/workflow/edges';

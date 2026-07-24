@@ -1,5 +1,19 @@
 {{- if .Values.media.enabled }}
 {{- $root := . }}
+{{- if .Values.media.catalogToken }}
+# The media services' catalog identity (auth-on catalogs): a bearer the annotator presents on every
+# catalog read/write — FGA decides what that identity may do (the merge's writer-rung rehearsal).
+# A Secret, never a plain env value; renders only when set (prod leaves it to the real secret flow).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ include "lance.fullname" . }}-media-catalog-token
+  labels: {{- include "lance.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  token: {{ .Values.media.catalogToken | quote }}
+---
+{{- end }}
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 # lance-media plane (merged from the lance-audio checkout per docs/LANCE_NS_HANDOFF.md): the viewer,
 # search, and annotator services. All three share the catalog image (services/ tree is COPY'd whole),
@@ -67,6 +81,11 @@ spec:
             - { name: MEDIA_READ_BACKEND, value: {{ $root.Values.media.readBackend | quote }} }
             - { name: MEDIA_WRITE_BACKEND, value: {{ $root.Values.media.writeBackend | quote }} }
             - { name: MEDIA_CATALOG_URI, value: {{ $root.Values.media.catalogUri | default (printf "http://%s-catalog:%v" (include "lance.fullname" $root) $root.Values.services.catalog.port) | quote }} }
+            {{- if $root.Values.media.catalogToken }}
+            - name: MEDIA_CATALOG_TOKEN
+              valueFrom:
+                secretKeyRef: { name: {{ include "lance.fullname" $root }}-media-catalog-token, key: token }
+            {{- end }}
           {{- include "lance.appProbes" $root | nindent 10 }}
           resources: {{- include "lance.resources" (dict "root" $root "comp" $name) | nindent 12 }}
           volumeMounts:

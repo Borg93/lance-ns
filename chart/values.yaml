@@ -765,6 +765,11 @@ media:
   writeBackend: catalog
   # Default: the in-release catalog Service (rendered in media.yaml); set to override.
   catalogUri: ""
+  # The media services' catalog bearer (auth-on catalogs): rendered into a Secret + secretKeyRef env,
+  # only when set. FGA decides what the identity may do — grant it the writer rung on the annotations
+  # table (docs/LANCE_NS_HANDOFF.md condition 6). Unset = anonymous (fail-closed 401/403 on governed
+  # catalogs; fine for auth-off dev).
+  catalogToken: ""
   services:
     viewer: { port: 8101, daprAppId: viewer }
     search: { port: 8102, daprAppId: search }

@@ -28,11 +28,15 @@ import pyarrow.ipc as ipc
 import pytest
 from annotator.annotations.commit import check_base_version_value
 from annotator.annotations.schema import EMPTY_SCHEMA
-from common.core.exceptions import ConflictError, NotFoundError
+from common.core.exceptions import ConflictError, ForbiddenError, NotFoundError
 from common.lancekit.reader import CatalogTableReader, RestCatalogTransport
 from common.lancekit.writer import CatalogTableWriter, RestCatalogWriteTransport
 
 CATALOG_URL = os.environ.get("MEDIA_CATALOG_URL", "")
+# Auth-on catalogs need a bearer (the merged estate's default posture) — same env the
+# catalog-mode transports and the seeder honor; empty = auth-off, header omitted.
+CATALOG_TOKEN = os.environ.get("MEDIA_CATALOG_TOKEN", "")
+AUTH_HEADERS = {"Authorization": f"Bearer {CATALOG_TOKEN}"} if CATALOG_TOKEN else {}
 
 pytestmark = [
     pytest.mark.e2e,
@@ -111,7 +115,7 @@ def table_id() -> list[str]:
     buf = io.BytesIO()
     with ipc.new_stream(buf, SCHEMA) as writer:
         writer.write_table(_table([]))
-    with httpx.Client(base_url=CATALOG_URL, timeout=30) as client:
+    with httpx.Client(base_url=CATALOG_URL, timeout=30, headers=AUTH_HEADERS) as client:
         ns = client.post(f"/v1/namespace/{NAMESPACE}/create", json={})
         assert ns.status_code == 200 or "exist" in ns.text.lower(), ns.text
         created = client.post(
@@ -131,12 +135,14 @@ def table_id() -> list[str]:
 
 @pytest.fixture(scope="module")
 def reader(table_id: list[str]) -> CatalogTableReader:
-    return CatalogTableReader(RestCatalogTransport(CATALOG_URL), table_id)
+    return CatalogTableReader(RestCatalogTransport(CATALOG_URL, token=CATALOG_TOKEN or None), table_id)
 
 
 @pytest.fixture(scope="module")
 def writer(table_id: list[str]) -> CatalogTableWriter:
-    return CatalogTableWriter(RestCatalogWriteTransport(CATALOG_URL, table_id), table_id)
+    return CatalogTableWriter(
+        RestCatalogWriteTransport(CATALOG_URL, table_id, token=CATALOG_TOKEN or None), table_id
+    )
 
 
 def test_schema_round_trips_all_31_columns(reader: CatalogTableReader) -> None:
@@ -206,8 +212,13 @@ def test_milestone_loop(reader: CatalogTableReader, writer: CatalogTableWriter) 
 
 
 def test_catalog_errors_translate_to_domain_errors() -> None:
-    """A missing table surfaces as OUR NotFoundError (problem+json downstream),
-    never the generated client's raw ApiException → opaque 500."""
-    missing = CatalogTableReader(RestCatalogTransport(CATALOG_URL), [NAMESPACE, "no_such_table"])
-    with pytest.raises(NotFoundError):
+    """A missing table surfaces as OUR typed DomainError (problem+json downstream),
+    never the generated client's raw ApiException → opaque 500. Auth-off: NotFoundError.
+    GOVERNED (token set): the catalog fail-closes authz BEFORE existence — a table with no
+    FGA object answers 403, never leaking whether it exists — so ForbiddenError is the
+    correct governed translation (the estate's no-existence-leak posture)."""
+    missing = CatalogTableReader(
+        RestCatalogTransport(CATALOG_URL, token=CATALOG_TOKEN or None), [NAMESPACE, "no_such_table"]
+    )
+    with pytest.raises(ForbiddenError if CATALOG_TOKEN else NotFoundError):
         missing.to_table(limit=1)

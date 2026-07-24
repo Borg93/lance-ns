@@ -101,7 +101,10 @@ def seed_catalog(catalog_url: str, namespace: str, doc_id: str) -> str:
     with pa.ipc.new_stream(buf, table.schema) as writer:
         writer.write_table(table)
     table_id = f"{namespace}$annotations"
-    with httpx.Client(base_url=catalog_url, timeout=30) as client:
+    # Auth-on catalogs need a bearer — same env the catalog-mode transports honor.
+    token = os.environ.get("MEDIA_CATALOG_TOKEN", "")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    with httpx.Client(base_url=catalog_url, timeout=30, headers=headers) as client:
         ns = client.post(f"/v1/namespace/{namespace}/create", json={})
         if ns.status_code >= 400 and "exist" not in ns.text.lower():
             ns.raise_for_status()  # a REAL failure, not the idempotent already-exists

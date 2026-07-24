@@ -202,9 +202,13 @@
 		<div class="empty">
 			<RefreshCw size={16} />
 			<p>Catalog unreachable (HTTP {lastStatus}).</p>
+			<button class="btn" disabled={loading} onclick={load}>Retry</button>
 		</div>
 	{:else if parseError}
-		<p class="error">{parseError}</p>
+		<div class="empty">
+			<p class="error">{parseError}</p>
+			<button class="btn" disabled={loading} onclick={load}>Retry</button>
+		</div>
 	{:else}
 		<div class="toolbar">
 			<label class="mut"

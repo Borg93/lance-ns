@@ -52,7 +52,14 @@
 		if (status === 401) return `Sign in — ${what} is a per-user action.`;
 		if (status === 403) return `Denied: ${what} needs the estate/project-admin rung.`;
 		if (status === 409) return `Conflict: ${what} — the id already exists.`;
-		if (status === 0) return `Catalog unreachable — ${what} was not applied.`;
+		if (status === 0) {
+			// Status 0 conflates two different failures (http.ts maps both to 0): the client's 8s
+			// timeout — where the catalog may still commit the write after we gave up — vs a true
+			// network refusal where nothing reached it. Only the latter can honestly claim "not applied".
+			return /TimeoutError|AbortError/.test(detail)
+				? `Timed out waiting on the catalog — ${what} may or may not have been applied; check the projects list before retrying.`
+				: `Catalog unreachable — ${what} was not applied.`;
+		}
 		return detail;
 	}
 
@@ -66,7 +73,8 @@
 			// 1. The work warehouse — its `project` field is what brings the project into existence.
 			const first = await createWarehouse({ id: wh, project, bucket: whBucket.trim() || null });
 			if (!first.ok) {
-				// Nothing was created — stay open so the form can be corrected and retried.
+				// No confirmed creation (a timeout may still land server-side — failText says so) — stay
+				// open so the form can be corrected and retried.
 				error = failText(`provisioning warehouse ${wh}`, first.status, first.detail);
 				toast.error(error);
 				return;

@@ -825,5 +825,13 @@ ingress:
   enabled: false
   className: "" # e.g. nginx / traefik; "" omits ingressClassName → the cluster's default IngressClass
   host: "" # e.g. lance.example.com; "" → a host-less rule that matches any host
-  annotations: {} # e.g. cert-manager.io/cluster-issuer, nginx.ingress.kubernetes.io/*
+  # SvelteKit emits one `Link: <…>; rel=modulepreload` entry per module of the entry graph, so a
+  # chart-heavy zone (models pulls layerchart) sends a ~4 KB response header. nginx's DEFAULT
+  # proxy buffer is 4 KB and it answers "upstream sent too big header" with a 502 — the models
+  # zone was unreachable through the edge while its pod served 200s (found live 2026-07-24).
+  # 16 KB fits the largest zone with headroom; harmless for the others. Keyed defaults, so an
+  # operator's own annotations still merge (and can override these).
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-buffer-size: 16k
+    nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
   tls: [] # e.g. [{ secretName: lance-tls, hosts: ["lance.example.com"] }]

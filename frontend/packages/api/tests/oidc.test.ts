@@ -14,8 +14,10 @@ import {
 	decodeJwtClaims,
 	decodeSession,
 	deriveSessionKey,
+	discover,
 	encodeSession,
 	exchangeCode,
+	internalEndpoint,
 	isExpired,
 	pkceChallenge,
 	randomToken,
@@ -196,5 +198,68 @@ describe('exchangeCode', () => {
 		const fakeFetch = (async () =>
 			new Response('nope', { status: 401 })) as unknown as typeof fetch;
 		await expect(exchangeCode(CFG, `${CFG.issuer}/token`, 'c', 'v', fakeFetch)).rejects.toThrow();
+	});
+});
+
+describe('split-horizon internal issuer', () => {
+	const SPLIT: OidcConfig = { ...CFG, internalIssuer: 'http://lance-dex:5556/dex' };
+	const jsonFetch = (capture: (url: string) => void, body: unknown) =>
+		(async (url: string | URL | Request) => {
+			capture(String(url));
+			return new Response(JSON.stringify(body), {
+				status: 200,
+				headers: { 'content-type': 'application/json' },
+			});
+		}) as typeof fetch;
+
+	test('internalEndpoint rewrites a public-issuer URL onto the internal base', () => {
+		expect(internalEndpoint(SPLIT, `${CFG.issuer}/token`)).toBe('http://lance-dex:5556/dex/token');
+	});
+
+	test('internalEndpoint is a no-op without an internal issuer, or for a foreign URL', () => {
+		expect(internalEndpoint(CFG, `${CFG.issuer}/token`)).toBe(`${CFG.issuer}/token`);
+		expect(internalEndpoint(SPLIT, 'https://elsewhere.example.com/token')).toBe(
+			'https://elsewhere.example.com/token',
+		);
+	});
+
+	test('discover fetches from the internal issuer, returning the endpoints as rendered (public)', async () => {
+		let url = '';
+		const doc = {
+			authorization_endpoint: `${CFG.issuer}/auth`,
+			token_endpoint: `${CFG.issuer}/token`,
+		};
+		const got = await discover(
+			SPLIT,
+			jsonFetch((u) => (url = u), doc),
+		);
+		expect(url).toBe('http://lance-dex:5556/dex/.well-known/openid-configuration');
+		// The authorize URL the BROWSER is redirected to must stay the public one — no rewrite here.
+		expect(got.authorization_endpoint).toBe(`${CFG.issuer}/auth`);
+	});
+
+	test('discover stays on the public issuer when no internal one is configured', async () => {
+		let url = '';
+		await discover(
+			CFG,
+			jsonFetch((u) => (url = u), { authorization_endpoint: 'a', token_endpoint: 't' }),
+		);
+		expect(url).toBe(`${CFG.issuer}/.well-known/openid-configuration`);
+	});
+
+	test('exchangeCode POSTs to the REWRITTEN internal token endpoint (the discovered one is public)', async () => {
+		let url = '';
+		const session = await exchangeCode(
+			SPLIT,
+			`${CFG.issuer}/token`, // as discovered: Dex renders its endpoints from the PUBLIC issuer
+			'code-1',
+			'ver-1',
+			jsonFetch((u) => (url = u), {
+				access_token: 'AT',
+				id_token: jwtWith({ sub: 'u1' }),
+			}),
+		);
+		expect(url).toBe('http://lance-dex:5556/dex/token');
+		expect(session.sub).toBe('u1');
 	});
 });

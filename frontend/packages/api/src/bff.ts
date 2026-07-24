@@ -63,6 +63,9 @@ export function makeOidcConfig(env: Env): OidcConfig | null {
 		scopes: env.OIDC_SCOPES || 'openid profile email',
 		// SESSION_SECRET seals the cookie (AES-256-GCM); unset in dev → unsealed base64 (documented).
 		sessionKey: env.SESSION_SECRET ? deriveSessionKey(env.SESSION_SECRET) : null,
+		// Split-horizon: server-side fetches (discovery, token POST) go here when set — the in-cluster Dex
+		// Service — while the browser's authorize redirect + iss keep the public OIDC_ISSUER above.
+		internalIssuer: env.OIDC_INTERNAL_ISSUER?.replace(/\/$/, '') || null,
 	};
 }
 

@@ -23,6 +23,10 @@ export type OidcConfig = {
 	scopes: string;
 	/** 32-byte AES key derived from `SESSION_SECRET`, or `null` in dev — the cookie is then base64 (unsealed). */
 	sessionKey: Buffer | null;
+	/** Split-horizon issuer for SERVER-side fetches (discovery, token POST) — e.g. the in-cluster Dex
+	 * Service URL when the public `issuer` is only browser-reachable. The BROWSER-facing authorize URL and
+	 * the token's `iss` keep the public `issuer`. `null`/unset → all fetches use the public issuer. */
+	internalIssuer?: string | null;
 };
 
 export type Session = {
@@ -168,14 +172,31 @@ type Discovery = {
 	end_session_endpoint?: string;
 };
 
-/** Fetch the OIDC discovery document (`/.well-known/openid-configuration`). */
+/** Rewrite a discovered endpoint URL onto the internal issuer base for SERVER-side calls. The discovery
+ * doc's endpoints are PUBLIC URLs (Dex renders them from its public issuer), which pods may not be able to
+ * reach (split-horizon: the public host resolves for browsers, not in-cluster) — so the server-side
+ * exchange swaps the public-issuer prefix for the internal one. A URL not under the public issuer, or no
+ * internal issuer configured, passes through unchanged. */
+export function internalEndpoint(cfg: OidcConfig, url: string): string {
+	if (!cfg.internalIssuer) return url;
+	return url.startsWith(cfg.issuer) ? cfg.internalIssuer + url.slice(cfg.issuer.length) : url;
+}
+
+/** Fetch the OIDC discovery document (`/.well-known/openid-configuration`) — a SERVER-side fetch, so it
+ * goes to the internal issuer when one is configured. The endpoints it returns stay as rendered (public
+ * URLs): the authorize URL the browser is redirected to must be the public one; server-side consumers
+ * (the token exchange) rewrite via `internalEndpoint`. */
 export async function discover(cfg: OidcConfig, fetchFn: typeof fetch = fetch): Promise<Discovery> {
-	const res = await fetchFn(`${cfg.issuer}/.well-known/openid-configuration`);
+	const base = cfg.internalIssuer ?? cfg.issuer;
+	const res = await fetchFn(`${base}/.well-known/openid-configuration`);
 	if (!res.ok) throw new Error(`OIDC discovery failed: ${res.status}`);
 	return (await res.json()) as Discovery;
 }
 
-/** Exchange an authorization code (+ PKCE verifier) for tokens, returning the session. */
+/** Exchange an authorization code (+ PKCE verifier) for tokens, returning the session. A SERVER-side
+ * POST: the discovered (public) token endpoint is rewritten onto the internal issuer when configured —
+ * see `internalEndpoint` for why. The `iss` inside the returned id_token stays the public issuer (Dex
+ * signs with its public identity regardless of which horizon served the request). */
 export async function exchangeCode(
 	cfg: OidcConfig,
 	tokenEndpoint: string,
@@ -183,7 +204,7 @@ export async function exchangeCode(
 	verifier: string,
 	fetchFn: typeof fetch = fetch,
 ): Promise<Session> {
-	const res = await fetchFn(tokenEndpoint, {
+	const res = await fetchFn(internalEndpoint(cfg, tokenEndpoint), {
 		method: 'POST',
 		headers: { 'content-type': 'application/x-www-form-urlencoded' },
 		body: tokenRequestBody(cfg, code, verifier),

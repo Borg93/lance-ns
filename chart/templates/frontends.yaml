@@ -49,6 +49,13 @@ spec:
           {{- include "lance.preStop" $root | nindent 10 }}
           env:
             {{- include "lance.frontendEnv" $root | nindent 12 }}
+            {{- if and $fe.oidc.enabled $root.Values.auth.enabled }}
+            # Split-horizon OIDC (same gating as lance.frontendEnv's OIDC block): the zones' SERVER-side
+            # fetches (discovery doc, token POST) go to the in-cluster Dex Service — the public issuer may
+            # only resolve for browsers. The BROWSER-facing authorize URL and the iss expectation keep the
+            # public OIDC_ISSUER; the BFF rewrites the discovered (public) endpoints onto this base.
+            - { name: OIDC_INTERNAL_ISSUER, value: "http://{{ include "lance.fullname" $root }}-dex:5556/dex" }
+            {{- end }}
           ports: [{ name: http, containerPort: 3000 }]
           {{- include "lance.tcpProbes" "http" | nindent 10 }}
           resources: {{- include "lance.resources" (dict "root" $root "comp" $comp) | nindent 12 }}

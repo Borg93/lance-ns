@@ -2,17 +2,62 @@ import { test, expect, type Route } from '@playwright/test';
 
 // Hermetic coverage for the zone contract: the app is server-aware (hooks + BFF routes
 // answer under /annotator; only the Pixi canvas page itself opts out of SSR per-page),
-// and the client fetches the media plane through THIS zone's base-prefixed BFF routes
-// (/annotator/api/*) instead of the retired root-absolute /api/*.
+// the client fetches the media plane through THIS zone's base-prefixed BFF routes
+// (/annotator/api/*), and the landing is the DATA-SELECTION view (datasets → documents
+// → chunks → canvas) with `?keys=` deep links opening the canvas directly.
 
 const json = (route: Route, body: unknown, status = 200) =>
 	route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-// 1×1 transparent PNG for the demo unit's chunk-frame.
+// 1×1 transparent PNG for thumbnails + chunk frames.
 const PNG = Buffer.from(
 	'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
 	'base64',
 );
+
+const DOC = 'fe00cd746463ad2c';
+const KEY = `${DOC}/0/19`;
+
+// A minimal-but-real corpus for the selection flow (viewer-BFF shapes).
+const DATASETS = {
+	datasets: [
+		{
+			id: 'demo',
+			tables: { documents: { row_count: 1, version: 1 }, chunks: { row_count: 1, version: 1 } },
+			capabilities: ['frames'],
+		},
+	],
+};
+const HEALTH = {
+	db: { path: '/corpus/demo.lance', tables: ['documents', 'chunks'], chunks: 1, documents: 1 },
+	embed: { ok: true, url: '', error: null },
+	rerank: { ok: true, url: '', error: null },
+};
+const DESCRIPTOR = {
+	id: 'demo',
+	tables: {
+		documents: { name: 'documents', row_count: 1, version: 1, columns: [], indexes: [] },
+		chunks: { name: 'chunks', row_count: 1, version: 1, columns: [], indexes: [] },
+	},
+	declared: {
+		identity: { key_fields: ['doc_id', 'speech_id', 'chunk_id'], doc_key: 'doc_id' },
+		document: { table: 'documents', media_blob: 'media', thumbnail: 'thumb' },
+		time: { start: 't0', end: 't1' },
+		display: { title: ['namn'], body: 'text' },
+		search: { row_table: 'chunks' },
+	},
+};
+const DOCUMENTS = {
+	total: 1,
+	page: 1,
+	docs: [{ doc_id: DOC, namn: 'Demo document', duration: 12 }],
+};
+// Chunk rows carry only the NON-doc identity fields — the backend strips the doc key
+// (it is the path parameter). The picker must stamp it back in (live-found bug).
+const TRANSCRIPT = {
+	doc_id: DOC,
+	chunks: [{ speech_id: 0, chunk_id: 19, t0: 0, t1: 2.5, text: 'hello world' }],
+};
 
 let apiPaths: string[] = [];
 let apiWrites: string[] = [];
@@ -30,12 +75,23 @@ test.beforeEach(async ({ page }) => {
 		if (req.method() !== 'GET') apiWrites.push(new URL(req.url()).pathname);
 		return json(route, { detail: 'unstubbed' }, 404);
 	});
+	await page.route('**/annotator/api/config', (route) =>
+		json(route, { assistRunner: false, jobsRunner: false }),
+	);
+	await page.route('**/annotator/api/datasets', (route) => json(route, DATASETS));
+	await page.route('**/annotator/api/health', (route) => json(route, HEALTH));
+	await page.route('**/annotator/api/datasets/demo/descriptor', (route) => json(route, DESCRIPTOR));
+	await page.route('**/annotator/api/documents*', (route) => json(route, DOCUMENTS));
+	await page.route(`**/annotator/api/doc-transcript/${DOC}*`, (route) => json(route, TRANSCRIPT));
+	await page.route('**/annotator/api/thumbnail/**', (route) =>
+		route.fulfill({ status: 200, contentType: 'image/png', body: PNG }),
+	);
 	await page.route('**/annotator/api/chunk-frame/**', (route) => {
 		apiPaths.push(new URL(route.request().url()).pathname);
 		return route.fulfill({ status: 200, contentType: 'image/png', body: PNG });
 	});
-	// The annotations GET 404s: the controller's documented soft-fail path (empty unit),
-	// which keeps this hermetic without fabricating an Arrow IPC payload.
+	// The annotations GET 404s (the generic route): the viewer's documented failure
+	// surface — the shell boots and the status chip reports the failure honestly.
 });
 
 test('the server answers under /annotator (hooks live; canvas page opts out per-page)', async ({
@@ -49,12 +105,46 @@ test('the server answers under /annotator (hooks live; canvas page opts out per-
 	expect(await res.text()).toContain('base: "/annotator"');
 });
 
-test('boots the shell and loads the unit through the zone-based BFF paths', async ({ page }) => {
+test('landing = data selection: dataset → document → chunk → the annotate canvas', async ({
+	page,
+}) => {
 	await page.goto('/annotator/');
-	// The estate navbar (layout) renders; the toolbar's stable controls mount.
+	// No hardcoded demo unit: the selection view renders (single dataset auto-picked).
+	await expect(page.getByTestId('data-selection')).toBeVisible();
+	await expect(page.getByTestId('dataset-id')).toHaveText('demo');
+	// Documents grid (thumbnails via the zone BFF) → drill into the chunk picker.
+	await page.getByTestId('doc-tile').click();
+	await expect(page.getByTestId('chunk-picker')).toBeVisible();
+	// Open one chunk in the canvas: the URL carries the ?keys= deep link and the shell
+	// boots, loading the unit through the zone-based BFF paths.
+	await page.getByTestId('chunk-row').click();
+	await expect(page).toHaveURL(new RegExp(`keys=${encodeURIComponent(KEY)}`));
 	await expect(page.getByTitle('Redo (Ctrl+Shift+Z)')).toBeVisible();
-	// The demo unit's annotations were requested via /annotator/api/* — the base-prefixed
-	// BFF, never bare /api — and nothing fired a write on boot.
-	await expect.poll(() => apiPaths).toContain('/annotator/api/annotations/fe00cd746463ad2c/0/19');
+	await expect.poll(() => apiPaths).toContain(`/annotator/api/annotations/${KEY}`);
 	expect(apiWrites).toHaveLength(0);
+	// The rail's back button returns to the selection view.
+	await page.getByTestId('exit-annotate').click();
+	await expect(page.getByTestId('data-selection')).toBeVisible();
+});
+
+test('?keys= deep link opens the canvas directly (the read-plane bridge)', async ({ page }) => {
+	await page.goto(`/annotator/?keys=${KEY}`);
+	await expect(page.getByTitle('Redo (Ctrl+Shift+Z)')).toBeVisible();
+	await expect(page.getByTestId('data-selection')).not.toBeVisible();
+	await expect.poll(() => apiPaths).toContain(`/annotator/api/annotations/${KEY}`);
+	expect(apiWrites).toHaveLength(0);
+});
+
+test('unreachable annotations surface on the status chip (no silent loading hang)', async ({
+	page,
+}) => {
+	await page.goto(`/annotator/?keys=${KEY}`);
+	// The stubbed annotations GET 404s — the chip must say so instead of hanging.
+	await expect(page.getByTestId('annotate-status')).toContainText('load failed');
+});
+
+test('AI assist is labeled mocked while no model runner is deployed', async ({ page }) => {
+	await page.goto(`/annotator/?keys=${KEY}`);
+	await expect(page.getByTestId('assist-mock-chip')).toBeVisible();
+	await expect(page.getByTestId('assist-mock-chip')).toContainText('mocked — needs runner');
 });

@@ -1,0 +1,109 @@
+<script lang="ts">
+	// Drill-in for ONE document: its chunk timeline (the annotatable media units),
+	// each openable in the canvas — or the whole document as a review selection.
+	// Chunks come from the viewer's /api/doc-transcript (ordered, key fields + times
+	// + body); frames render lazily via /api/chunk-frame and hide themselves when a
+	// chunk has no extracted frame yet.
+	import { onMount } from 'svelte';
+	import { ArrowLeft, ListChecks, Pencil } from 'lucide-svelte';
+	import { getDocTranscript, type DocTranscriptChunk, type Document } from '@lance/api';
+	import type { DatasetView } from '@lance/api/descriptor';
+	import { Button } from '@lance/ui';
+
+	let {
+		view,
+		doc,
+		onopen,
+		onback,
+	}: {
+		view: DatasetView;
+		doc: Document;
+		/** Open these key-paths (`doc/speech/chunk`) in the annotate canvas. */
+		onopen: (keys: string[]) => void;
+		onback: () => void;
+	} = $props();
+
+	let chunks = $state<DocTranscriptChunk[] | null>(null);
+	let error = $state<string | null>(null);
+
+	const title = $derived(view.title(doc));
+	// Doc-transcript rows carry only the NON-doc identity fields (the backend strips the
+	// doc key — it's the path parameter), so stamp the document's own key back in before
+	// building the media key-path. Found live: without this the key renders as `/0/0`.
+	const keyOf = (chunk: DocTranscriptChunk): string =>
+		view.keyPath({ ...chunk, [view.docKeyField]: view.docId(doc) }).join('/');
+
+	// One fetch per opened document — the parent unmounts this picker (back → grid)
+	// before another document can open, so mount-time is the whole lifecycle.
+	onMount(() => {
+		getDocTranscript(view.docId(doc))
+			.then((t) => (chunks = t.chunks))
+			.catch((e: unknown) => (error = e instanceof Error ? e.message : String(e)));
+	});
+
+	function fmtTime(s: number): string {
+		const m = Math.floor(s / 60);
+		return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+	}
+</script>
+
+<section class="flex h-full min-h-0 flex-col gap-3" data-testid="chunk-picker">
+	<div class="flex shrink-0 items-center gap-2">
+		<Button variant="ghost" size="sm" onclick={onback}>
+			<ArrowLeft class="size-4" /> Documents
+		</Button>
+		<h2 class="min-w-0 truncate text-sm font-medium" {title}>{title}</h2>
+		{#if chunks?.length}
+			<Button
+				variant="default"
+				size="sm"
+				class="ml-auto shrink-0"
+				data-testid="review-all"
+				onclick={() => onopen(chunks!.map(keyOf))}
+			>
+				<ListChecks class="size-4" /> Review all {chunks.length} chunks
+			</Button>
+		{/if}
+	</div>
+
+	{#if error}
+		<p class="text-destructive text-sm">Failed to load chunks: {error}</p>
+	{:else if chunks === null}
+		<p class="text-muted-foreground text-sm">Loading chunks…</p>
+	{:else if chunks.length === 0}
+		<p class="text-muted-foreground text-sm">This document has no chunks to annotate.</p>
+	{:else}
+		<ul class="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+			{#each chunks as chunk, i (keyOf(chunk))}
+				{@const time = view.time(chunk)}
+				<li>
+					<button
+						type="button"
+						data-testid="chunk-row"
+						class="border-border hover:border-primary hover:bg-muted/40 flex w-full items-center gap-3 rounded-md border p-2 text-left"
+						onclick={() => onopen([keyOf(chunk)])}
+					>
+						<img
+							src={view.frameUrl(chunk)}
+							alt=""
+							loading="lazy"
+							class="bg-muted h-12 w-20 shrink-0 rounded object-cover"
+							onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')}
+						/>
+						<div class="min-w-0 flex-1">
+							<div class="text-muted-foreground font-mono text-[10px]">
+								#{i + 1}
+								{#if time}
+									· {fmtTime(time.start)}–{fmtTime(time.end)}
+								{/if}
+								· {keyOf(chunk)}
+							</div>
+							<div class="line-clamp-2 text-xs">{view.body(chunk)}</div>
+						</div>
+						<Pencil class="text-muted-foreground size-4 shrink-0" />
+					</button>
+				</li>
+			{/each}
+		</ul>
+	{/if}
+</section>

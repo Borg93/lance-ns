@@ -1,38 +1,58 @@
 <script lang="ts">
-	// Thin annotator route: resolve the media unit(s) — a review SELECTION handed off
-	// from the read plane via `?keys=doc/speech/chunk,…` (atlas lasso / search), else
-	// the demo unit — and mount the shell PER unit (re-mount on the active key) so
-	// navigating the selection loads each fresh. (RA_ANNO_MERGE.md §5c–5d.)
+	// Thin annotator route. `?keys=doc/speech/chunk,…` (the read plane's review-selection
+	// bridge — atlas lasso / search — and now also this zone's own selection view) opens
+	// the annotate canvas, re-mounted per active key so navigating the selection loads
+	// each unit fresh. With no keys the DATA-SELECTION landing renders instead (datasets →
+	// documents → chunks); the old hardcoded demo unit is gone. The URL is the source of
+	// truth, so a canvas reload restores the same unit.
 	import { browser } from '$app/environment';
-	import { base } from '$app/paths';
-	import type { MediaKind, MediaUnit } from '$lib/viewer/types';
+	import { goto } from '$app/navigation';
+	import { page } from '$app/state';
+	import type { MediaKind } from '$lib/viewer/types';
 	import { reviewSelection } from '$lib/labeling/review-selection.svelte';
+	import DataSelection from '$lib/select/DataSelection.svelte';
 	import AnnotatorShell from '$lib/viewer/layout/AnnotatorShell.svelte';
 
-	const DEMO_KEY = 'fe00cd746463ad2c/0/19';
-	const DEMO_UNIT: MediaUnit = {
-		kind: 'image',
-		key: DEMO_KEY,
-		imageUrl: `${base}/api/chunk-frame/${DEMO_KEY}`,
-		annotationsUrl: `${base}/api/annotations/${DEMO_KEY}`,
-	};
-
-	// Init synchronously (before first render) so there's no demo flash. Beyond `keys`,
-	// the deep-link takes a modality override (`kind=audio|video` → the temporal viewers)
-	// and an optional same-origin `media=` source (annotate a specific clip/fixture).
-	if (browser) {
-		const params = new URLSearchParams(window.location.search);
+	function openFromParams(params: URLSearchParams): void {
 		const keys = params.get('keys');
+		if (!keys) {
+			reviewSelection.clear();
+			return;
+		}
+		// Beyond `keys`, the deep-link takes a modality override (`kind=audio|video` → the
+		// temporal viewers) and an optional same-origin `media=` source (a specific clip).
 		const rawKind = params.get('kind');
 		const kind: MediaKind = rawKind === 'audio' || rawKind === 'video' ? rawKind : 'image';
 		const rawMedia = params.get('media');
 		const media = rawMedia?.startsWith('/') ? rawMedia : undefined; // same-origin only
-		if (keys) reviewSelection.openKeys(keys.split(','), kind, media);
+		reviewSelection.openKeys(keys.split(','), kind, media);
 	}
 
-	const unit = $derived(reviewSelection.active ?? DEMO_UNIT);
+	// Init synchronously (before first render) so a deep link never flashes the landing.
+	if (browser) openFromParams(new URLSearchParams(window.location.search));
+
+	// Track later URL changes (selection-view goto, back/forward) — guarded against
+	// re-opening the keys the store already holds.
+	$effect(() => {
+		const keys = page.url.searchParams.get('keys');
+		const held = reviewSelection.units.map((u) => u.key).join(',');
+		if ((keys ?? '') !== held) openFromParams(page.url.searchParams);
+	});
+
+	const unit = $derived(reviewSelection.active);
+
+	function open(keys: string[]): void {
+		void goto(`?keys=${encodeURIComponent(keys.join(','))}`, { keepFocus: true, noScroll: true });
+	}
+	function exit(): void {
+		void goto('?', { keepFocus: true, noScroll: true });
+	}
 </script>
 
-{#key unit.key}
-	<AnnotatorShell {unit} />
-{/key}
+{#if unit}
+	{#key unit.key}
+		<AnnotatorShell {unit} onexit={exit} />
+	{/key}
+{:else}
+	<DataSelection onopen={open} />
+{/if}

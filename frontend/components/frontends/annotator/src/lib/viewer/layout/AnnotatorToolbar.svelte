@@ -2,7 +2,17 @@
 	// Left tool rail — the primary command surface. Fully controlled: reads/writes
 	// the AnnotatorController facade, never the engine directly. (Ported from
 	// ra-anno Toolbar.svelte, trimmed to functional controls for our engine.)
-	import { Eye, Pencil, Trash2, Spline, Eraser, Undo2, Redo2, Save } from 'lucide-svelte';
+	import {
+		Eye,
+		LayoutGrid,
+		Pencil,
+		Trash2,
+		Spline,
+		Eraser,
+		Undo2,
+		Redo2,
+		Save,
+	} from 'lucide-svelte';
 	import { Button } from '@lance/ui';
 	import { cn } from '@lance/ui/utils';
 	import { TOOL_DEFS } from '../tool-defs';
@@ -11,8 +21,12 @@
 	// `spatial` = this unit has a canvas to draw ON (image / video frame). Audio has no
 	// spatial lane — its segments are made by dragging on the waveform — so the draw
 	// tools + pan + convert-to-polygon are hidden; mode/undo/redo/save/delete stay.
-	let { controller, spatial = true }: { controller: AnnotatorController; spatial?: boolean } =
-		$props();
+	// `onexit` (optional) renders the back-to-selection button at the rail top.
+	let {
+		controller,
+		spatial = true,
+		onexit,
+	}: { controller: AnnotatorController; spatial?: boolean; onexit?: () => void } = $props();
 
 	const visible = $derived(
 		spatial
@@ -27,6 +41,19 @@
 	class="border-border bg-card flex h-full w-11 shrink-0 flex-col items-center gap-1 border-r py-2"
 	data-testid="annotator-toolbar"
 >
+	{#if onexit}
+		<Button
+			variant="ghost"
+			size="icon-sm"
+			title="Back to document selection"
+			data-testid="exit-annotate"
+			onclick={onexit}
+		>
+			<LayoutGrid class="size-4" />
+		</Button>
+		<div class="bg-border my-1 h-px w-6"></div>
+	{/if}
+
 	<!-- Mode toggle -->
 	<Button
 		variant={controller.mode === 'edit' ? 'default' : 'ghost'}

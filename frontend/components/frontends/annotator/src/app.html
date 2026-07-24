@@ -14,8 +14,11 @@
       No-flash theme boot. The estate-shared mode-watcher (mounted in +layout.svelte) owns the
       `dark` class at runtime, and in every OTHER zone its SSR-injected head script also handles
       first paint. This zone can't rely on that: the canvas route is `ssr = false` (Pixi/WebGL),
-      so SvelteKit renders no component head at all and `%sveltekit.head%` comes back empty —
-      first paint would use the light `:root` block and then snap. So we inline the equivalent,
+      so SvelteKit renders no component head at all and the head placeholder below comes back
+      empty — first paint would use the light `:root` block and then snap. (Do NOT spell that
+      placeholder out in this comment: SvelteKit string-replaces the token wherever it appears,
+      comments included, and the real one further down then renders as literal text on the
+      page. Found exactly that way.) So we inline the equivalent here,
       reading the SAME origin-wide `mode-watcher-mode` key with the same system fallback (the
       zone-private `lance-media-theme` key that pinned this zone dark is gone). Keep this in
       lockstep with mode-watcher's setInitialMode.

@@ -101,10 +101,16 @@ test('the server answers under /annotator (hooks live; canvas page opts out per-
 }) => {
 	const res = await page.request.get('/annotator/');
 	expect(res.status()).toBe(200);
+	const html = await res.text();
 	// The page itself is a per-page ssr=false island, but it is SERVED by the SvelteKit
 	// server under the zone base — the kit-injected config must carry the based path
 	// (dev serves modules at /annotator/@fs, the build at /annotator/_app).
-	expect(await res.text()).toContain('base: "/annotator"');
+	expect(html).toContain('base: "/annotator"');
+	// Every app.html placeholder must have been substituted. SvelteKit string-replaces these
+	// tokens ANYWHERE in the file, comments included — writing one inside a comment silently
+	// consumes the real head (stylesheet link and all) and leaves the live placeholder to
+	// render as visible text. Caught that way once; this keeps it caught.
+	expect(html).not.toContain('%sveltekit.');
 });
 
 test('the zone follows the ESTATE theme, not a zone-private one', async ({ page }) => {

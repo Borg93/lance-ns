@@ -10,6 +10,8 @@
 
 	$effect(() => {
 		void trigger; // track the signature
-		tick().then(() => fitView({ padding: 0.22, duration: 400 }));
+		// maxZoom 1 = never scale a card ABOVE its natural size: a three-node estate used to be
+		// blown up to fill the canvas, which read as "the graph is enormous".
+		tick().then(() => fitView({ padding: 0.22, duration: 400, maxZoom: 1 }));
 	});
 </script>

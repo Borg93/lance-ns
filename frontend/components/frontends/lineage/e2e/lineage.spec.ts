@@ -254,7 +254,8 @@ test('graph nodes lay out by computed depth — no two medallion nodes overlap',
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
 	// The linear DAG raw → bronze → silver → gold must occupy 4 DISTINCT x columns (the old
-	// hardcoded-layer layout piled unknown datasets onto one x where labels overlapped).
+	// hardcoded-layer layout piled unknown datasets onto one x where labels overlapped). One root
+	// ⇒ a 1-wide root grid, so the depth columns are unshifted.
 	const xs = new Set<number>();
 	for (const id of ['raw_events', 'bronze$events', 'silver$features', 'gold$catalog']) {
 		const node = page.locator('.svelte-flow__node').filter({ hasText: id });
@@ -262,6 +263,49 @@ test('graph nodes lay out by computed depth — no two medallion nodes overlap',
 		xs.add(Math.round(box?.x ?? 0));
 	}
 	expect(xs.size).toBe(4);
+});
+
+test('a small estate is framed at 1:1 — fitView never blows the cards up', async ({ page }) => {
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
+	await page.waitForTimeout(700); // let the fitView tween settle
+	// The medallion card is 200px wide by design; with fitView maxZoom 1 the rendered card can be
+	// SMALLER (zoomed out to frame a big graph) but never larger, so a 4-node estate no longer
+	// renders as giant blocks filling the canvas.
+	const box = await page.locator('.svelte-flow__node').first().boundingBox();
+	expect(box?.width ?? 0).toBeGreaterThan(0);
+	expect(box?.width ?? 0).toBeLessThanOrEqual(201);
+});
+
+test('depth-0 roots pack into a wrapped grid, not one tall column', async ({ page }) => {
+	// Nine un-derived datasets: the old layout stacked all nine at one x (a 1000px tower that
+	// forced fitView to zoom right out). They must now wrap into ceil(sqrt(9)) = 3 columns × 3 rows.
+	const ROOTS = Array.from({ length: 9 }, (_, i) => ({
+		id: `root_${i}`,
+		namespace: 'roots',
+		source_uri: `s3://lakehouse/root_${i}`,
+		tags: [],
+	}));
+	await page.route(
+		(url) => url.pathname.endsWith('/lineage/api/graph'),
+		(route) => json(route, { nodes: ROOTS, edges: [], total: 9, capped: false }),
+	);
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(9, { timeout: 15_000 });
+	await page.waitForTimeout(700);
+
+	const xs = new Set<number>();
+	const ys = new Set<number>();
+	for (let i = 0; i < 9; i += 1) {
+		const box = await page
+			.locator('.svelte-flow__node')
+			.filter({ hasText: `root_${i}` })
+			.boundingBox();
+		xs.add(Math.round(box?.x ?? 0));
+		ys.add(Math.round(box?.y ?? 0));
+	}
+	expect(xs.size).toBe(3);
+	expect(ys.size).toBe(3);
 });
 
 test('clicking a graph node opens the dataset detail page', async ({ page }) => {
@@ -575,4 +619,32 @@ test('graph + columns layout builds stay cheap (measured, printed to stdout)', a
 	console.log(`[perf] graph layout build: ${graphMs}; columns layout build: ${colMs}`);
 	expect(graphMs).toMatch(/ms$/);
 	expect(colMs).toMatch(/ms$/);
+});
+
+test('a flat 60-dataset estate packs into a square-ish grid, cheaply', async ({ page }) => {
+	// The other worst case for the packer: 60 datasets, none derived from another — so all 60 are
+	// depth-0 roots. They used to stack into one ~6600px column that fitView had to shrink to a
+	// sliver; they must now wrap into ceil(sqrt(60)) = 8 columns.
+	const FLAT_NODES = Array.from({ length: 60 }, (_, i) => ({
+		id: `ds_${i}`,
+		namespace: 'perf',
+		source_uri: `s3://lakehouse/ds_${i}`,
+		tags: [],
+	}));
+	await page.route(
+		(url) => url.pathname.endsWith('/lineage/api/graph'),
+		(route) => json(route, { nodes: FLAT_NODES, edges: [], total: 60, capped: false }),
+	);
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(60, { timeout: 20_000 });
+	await page.waitForTimeout(700);
+
+	const xs = new Set<number>();
+	for (const node of await page.locator('.svelte-flow__node').all()) {
+		xs.add(Math.round((await node.boundingBox())?.x ?? 0));
+	}
+	const flatMs = (await page.locator('header .perf').textContent()) ?? '?';
+	console.log(`[perf] flat 60-root graph layout build: ${flatMs} (${xs.size} packed columns)`);
+	expect(flatMs).toMatch(/ms$/);
+	expect(xs.size).toBe(8);
 });

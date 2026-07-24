@@ -91,6 +91,37 @@
 		return depth;
 	}
 
+	// Card pitch — the medallion/job cards are 200px wide and ~64px tall.
+	const COL_W = 240;
+	const ROW_H = 110;
+	const X0 = 30;
+	const Y0 = 40;
+
+	/** Positions nodes by derivation depth.
+	 *
+	 * Depth-0 roots are usually most of an estate (every table nothing else derives from), and
+	 * stacking them in one column made the canvas a thin tower thousands of px tall — `fitView`
+	 * then had to zoom right out to frame it. They now pack into a `ceil(sqrt(n))` wrapped grid,
+	 * so the root block stays roughly square. Derived nodes keep their depth column, shifted right
+	 * past the root grid, and still stagger by row within the column.
+	 *
+	 * Returns a stateful placer: call it once per node, in iteration order. */
+	function placer(ids: string[], depthOf: (id: string) => number) {
+		const roots = ids.reduce((n, id) => n + (depthOf(id) === 0 ? 1 : 0), 0);
+		const rootCols = Math.max(1, Math.ceil(Math.sqrt(roots)));
+		let rootSeen = 0;
+		const perLayer: Record<number, number> = {};
+		return (id: string) => {
+			const layer = depthOf(id);
+			if (layer <= 0) {
+				const i = rootSeen++;
+				return { x: X0 + (i % rootCols) * COL_W, y: Y0 + Math.floor(i / rootCols) * ROW_H };
+			}
+			const row = (perLayer[layer] = (perLayer[layer] ?? 0) + 1) - 1;
+			return { x: X0 + (rootCols - 1 + layer) * COL_W, y: Y0 + row * ROW_H };
+		};
+	}
+
 	// Rebuild the active graph plane whenever the polled data (or the chosen view) changes.
 	// Reconcile, don't rebuild: keep each node's identity + dragged position across the poll.
 	$effect(() => {
@@ -137,14 +168,19 @@
 				store.nodes.map((n) => n.id),
 				store.edges,
 			);
-			const perCol: Record<number, number> = {};
+			// A job's column = the deepest dataset it writes; source jobs (depth 0) pack into a grid.
+			const jobLayer = new Map(
+				[...jobs.entries()].map(([job, j]) => [
+					job,
+					Math.max(0, ...[...j.outputs].map((o) => dsDepth.get(o) ?? 0)),
+				]),
+			);
+			const place = placer([...jobs.keys()], (id) => jobLayer.get(id) ?? 0);
 			nodes = [...jobs.entries()].map(([job, j]) => {
-				const layer = Math.max(0, ...[...j.outputs].map((o) => dsDepth.get(o) ?? 0));
-				const row = (perCol[layer] = (perCol[layer] ?? 0) + 1) - 1;
 				return {
 					id: job,
 					type: 'job' as const,
-					position: prev.get(job)?.position ?? { x: 30 + layer * 280, y: 40 + row * 130 },
+					position: prev.get(job)?.position ?? place(job),
 					data: {
 						id: job.replace(/^ray-jobs\//, ''),
 						author: j.author,
@@ -178,23 +214,20 @@
 		}
 
 		// Datasets plane (default): x = derivation depth (computed, so unrelated datasets never
-		// stack on one overlapping column), y = per-depth row stagger.
-		const dsDepth = depths(
-			store.nodes.map((n) => n.id),
-			store.edges,
-		);
-		const perLayer: Record<number, number> = {};
+		// stack on one overlapping column), with the depth-0 roots packed into a wrapped grid.
+		const dsIds = store.nodes.map((n) => n.id);
+		const dsDepth = depths(dsIds, store.edges);
+		const place = placer(dsIds, (id) => dsDepth.get(id) ?? 0);
 		nodes = store.nodes.map((n) => {
 			// Version/failed badges ride the bulk estate read's per-node rollup — no per-dataset
 			// /producers fan-out (the run detail lives on the dataset detail page).
 			const versions = n.versions ?? [];
 			const failed = n.failed ?? false;
 			const layer = dsDepth.get(n.id) ?? 0;
-			const row = (perLayer[layer] = (perLayer[layer] ?? 0) + 1) - 1;
 			return {
 				id: n.id,
 				type: 'medallion' as const,
-				position: prev.get(n.id)?.position ?? { x: 30 + layer * 300, y: 40 + row * 130 },
+				position: prev.get(n.id)?.position ?? place(n.id),
 				data: {
 					id: n.id,
 					// Color/icon: keep the medallion ramp for the known stage tables, else key by depth.

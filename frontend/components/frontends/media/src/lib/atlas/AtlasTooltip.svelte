@@ -126,19 +126,19 @@
 
 {#if index != null}
 	<div
-		class="border-border bg-card/85 pointer-events-none absolute z-20 w-64 max-w-[80vw] -translate-x-1/2 -translate-y-full rounded-md border p-2.5 text-[11px] shadow-md backdrop-blur"
+		class="border-border bg-card/85 pointer-events-none absolute z-20 w-64 max-w-[80vw] -translate-x-1/2 -translate-y-full rounded-md border p-2.5 text-xs shadow-md backdrop-blur"
 		style:left="{x}px"
 		style:top="{Math.max(8, y - 10)}px"
 	>
 		<div class="mb-1 flex flex-wrap items-center gap-1.5">
 			{#if clusterId != null}
-				<span class="bg-secondary/70 text-foreground rounded px-1.5 py-0.5 font-mono">
+				<span class="bg-secondary/70 text-foreground rounded-md px-1.5 py-0.5 font-mono">
 					{clusterId < 0 ? 'noise' : `cluster #${clusterId}`}
 				</span>
 			{/if}
 			{#each chips as ch (ch.name)}
 				<span
-					class="bg-secondary/40 text-muted-foreground truncate rounded px-1.5 py-0.5"
+					class="bg-secondary/40 text-muted-foreground truncate rounded-md px-1.5 py-0.5"
 					title={ch.value}
 				>
 					{ch.value}
@@ -164,6 +164,6 @@
 		{:else}
 			<div class="text-muted-foreground/60 italic">loading…</div>
 		{/if}
-		<div class="text-muted-foreground/60 mt-1 text-[10px]">click to play</div>
+		<div class="text-muted-foreground/60 mt-1 text-[0.7rem]">click to play</div>
 	</div>
 {/if}

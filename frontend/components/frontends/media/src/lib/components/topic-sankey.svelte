@@ -168,7 +168,7 @@
 											y={(node.y0 + node.y1) / 2}
 											dy="0.32em"
 											text-anchor={node.isBranch ? 'start' : 'end'}
-											class="fill-foreground pointer-events-none text-[10px]"
+											class="fill-foreground pointer-events-none text-[0.7rem]"
 										>
 											{node.name}
 											<tspan class="fill-muted-foreground tabular-nums">

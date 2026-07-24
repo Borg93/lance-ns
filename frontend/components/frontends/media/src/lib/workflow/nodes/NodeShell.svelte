@@ -35,7 +35,7 @@
 	const error = $derived(status === 'error' ? (graph.runtime[id]?.error ?? null) : null);
 
 	const btn =
-		'nodrag shrink-0 rounded p-0.5 text-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground';
+		'nodrag shrink-0 rounded-md p-0.5 text-muted-foreground/40 opacity-0 transition-opacity group-hover:opacity-100 hover:text-foreground';
 </script>
 
 <div
@@ -51,13 +51,13 @@
 		>
 		{#if !enabled}
 			<span
-				class="bg-muted text-muted-foreground shrink-0 rounded px-1 text-[9px] tracking-wide uppercase"
+				class="bg-muted text-muted-foreground shrink-0 rounded-md px-1 text-[9px] tracking-wide uppercase"
 				>off</span
 			>
 		{/if}
 		{#if stale}
 			<span
-				class="shrink-0 rounded bg-amber-500/15 px-1 text-[9px] tracking-wide text-amber-600 uppercase dark:text-amber-400"
+				class="shrink-0 rounded-md bg-amber-500/15 px-1 text-[9px] tracking-wide text-amber-600 uppercase dark:text-amber-400"
 				title="This node's results are out of date (it was edited, rewired, or upstream re-ran) — press ▶ to refresh"
 				>stale</span
 			>
@@ -112,7 +112,7 @@
 	<div class="text-foreground px-3 py-2 text-xs">
 		{#if error}
 			<div
-				class="nodrag border-destructive/30 bg-destructive/10 text-destructive mb-2 max-h-16 overflow-y-auto rounded border px-2 py-1 text-[10px] leading-snug break-words"
+				class="nodrag border-destructive/30 bg-destructive/10 text-destructive mb-2 max-h-16 overflow-y-auto rounded-md border px-2 py-1 text-[0.7rem] leading-snug break-words"
 				title={error}
 			>
 				{error}

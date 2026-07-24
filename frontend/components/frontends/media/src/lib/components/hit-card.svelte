@@ -8,6 +8,7 @@
 	import { audioPreview } from '$lib/audio-preview.svelte';
 	import { fmtTime, queryTerms, makeHighlighter, cn, hitKey } from '$lib/utils';
 	import { AudioLines, Play, Pause } from '@lucide/svelte';
+	import { Badge } from '@rask/ui';
 
 	type Props = {
 		hit: Hit;
@@ -92,32 +93,22 @@
 {#snippet voiceMeta()}
 	{#if voice}
 		<div class="flex flex-wrap items-center gap-1 pt-0.5">
-			<span
-				class="border-border bg-secondary text-foreground rounded-full border px-1.5 py-px font-mono text-[10px]"
-			>
+			<Badge variant="secondary" class="px-1.5 py-px font-mono text-[0.7rem]">
 				{voice.speaker_label} · {fmtTime(voice.turn_start)}–{fmtTime(voice.turn_end)}
-			</span>
+			</Badge>
+			<!-- Match confidence rides the estate status tokens, not one-off emerald/amber. -->
 			{#if band === 'strong'}
-				<span
-					title={bandTitle}
-					class="rounded-full bg-emerald-500/15 px-1.5 py-px text-[10px] font-medium text-emerald-600 dark:text-emerald-400"
-				>
+				<Badge variant="success" title={bandTitle} class="px-1.5 py-px text-[0.7rem]">
 					Strong match
-				</span>
+				</Badge>
 			{:else if band === 'possible'}
-				<span
-					title={bandTitle}
-					class="rounded-full bg-amber-500/15 px-1.5 py-px text-[10px] font-medium text-amber-600 dark:text-amber-400"
-				>
+				<Badge variant="warning" title={bandTitle} class="px-1.5 py-px text-[0.7rem]">
 					Possible
-				</span>
+				</Badge>
 			{:else}
-				<span
-					title={bandTitle}
-					class="bg-muted text-muted-foreground rounded-full px-1.5 py-px font-mono text-[10px]"
-				>
+				<Badge variant="outline" title={bandTitle} class="px-1.5 py-px font-mono text-[0.7rem]">
 					{voice.turn_score.toFixed(2)}
-				</span>
+				</Badge>
 			{/if}
 		</div>
 	{/if}
@@ -191,7 +182,7 @@
 						src={chunkFrameUrl(hit)}
 						loading="lazy"
 						alt=""
-						class="border-background absolute right-1.5 bottom-1.5 h-10 w-16 rounded border bg-black object-cover shadow"
+						class="border-background absolute right-1.5 bottom-1.5 h-10 w-16 rounded-md border bg-black object-cover shadow"
 						onerror={(e) => {
 							features.framesUnavailable = true;
 							(e.currentTarget as HTMLImageElement).style.display = 'none';
@@ -200,7 +191,7 @@
 				{/if}
 				{#if time}
 					<span
-						class="absolute bottom-1.5 left-1.5 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white"
+						class="absolute bottom-1.5 left-1.5 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[0.7rem] text-white"
 					>
 						{fmtTime(time.start)}
 					</span>
@@ -209,7 +200,7 @@
 			<div class="flex flex-1 flex-col gap-1 p-2.5">
 				<div class="line-clamp-1 text-xs leading-snug font-semibold">{title}</div>
 				{#if metaLine}
-					<div class="text-muted-foreground truncate font-mono text-[10px]">{metaLine}</div>
+					<div class="text-muted-foreground truncate font-mono text-[0.7rem]">{metaLine}</div>
 				{/if}
 				{@render voiceMeta()}
 				<div class="line-clamp-3 text-xs leading-snug [overflow-wrap:anywhere]">
@@ -218,7 +209,7 @@
 					{@html highlight(body)}
 				</div>
 				{#if caption}
-					<div class="text-muted-foreground line-clamp-2 text-[10px] italic" title={caption}>
+					<div class="text-muted-foreground line-clamp-2 text-[0.7rem] italic" title={caption}>
 						🎬 {caption}
 					</div>
 				{/if}
@@ -247,7 +238,7 @@
 			aria-pressed={active}
 			class={cn(
 				'border-border flex w-full items-start gap-3 border-b px-3 py-2.5 text-left transition-colors',
-				'hover:bg-secondary/40',
+				'hover:bg-muted/60',
 				// ring-inset keeps the highlight inside the row's box so it survives
 				// the parent's overflow-clip; bg + thick left bar make selection
 				// unmistakable in both light and dark themes.
@@ -260,7 +251,7 @@
 					src={thumbnailUrl(hit)}
 					loading="lazy"
 					alt=""
-					class="h-[54px] w-[96px] rounded bg-black object-cover"
+					class="h-[54px] w-[96px] rounded-md bg-black object-cover"
 					onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')}
 				/>
 				{#if !features.framesUnavailable}
@@ -282,7 +273,7 @@
 					{title}
 				</div>
 				{#if metaLine}
-					<div class="text-muted-foreground truncate font-mono text-[11px]">{metaLine}</div>
+					<div class="text-muted-foreground truncate font-mono text-xs">{metaLine}</div>
 				{/if}
 				{@render voiceMeta()}
 				<div class="line-clamp-3 text-sm leading-snug [overflow-wrap:anywhere]">
@@ -291,7 +282,7 @@
 					{@html highlight(body)}
 				</div>
 				{#if caption}
-					<div class="text-muted-foreground line-clamp-1 text-[11px] italic" title={caption}>
+					<div class="text-muted-foreground line-clamp-1 text-xs italic" title={caption}>
 						🎬 {caption}
 					</div>
 				{/if}

@@ -70,7 +70,7 @@
 			style="top: 65%">img</span
 		>
 
-		<label class="text-muted-foreground mb-1 block text-[10px]" for="q-{id}">
+		<label class="text-muted-foreground mb-1 block text-[0.7rem]" for="q-{id}">
 			{isVisual ? 'Query (optional — image drives it)' : 'Query'}
 		</label>
 		<input
@@ -80,7 +80,7 @@
 			bind:value={cfg.q}
 		/>
 
-		<label class="text-muted-foreground mt-2 mb-1 block text-[10px]" for="mode-{id}">Mode</label>
+		<label class="text-muted-foreground mt-2 mb-1 block text-[0.7rem]" for="mode-{id}">Mode</label>
 		<select
 			id="mode-{id}"
 			class="{FIELD_CLASS} w-full"
@@ -93,7 +93,7 @@
 		</select>
 
 		<div class="mt-2 flex items-center gap-2">
-			<label class="text-muted-foreground text-[10px]" for="n-{id}">Results</label>
+			<label class="text-muted-foreground text-[0.7rem]" for="n-{id}">Results</label>
 			<input
 				id="n-{id}"
 				type="number"
@@ -106,7 +106,7 @@
 						n: Math.max(MIN_N, Math.min(MAX_N, Number(e.currentTarget.value) || DEFAULT_N)),
 					})}
 			/>
-			<label class="nodrag text-muted-foreground ml-auto flex items-center gap-1.5 text-[10px]">
+			<label class="nodrag text-muted-foreground ml-auto flex items-center gap-1.5 text-[0.7rem]">
 				<input type="checkbox" bind:checked={cfg.rerank} />
 				Rerank
 			</label>
@@ -114,7 +114,7 @@
 
 		<div class="mt-2 flex items-center gap-2">
 			<label
-				class="text-muted-foreground text-[10px]"
+				class="text-muted-foreground text-[0.7rem]"
 				for="min-score-{id}"
 				title="Drop hits scoring below this (normalized, higher = better). Empty = no threshold."
 			>
@@ -136,13 +136,13 @@
 		</div>
 
 		{#if hasUpstreamResults}
-			<div class="nodrag text-muted-foreground mt-2 flex items-center gap-1.5 text-[10px]">
+			<div class="nodrag text-muted-foreground mt-2 flex items-center gap-1.5 text-[0.7rem]">
 				<span
 					title="Re-rank all chunks in the upstream videos, or narrow to the exact upstream chunks"
 				>
 					Refine within
 				</span>
-				<div class="border-border ml-auto flex overflow-hidden rounded border">
+				<div class="border-border ml-auto flex overflow-hidden rounded-md border">
 					{#each REFINE_SCOPES as s (s.value)}
 						<button
 							type="button"
@@ -161,7 +161,7 @@
 		<!-- Run summary; on error the NodeShell banner carries the signal, so the
          whole footer (divider included) is hidden rather than left blank. -->
 		{#if rt.status !== 'error'}
-			<div class="border-border mt-2 border-t pt-1.5 text-[10px]">
+			<div class="border-border mt-2 border-t pt-1.5 text-[0.7rem]">
 				{#if rt.status === 'running'}
 					<span class="text-primary">Searching…</span>
 				{:else if rt.status === 'done'}

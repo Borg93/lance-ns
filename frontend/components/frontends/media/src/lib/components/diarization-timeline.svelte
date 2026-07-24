@@ -96,15 +96,15 @@
 
 {#if duration > 0 && turns.length > 0}
 	<div class="flex flex-col gap-0.5 p-1.5" role="group" aria-label="Speaker timeline">
-		<div class="text-muted-foreground mb-0.5 flex items-center gap-2 text-[11px]">
-			<div class="border-border inline-flex overflow-hidden rounded border">
+		<div class="text-muted-foreground mb-0.5 flex items-center gap-2 text-xs">
+			<div class="border-border inline-flex overflow-hidden rounded-md border">
 				<button
 					type="button"
 					onclick={() => (scope = 'chunk')}
 					disabled={!canChunk}
 					class="px-1.5 py-0.5 transition-colors disabled:opacity-40 {scope === 'chunk'
 						? 'bg-secondary text-foreground'
-						: 'hover:bg-secondary hover:text-foreground'}"
+						: 'hover:bg-muted hover:text-foreground'}"
 				>
 					Chunk
 				</button>
@@ -113,7 +113,7 @@
 					onclick={() => (scope = 'video')}
 					class="border-border border-l px-1.5 py-0.5 transition-colors {scope === 'video'
 						? 'bg-secondary text-foreground'
-						: 'hover:bg-secondary hover:text-foreground'}"
+						: 'hover:bg-muted hover:text-foreground'}"
 				>
 					Video
 				</button>
@@ -132,7 +132,7 @@
 				<div
 					class="flex {showVoice
 						? 'w-24'
-						: 'w-20'} shrink-0 items-center gap-1 text-[10px] font-medium"
+						: 'w-20'} shrink-0 items-center gap-1 text-[0.7rem] font-medium"
 				>
 					<span class="size-1.5 shrink-0 rounded-sm {c}"></span>
 					<span class="truncate {isActiveLane ? 'text-foreground' : 'text-muted-foreground'}">
@@ -144,7 +144,7 @@
 							title="Find this voice in other videos"
 							aria-label={`Find ${speaker}'s voice in other videos`}
 							onclick={() => onFindVoice?.({ speaker })}
-							class="text-muted-foreground hover:bg-secondary hover:text-foreground ml-auto shrink-0 rounded p-0.5 transition-colors"
+							class="text-muted-foreground hover:bg-muted hover:text-foreground ml-auto shrink-0 rounded-md p-0.5 transition-colors"
 						>
 							<AudioLines class="size-3" />
 						</button>

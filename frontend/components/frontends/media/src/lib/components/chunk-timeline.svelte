@@ -28,7 +28,7 @@
 
 {#if duration > 0 && chunks.length > 0}
 	<!-- Counter row above the ribbon: which chunk of how many is playing. -->
-	<div class="text-muted-foreground flex shrink-0 justify-end px-1 text-[10px]">
+	<div class="text-muted-foreground flex shrink-0 justify-end px-1 text-[0.7rem]">
 		chunk {currentChunkIdx + 1} / {chunks.length}
 	</div>
 	<!-- overflow-x-hidden clips drifted-width segments at the track edges, but

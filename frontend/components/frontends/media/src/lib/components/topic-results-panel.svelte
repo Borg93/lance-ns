@@ -67,7 +67,7 @@
 		{/if}
 		<a
 			href={`${base}/?topic=${encodeURIComponent(topic)}`}
-			class="border-border text-muted-foreground hover:bg-secondary hover:text-foreground ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors"
+			class="border-border text-muted-foreground hover:bg-muted hover:text-foreground ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border px-2 py-0.5 text-xs transition-colors"
 			title="Refine this topic in the full Search UI"
 		>
 			Open in Search <ArrowUpRight class="size-3" />

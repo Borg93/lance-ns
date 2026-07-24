@@ -95,7 +95,7 @@
 				type="button"
 				onclick={() => graph.closeDetail()}
 				aria-label="Back to results"
-				class="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 transition-colors"
+				class="text-muted-foreground hover:bg-muted hover:text-foreground rounded-md p-1 transition-colors"
 			>
 				<ArrowLeft class="size-4" />
 			</button>
@@ -115,7 +115,7 @@
 			<div class="flex flex-col gap-3 p-3 text-xs">
 				<div class="flex items-center gap-1.5">
 					<input
-						class="border-border bg-background text-foreground focus:border-primary min-w-0 flex-1 rounded border px-2 py-1 text-xs outline-none"
+						class="border-border bg-background text-foreground focus:border-primary min-w-0 flex-1 rounded-md border px-2 py-1 text-xs outline-none"
 						placeholder={title}
 						aria-label="Rename node"
 						bind:value={cfg.label}
@@ -125,7 +125,7 @@
 						onclick={() => graph.duplicateNode(id)}
 						title="Duplicate node"
 						aria-label="Duplicate node"
-						class="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded p-1 transition-colors"
+						class="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded-md p-1 transition-colors"
 					>
 						<Copy class="size-3.5" />
 					</button>
@@ -134,7 +134,7 @@
 						onclick={() => graph.setConfig(id, { enabled: !cfg.enabled })}
 						title={cfg.enabled ? 'Disable (bypass) node' : 'Enable node'}
 						aria-label="Toggle node enabled"
-						class="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded p-1 transition-colors"
+						class="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded-md p-1 transition-colors"
 					>
 						{#if cfg.enabled}<EyeOff class="size-3.5" />{:else}<Eye class="size-3.5" />{/if}
 					</button>
@@ -144,7 +144,9 @@
 					<span class="text-muted-foreground">{statusText}</span>
 				</div>
 				{#if rt.error}
-					<div class="border-destructive/30 bg-destructive/10 text-destructive rounded border p-2">
+					<div
+						class="border-destructive/30 bg-destructive/10 text-destructive rounded-md border p-2"
+					>
 						{rt.error}
 					</div>
 				{/if}
@@ -162,11 +164,11 @@
 					<div class="border-border flex flex-col gap-2.5 border-t pt-3">
 						<div class="flex items-center gap-2">
 							<span class="text-muted-foreground">Format</span>
-							<div class="border-border flex overflow-hidden rounded border">
+							<div class="border-border flex overflow-hidden rounded-md border">
 								{#each EXPORT_FORMATS as fmt (fmt)}
 									<button
 										type="button"
-										class="px-2.5 py-0.5 text-[11px] font-medium transition-colors {cfg.exportFormat ===
+										class="px-2.5 py-0.5 text-xs font-medium transition-colors {cfg.exportFormat ===
 										fmt
 											? 'bg-primary text-primary-foreground'
 											: 'text-muted-foreground hover:bg-muted'}"
@@ -180,10 +182,10 @@
 
 						<div>
 							<div class="mb-1 flex items-center justify-between">
-								<span class="text-muted-foreground text-[10px] tracking-wide uppercase">
+								<span class="text-muted-foreground text-[0.7rem] tracking-wide uppercase">
 									Columns ({selectedColumns.length}/{allColumns.length})
 								</span>
-								<div class="flex gap-2 text-[10px]">
+								<div class="flex gap-2 text-[0.7rem]">
 									<button
 										type="button"
 										class="text-primary hover:underline"
@@ -202,7 +204,7 @@
 							</div>
 							<div class="grid grid-cols-2 gap-x-3 gap-y-0.5">
 								{#each allColumns as col (col)}
-									<label class="text-foreground flex items-center gap-1.5 text-[11px]">
+									<label class="text-foreground flex items-center gap-1.5 text-xs">
 										<input
 											type="checkbox"
 											class="accent-primary size-3"
@@ -217,7 +219,7 @@
 
 						<button
 							type="button"
-							class="border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded border px-2 py-1.5 text-[11px] font-medium transition-colors disabled:opacity-50"
+							class="border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
 							disabled={hits.length === 0 || selectedColumns.length === 0}
 							onclick={() =>
 								exportHits(
@@ -235,13 +237,13 @@
 
 				{#if hits.length}
 					<div>
-						<div class="text-muted-foreground mb-1 text-[10px] tracking-wide uppercase">
+						<div class="text-muted-foreground mb-1 text-[0.7rem] tracking-wide uppercase">
 							Results ({hits.length}) · click to play
 						</div>
 						<HitList {hits} maxHeight="max-h-none" />
 					</div>
 				{:else if kind === 'search' || kind === 'results' || kind === 'export' || kind === 'combine' || kind === 'tagger'}
-					<p class="text-muted-foreground text-[11px]">
+					<p class="text-muted-foreground text-xs">
 						{#if kind === 'export' && rt.status === 'idle'}
 							Press Run to feed results. Selected columns{selectedColumns.includes('tags')
 								? ' (including tags)'
@@ -253,7 +255,7 @@
 						{/if}
 					</p>
 				{:else}
-					<p class="text-muted-foreground text-[11px]">
+					<p class="text-muted-foreground text-xs">
 						Produces a {nodeLabel(kind).toLowerCase()} input — wire it into a Search and Run.
 					</p>
 				{/if}

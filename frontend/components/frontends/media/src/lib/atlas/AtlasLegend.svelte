@@ -104,7 +104,7 @@
 		{#if clusterStats.noise > 0}
 			{@const noiseHidden = hidden.has(-1)}
 			<div
-				class="border-border/60 hover:bg-muted/60 mt-1 flex w-full items-center gap-1 rounded border-t px-1 pt-1"
+				class="border-border/60 hover:bg-muted/60 mt-1 flex w-full items-center gap-1 rounded-md border-t px-1 pt-1"
 				class:opacity-40={noiseHidden}
 			>
 				<button

@@ -48,7 +48,7 @@
 		/>
 		{#if duration != null}
 			<span
-				class="absolute right-1.5 bottom-1.5 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] text-white backdrop-blur-sm"
+				class="absolute right-1.5 bottom-1.5 rounded-md bg-black/70 px-1.5 py-0.5 font-mono text-[0.7rem] text-white backdrop-blur-sm"
 			>
 				{fmtTime(duration)}
 			</span>
@@ -59,7 +59,7 @@
 			{title}
 		</div>
 		{#if metaLine}
-			<div class="text-muted-foreground truncate font-mono text-[10px]" title={metaLine}>
+			<div class="text-muted-foreground truncate font-mono text-[0.7rem]" title={metaLine}>
 				{metaLine}
 			</div>
 		{/if}

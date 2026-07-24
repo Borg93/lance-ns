@@ -37,7 +37,7 @@
 		{@const title = activeView().title(h)}
 		{@const body = activeView().body(h)}
 		<div
-			class="group bg-background rounded border transition-colors"
+			class="group bg-background rounded-md border transition-colors"
 			class:border-primary={isSel}
 			class:border-border={!isSel}
 		>
@@ -56,7 +56,7 @@
 						src={chunkFrameUrl(h)}
 						alt=""
 						loading="lazy"
-						class="bg-muted h-10 w-14 rounded object-cover"
+						class="bg-muted h-10 w-14 rounded-md object-cover"
 						onerror={(e) => {
 							// Many transcript chunks have no extracted frame → 404. Swap to a
 							// transparent pixel once so it shows a clean muted box, not a
@@ -69,18 +69,18 @@
 						}}
 					/>
 					<span
-						class="pointer-events-none absolute inset-0 grid place-items-center rounded bg-black/45 opacity-0 transition-opacity group-hover:opacity-100"
+						class="pointer-events-none absolute inset-0 grid place-items-center rounded-md bg-black/45 opacity-0 transition-opacity group-hover:opacity-100"
 					>
 						<Play class="size-4 text-white" />
 					</span>
 				</div>
 				<div class="min-w-0">
 					{#if title}
-						<div class="text-foreground truncate text-[10px] font-medium" {title}>
+						<div class="text-foreground truncate text-[0.7rem] font-medium" {title}>
 							{title}
 						</div>
 					{/if}
-					<div class="text-muted-foreground line-clamp-2 text-[10px]">{body}</div>
+					<div class="text-muted-foreground line-clamp-2 text-[0.7rem]">{body}</div>
 				</div>
 			</button>
 
@@ -90,7 +90,7 @@
 			<div class="flex flex-wrap items-center gap-1 px-1.5 pb-1.5">
 				{#each tags as tag (tag)}
 					<span
-						class="bg-primary/10 text-foreground inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px]"
+						class="bg-primary/10 text-foreground inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px]"
 					>
 						{tag}
 						<button
@@ -109,7 +109,7 @@
 				{#if addingKey === key}
 					<!-- svelte-ignore a11y_autofocus -->
 					<input
-						class="border-border bg-background text-foreground focus:border-primary w-24 rounded border px-1 py-0.5 text-[9px] outline-none"
+						class="border-border bg-background text-foreground focus:border-primary w-24 rounded-md border px-1 py-0.5 text-[9px] outline-none"
 						placeholder="tag…"
 						autofocus
 						bind:value={draft}
@@ -129,7 +129,7 @@
 				{:else}
 					<button
 						type="button"
-						class="border-border text-muted-foreground hover:bg-muted hover:text-foreground inline-flex items-center gap-0.5 rounded border border-dashed px-1 py-0.5 text-[9px]"
+						class="border-border text-muted-foreground hover:bg-muted hover:text-foreground inline-flex items-center gap-0.5 rounded-md border border-dashed px-1 py-0.5 text-[9px]"
 						onclick={(e) => {
 							e.stopPropagation();
 							openAdd(key);

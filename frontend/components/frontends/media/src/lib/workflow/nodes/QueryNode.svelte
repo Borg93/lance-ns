@@ -12,9 +12,9 @@
 
 {#if cfg && rt}
 	<NodeShell {id} title="Text query" status={rt.status} {selected}>
-		<label class="text-muted-foreground mb-1 block text-[10px]" for="q-{id}">Query text</label>
+		<label class="text-muted-foreground mb-1 block text-[0.7rem]" for="q-{id}">Query text</label>
 		<input id="q-{id}" class="{FIELD_CLASS} w-full" placeholder="e.g. Sverige" bind:value={cfg.q} />
-		<p class="text-muted-foreground mt-1 text-[10px]">Drives FTS / vector legs of Search.</p>
+		<p class="text-muted-foreground mt-1 text-[0.7rem]">Drives FTS / vector legs of Search.</p>
 		<Handle type="source" position={Position.Right} />
 	</NodeShell>
 {/if}

@@ -51,7 +51,7 @@
 		{@const isCurrent = windowStartIdx + j === currentChunkIdx}
 		{@const start = activeView().time(c)?.start ?? null}
 		<div class={blockClass(isCurrent)}>
-			<div class="text-muted-foreground flex items-center gap-1.5 py-0.5 font-mono text-[11px]">
+			<div class="text-muted-foreground flex items-center gap-1.5 py-0.5 font-mono text-xs">
 				{#if start != null}<span>{fmtTime(start)}</span>{/if}
 				{#if isCurrent}
 					<span class="text-primary inline-flex items-center gap-0.5 font-sans font-medium">

@@ -49,11 +49,11 @@
 	}
 
 	const ITEM =
-		'flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-sm outline-none ' +
+		'flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none ' +
 		'data-selected:bg-secondary data-disabled:cursor-default data-disabled:opacity-40';
 	const CHIP =
-		'ml-auto shrink-0 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground';
-	const HEADING = 'px-2 pt-2 pb-1 text-[10px] tracking-wide text-muted-foreground uppercase';
+		'ml-auto shrink-0 rounded-md border border-border bg-muted px-1.5 py-0.5 font-mono text-[0.7rem] text-muted-foreground';
+	const HEADING = 'px-2 pt-2 pb-1 text-[0.7rem] tracking-wide text-muted-foreground uppercase';
 </script>
 
 <svelte:window onkeydown={onKeydown} />

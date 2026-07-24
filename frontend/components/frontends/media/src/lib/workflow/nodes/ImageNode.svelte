@@ -35,21 +35,21 @@
 		<input
 			type="file"
 			accept="image/*"
-			class="nodrag text-muted-foreground file:bg-secondary file:text-secondary-foreground w-full text-[10px] file:mr-2 file:rounded file:border-0 file:px-2 file:py-1 file:text-[10px]"
+			class="nodrag text-muted-foreground file:bg-secondary file:text-secondary-foreground w-full text-[0.7rem] file:mr-2 file:rounded-md file:border-0 file:px-2 file:py-1 file:text-[0.7rem]"
 			onchange={onFile}
 		/>
 		{#if preview}
 			<img
 				src={preview}
 				alt={cfg.imageName || 'query image'}
-				class="border-border bg-muted mt-2 h-24 w-full rounded border object-cover"
+				class="border-border bg-muted mt-2 h-24 w-full rounded-md border object-cover"
 			/>
 		{:else if cfg.imageName}
-			<p class="mt-2 text-[10px] text-amber-500">
+			<p class="mt-2 text-[0.7rem] text-amber-500">
 				Previously: {cfg.imageName} — re-upload (images aren't saved across reloads).
 			</p>
 		{/if}
-		<p class="text-muted-foreground mt-1 text-[10px]">
+		<p class="text-muted-foreground mt-1 text-[0.7rem]">
 			Wire into a Search's <span class="text-violet-400">img</span> port, then set mode =
 			<span class="text-foreground">Image</span> or <span class="text-foreground">All</span>.
 		</p>

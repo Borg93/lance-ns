@@ -112,7 +112,7 @@
 		<div class="border-border flex items-center justify-between border-b px-4 py-2">
 			<div class="flex items-baseline gap-2">
 				<h2 class="text-foreground text-sm font-semibold">Atlas Viewer</h2>
-				<span class="text-muted-foreground text-[11px]">
+				<span class="text-muted-foreground text-xs">
 					{#if upstreamHits && upstreamHits.length}
 						pre-filtered to {upstreamHits.length.toLocaleString()} upstream hits
 					{:else}
@@ -123,7 +123,7 @@
 			</div>
 			<button
 				type="button"
-				class="text-muted-foreground hover:bg-secondary/60 hover:text-foreground rounded p-1 transition-colors"
+				class="text-muted-foreground hover:bg-muted/60 hover:text-foreground rounded-md p-1 transition-colors"
 				title="Close (discard)"
 				aria-label="Close atlas viewer"
 				onclick={onCancel}
@@ -137,7 +137,7 @@
 		</div>
 
 		<div class="border-border flex items-center justify-between border-t px-4 py-2">
-			<span class="text-muted-foreground text-[11px]">
+			<span class="text-muted-foreground text-xs">
 				{#if selectionTotal > 0}
 					<span class="text-foreground">{selectionTotal.toLocaleString()}</span> points selected
 				{:else}

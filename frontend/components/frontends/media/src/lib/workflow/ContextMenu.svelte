@@ -19,7 +19,7 @@
 	const cfg = $derived(menu.nodeId ? graph.config[menu.nodeId] : null);
 
 	const ITEM =
-		'flex w-full items-center gap-2 rounded px-2 py-1 text-left transition-colors hover:bg-muted';
+		'flex w-full items-center gap-2 rounded-md px-2 py-1 text-left transition-colors hover:bg-muted';
 
 	function act(fn: () => void): void {
 		fn();
@@ -93,7 +93,9 @@
 			<Trash2 class="size-3.5" /> Delete
 		</button>
 	{:else}
-		<div class="text-muted-foreground px-2 py-1 text-[10px] tracking-wide uppercase">Add node</div>
+		<div class="text-muted-foreground px-2 py-1 text-[0.7rem] tracking-wide uppercase">
+			Add node
+		</div>
 		{#each NODE_KINDS as kind (kind)}
 			<button
 				class={ITEM}

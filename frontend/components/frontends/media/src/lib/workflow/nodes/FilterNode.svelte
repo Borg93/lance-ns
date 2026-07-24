@@ -29,7 +29,7 @@
 		<div class="flex flex-col gap-2">
 			{#each fields as f (f.field)}
 				<div>
-					<label class="text-muted-foreground mb-1 block text-[10px]" for="{f.field}-{id}"
+					<label class="text-muted-foreground mb-1 block text-[0.7rem]" for="{f.field}-{id}"
 						>{f.label}</label
 					>
 					<input
@@ -45,7 +45,7 @@
 				</div>
 			{/each}
 			<div>
-				<label class="text-muted-foreground mb-1 block text-[10px]" for="where-{id}"
+				<label class="text-muted-foreground mb-1 block text-[0.7rem]" for="where-{id}"
 					>SQL where</label
 				>
 				<input

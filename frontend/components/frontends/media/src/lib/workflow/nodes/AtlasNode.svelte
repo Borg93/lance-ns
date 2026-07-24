@@ -44,7 +44,7 @@
 			</p>
 			<button
 				type="button"
-				class="nodrag border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded border px-2 py-1 text-[11px] font-medium transition-colors"
+				class="nodrag border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors"
 				onclick={(e) => {
 					e.stopPropagation();
 					openModal();
@@ -54,12 +54,12 @@
 				Open atlas
 			</button>
 			{#if capturedCount === 0}
-				<p class="text-muted-foreground text-[10px]">
+				<p class="text-muted-foreground text-[0.7rem]">
 					Open the <span class="text-amber-500">Atlas</span> viewer, lasso a region, and
 					<span class="text-foreground">Confirm</span> to capture it into the workflow.
 				</p>
 			{:else}
-				<p class="text-[10px] text-emerald-500">
+				<p class="text-[0.7rem] text-emerald-500">
 					Selection captured. Wire into Search to refine within it.
 				</p>
 			{/if}

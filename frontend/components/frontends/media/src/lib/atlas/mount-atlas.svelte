@@ -121,7 +121,7 @@
 					<div class="relative ml-auto">
 						<button
 							type="button"
-							class="text-muted-foreground hover:bg-secondary/60 hover:text-foreground flex items-center gap-1 rounded px-2 py-0.5"
+							class="text-muted-foreground hover:bg-muted/60 hover:text-foreground flex items-center gap-1 rounded-md px-2 py-0.5"
 							onclick={() => (showColsPicker = !showColsPicker)}
 							title="Choose which columns the table shows"
 						>
@@ -142,11 +142,11 @@
 									{@const on = visibleCols.includes(c.key)}
 									<button
 										type="button"
-										class="hover:bg-secondary/50 flex w-full items-center gap-2 rounded px-2 py-1 text-left"
+										class="hover:bg-muted/60 flex w-full items-center gap-2 rounded-md px-2 py-1 text-left"
 										onclick={() => toggleCol(c.key)}
 									>
 										<span
-											class="grid size-3.5 shrink-0 place-items-center rounded border"
+											class="grid size-3.5 shrink-0 place-items-center rounded-md border"
 											class:border-primary={on}
 											class:bg-primary={on}
 											class:border-border={!on}

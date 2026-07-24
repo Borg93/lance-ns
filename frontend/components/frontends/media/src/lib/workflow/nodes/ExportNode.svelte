@@ -59,7 +59,7 @@
 	<NodeShell {id} title="Export" status={rt.status} {selected}>
 		<Handle type="target" position={Position.Left} />
 		<div class="flex flex-col gap-2">
-			<div class="text-muted-foreground text-[11px]">
+			<div class="text-muted-foreground text-xs">
 				{#if hits.length}
 					<span class="text-foreground">{hits.length}</span> hits ·
 					{cols.length} col{cols.length === 1 ? '' : 's'} ·
@@ -73,7 +73,7 @@
 			</div>
 			<button
 				type="button"
-				class="nodrag border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+				class="nodrag border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50"
 				disabled={!canDownload}
 				onclick={(e) => {
 					e.stopPropagation();
@@ -86,7 +86,7 @@
 
 			<button
 				type="button"
-				class="nodrag border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded border px-2 py-1 text-[11px] font-medium transition-colors disabled:opacity-50"
+				class="nodrag border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1 text-xs font-medium transition-colors disabled:opacity-50"
 				disabled={tagSaving || (taggedCount === 0 && removedCount === 0)}
 				title="Persist the run's chunk-tags as reviewable annotation rows"
 				onclick={(e) => {
@@ -98,7 +98,7 @@
 				Save {taggedCount || ''} tag{taggedCount === 1 ? '' : 's'} as annotations
 			</button>
 			{#if tagMsg}
-				<div class="text-muted-foreground font-mono text-[10px]">{tagMsg}</div>
+				<div class="text-muted-foreground font-mono text-[0.7rem]">{tagMsg}</div>
 			{/if}
 		</div>
 	</NodeShell>

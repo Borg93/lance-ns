@@ -169,7 +169,7 @@
 	import { thumbnailUrl } from '@lance/api';
 	import { queryTerms, makeHighlighter, hitKey } from '$lib/utils';
 	import { audioPreview } from '$lib/audio-preview.svelte';
-	import { Play, Pause } from '@lucide/svelte';
+	import { ChevronDown, ChevronUp, Play, Pause } from '@lucide/svelte';
 
 	let {
 		hits,
@@ -380,7 +380,11 @@
 							>
 								<span>{c.label}</span>
 								{#if sortKey === c.key}
-									<span class="text-primary">{sortDir === 'asc' ? '▲' : '▼'}</span>
+									{#if sortDir === 'asc'}
+										<ChevronUp class="text-primary size-3" />
+									{:else}
+										<ChevronDown class="text-primary size-3" />
+									{/if}
 								{/if}
 							</button>
 						{:else}
@@ -420,7 +424,7 @@
 								bind:value={filters[c.key]}
 								placeholder={c.numeric ? 'min ≥' : 'filter'}
 								aria-label={c.numeric ? `Minimum ${c.label}` : `Filter ${c.label}`}
-								class="border-border bg-background text-foreground placeholder:text-muted-foreground focus:border-primary w-full rounded border px-1.5 py-0.5 text-xs focus:outline-none"
+								class="border-input dark:bg-input/30 text-foreground placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 w-full rounded-md border bg-transparent px-1.5 py-0.5 text-xs transition-colors outline-none focus-visible:ring-3"
 							/>
 						{/if}
 					</th>
@@ -430,7 +434,7 @@
 		<tbody>
 			{#each displayedHits as hit (hitKey(hit))}
 				<tr
-					class={'border-border/60 hover:bg-secondary/40 cursor-pointer border-b ' +
+					class={'border-border/60 hover:bg-muted/60 cursor-pointer border-b ' +
 						(activeKey === hitKey(hit)
 							? 'bg-primary/15 font-medium [box-shadow:inset_3px_0_0_0_var(--color-primary)]'
 							: '')}
@@ -484,7 +488,7 @@
 									src={thumbnailUrl(hit)}
 									loading="lazy"
 									alt=""
-									class="bg-muted h-9 w-16 rounded object-cover"
+									class="bg-muted h-9 w-16 rounded-md object-cover"
 									onerror={(e) =>
 										((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')}
 								/>

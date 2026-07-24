@@ -702,7 +702,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each detail.neighbors as nb (nb.entity_id + nb.direction)}
 						<button
-							class="border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-full border px-2 py-0.5 text-xs transition-colors"
+							class="border-border bg-secondary text-secondary-foreground hover:bg-muted/60 rounded-full border px-2 py-0.5 text-xs transition-colors"
 							title={nb.description || nb.name}
 							onclick={() => selectEntity(nb.entity_id)}
 						>
@@ -719,7 +719,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each detail.cooccur as co (co.entity_id)}
 						<button
-							class="border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-full border px-2 py-0.5 text-xs transition-colors"
+							class="border-border bg-secondary text-secondary-foreground hover:bg-muted/60 rounded-full border px-2 py-0.5 text-xs transition-colors"
 							onclick={() => selectEntity(co.entity_id)}
 						>
 							{co.name} <span class="text-muted-foreground">·{co.shared}</span>

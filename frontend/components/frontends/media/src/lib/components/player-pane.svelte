@@ -14,6 +14,7 @@
 	import { voiceSearch } from '$lib/voice-search.svelte';
 	import { fmtTime, hitKey } from '$lib/utils';
 	import { ChevronRight, Maximize2, Minimize2 } from '@lucide/svelte';
+	import { Button } from '@rask/ui';
 	import TranscriptWindow from './transcript-window.svelte';
 	import ChunkTimeline from './chunk-timeline.svelte';
 	import DiarizationTimeline from './diarization-timeline.svelte';
@@ -379,28 +380,24 @@
 				<div
 					class="border-border/70 text-muted-foreground flex items-center gap-1.5 border-t px-3 py-1.5 text-xs font-medium"
 				>
-					<button
-						type="button"
-						onclick={() => (tab = 'transcript')}
+					<Button
+						variant={tab === 'transcript' ? 'secondary' : 'ghost'}
+						size="xs"
 						aria-pressed={tab === 'transcript'}
-						class="rounded px-2 py-0.5 transition-colors {tab === 'transcript'
-							? 'bg-secondary text-foreground'
-							: 'hover:bg-secondary hover:text-foreground'}"
+						onclick={() => (tab = 'transcript')}
 					>
 						Transcript
-					</button>
-					<button
-						type="button"
-						onclick={() => (tab = 'speakers')}
+					</Button>
+					<Button
+						variant={tab === 'speakers' ? 'secondary' : 'ghost'}
+						size="xs"
 						aria-pressed={tab === 'speakers'}
-						class="rounded px-2 py-0.5 transition-colors {tab === 'speakers'
-							? 'bg-secondary text-foreground'
-							: 'hover:bg-secondary hover:text-foreground'}"
+						onclick={() => (tab = 'speakers')}
 					>
 						Speakers
-					</button>
+					</Button>
 					{@render fsToggle(
-						'ml-auto rounded p-1 transition-colors hover:bg-secondary hover:text-foreground',
+						'ml-auto rounded-md p-1 transition-colors hover:bg-muted hover:text-foreground',
 					)}
 				</div>
 			{/if}
@@ -482,11 +479,13 @@
 					type="button"
 					onclick={() => (showMeta = !showMeta)}
 					aria-expanded={showMeta}
-					class="text-muted-foreground hover:bg-secondary/40 flex w-full items-center gap-1.5 px-3 py-1.5 transition-colors"
+					class="text-muted-foreground hover:bg-muted/60 flex w-full items-center gap-1.5 px-3 py-1.5 transition-colors"
 				>
 					<ChevronRight class="size-3.5 transition-transform {showMeta ? 'rotate-90' : ''}" />
 					<span class="font-medium">Metadata</span>
-					<span class="text-muted-foreground/70 ml-auto text-[10px]">{metaRows.length} fields</span>
+					<span class="text-muted-foreground/70 ml-auto text-[0.7rem]"
+						>{metaRows.length} fields</span
+					>
 				</button>
 				{#if showMeta}
 					<dl class="border-border grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 border-t px-3 py-2">

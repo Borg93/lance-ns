@@ -870,7 +870,7 @@
 
 				<!-- parallel-lanes diagram -->
 				<div class="bg-card border-border rounded-xl border p-4">
-					<div class="text-muted-foreground mb-2 text-center text-[11px]">
+					<div class="text-muted-foreground mb-2 text-center text-xs">
 						every pass starts from the <strong class="text-foreground">same full library</strong> — all
 						at once
 					</div>
@@ -881,8 +881,8 @@
 								class="reveal bg-muted border-border relative overflow-hidden rounded-lg border p-2.5 text-center"
 							>
 								<div class="{lane.text} text-xs font-semibold">{lane.name}</div>
-								<div class="text-muted-foreground text-[10px]">{lane.sub}</div>
-								<div class="text-muted-foreground mt-1 text-[10px]">→ own ranked list</div>
+								<div class="text-muted-foreground text-[0.7rem]">{lane.sub}</div>
+								<div class="text-muted-foreground mt-1 text-[0.7rem]">→ own ranked list</div>
 								<span class="lane-scan {lane.scan}"></span>
 							</div>
 						{/each}
@@ -1072,7 +1072,7 @@
 								<span class="text-base leading-none">{j.icon}</span>
 								<span class="text-foreground font-medium">{j.name}</span>
 								<code
-									class="bg-card text-primary ml-auto rounded px-1.5 py-0.5 font-mono text-[11px]"
+									class="bg-card text-primary ml-auto rounded-md px-1.5 py-0.5 font-mono text-xs"
 								>
 									mode: {j.mode}
 								</code>
@@ -1134,7 +1134,7 @@
 								<span class="text-foreground font-medium">{s.name}</span>
 							</div>
 							<div class="mb-2">
-								<code class="bg-card text-primary rounded px-1.5 py-0.5 font-mono text-[11px]"
+								<code class="bg-card text-primary rounded-md px-1.5 py-0.5 font-mono text-xs"
 									>{s.q}</code
 								>
 							</div>
@@ -1265,7 +1265,8 @@
 					<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
 						<span class="text-muted-foreground">→ runs</span>
 						{#if demoMode}
-							<code class="bg-primary/15 text-primary rounded px-2 py-0.5 font-mono font-semibold"
+							<code
+								class="bg-primary/15 text-primary rounded-md px-2 py-0.5 font-mono font-semibold"
 								>{demoMode}</code
 							>
 							<span class="text-muted-foreground"
@@ -1288,14 +1289,14 @@
 							>
 								<div class="text-base leading-none">{lane.icon}</div>
 								<div class="mt-1 text-xs font-medium">{lane.name}</div>
-								<div class="text-[10px] opacity-70">{lane.side}</div>
+								<div class="text-[0.7rem] opacity-70">{lane.side}</div>
 							</div>
 						{/each}
 					</div>
 
-					<div class="mt-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+					<div class="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
 						<span
-							class="rounded px-2 py-0.5 transition-colors {demoLegs.length > 1
+							class="rounded-md px-2 py-0.5 transition-colors {demoLegs.length > 1
 								? 'bg-primary/10 text-primary'
 								: 'bg-muted text-muted-foreground'}"
 							>{demoLegs.length > 1
@@ -1305,12 +1306,12 @@
 								: 'no fusion'}</span
 						>
 						<span
-							class="rounded px-2 py-0.5 transition-all {demoSlider
+							class="rounded-md px-2 py-0.5 transition-all {demoSlider
 								? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
 								: 'bg-muted text-muted-foreground line-through opacity-60'}">Balance slider</span
 						>
 						<span
-							class="rounded px-2 py-0.5 transition-all {demoRerank
+							class="rounded-md px-2 py-0.5 transition-all {demoRerank
 								? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
 								: 'bg-muted text-muted-foreground line-through opacity-60'}">Rerank</span
 						>
@@ -1335,7 +1336,7 @@
 					</p>
 				</div>
 
-				<div class="text-muted-foreground mb-1.5 text-[11px] font-medium tracking-wide uppercase">
+				<div class="text-muted-foreground mb-1.5 text-xs font-medium tracking-wide uppercase">
 					Full reference
 				</div>
 				<div class="border-border overflow-x-auto rounded-lg border">
@@ -1430,7 +1431,7 @@
 						<div class="flex flex-wrap items-center gap-2">
 							<span class="text-foreground text-sm font-semibold">{w.title}</span>
 							<code
-								class="bg-primary/15 text-primary rounded px-2 py-0.5 font-mono text-[11px] font-semibold"
+								class="bg-primary/15 text-primary rounded-md px-2 py-0.5 font-mono text-xs font-semibold"
 								>mode: {w.mode}</code
 							>
 						</div>
@@ -1494,30 +1495,30 @@
 							🖼️ Image
 						</div>
 					</div>
-					<div class="text-muted-foreground grid w-full grid-cols-3 text-center text-[10px]">
+					<div class="text-muted-foreground grid w-full grid-cols-3 text-center text-[0.7rem]">
 						<span>▼</span><span>▼ embed</span><span>▼ embed</span>
 					</div>
 					<div class="grid w-full grid-cols-3 gap-2">
 						<div
-							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-[11px]"
+							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs"
 						>
 							FTS leg
 							<div class="text-muted-foreground">BM25 on text</div>
 						</div>
 						<div
-							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-[11px]"
+							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs"
 						>
 							Text-vector leg
 							<div class="text-muted-foreground">text_embedding</div>
 						</div>
 						<div
-							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-[11px]"
+							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs"
 						>
 							Frame-vector leg
 							<div class="text-muted-foreground">frame_embedding</div>
 						</div>
 					</div>
-					<p class="text-muted-foreground mt-2 text-center text-[11px]">
+					<p class="text-muted-foreground mt-2 text-center text-xs">
 						+ the text query also drives a <strong class="text-foreground">Scene</strong> leg (<code
 							class="font-mono">caption_embedding</code
 						>) in <code class="font-mono">all</code>.
@@ -1584,7 +1585,7 @@
 					</div>
 				</div>
 				<p class="text-muted-foreground mt-3 mb-2 text-sm">
-					Each clip scores <code class="text-primary bg-muted rounded px-1 font-mono text-[11px]"
+					Each clip scores <code class="text-primary bg-muted rounded-md px-1 font-mono text-xs"
 						>Σ 1/(60 + rank)</code
 					>
 					over the lists it appears in (rank counts from 0, so the #1 clip uses 1/60):
@@ -1604,11 +1605,11 @@
 							<span class="text-foreground font-mono">≈ {row.score.toFixed(4)}</span>
 							{#if row.inBoth}
 								<span
-									class="bg-highlight/30 text-foreground rounded px-1.5 py-0.5 text-[10px] font-medium"
+									class="bg-highlight/30 text-foreground rounded-md px-1.5 py-0.5 text-[0.7rem] font-medium"
 									>in both → wins</span
 								>
 							{:else}
-								<span class="text-muted-foreground text-[10px]">one list</span>
+								<span class="text-muted-foreground text-[0.7rem]">one list</span>
 							{/if}
 						</div>
 					{/each}
@@ -1661,10 +1662,10 @@
 					class="reveal bg-muted border-border mb-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">For instance:</span> searching
-					<code class="bg-card text-primary rounded px-1 font-mono">elcertifikat</code> → slide
+					<code class="bg-card text-primary rounded-md px-1 font-mono">elcertifikat</code> → slide
 					toward
 					<strong class="text-foreground">Keyword</strong> for that exact word; searching
-					<code class="bg-card text-primary rounded px-1 font-mono"
+					<code class="bg-card text-primary rounded-md px-1 font-mono"
 						>vad regeringen gör åt höga elpriser</code
 					>
 					→ slide toward <strong class="text-foreground">Vector</strong> to catch a clip that says
@@ -1709,7 +1710,7 @@
 						<div class="border-border text-foreground border-b p-2 font-medium">Reads</div>
 						<div class="border-border border-b border-l p-2">
 							one column — each candidate's transcript, the <code
-								class="bg-muted text-primary rounded px-1 font-mono">text</code
+								class="bg-muted text-primary rounded-md px-1 font-mono">text</code
 							> field on the chunk. Nothing else.
 						</div>
 					</div>
@@ -1742,10 +1743,10 @@
 					class="reveal bg-muted border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">Before → after</span>, query
-					<code class="bg-card text-primary rounded px-1 font-mono">höjda räntor</code>: the fused
-					top-3 might be ① a "minister vid podium" clip that drifted in on Vector, ② a stakeout that
-					says "räntan" once, ③ the clip that actually says "vi måste hantera de höjda räntorna".
-					The cross-encoder reads only each transcript and reorders to
+					<code class="bg-card text-primary rounded-md px-1 font-mono">höjda räntor</code>: the
+					fused top-3 might be ① a "minister vid podium" clip that drifted in on Vector, ② a
+					stakeout that says "räntan" once, ③ the clip that actually says "vi måste hantera de höjda
+					räntorna". The cross-encoder reads only each transcript and reorders to
 					<strong class="text-foreground">③ ① ②</strong> — promoting the clip whose spoken words really
 					match.
 				</div>
@@ -1819,8 +1820,9 @@
 					class="reveal bg-card border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">For instance:</span> search
-					<code class="bg-muted text-primary rounded px-1 font-mono">nya regler</code> with a filter
-					<code class="bg-muted rounded px-1 font-mono">namn = "Andersson"</code> and N = 10.
+					<code class="bg-muted text-primary rounded-md px-1 font-mono">nya regler</code> with a
+					filter
+					<code class="bg-muted rounded-md px-1 font-mono">namn = "Andersson"</code> and N = 10.
 					<strong class="text-foreground">Prefilter (on):</strong> every leg that runs (here Keyword
 					+ Vector) searches <em>only</em> Andersson's chunks → a full 10 ranked Andersson hits.
 					<strong class="text-foreground">Postfilter (off):</strong> each leg first finds its top 10
@@ -2029,8 +2031,7 @@
 					<div class="text-foreground font-medium">Build / rebuild it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
 						The projection is computed offline. Run
-						<code class="bg-card rounded px-1 py-0.5 font-mono text-[11px]"
-							>ratch feature atlas</code
+						<code class="bg-card rounded-md px-1 py-0.5 font-mono text-xs">ratch feature atlas</code
 						>
 						to (re)generate it; the tab shows a prompt until it exists.
 					</p>

@@ -25,7 +25,7 @@
 				<button
 					type="button"
 					onclick={() => graph.setConfig(id, { combineMode: m.value })}
-					class="nodrag flex-1 rounded border px-2 py-1 text-[11px] transition-colors {cfg.combineMode ===
+					class="nodrag flex-1 rounded-md border px-2 py-1 text-xs transition-colors {cfg.combineMode ===
 					m.value
 						? 'border-primary bg-primary/10 text-foreground'
 						: 'border-border text-muted-foreground hover:bg-muted'}"
@@ -34,7 +34,7 @@
 				</button>
 			{/each}
 		</div>
-		<p class="text-muted-foreground mt-1 text-[10px]">
+		<p class="text-muted-foreground mt-1 text-[0.7rem]">
 			{cfg.combineMode === 'intersect'
 				? 'Keep only chunks present in ALL inputs.'
 				: 'Keep chunks present in ANY input.'}
@@ -42,7 +42,7 @@
 
 		<!-- Run summary; hidden on error so the NodeShell banner stands alone. -->
 		{#if rt.status !== 'error'}
-			<div class="border-border mt-2 border-t pt-1.5 text-[10px]">
+			<div class="border-border mt-2 border-t pt-1.5 text-[0.7rem]">
 				{#if rt.status === 'done'}
 					<span class="text-muted-foreground"
 						><span class="text-foreground">{rt.count}</span> combined</span

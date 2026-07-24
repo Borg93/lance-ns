@@ -294,7 +294,7 @@
 												<text
 													x={node.x0 + 6}
 													y={node.y0 + 12}
-													class="pointer-events-none fill-white text-[11px] font-semibold"
+													class="pointer-events-none fill-white text-xs font-semibold"
 													style="paint-order: stroke; stroke: rgba(0,0,0,0.4); stroke-width: 2.5px;"
 												>
 													{label}
@@ -305,7 +305,7 @@
 												x={node.x0 + 7}
 												y={node.y0 + (view === 'nested' ? 13 : 17)}
 												class="pointer-events-none fill-white {view === 'nested'
-													? 'text-[11px]'
+													? 'text-xs'
 													: 'text-[12px]'} font-semibold"
 												style="paint-order: stroke; stroke: rgba(0,0,0,0.35); stroke-width: 2.5px;"
 											>
@@ -315,7 +315,7 @@
 												<text
 													x={node.x0 + 7}
 													y={node.y0 + (view === 'nested' ? 26 : 33)}
-													class="pointer-events-none fill-white/85 text-[10px] tabular-nums"
+													class="pointer-events-none fill-white/85 text-[0.7rem] tabular-nums"
 													style="paint-order: stroke; stroke: rgba(0,0,0,0.3); stroke-width: 2px;"
 												>
 													{fmt(node.value ?? 0)}

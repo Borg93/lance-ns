@@ -32,13 +32,13 @@
 	<NodeShell {id} title="Tagger" status={rt.status} {selected}>
 		<Handle type="target" position={Position.Left} />
 
-		<label class="text-muted-foreground mb-1 block text-[10px]" for="tag-{id}">
+		<label class="text-muted-foreground mb-1 block text-[0.7rem]" for="tag-{id}">
 			Tags stamped on every hit
 		</label>
 		<div class="mb-1.5 flex flex-wrap gap-1">
 			{#each cfg.tags as tag (tag)}
 				<span
-					class="bg-primary/10 text-foreground inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px]"
+					class="bg-primary/10 text-foreground inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[0.7rem]"
 				>
 					{tag}
 					<button
@@ -52,7 +52,7 @@
 				</span>
 			{/each}
 			{#if cfg.tags.length === 0}
-				<span class="text-muted-foreground/70 text-[10px]">no tags yet</span>
+				<span class="text-muted-foreground/70 text-[0.7rem]">no tags yet</span>
 			{/if}
 		</div>
 		<input
@@ -70,7 +70,7 @@
 
 		<!-- Run summary; hidden on error so the NodeShell banner stands alone. -->
 		{#if rt.status !== 'error'}
-			<div class="border-border mt-2 border-t pt-1.5 text-[10px]">
+			<div class="border-border mt-2 border-t pt-1.5 text-[0.7rem]">
 				{#if rt.status === 'done'}
 					<span class="text-muted-foreground">
 						tagged <span class="text-foreground">{rt.count}</span> hits

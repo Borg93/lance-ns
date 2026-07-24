@@ -129,7 +129,7 @@
 			data-sentence
 			data-start={a.start}
 			data-end={a.end}
-			class="hover:bg-secondary/40 cursor-pointer rounded-sm transition-colors"
+			class="hover:bg-muted/60 cursor-pointer rounded-sm transition-colors"
 			onclick={() => {
 				if (media) {
 					media.currentTime = a.start;

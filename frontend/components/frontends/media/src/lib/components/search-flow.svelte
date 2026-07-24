@@ -3,7 +3,7 @@
       Renders inside the Help (?) popover (~520px wide). No props. */
 </script>
 
-<div class="flex flex-col gap-3 text-[11px]">
+<div class="flex flex-col gap-3 text-xs">
 	<!-- 1) ONE-LINE FRAME -->
 	<div class="border-border bg-card rounded-md border px-3 py-2">
 		<span class="text-foreground">Every result is one </span>
@@ -22,27 +22,27 @@
 			other.
 		</p>
 		<div class="grid grid-cols-2 gap-2">
-			<div class="border-border bg-muted rounded border border-l-2 border-l-sky-400 p-2">
+			<div class="border-border bg-muted rounded-md border border-l-2 border-l-sky-400 p-2">
 				<div class="text-foreground font-medium">⌨ Keyword</div>
-				<div class="text-muted-foreground text-[10px]">
+				<div class="text-muted-foreground text-[0.7rem]">
 					exact words you type (FTS / BM25 on the transcript)
 				</div>
 			</div>
-			<div class="border-border border-l-primary bg-muted rounded border border-l-2 p-2">
+			<div class="border-border border-l-primary bg-muted rounded-md border border-l-2 p-2">
 				<div class="text-foreground font-medium">💬 Meaning</div>
-				<div class="text-muted-foreground text-[10px]">
+				<div class="text-muted-foreground text-[0.7rem]">
 					what a clip is about, even in other words (text vector)
 				</div>
 			</div>
-			<div class="border-border bg-muted rounded border border-l-2 border-l-amber-400 p-2">
+			<div class="border-border bg-muted rounded-md border border-l-2 border-l-amber-400 p-2">
 				<div class="text-foreground font-medium">🖼 Image</div>
-				<div class="text-muted-foreground text-[10px]">
+				<div class="text-muted-foreground text-[0.7rem]">
 					how much the video frame looks like your image (frame vector)
 				</div>
 			</div>
-			<div class="border-border bg-muted rounded border border-l-2 border-l-emerald-400 p-2">
+			<div class="border-border bg-muted rounded-md border border-l-2 border-l-emerald-400 p-2">
 				<div class="text-foreground font-medium">🎬 Scene</div>
-				<div class="text-muted-foreground text-[10px]">
+				<div class="text-muted-foreground text-[0.7rem]">
 					what's visible on screen, from each frame's Swedish caption (caption vector)
 				</div>
 			</div>
@@ -52,15 +52,15 @@
 	<!-- 3) PER-COMPONENT REFERENCE TABLE -->
 	<div class="flex flex-col gap-1.5">
 		<div class="text-foreground font-semibold">What each judge actually does</div>
-		<div class="border-border overflow-hidden rounded border">
+		<div class="border-border overflow-hidden rounded-md border">
 			<!-- header -->
-			<div class="bg-muted text-foreground grid grid-cols-[64px_1fr_1fr] text-[10px] font-medium">
+			<div class="bg-muted text-foreground grid grid-cols-[64px_1fr_1fr] text-[0.7rem] font-medium">
 				<div class="border-border border-b p-1.5">Judge</div>
 				<div class="border-border border-b border-l p-1.5">You give it</div>
 				<div class="border-border border-b border-l p-1.5">Compared against</div>
 			</div>
 			<!-- keyword -->
-			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[10px]">
+			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[0.7rem]">
 				<div class="border-border text-foreground border-b p-1.5">⌨ Keyword</div>
 				<div class="border-border border-b border-l p-1.5">your query words</div>
 				<div class="border-border border-b border-l p-1.5">
@@ -68,7 +68,7 @@
 				</div>
 			</div>
 			<!-- meaning -->
-			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[10px]">
+			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[0.7rem]">
 				<div class="border-border text-foreground border-b p-1.5">💬 Meaning</div>
 				<div class="border-border border-b border-l p-1.5">your text → a vector</div>
 				<div class="border-border border-b border-l p-1.5">
@@ -77,7 +77,7 @@
 				</div>
 			</div>
 			<!-- image -->
-			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[10px]">
+			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[0.7rem]">
 				<div class="border-border text-foreground border-b p-1.5">🖼 Image</div>
 				<div class="border-border border-b border-l p-1.5">your image → a vector</div>
 				<div class="border-border border-b border-l p-1.5">
@@ -85,7 +85,7 @@
 				</div>
 			</div>
 			<!-- scene -->
-			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[10px]">
+			<div class="text-muted-foreground grid grid-cols-[64px_1fr_1fr] text-[0.7rem]">
 				<div class="text-foreground p-1.5">🎬 Scene</div>
 				<div class="border-border border-l p-1.5">your text → a vector</div>
 				<div class="border-border border-l p-1.5">
@@ -103,17 +103,17 @@
 		<!-- inputs -->
 		<div class="grid grid-cols-3 gap-2">
 			<div
-				class="border-border bg-muted rounded border border-l-2 border-l-sky-400 px-2 py-1.5 text-center"
+				class="border-border bg-muted rounded-md border border-l-2 border-l-sky-400 px-2 py-1.5 text-center"
 			>
 				⌨ Keyword text
 			</div>
 			<div
-				class="border-border border-l-primary bg-muted rounded border border-l-2 px-2 py-1.5 text-center"
+				class="border-border border-l-primary bg-muted rounded-md border border-l-2 px-2 py-1.5 text-center"
 			>
 				💬 Meaning text
 			</div>
 			<div
-				class="border-border bg-muted rounded border border-l-2 border-l-amber-400 px-2 py-1.5 text-center"
+				class="border-border bg-muted rounded-md border border-l-2 border-l-amber-400 px-2 py-1.5 text-center"
 			>
 				🖼 Image
 			</div>
@@ -124,20 +124,20 @@
 
 		<!-- legs -->
 		<div class="grid grid-cols-3 gap-2">
-			<div class="border-border bg-background rounded border px-2 py-1.5 text-center">
+			<div class="border-border bg-background rounded-md border px-2 py-1.5 text-center">
 				FTS leg
-				<div class="text-muted-foreground text-[10px]">BM25 on text</div>
+				<div class="text-muted-foreground text-[0.7rem]">BM25 on text</div>
 			</div>
-			<div class="border-border bg-background rounded border px-2 py-1.5 text-center">
+			<div class="border-border bg-background rounded-md border px-2 py-1.5 text-center">
 				Text-vector leg
-				<div class="text-muted-foreground text-[10px]">the transcript's semantic vector</div>
+				<div class="text-muted-foreground text-[0.7rem]">the transcript's semantic vector</div>
 			</div>
-			<div class="border-border bg-background rounded border px-2 py-1.5 text-center">
+			<div class="border-border bg-background rounded-md border px-2 py-1.5 text-center">
 				Frame-vector leg
-				<div class="text-muted-foreground text-[10px]"><code>frame_embedding</code></div>
+				<div class="text-muted-foreground text-[0.7rem]"><code>frame_embedding</code></div>
 			</div>
 		</div>
-		<p class="text-muted-foreground/80 text-center text-[10px]">
+		<p class="text-muted-foreground/80 text-center text-[0.7rem]">
 			+ the text query also drives a <strong class="text-foreground">Scene</strong> leg (<code
 				>caption_embedding</code
 			>) in “all”.
@@ -153,7 +153,7 @@
 		<div class="text-muted-foreground/70 text-center">▼</div>
 
 		<!-- rerank -->
-		<div class="border-border bg-muted rounded border px-3 py-1.5 text-center">
+		<div class="border-border bg-muted rounded-md border px-3 py-1.5 text-center">
 			Rerank top <em>K</em> <span class="text-muted-foreground">(optional)</span> — re-read each transcript
 			vs your text
 		</div>
@@ -175,12 +175,12 @@
 		<p class="text-muted-foreground">
 			Two judges run on 5 clips (A–E) and each returns a ranked list:
 		</p>
-		<div class="grid grid-cols-2 gap-2 text-[10px]">
-			<div class="border-border bg-muted rounded border p-1.5">
+		<div class="grid grid-cols-2 gap-2 text-[0.7rem]">
+			<div class="border-border bg-muted rounded-md border p-1.5">
 				<div class="text-foreground font-medium">⌨ Keyword</div>
 				1 = C&ensp;·&ensp;2 = A&ensp;·&ensp;3 = B
 			</div>
-			<div class="border-border bg-muted rounded border p-1.5">
+			<div class="border-border bg-muted rounded-md border p-1.5">
 				<div class="text-foreground font-medium">💬 Meaning</div>
 				1 = A&ensp;·&ensp;2 = C&ensp;·&ensp;3 = D
 			</div>
@@ -189,10 +189,14 @@
 			Each clip scores <code class="text-primary">sum of 1/(60 + rank)</code> over the lists it appears
 			in:
 		</p>
-		<div class="border-border bg-muted text-foreground rounded border p-1.5 font-mono text-[10px]">
-			A = 1/62 + 1/61 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded px-1">in both → wins</span
+		<div
+			class="border-border bg-muted text-foreground rounded-md border p-1.5 font-mono text-[0.7rem]"
+		>
+			A = 1/62 + 1/61 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded-md px-1"
+				>in both → wins</span
 			><br />
-			C = 1/61 + 1/62 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded px-1">in both → wins</span
+			C = 1/61 + 1/62 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded-md px-1"
+				>in both → wins</span
 			><br />
 			B = 1/63 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;≈ 0.0159 (one list)<br />
 			D = 1/63 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;≈ 0.0159 (one list)
@@ -215,14 +219,14 @@
 			moment you add an image, fusion falls back to equal-weight RRF and the slider is
 			<strong class="text-foreground">ignored</strong>.
 		</p>
-		<div class="grid grid-cols-2 gap-2 text-[10px]">
-			<div class="border-border bg-muted rounded border p-2">
+		<div class="grid grid-cols-2 gap-2 text-[0.7rem]">
+			<div class="border-border bg-muted rounded-md border p-2">
 				<div class="text-foreground font-medium">Slider (2 judges only)</div>
 				<div class="text-muted-foreground mt-0.5">Hybrid keyword ↔ meaning.</div>
 				<div class="text-foreground mt-1 font-mono">w·vectorScore + (1−w)·ftsScore</div>
 				<div class="text-muted-foreground mt-0.5">Uses real scores. You pick the weight.</div>
 			</div>
-			<div class="border-border bg-muted rounded border p-2">
+			<div class="border-border bg-muted rounded-md border p-2">
 				<div class="text-foreground font-medium">RRF (2 or 3 judges)</div>
 				<div class="text-muted-foreground mt-0.5">Default everywhere; always for 3-way "all".</div>
 				<div class="text-foreground mt-1 font-mono">Σ 1/(60 + rank)</div>
@@ -255,7 +259,7 @@
 	<!-- 8) SETTINGS REFERENCE -->
 	<div class="flex flex-col gap-1.5">
 		<div class="text-foreground font-semibold">⚙ Settings reference</div>
-		<div class="border-border overflow-hidden rounded border text-[10px]">
+		<div class="border-border overflow-hidden rounded-md border text-[0.7rem]">
 			<div class="text-muted-foreground grid grid-cols-[1fr_1.6fr]">
 				<div class="border-border text-foreground border-b p-1.5">Results to return</div>
 				<div class="border-border border-b border-l p-1.5">

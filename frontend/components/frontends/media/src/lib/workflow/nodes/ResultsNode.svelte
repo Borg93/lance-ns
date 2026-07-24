@@ -16,11 +16,11 @@
 	<NodeShell {id} title="Results" status={rt.status} {selected} width="w-80">
 		<Handle type="target" position={Position.Left} />
 		{#if rt.status === 'idle'}
-			<p class="text-muted-foreground text-[11px]">Run the graph to see hits here.</p>
+			<p class="text-muted-foreground text-xs">Run the graph to see hits here.</p>
 		{:else if hits.length === 0}
-			<p class="text-muted-foreground text-[11px]">No results.</p>
+			<p class="text-muted-foreground text-xs">No results.</p>
 		{:else}
-			<div class="text-muted-foreground mb-1.5 text-[10px]">
+			<div class="text-muted-foreground mb-1.5 text-[0.7rem]">
 				<span class="text-foreground">{hits.length}</span> results · click to play
 			</div>
 			<HitList {hits} />

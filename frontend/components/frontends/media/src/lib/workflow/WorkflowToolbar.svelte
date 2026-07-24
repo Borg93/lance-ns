@@ -88,9 +88,9 @@
 		</Button>
 	</div>
 	{#if graph.lastError}
-		<div class="text-destructive max-w-[18rem] text-[10px]">{graph.lastError}</div>
+		<div class="text-destructive max-w-[18rem] text-[0.7rem]">{graph.lastError}</div>
 	{/if}
-	<div class="text-muted-foreground/80 max-w-[19rem] space-y-0.5 text-[10px]">
+	<div class="text-muted-foreground/80 max-w-[19rem] space-y-0.5 text-[0.7rem]">
 		<div>
 			<span class="text-foreground">Add</span> — drag a node from the palette (top-right) onto the canvas.
 		</div>

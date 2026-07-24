@@ -1,0 +1,228 @@
+/* ────────────────────────────────────────────────────────────────────
+ * Tailwind 4 + shadcn-svelte theme — SHARED design system.
+ *
+ * This palette/typography is the design system shared with the sibling
+ * apps (ranymizer, …) so the three can merge into one UI cleanly. The
+ * source-of-truth tokens (--bg, --surface, --text, --accent, …) drive
+ * shadcn's semantic names (--background, --card, --primary, …) via
+ * `@theme inline`, so any component using `bg-card` / `text-foreground` /
+ * `border-border` picks up the palette automatically.
+ *
+ * Structure note (lance-media-specific): light values live in `:root` and the
+ * `.dark` class overrides them, because lance-media's theme toggle flips the
+ * `.dark` class (see theme-toggle.svelte). The app boots DARK by default
+ * (see app.html). ranymizer keeps the inverse (dark in :root, .light
+ * override) — same values, mirrored placement; reconcile at merge time.
+ * ──────────────────────────────────────────────────────────────────── */
+
+@import "tailwindcss";
+@import "tw-animate-css";
+
+/* Tailwind 4 + Vite auto-discovery isn't reliable for .svelte under Bun;
+ * point it at the source roots explicitly (paths relative to this file). */
+@source "./lib";
+@source "../../../packages/ui/src";
+@source "./routes";
+@source "./app.html";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── design tokens — LIGHT (default in :root; .dark overrides) ─────── */
+:root {
+  --bg: #fafaf8;
+  --surface: #ffffff;
+  --surface2: #f4f4f2;
+  --surface3: #eeeeec;
+  --border-c: rgba(0, 0, 0, 0.07);
+  --border-strong: rgba(0, 0, 0, 0.16);
+  --text: #1c1c1e;
+  --text2: #515156;
+  --text3: #86868b;
+  --accent: #4f46e5;
+  --accent-dim: rgba(79, 70, 229, 0.08);
+  --danger: #dc2626;
+  /* lance-media-specific: warm amber for search-match underline + karaoke cursor. */
+  --highlight: #b07d12;
+
+  --font-sans: "Inter", system-ui, -apple-system, sans-serif;
+  --font-serif: "Lora", Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+
+  /* shadcn semantic mapping → shared tokens above (live var() refs, so the
+   * .dark overrides below cascade through automatically). */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --card: var(--surface);
+  --card-foreground: var(--text);
+  --popover: var(--surface);
+  --popover-foreground: var(--text);
+  --primary: var(--accent);
+  --primary-foreground: #ffffff;
+  --secondary: var(--surface2);
+  --secondary-foreground: var(--text);
+  --muted: var(--surface2);
+  --muted-foreground: var(--text2);
+  --accent-bg: var(--accent-dim);
+  --accent-foreground: var(--accent);
+  --destructive: var(--danger);
+  --destructive-foreground: #ffffff;
+  --border: var(--border-c);
+  --input: var(--border-c);
+  --ring: var(--accent);
+
+  /* shadcn-svelte Sidebar tokens. Reference the shared palette vars above so
+   * they flip automatically under `.dark` (same pattern as --card / --primary).
+   * The sidebar reads as a panel (= surface), one step off the page bg. */
+  --sidebar: var(--surface);
+  --sidebar-foreground: var(--text);
+  --sidebar-primary: var(--accent);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: var(--surface2);
+  --sidebar-accent-foreground: var(--text);
+  --sidebar-border: var(--border-c);
+  --sidebar-ring: var(--accent);
+
+  --radius: 0.375rem;
+}
+
+/* ── design tokens — DARK (lance-media boots here; toggle removes .dark) ──
+ * Must be `.dark`, NOT `:where(.dark)`: `:where()` has zero specificity, so the
+ * `:root` light block (specificity 0,1,0) would always win and dark mode would
+ * never apply. `.dark` ties `:root` on specificity and wins by source order. */
+.dark {
+  --bg: #0d0d0f;
+  --surface: #131316;
+  --surface2: #1a1a1e;
+  --surface3: #222227;
+  --border-c: rgba(255, 255, 255, 0.06);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --text: #e9e9ea;
+  --text2: #9a9a9f;
+  --text3: #65656c;
+  --accent: #818cf8;
+  --accent-dim: rgba(129, 140, 248, 0.12);
+  --danger: #f87171;
+  --highlight: #e3b341;
+}
+
+/* ── Tailwind 4 theme: bind shadcn names to our colors and fonts ──── */
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent-bg);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-surface2: var(--surface2);
+  --color-text2: var(--text2);
+  --color-text3: var(--text3);
+  --color-highlight: var(--highlight);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans: var(--font-sans);
+  --font-serif: var(--font-serif);
+  --font-mono: var(--font-mono);
+}
+
+/* ── reset + body ─────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+  html,
+  body {
+    height: 100%;
+  }
+  body {
+    font-family: var(--font-sans);
+    font-size: 13.5px;
+    line-height: 1.5;
+    color: var(--foreground);
+    background: var(--background);
+    font-feature-settings: "ss01", "cv11";
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  /* shadcn-style thin scrollbar */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-border);
+    border-radius: 999px;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-muted-foreground);
+  }
+}
+
+svg {
+  display: block;
+  flex-shrink: 0;
+}
+
+/* ────────────────────────────────────────────────────────────────────
+ * Karaoke cursor styling for the transcript player. Raw CSS (not utility
+ * classes) because the cursor is toggled via direct .classList add/remove
+ * in a RAF loop — applying Tailwind classes from JS produces noisy diffs
+ * every frame. Visible in both themes via the --highlight token.
+ * ──────────────────────────────────────────────────────────────────── */
+.cursor-word {
+  background: color-mix(in oklab, var(--color-highlight) 45%, transparent);
+  color: var(--color-foreground);
+  font-weight: 600;
+  border-radius: 3px;
+  padding: 1px 2px;
+  margin: 0 -2px;
+}
+.cursor-sentence {
+  background: color-mix(in oklab, var(--color-highlight) 12%, transparent);
+  border-left: 2px solid color-mix(in oklab, var(--color-highlight) 70%, transparent);
+  padding-left: 6px;
+  margin-left: -8px;
+  border-radius: 3px;
+}
+
+/* bits-ui Popover.Content bleeds opacity during enter/exit animations; pin
+ * popovers to a solid surface + visible border so they never render faint. */
+[data-popover-content][data-state="open"],
+[data-popover-content][data-state="closed"] {
+  background-color: var(--color-card) !important;
+  opacity: 1 !important;
+  box-shadow:
+    0 0 0 1px var(--color-border),
+    0 10px 30px -8px rgba(0, 0, 0, 0.18),
+    0 4px 8px -2px rgba(0, 0, 0, 0.08);
+}

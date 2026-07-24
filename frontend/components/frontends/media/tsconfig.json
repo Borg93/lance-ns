@@ -1,0 +1,6 @@
+{
+  "extends": ["./.svelte-kit/tsconfig.json", "@lance/config/tsconfig.base.json"],
+  "compilerOptions": {
+    "types": ["bun-types", "@webgpu/types"]
+  }
+}

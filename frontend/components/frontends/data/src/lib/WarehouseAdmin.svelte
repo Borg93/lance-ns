@@ -28,14 +28,16 @@
 		fetchWarehouses,
 		setWarehouseActive,
 		type Warehouse,
+		type WarehouseRecord,
 	} from './catalog';
+	import RowDrawer from './RowDrawer.svelte';
 
 	const POLL_MS = 5000;
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
-	let warehouses = $state<Warehouse[] | null>(null);
+	let warehouses = $state<WarehouseRecord[] | null>(null);
 	let lastStatus = $state(0);
 	let settled = $state(false);
 	let busy = $state(false);
@@ -126,6 +128,14 @@
 	let globalFilter = $state('');
 	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
 
+	// Goal cond 8: row click opens the full-record drawer (link + lifecycle button stopPropagation).
+	let drawerOpen = $state(false);
+	let drawerRow = $state<WarehouseRecord | null>(null);
+	function openDrawer(row: WarehouseRecord): void {
+		drawerRow = row;
+		drawerOpen = true;
+	}
+
 	const sortableHeader =
 		(label: string) =>
 		({
@@ -142,7 +152,7 @@
 				onclick: column.getToggleSortingHandler(),
 			});
 
-	const columns: ColumnDef<Warehouse>[] = [
+	const columns: ColumnDef<WarehouseRecord>[] = [
 		{
 			id: 'id',
 			accessorKey: 'id',
@@ -223,13 +233,24 @@
 </script>
 
 {#snippet idCell(w: Warehouse)}
-	<a class="whlink mono" href={`${base}/warehouses/${encodeURIComponent(w.id)}`}>{w.id}</a>
+	<a
+		class="whlink mono"
+		href={`${base}/warehouses/${encodeURIComponent(w.id)}`}
+		onclick={(e) => e.stopPropagation()}>{w.id}</a
+	>
 {/snippet}
 {#snippet statusCell(w: Warehouse)}
 	<span class="chip mono" class:off={statusOf(w) !== 'active'}>{statusOf(w)}</span>
 {/snippet}
 {#snippet actionsCell(w: Warehouse)}
-	<button class="btn ghost" disabled={busy} onclick={() => toggleActive(w)}>
+	<button
+		class="btn ghost"
+		disabled={busy}
+		onclick={(e) => {
+			e.stopPropagation();
+			toggleActive(w);
+		}}
+	>
 		{statusOf(w) === 'active' ? 'deactivate' : 'activate'}
 	</button>
 {/snippet}
@@ -267,6 +288,7 @@
 			table={whTable}
 			loading={warehouses === null}
 			emptyMessage="No warehouses provisioned — the form below creates the first."
+			onrowclick={openDrawer}
 		/>
 
 		<section>
@@ -337,6 +359,53 @@
 		</section>
 	{/if}
 </div>
+
+<RowDrawer
+	bind:open={drawerOpen}
+	title={drawerRow?.id ?? ''}
+	description="The full warehouse registry record."
+>
+	{#if drawerRow}
+		<dl class="rec">
+			<dt>warehouse id</dt>
+			<dd class="mono">{drawerRow.id}</dd>
+			<dt>project</dt>
+			<dd>
+				<a class="mono jump" href={`${base}/projects/${encodeURIComponent(drawerRow.project)}`}
+					>{drawerRow.project}</a
+				>
+			</dd>
+			<dt>bucket</dt>
+			<dd class="mono">{drawerRow.bucket}</dd>
+			<dt>root uri</dt>
+			<dd class="mono">{drawerRow.root_uri}</dd>
+			<dt>status</dt>
+			<dd>
+				<span class="chip mono" class:off={statusOf(drawerRow) !== 'active'}
+					>{statusOf(drawerRow)}</span
+				>
+			</dd>
+			<dt>class</dt>
+			<dd>
+				{#if drawerRow.serving === 'gold'}
+					<!-- the serving marker: this record hosts the project's gold tier in its own bucket -->
+					<span class="chip gold mono">serving · gold</span>
+				{:else}
+					<span class="mut">work warehouse</span>
+				{/if}
+			</dd>
+			<dt>created</dt>
+			<dd class="mono">{drawerRow.created_at ?? '—'}</dd>
+		</dl>
+		<div class="jumps">
+			<a class="jbtn" href={`${base}/warehouses/${encodeURIComponent(drawerRow.id)}`}>Open detail</a
+			>
+			<a class="jbtn" href={`${base}/projects/${encodeURIComponent(drawerRow.project)}`}
+				>Open project</a
+			>
+		</div>
+	{/if}
+</RowDrawer>
 
 <style>
 	.page {
@@ -438,5 +507,43 @@
 	}
 	.whlink:hover {
 		text-decoration: underline;
+	}
+	/* drawer record + jump links */
+	.chip.gold {
+		border-color: color-mix(in srgb, var(--accent, #ffc14d) 55%, var(--line));
+	}
+	.rec {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 6px 14px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.rec dt {
+		color: var(--faint);
+	}
+	.rec dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.jump {
+		color: var(--ink);
+	}
+	.jumps {
+		display: flex;
+		gap: 8px;
+	}
+	.jbtn {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		text-decoration: none;
+	}
+	.jbtn:hover {
+		border-color: var(--mut);
 	}
 </style>

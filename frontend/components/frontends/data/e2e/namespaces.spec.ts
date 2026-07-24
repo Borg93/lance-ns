@@ -82,7 +82,7 @@ test('drop confirms via the AlertDialog, posts the cascade behavior, and the row
 }) => {
 	await page.goto('/data/namespaces');
 	await expect(page.locator('a.ns-name', { hasText: 'bronze' })).toBeVisible();
-	await page.getByRole('button', { name: 'Drop namespace bronze' }).click();
+	await page.getByRole('button', { name: 'Drop namespace bronze', exact: true }).click();
 	// The confirm is the portalled @rask/ui AlertDialog — drive it by role, not the trigger row.
 	const dialog = page.getByRole('alertdialog');
 	await expect(dialog).toContainText('Drop namespace bronze');
@@ -105,7 +105,7 @@ test('an unticked confirm posts Restrict — the default must never silently cas
 	page,
 }) => {
 	await page.goto('/data/namespaces');
-	await page.getByRole('button', { name: 'Drop namespace gold' }).click();
+	await page.getByRole('button', { name: 'Drop namespace gold', exact: true }).click();
 	const dialog = page.getByRole('alertdialog');
 	await expect(dialog).toContainText('Drop namespace gold');
 	// Leave the cascade checkbox UNTICKED: the wire contract must carry Restrict (refuse-on-non-empty) —
@@ -119,7 +119,7 @@ test('an unticked confirm posts Restrict — the default must never silently cas
 
 test('cancelling the confirm never posts the drop', async ({ page }) => {
 	await page.goto('/data/namespaces');
-	await page.getByRole('button', { name: 'Drop namespace gold' }).click();
+	await page.getByRole('button', { name: 'Drop namespace gold', exact: true }).click();
 	await page.getByRole('alertdialog').getByRole('button', { name: 'Cancel' }).click();
 	await expect(page.getByRole('alertdialog')).toHaveCount(0);
 	expect(dropPost).toBeNull();
@@ -131,7 +131,7 @@ test('a 403 drop surfaces the forbidden state and keeps the namespace listed', a
 	// (owner-tier can_delete) does for a non-owner.
 	await page.route('**/capi/v1/namespace/**', (route) => json(route, { detail: 'forbidden' }, 403));
 	await page.goto('/data/namespaces');
-	await page.getByRole('button', { name: 'Drop namespace gold' }).click();
+	await page.getByRole('button', { name: 'Drop namespace gold', exact: true }).click();
 	await page.getByRole('alertdialog').getByRole('button', { name: 'Drop', exact: true }).click();
 	await expect(page.locator('.banner.fail')).toContainText(
 		'Denied: dropping gold needs the owner rung (can_delete).',

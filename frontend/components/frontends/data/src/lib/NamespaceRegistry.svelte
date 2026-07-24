@@ -25,6 +25,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { dropNamespace, fetchTables } from './catalog';
+	import RowDrawer from './RowDrawer.svelte';
 	import { namespaceOfTable, stageOf, type StageInfo } from './stage';
 	import StageBadge from './StageBadge.svelte';
 
@@ -127,6 +128,14 @@
 	let globalFilter = $state('');
 	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
 
+	// Goal cond 8: row click opens the record drawer (links/buttons in cells stopPropagation).
+	let drawerOpen = $state(false);
+	let drawerRow = $state<Row | null>(null);
+	function openDrawer(row: Row): void {
+		drawerRow = row;
+		drawerOpen = true;
+	}
+
 	const columns: ColumnDef<Row>[] = [
 		{
 			id: 'namespace',
@@ -197,7 +206,11 @@
 </script>
 
 {#snippet nsCell(row: Row)}
-	<a class="ns-name mono" href={`${base}/namespaces/${encodeURIComponent(row.ns)}`}>{row.ns}</a>
+	<a
+		class="ns-name mono"
+		href={`${base}/namespaces/${encodeURIComponent(row.ns)}`}
+		onclick={(e) => e.stopPropagation()}>{row.ns}</a
+	>
 {/snippet}
 {#snippet stageCell(row: Row)}
 	{#if row.stage}<StageBadge info={row.stage} />{:else}<span class="mut">—</span>{/if}
@@ -207,7 +220,10 @@
 		class="drop"
 		aria-label={`Drop namespace ${row.ns}`}
 		disabled={busy}
-		onclick={() => openDrop(row.ns)}
+		onclick={(e) => {
+			e.stopPropagation();
+			openDrop(row.ns);
+		}}
 	>
 		<Trash2 size={12} /> drop
 	</button>
@@ -253,9 +269,35 @@
 			{table}
 			loading={tables === null}
 			emptyMessage="No namespaces yet — bind one to a warehouse to create the first."
+			onrowclick={openDrawer}
 		/>
 	{/if}
 </div>
+
+<RowDrawer
+	bind:open={drawerOpen}
+	title={drawerRow?.ns ?? ''}
+	description="The registry record for this namespace (grouped from the table registry)."
+>
+	{#if drawerRow}
+		<dl class="rec">
+			<dt>namespace</dt>
+			<dd class="mono">{drawerRow.ns}</dd>
+			<dt>medallion stage</dt>
+			<dd>
+				{#if drawerRow.stage}<StageBadge info={drawerRow.stage} />{:else}<span class="mut"
+						>— (not a medallion zone)</span
+					>{/if}
+			</dd>
+			<dt>tables</dt>
+			<dd class="mono">{drawerRow.count}</dd>
+		</dl>
+		<div class="jumps">
+			<a class="jbtn" href={`${base}/namespaces/${encodeURIComponent(drawerRow.ns)}`}>Open detail</a
+			>
+		</div>
+	{/if}
+</RowDrawer>
 
 <AlertDialog.Root bind:open={dropOpen}>
 	<AlertDialog.Content>
@@ -382,6 +424,38 @@
 		gap: 8px;
 		color: var(--mut);
 		font-size: 13px;
+	}
+	/* drawer record + jump links */
+	.rec {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 6px 14px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.rec dt {
+		color: var(--faint);
+	}
+	.rec dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.jumps {
+		display: flex;
+		gap: 8px;
+	}
+	.jbtn {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		text-decoration: none;
+	}
+	.jbtn:hover {
+		border-color: var(--mut);
 	}
 	.dialog-actions {
 		display: flex;

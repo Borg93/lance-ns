@@ -24,6 +24,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { declareTable, fetchTables } from './catalog';
+	import RowDrawer from './RowDrawer.svelte';
 	import { namespaceOfTable, stageOfTable, type StageInfo } from './stage';
 	import StageBadge from './StageBadge.svelte';
 
@@ -118,6 +119,15 @@
 	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
 	let stageFilter = $state(''); // '' = any stage
 
+	// Goal cond 8: row click opens the record drawer (the in-cell links keep navigating — they
+	// stopPropagation so a link click never also opens the drawer).
+	let drawerOpen = $state(false);
+	let drawerRow = $state<Row | null>(null);
+	function openDrawer(row: Row): void {
+		drawerRow = row;
+		drawerOpen = true;
+	}
+
 	const columns: ColumnDef<Row>[] = [
 		{
 			id: 'table',
@@ -183,14 +193,20 @@
 </script>
 
 {#snippet tableCell(row: Row)}
-	<a class="rowlink mono" href={`${base}/tables/${encodeURIComponent(row.id)}`}>{row.id}</a>
+	<a
+		class="rowlink mono"
+		href={`${base}/tables/${encodeURIComponent(row.id)}`}
+		onclick={(e) => e.stopPropagation()}>{row.id}</a
+	>
 {/snippet}
 {#snippet stageCell(row: Row)}
 	{#if row.stage}<StageBadge info={row.stage} />{:else}<span class="mut">—</span>{/if}
 {/snippet}
 {#snippet nsCell(row: Row)}
-	<a class="nslink mono" href={`${base}/namespaces/${encodeURIComponent(row.namespace)}`}
-		>{row.namespace}</a
+	<a
+		class="nslink mono"
+		href={`${base}/namespaces/${encodeURIComponent(row.namespace)}`}
+		onclick={(e) => e.stopPropagation()}>{row.namespace}</a
 	>
 {/snippet}
 
@@ -263,9 +279,41 @@
 			{table}
 			loading={tables === null}
 			emptyMessage="No tables registered — a create (or the medallion cascade's gold sink) makes the first."
+			onrowclick={openDrawer}
 		/>
 	{/if}
 </div>
+
+<RowDrawer
+	bind:open={drawerOpen}
+	title={drawerRow?.id ?? ''}
+	description="The registry record for this table."
+>
+	{#if drawerRow}
+		<dl class="rec">
+			<dt>table id</dt>
+			<dd class="mono">{drawerRow.id}</dd>
+			<dt>namespace</dt>
+			<dd>
+				<a class="mono jump" href={`${base}/namespaces/${encodeURIComponent(drawerRow.namespace)}`}
+					>{drawerRow.namespace}</a
+				>
+			</dd>
+			<dt>medallion stage</dt>
+			<dd>
+				{#if drawerRow.stage}<StageBadge info={drawerRow.stage} />{:else}<span class="mut"
+						>— (not a medallion zone)</span
+					>{/if}
+			</dd>
+		</dl>
+		<div class="jumps">
+			<a class="btn" href={`${base}/tables/${encodeURIComponent(drawerRow.id)}`}>Open detail</a>
+			<a class="btn" href={`${base}/tables/${encodeURIComponent(drawerRow.id)}?tab=access`}
+				>Access tab</a
+			>
+		</div>
+	{/if}
+</RowDrawer>
 
 <style>
 	.page {
@@ -378,5 +426,40 @@
 		gap: 8px;
 		color: var(--mut);
 		padding: 32px 0;
+	}
+	/* drawer record + jump links */
+	.rec {
+		display: grid;
+		grid-template-columns: max-content 1fr;
+		gap: 6px 14px;
+		margin: 0;
+		font-size: 12px;
+	}
+	.rec dt {
+		color: var(--faint);
+	}
+	.rec dd {
+		margin: 0;
+		color: var(--ink);
+		word-break: break-all;
+	}
+	.jump {
+		color: var(--ink);
+	}
+	.jumps {
+		display: flex;
+		gap: 8px;
+	}
+	.jumps .btn {
+		background: var(--panel-2);
+		border: 1px solid var(--line);
+		border-radius: var(--radius-sm);
+		color: var(--ink);
+		font-size: 12px;
+		padding: 4px 12px;
+		text-decoration: none;
+	}
+	.jumps .btn:hover {
+		border-color: var(--mut);
 	}
 </style>

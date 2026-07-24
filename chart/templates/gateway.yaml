@@ -30,12 +30,11 @@ data:
       server {
         listen {{ $port }};
 
-        # The SvelteKit UI at the root (incl. websockets for HMR/live data).
-        location / {
-          proxy_pass http://{{ include "lance.fullname" . }}-web:3000;
-          proxy_set_header Upgrade $http_upgrade;
-          proxy_set_header Connection "upgrade";
-        }
+        # No UI here: the MFE zones are served by the Ingress (web-<zone> Services) — the gateway is the
+        # BACKEND-only edge. A root hit is a routing mistake, answered honestly. (The old `-web` upstream
+        # made every fresh gateway boot crash with "host not found" once apps/web retired — nginx resolves
+        # upstreams at startup, so the long-lived pod masked it until the first from-scratch install.)
+        location / { return 404; }
 
         # App APIs are routed via Dapr SERVICE INVOCATION through the gateway's OWN sidecar (:3500):
         #   /lineage/runs → http://127.0.0.1:3500/v1.0/invoke/lineage/method/runs

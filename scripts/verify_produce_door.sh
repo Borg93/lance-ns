@@ -31,13 +31,13 @@ step "2/7 roll the freshly-loaded images (kind same-tag → delete pods, not jus
 # catalog too: it carries the #68 access-simulator fix (services/common/fga.py qualify flag) under the same
 # :dev tag, so without an explicit pod delete the running catalog keeps the old double-prefix Check.
 kubectl delete pod -l app.kubernetes.io/component=lance-ray --wait=false
-kubectl delete pod -l app.kubernetes.io/component=web --wait=false
 kubectl delete pod -l app.kubernetes.io/component=catalog --wait=false
 # lineage too: the SAME :dev image carries #83's /admin/dlq ops endpoints (all backend services share
 # lance-rest-catalog:dev), so without rolling lineage the DLQ panel 404s against the old pod.
 kubectl delete pod -l app.kubernetes.io/component=lineage --wait=false
+# (the monolithic web app is retired — the MFE zones are web-<name> and none consumes MEDALLION_API,
+# so only the backends roll here)
 kubectl rollout status "deploy/$RELEASE-lance-ray" --timeout=150s
-kubectl rollout status "deploy/$RELEASE-web" --timeout=150s
 kubectl rollout status "deploy/$RELEASE-catalog" --timeout=150s
 kubectl rollout status "deploy/$RELEASE-lineage" --timeout=150s
 
@@ -49,9 +49,11 @@ env_val() {
 [ "$(env_val MEDALLION_OIDC_ENABLED)" = "true" ] || fail "MEDALLION_OIDC_ENABLED not true on lance-ray"
 [ "$(env_val MEDALLION_PRODUCE_ADMIN_PROJECT)" = "acme" ] || fail "produce-admin project not acme"
 echo "   OIDC_ENABLED=true  ADMIN_PROJECT=acme  ISSUER=$(env_val MEDALLION_OIDC_ISSUER)"
-webapi="$(kubectl get deploy "$RELEASE-web" -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='MEDALLION_API')].value}")"
-[ -n "$webapi" ] || fail "web has no MEDALLION_API"
-echo "   web MEDALLION_API=$webapi"
+# The monolithic web app is retired — every MFE zone carries MEDALLION_API (the produce/train door UI
+# lives in the models zone; the env is shared zone plumbing). Assert on the models zone.
+webapi="$(kubectl get deploy "$RELEASE-web-models" -o jsonpath="{.spec.template.spec.containers[0].env[?(@.name=='MEDALLION_API')].value}")"
+[ -n "$webapi" ] || fail "web-models has no MEDALLION_API"
+echo "   web-models MEDALLION_API=$webapi"
 
 step "4/7 port-forward dex + lance-ray + openfga + lineage"
 kubectl port-forward "svc/$RELEASE-dex" 5556:5556 >/tmp/pf-dex.log 2>&1 & PF_PIDS+=($!)

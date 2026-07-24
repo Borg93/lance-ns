@@ -50,6 +50,8 @@ def test_app_apis_route_through_dapr_service_invocation(gateway: str) -> None:
     assert catalog.status_code == 200
 
 
-def test_root_serves_the_ui(gateway: str) -> None:
-    # "/" is routed directly to the web service (no sidecar) — the single entry point also fronts the UI.
-    assert requests.get(f"{gateway}/", timeout=8).status_code == 200
+def test_root_is_backend_only(gateway: str) -> None:
+    # Since the MFE migration the zones are served by the Ingress (web-<zone>); the gateway is the
+    # BACKEND-only edge, so "/" answers an honest 404 instead of proxying a retired web upstream
+    # (the old upstream crashed every fresh gateway boot with "host not found").
+    assert requests.get(f"{gateway}/", timeout=8).status_code == 404

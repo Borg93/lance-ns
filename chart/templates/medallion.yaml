@@ -95,7 +95,11 @@ spec:
             - { name: MEDALLION_RAY_ENABLED, value: "true" }
             - { name: MEDALLION_RAY_ADDRESS, value: {{ .Values.medallion.rayAddress | quote }} }
             {{- end }}
-            {{- if .Values.medallion.fgaEnabled }}
+            {{- if or .Values.medallion.fgaEnabled .Values.auth.enabled }}
+            # Rendered under fgaEnabled OR auth.enabled: the #64 human door below NEEDS the FGA client
+            # (can_administer) — auth-on without these envs left the client on its unreachable default URL,
+            # 503-fail-closing every human trigger (found by the fresh-redeploy drive 2026-07-24; the
+            # long-lived release had accumulated fgaEnabled=true via --reuse-values, masking it).
             # SECURITY (found live 2026-07-13): the FGA envs were rendered ONLY inside the movers range,
             # but this app also hosts the TRAINING consumer (#115 D5) — so `handle_train_trigger` got
             # `fga_client=None` and its can_read_data/can_create_table gate silently no-op'd: a revoked

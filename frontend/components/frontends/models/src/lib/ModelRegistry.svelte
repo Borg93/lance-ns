@@ -13,6 +13,7 @@
 		type ModelSummary,
 		promoteModel,
 	} from './catalog';
+	import ModelDetail from './ModelDetail.svelte';
 
 	const POLL_MS = 5000;
 
@@ -107,16 +108,6 @@
 			promoting = false;
 		}
 	}
-
-	function metricNames(d: ModelDescribe): string[] {
-		return Object.keys({ ...d.candidate_metrics, ...d.blessed_metrics }).sort();
-	}
-
-	function fmt(value: unknown): string {
-		if (typeof value === 'number')
-			return Number.isInteger(value) ? String(value) : value.toFixed(4);
-		return value == null ? '—' : String(value);
-	}
 </script>
 
 <div class="page">
@@ -193,35 +184,10 @@
 						<tr class="detail-row">
 							<td colspan="5">
 								{#if detail === null}
-									<p class="mut">Loading metrics…</p>
+									<p class="mut">Loading model detail…</p>
 								{:else}
-									{@const names = metricNames(detail)}
-									{#if names.length === 0}
-										<p class="mut">No metrics recorded for this model.</p>
-									{:else}
-										<table class="metrics">
-											<thead>
-												<tr>
-													<th>metric</th>
-													<th>candidate v{detail.latest_version}</th>
-													<th
-														>blessed {detail.blessed_version
-															? `v${detail.blessed_version}`
-															: '—'}</th
-													>
-												</tr>
-											</thead>
-											<tbody>
-												{#each names as name (name)}
-													<tr>
-														<td class="mono">{name}</td>
-														<td class="mono">{fmt(detail.candidate_metrics?.[name])}</td>
-														<td class="mono">{fmt(detail.blessed_metrics?.[name])}</td>
-													</tr>
-												{/each}
-											</tbody>
-										</table>
-									{/if}
+									<!-- Goal cond 9: metrics comparison + artifacts table + training curves. -->
+									<ModelDetail model={m.model} {detail} />
 								{/if}
 							</td>
 						</tr>
@@ -335,13 +301,6 @@
 	.detail-row td {
 		background: var(--bg-2);
 		padding: 12px 16px;
-	}
-	.metrics {
-		max-width: 520px;
-	}
-	.metrics th,
-	.metrics td {
-		border-bottom: 1px solid var(--line);
 	}
 	.mut {
 		color: var(--mut);

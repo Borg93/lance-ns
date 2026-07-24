@@ -8,6 +8,9 @@ import { type ApiResult, requestJSON as request } from './http';
 export type ModelSummary = components['schemas']['ModelSummary'];
 export type ModelsList = components['schemas']['ModelsListResponse'];
 export type ModelDescribe = components['schemas']['ModelDescribeResponse'];
+/** One object under the model's artifact tree (path relative to the model root) — the describe
+ * response's `artifacts` listing the registry detail renders as a table. */
+export type ModelArtifact = components['schemas']['ModelArtifact'];
 export type PromoteResponse = components['schemas']['PromoteResponse'];
 export type AccessList = components['schemas']['AccessListResponse'];
 export type AccessCheck = components['schemas']['AccessCheckResponse'];

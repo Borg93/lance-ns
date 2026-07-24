@@ -14,6 +14,28 @@ test.beforeEach(async ({ page }) => {
 		{ model: 'demo', latest_version: 3, blessed_version: 2 },
 		{ model: 'fraud', latest_version: 1, blessed_version: null },
 	];
+	// The detail's training curves come from the experiments BFF's ?model= mode: demo has a real
+	// series, fraud has none (the honest empty state).
+	await page.route('**/api/experiments**', (route) => {
+		const url = new URL(route.request().url());
+		const model = url.searchParams.get('model') ?? '';
+		const points =
+			model === 'demo'
+				? [
+						{ t: '2026-07-24T10:00:00Z', v: 4 },
+						{ t: '2026-07-24T11:00:00Z', v: 9 },
+					]
+				: [];
+		return json(route, {
+			model,
+			source: 'GreptimeDB (OTLP)',
+			curves: [
+				{ key: 'rows', title: 'Rows seen per run', points },
+				{ key: 'features', title: 'Feature datasets per run', points: [] },
+				{ key: 'runs', title: 'Cumulative training runs', points: [] },
+			],
+		});
+	});
 	await page.route('**/capi/**', (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^.*\/capi/, '');
@@ -35,6 +57,18 @@ test.beforeEach(async ({ page }) => {
 				blessed_version: entry?.blessed_version ?? null,
 				candidate_metrics: { rows_seen: 9, loss: 0.1234 },
 				blessed_metrics: entry?.blessed_version ? { rows_seen: 4, loss: 0.5 } : null,
+				// The frozen contract's new field: the models/<model>/ object listing.
+				artifacts:
+					name === 'demo'
+						? [
+								{
+									path: '3/weights.json',
+									size_bytes: 2048,
+									updated_at: '2026-07-24T09:00:00Z',
+								},
+								{ path: '3/scaler.json', size_bytes: 512, updated_at: null },
+							]
+						: [],
 			});
 		}
 		if (path === '/v1/model') return json(route, { models });
@@ -59,6 +93,39 @@ test('clicking a model opens the candidate-vs-blessed metrics panel', async ({ p
 	await expect(page.locator('.metrics')).toContainText('rows_seen');
 	await expect(page.locator('.metrics')).toContainText('0.1234'); // candidate loss
 	await expect(page.locator('.metrics')).toContainText('0.5000'); // blessed loss
+});
+
+test('the detail lists the artifacts as a sortable table', async ({ page }) => {
+	await page.goto('/models');
+	await page.locator('td', { hasText: 'demo' }).first().click();
+	const artifacts = page.getByLabel('Artifacts for demo');
+	await expect(artifacts).toContainText('3/weights.json');
+	await expect(artifacts).toContainText('2.0 KiB'); // size_bytes rendered human-readable
+	await expect(artifacts).toContainText('3/scaler.json');
+	await expect(artifacts).toContainText('—'); // null updated_at renders honestly
+});
+
+test('an artifact-less model shows the honest empty artifacts state', async ({ page }) => {
+	await page.goto('/models');
+	await page.locator('td', { hasText: 'fraud' }).first().click();
+	await expect(page.getByLabel('Artifacts for fraud')).toContainText('No artifacts listed');
+});
+
+test('training curves plot where series exist and state the truth where none do', async ({
+	page,
+}) => {
+	await page.goto('/models');
+	await page.locator('td', { hasText: 'demo' }).first().click();
+	// demo: the rows curve has points → one LayerChart plot; the empty curves are simply absent.
+	await expect(page.getByLabel('Curve Rows seen per run')).toBeVisible();
+	await expect(
+		page.getByLabel('Curve Rows seen per run').locator('svg.lc-layout-svg'),
+	).toBeVisible();
+	await expect(page.getByLabel('Curve Cumulative training runs')).toHaveCount(0);
+	// fraud: no series at all → the honest empty state, no fabricated flat line.
+	await page.locator('td', { hasText: 'demo' }).first().click(); // collapse
+	await page.locator('td', { hasText: 'fraud' }).first().click();
+	await expect(page.getByText('No training series recorded for this model')).toBeVisible();
 });
 
 test('bless promotes the candidate and the row updates', async ({ page }) => {

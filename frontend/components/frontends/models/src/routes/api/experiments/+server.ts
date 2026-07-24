@@ -35,6 +35,43 @@ const PANELS = [
 	},
 ] as const;
 
+// Per-model training CURVES (?model=<name>) for the registry's detail view — the same GreptimeDB
+// metrics as time series via the Prometheus query_range endpoint (last 24 h, 5 min steps), so the
+// detail page can plot honest per-run trajectories instead of only the latest scalar.
+const CURVES = [
+	{ key: 'rows', title: 'Rows seen per run', metric: 'lance_training_rows_seen' },
+	{ key: 'features', title: 'Feature datasets per run', metric: 'lance_training_features' },
+	{ key: 'runs', title: 'Cumulative training runs', metric: 'lance_training_runs_total' },
+] as const;
+const RANGE_S = 24 * 3600;
+const STEP_S = 300;
+
+type Point = { t: string; v: number };
+
+/** Escape a label VALUE for a PromQL matcher (backslash, quote, newline). */
+const escapeLabel = (v: string): string =>
+	v.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+
+async function promqlRange(base: string, fetchFn: typeof fetch, query: string): Promise<Point[]> {
+	const end = Math.floor(Date.now() / 1000);
+	const q = new URLSearchParams({
+		query,
+		start: String(end - RANGE_S),
+		end: String(end),
+		step: String(STEP_S),
+	});
+	const res = await fetchFn(`${base}/v1/prometheus/api/v1/query_range?${q}`);
+	if (!res.ok) throw new Error(`greptime ${res.status}`);
+	const body = (await res.json()) as {
+		data?: { result?: { values?: [number, string][] }[] };
+	};
+	// One series per query (aggregated by max); flatten its [unix, value] pairs.
+	return (body.data?.result ?? [])
+		.flatMap((r) => r.values ?? [])
+		.map(([t, v]) => ({ t: new Date(t * 1000).toISOString(), v: Number(v) }))
+		.filter((p) => Number.isFinite(p.v));
+}
+
 type Series = { model: string; value: number };
 
 async function promql(base: string, fetchFn: typeof fetch, query: string): Promise<Series[]> {
@@ -50,7 +87,7 @@ async function promql(base: string, fetchFn: typeof fetch, query: string): Promi
 		.sort((a, b) => a.model.localeCompare(b.model));
 }
 
-export const GET: RequestHandler = async ({ fetch, locals }) => {
+export const GET: RequestHandler = async ({ url, fetch, locals }) => {
 	if (locals.authEnabled && !locals.session) {
 		return json({ detail: 'sign in to view experiment metrics' }, { status: 401 });
 	}
@@ -59,6 +96,25 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 			{ detail: 'experiment tracking requires the observability stack (GreptimeDB)' },
 			{ status: 501 },
 		);
+	}
+	// The per-model curve mode: `?model=<name>` → time series for the registry detail's plots. An
+	// unknown model is not an error — its curves are honestly empty (no fabricated training history).
+	const model = url.searchParams.get('model')?.trim();
+	if (model) {
+		try {
+			const selector = `{lance_model="${escapeLabel(model)}"}`;
+			const curves = await Promise.all(
+				CURVES.map(async (c) => ({
+					key: c.key,
+					title: c.title,
+					points: await promqlRange(GREPTIME_API, fetch, `max(${c.metric}${selector})`),
+				})),
+			);
+			return json({ model, source: 'GreptimeDB (OTLP)', curves });
+		} catch (err) {
+			console.error(`experiments curves upstream failure: ${String(err)}`);
+			return json({ detail: String(err) }, { status: 502 });
+		}
 	}
 	try {
 		const panels = await Promise.all(

@@ -55,6 +55,92 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/access/check": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Check Access
+         * @description One ``(user, relation, object)`` OpenFGA Check over ANY model type — the estate-wide extension of
+         *     the per-object ``…/access/check`` playground (#68), which stays as-is for table/namespace owners.
+         *
+         *     Any relation the compiled model defines on the type may be probed (base rungs included — an admin
+         *     debugging a cascade asks about ``writer``, not just ``can_write_data``); an unknown one is a clean 400.
+         *     ``checked`` echoes the resolved tuple so the verdict is unambiguous.
+         */
+        post: operations["check_access_v1_access_check_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/model": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Access Model
+         * @description The authorization model — the checked-in ``model.fga`` DSL text plus the pinned model id.
+         *
+         *     Read-only and estate-admin gated: the model reveals the whole privilege topology (which rungs derive
+         *     which actions), the same platform-tier disclosure as the tuple listing.
+         */
+        get: operations["get_access_model_v1_access_model_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/access/tuples": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Read Access Tuples
+         * @description One page of the raw tuple store, estate-admin gated.
+         *
+         *     Filter combos follow OpenFGA Read's contract — the object side must carry at least a TYPE whenever any
+         *     filter is sent: ``object_type`` alone (whole-type scan), ``object`` alone (one object's tuples),
+         *     ``user`` combined with either (that subject's tuples there). A user-only filter is a 400 — OpenFGA's
+         *     Read API cannot answer it (add ``object_type`` or ``object``; per-subject enumeration across all types
+         *     is a ListObjects question, not a Read). No filter reads the whole store, paginated.
+         */
+        get: operations["read_access_tuples_v1_access_tuples_get"];
+        put?: never;
+        /**
+         * Write Access Tuple
+         * @description Write ONE raw tuple (idempotent — a duplicate write is success), echoing the tuple as stored.
+         *
+         *     Only a directly-assignable relation the compiled model defines on the object's type is accepted (a
+         *     derived ``can_*`` action or an unknown type/relation is a 400) — the raw-tuple analog of the
+         *     per-object grant surface's grantable-rung guard, without its table/namespace restriction.
+         */
+        post: operations["write_access_tuple_v1_access_tuples_post"];
+        /**
+         * Delete Access Tuple
+         * @description Delete ONE raw tuple (idempotent — an already-absent tuple is success), echoing the tuple removed.
+         */
+        delete: operations["delete_access_tuple_v1_access_tuples_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/events": {
         parameters: {
             query?: never;
@@ -129,6 +215,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/me": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Me
+         * @description Describe the signed-in caller: verified claims, estate standing, and tenant memberships.
+         *
+         *     Any verified token → 200; anonymous → 401. FGA off → ``estate_admin=true`` + ``projects=[]`` (dev
+         *     parity). With FGA on, the lookups are display-only and DEGRADE per relation on an OpenFGA
+         *     outage/brownout — this endpoint never 5xxes over authz-lookup health.
+         */
+        get: operations["get_me_v1_me_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/model": {
         parameters: {
             query?: never;
@@ -165,7 +275,9 @@ export interface paths {
         };
         /**
          * Describe Model
-         * @description Registry summary: the latest (candidate) version, the blessed version (or null), and both metrics.
+         * @description Registry summary: the latest (candidate) version, the blessed version (or null), both metrics, and
+         *     the model's plain-path artifact objects (path/size/mtime under ``models/<model>/<token>/…`` — the
+         *     #17/#92 layout; ``[]`` when none are laid out).
          *
          *     Reader-gated (``can_get_metadata``) — a reader may see which version is blessed and compare metrics; only
          *     a validator may move the pointer.
@@ -2074,6 +2186,17 @@ export interface components {
             user: string;
         };
         /**
+         * AccessCheckResult
+         * @description The estate-admin check verdict: ``checked`` echoes the exact resolved tuple that was probed (the
+         *     ``user`` after bare-id → ``user:<id>`` resolution), so a verdict can never be misread against a
+         *     different subject than the one OpenFGA saw.
+         */
+        AccessCheckResult: {
+            /** Allowed */
+            allowed: boolean;
+            checked: components["schemas"]["AccessTuple"];
+        };
+        /**
          * AccessGrantRequest
          * @description Grant or revoke ONE base rung to a subject. ``user`` may be a bare id (``alice`` → ``user:alice``)
          *     or a fully-qualified userset (``role:project_admin#assignee``, ``team:acme#member``); ``relation`` must
@@ -2112,6 +2235,42 @@ export interface components {
             grants: components["schemas"]["RelationGrants"][];
             /** Object */
             object: string;
+        };
+        /**
+         * AccessModelResponse
+         * @description The authorization model: the checked-in ``model.fga`` DSL text and the model id the catalog's
+         *     checks are pinned to.
+         */
+        AccessModelResponse: {
+            /** Authorization Model Id */
+            authorization_model_id: string;
+            /** Dsl */
+            dsl: string;
+        };
+        /**
+         * AccessTuple
+         * @description One raw relationship tuple, verbatim (``user`` is a full subject — ``user:<id>`` or a userset like
+         *     ``team:acme#member``). The estate-admin tuple API's unit: the read page lists these, write/delete take
+         *     one as the body and echo it back, and a check verdict carries the exact tuple it probed.
+         */
+        AccessTuple: {
+            /** Object */
+            object: string;
+            /** Relation */
+            relation: string;
+            /** User */
+            user: string;
+        };
+        /**
+         * AccessTuplesPage
+         * @description One page of the raw tuple listing. ``continuation`` is the OpenFGA Read token for the next page —
+         *     ``null`` on the last page.
+         */
+        AccessTuplesPage: {
+            /** Continuation */
+            continuation: string | null;
+            /** Tuples */
+            tuples: components["schemas"]["AccessTuple"][];
         };
         /**
          * AddColumnsEntry
@@ -3602,6 +3761,8 @@ export interface components {
             id: string;
             /** Project */
             project: string;
+            /** Serving */
+            serving?: string | null;
         };
         /**
          * CredentialResponse
@@ -4800,6 +4961,35 @@ export interface components {
             udtf_version: string;
         };
         /**
+         * MeProject
+         * @description One tenant the caller belongs to, at their strongest role (``admin`` wins over ``member``).
+         */
+        MeProject: {
+            /** Project */
+            project: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "admin" | "member";
+        };
+        /**
+         * MeResponse
+         * @description The caller's self-describe: verified claims + effective (possibly degraded) FGA standing.
+         */
+        MeResponse: {
+            /** Email */
+            email: string | null;
+            /** Estate Admin */
+            estate_admin: boolean;
+            /** Name */
+            name: string | null;
+            /** Projects */
+            projects: components["schemas"]["MeProject"][];
+            /** Sub */
+            sub: string;
+        };
+        /**
          * MergeInsertIntoTableResponse
          * @description Response from merge insert operation
          */
@@ -4837,8 +5027,25 @@ export interface components {
              */
             version?: number | null;
         };
+        /**
+         * ModelArtifact
+         * @description One plain-path artifact object under the model's tree (the #17/#92 layout:
+         *     ``models/<model>/<token>/…``). ``path`` is relative to the model's artifact root
+         *     (``<token>/weights.json``); ``updated_at`` is the object's mtime as ISO-8601, ``null`` when the
+         *     filesystem reports none.
+         */
+        ModelArtifact: {
+            /** Path */
+            path: string;
+            /** Size Bytes */
+            size_bytes: number;
+            /** Updated At */
+            updated_at: string | null;
+        };
         /** ModelDescribeResponse */
         ModelDescribeResponse: {
+            /** Artifacts */
+            artifacts?: components["schemas"]["ModelArtifact"][];
             /** Blessed Metrics */
             blessed_metrics: {
                 [key: string]: unknown;
@@ -4973,6 +5180,8 @@ export interface components {
             bucket: string;
             /** Id */
             id: string;
+            /** Serving */
+            serving?: string | null;
             /** Status */
             status: string;
         };
@@ -5757,6 +5966,8 @@ export interface components {
             project: string;
             /** Root Uri */
             root_uri: string;
+            /** Serving */
+            serving?: string | null;
             /** Status */
             status?: string | null;
         };
@@ -5827,6 +6038,164 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    check_access_v1_access_check_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessTuple"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessCheckResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_access_model_v1_access_model_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessModelResponse"];
+                };
+            };
+        };
+    };
+    read_access_tuples_v1_access_tuples_get: {
+        parameters: {
+            query?: {
+                /** @description scan one whole type (e.g. 'table') */
+                object_type?: string | null;
+                /** @description filter by subject (bare id = user:<id>) */
+                user?: string | null;
+                /** @description filter by one full object ('table:db1$t') */
+                object?: string | null;
+                page_size?: number | null;
+                /** @description the previous page's continuation token */
+                continuation?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTuplesPage"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    write_access_tuple_v1_access_tuples_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessTuple"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTuple"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_access_tuple_v1_access_tuples_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AccessTuple"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AccessTuple"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -5929,6 +6298,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_me_v1_me_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MeResponse"];
                 };
             };
         };

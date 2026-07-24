@@ -84,7 +84,7 @@
 						onclick={() => onopen([keyOf(chunk)])}
 					>
 						<img
-							src={view.frameUrl(chunk)}
+							src={view.frameUrl({ ...chunk, [view.docKeyField]: view.docId(doc) })}
 							alt=""
 							loading="lazy"
 							class="bg-muted h-12 w-20 shrink-0 rounded object-cover"

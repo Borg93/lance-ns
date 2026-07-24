@@ -64,6 +64,16 @@ spec:
             - { name: VIEWER_API, value: "http://{{ include "lance.fullname" $root }}-viewer:{{ $root.Values.media.services.viewer.port }}" }
             - { name: SEARCH_API, value: "http://{{ include "lance.fullname" $root }}-search:{{ $root.Values.media.services.search.port }}" }
             - { name: ANNOTATOR_API, value: "http://{{ include "lance.fullname" $root }}-annotator:{{ $root.Values.media.services.annotator.port }}" }
+            {{- if and (eq .name "annotator") $root.Values.runners.enabled }}
+            # Mirror of the annotator SERVICE's runner seams (media.yaml) onto the zone's web pod:
+            # its /api/config endpoint reads these to render the honest "mocked — needs runner"
+            # chip, so the chip's truth must track the same values switch as the service env —
+            # found live 2026-07-24 (runner deployed, service wired, chip still claimed mock).
+            - { name: MEDIA_ASSIST_URL, value: "http://{{ include "lance.fullname" $root }}-assist:{{ $root.Values.runners.assist.port }}/v1/assist" }
+            {{- if $root.Values.runners.jobsUrl }}
+            - { name: MEDIA_JOBS_URL, value: {{ $root.Values.runners.jobsUrl | quote }} }
+            {{- end }}
+            {{- end }}
             {{- end }}
           ports: [{ name: http, containerPort: 3000 }]
           {{- include "lance.tcpProbes" "http" | nindent 10 }}

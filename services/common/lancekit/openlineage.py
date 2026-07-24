@@ -26,12 +26,8 @@ from common.lancekit.blobs import blob_field_names
 # ── Spec constants — MUST match lance-ns services/common/openlineage.py at merge ──
 SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$defs/RunEvent"
 _SCHEMA_FACET_URL = "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json"
-_OUTPUT_STATS_FACET_URL = (
-    "https://openlineage.io/spec/facets/1-0-2/OutputStatisticsOutputDatasetFacet.json"
-)
-_COLUMN_LINEAGE_FACET_URL = (
-    "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json"
-)
+_OUTPUT_STATS_FACET_URL = "https://openlineage.io/spec/facets/1-0-2/OutputStatisticsOutputDatasetFacet.json"
+_COLUMN_LINEAGE_FACET_URL = "https://openlineage.io/spec/facets/1-2-0/ColumnLineageDatasetFacet.json"
 _DATASOURCE_FACET_URL = "https://openlineage.io/spec/facets/1-0-1/DatasourceDatasetFacet.json"
 PRODUCER = "https://github.com/Borg93/lance-audio/tree/main/src/ratch"
 # Same UUID5 namespace lance-ns uses, so a run id computed here == the one computed
@@ -71,10 +67,7 @@ def facet_fields(schema: pa.Schema) -> list[dict[str, str]]:
     """``SchemaDatasetFacet.fields`` — ``[{"name","type"}]`` per column, blob-aware.
     Mirrors lance-ns common/schema.facet_fields (blob → "blob")."""
     blobs = set(blob_field_names(schema))
-    return [
-        {"name": f.name, "type": "blob" if f.name in blobs else _type_label(f.type)}
-        for f in schema
-    ]
+    return [{"name": f.name, "type": "blob" if f.name in blobs else _type_label(f.type)} for f in schema]
 
 
 def run_id_for(seed: str) -> str:
@@ -143,9 +136,7 @@ def build_run_event(
     }
 
 
-def _column_lineage_facet(
-    edges: list[ColumnEdge], inputs: list[tuple[str, str]]
-) -> dict[str, Any]:
+def _column_lineage_facet(edges: list[ColumnEdge], inputs: list[tuple[str, str]]) -> dict[str, Any]:
     """A ``ColumnLineageDatasetFacet``: per output field, its input field(s) + subtype."""
     in_ns, in_name = inputs[0] if inputs else ("", "")
     by_output: dict[str, list[dict[str, str]]] = {}

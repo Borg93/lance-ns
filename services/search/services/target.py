@@ -12,12 +12,12 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
-
 from common.core.exceptions import ValidationError
 from common.lancekit.descriptor import Declared, FtsBinding, VectorBinding
 from common.lancekit.introspect import TableInfo
 from common.lancekit.registry import DatasetHandle
+from pydantic import BaseModel, ConfigDict
+
 from search.services.constants import DURATION_COLUMN
 from search.services.filters import topic_layer_columns
 from search.services.spec import SearchMode

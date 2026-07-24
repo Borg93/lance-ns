@@ -12,15 +12,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import httpx
-from fastapi import FastAPI
-
-from annotator.api.v1.router import router as api_router
-from annotator.core.config import get_annotator_settings
 from common.core.handlers import register_handlers
 from common.core.middleware import register_middleware
 from common.core.probes import router as probes_router
 from common.obs import configure_app_logging
 from common.state import AppState, dataset_handle
+from fastapi import FastAPI
+
+from annotator.api.v1.router import router as api_router
+from annotator.core.config import get_annotator_settings
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +34,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.resources = state
     try:
         handle = dataset_handle(state)  # fail-fast open of the default descriptor
-        logger.info("annotator: default dataset %s ready (%d tables)", handle.id, len(handle.descriptor.tables))
+        logger.info(
+            "annotator: default dataset %s ready (%d tables)", handle.id, len(handle.descriptor.tables)
+        )
     except Exception:
         # /livez stays green; per-request resolution surfaces the problem as a domain 404.
         logger.exception("annotator: default dataset failed to open — serving degraded")

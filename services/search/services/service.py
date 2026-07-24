@@ -29,9 +29,9 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 import httpx
+from common.core.exceptions import ServiceUnavailableError, ValidationError
 from pydantic import BaseModel, ConfigDict
 
-from common.core.exceptions import ServiceUnavailableError, ValidationError
 from search.services.constants import (
     VECTOR_MAX_NPROBES,
     VECTOR_NPROBES,
@@ -50,6 +50,7 @@ if TYPE_CHECKING:
 
     from common.lancekit.descriptor import FtsBinding, VectorBinding
     from common.lancekit.registry import DatasetHandle
+
     from search.services.encoders.embedding import EmbeddingClient
     from search.services.encoders.reranker import VLLMReranker
 
@@ -128,9 +129,7 @@ def _query_vec(ctx: SearchContext, binding: VectorBinding) -> Any | None:
     return None
 
 
-def _vector_leg(
-    ctx: SearchContext, binding: VectorBinding, vec: Any, *, n: int
-) -> list[dict[str, Any]]:
+def _vector_leg(ctx: SearchContext, binding: VectorBinding, vec: Any, *, n: int) -> list[dict[str, Any]]:
     """One ranked vector leg: direct on the row table, or frame-ranked + joined."""
     target = ctx.target
     if binding.table == target.row_table_name:
@@ -166,9 +165,7 @@ def _search_fts(ctx: SearchContext) -> list[dict[str, Any]]:
         fts_query = MatchQuery(spec.q, fts.column, fuzziness=spec.fuzziness)
     try:
         qb = (
-            ctx.target.row_tbl.search(fts_query)
-            .select(["_score", *ctx.target.payload_columns])
-            .limit(spec.n)
+            ctx.target.row_tbl.search(fts_query).select(["_score", *ctx.target.payload_columns]).limit(spec.n)
         )
         if ctx.where:
             qb = qb.where(ctx.where, prefilter=spec.prefilter)
@@ -252,15 +249,12 @@ def _search_hybrid(ctx: SearchContext) -> list[dict[str, Any]]:
         from lancedb.query import MatchQuery, PhraseQuery
         from lancedb.rerankers import LinearCombinationReranker, RRFReranker
 
-        # Fusion: LinearCombination with the user's weight (the Balance slider)
-        # when supplied, else parameter-free RRF. The cross-encoder rerank, if
-        # enabled, is applied to the head afterwards so the rerank window stays
-        # independent of the result count.
-        if spec.weight is not None:
-            # weight ∈ [0, 1]: 0 = pure FTS, 1 = pure vector, 0.5 = balanced
-            fusion = LinearCombinationReranker(weight=spec.weight)
-        else:
-            fusion = RRFReranker()
+        # Fusion: LinearCombination with the user's weight (the Balance slider:
+        # 0 = pure FTS, 1 = pure vector, 0.5 = balanced) when supplied, else
+        # parameter-free RRF. The cross-encoder rerank, if enabled, is applied to
+        # the head afterwards so the rerank window stays independent of the
+        # result count.
+        fusion = LinearCombinationReranker(weight=spec.weight) if spec.weight is not None else RRFReranker()
         # FTS leg honours phrase/fuzziness like the dedicated 'fts' branch.
         if spec.phrase:
             fts_query = PhraseQuery(spec.q, fts.column)

@@ -29,9 +29,7 @@ _Out = TypeVar("_Out")
 class VLLMTransport:
     """POST JSON to a vLLM server, with a pooled client and concurrent fan-out."""
 
-    def __init__(
-        self, base_url: str, *, timeout_s: float = DEFAULT_TIMEOUT_S, pool_size: int = 32
-    ) -> None:
+    def __init__(self, base_url: str, *, timeout_s: float = DEFAULT_TIMEOUT_S, pool_size: int = 32) -> None:
         self.base_url = base_url.rstrip("/")
         self._http = httpx.Client(
             timeout=timeout_s,
@@ -52,9 +50,7 @@ class VLLMTransport:
         r.raise_for_status()
         return into.model_validate(r.json())
 
-    def map(
-        self, fn: Callable[[_In], _Out], items: Iterable[_In], *, concurrency: int
-    ) -> list[_Out]:
+    def map(self, fn: Callable[[_In], _Out], items: Iterable[_In], *, concurrency: int) -> list[_Out]:
         """Run ``fn`` over ``items`` across a thread pool, preserving input order."""
         with ThreadPoolExecutor(max_workers=concurrency) as pool:
             return list(pool.map(fn, items))

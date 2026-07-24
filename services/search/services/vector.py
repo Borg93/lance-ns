@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from common.core.exceptions import ValidationError
+
 from search.services.constants import (
     VECTOR_MAX_NPROBES,
     VECTOR_NPROBES,

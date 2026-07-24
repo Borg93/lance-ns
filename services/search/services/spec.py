@@ -13,9 +13,8 @@ from __future__ import annotations
 
 from enum import StrEnum
 
-from pydantic import BaseModel, ConfigDict, field_validator
-
 from common.lancekit.descriptor import Search
+from pydantic import BaseModel, ConfigDict, field_validator
 
 
 class SearchMode(StrEnum):

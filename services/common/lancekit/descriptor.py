@@ -191,7 +191,9 @@ def validate_descriptor(declared: Declared, tables: dict[str, TableInfo]) -> lis
             if blob_col is None:
                 problems.append(f"document.media_blob {declared.document.media_blob!r} missing")
             elif not blob_col.is_blob:
-                problems.append(f"document.media_blob {declared.document.media_blob!r} is not a lance.blob.v2 column")
+                problems.append(
+                    f"document.media_blob {declared.document.media_blob!r} is not a lance.blob.v2 column"
+                )
 
     if declared.search is not None:
         for mode, binding in declared.search.vectors.items():
@@ -207,7 +209,9 @@ def validate_descriptor(declared: Declared, tables: dict[str, TableInfo]) -> lis
         if declared.search.fts is not None:
             info = tables.get(declared.search.fts.table)
             if info is None or info.column(declared.search.fts.column) is None:
-                problems.append(f"fts binding: {declared.search.fts.table}.{declared.search.fts.column} missing")
+                problems.append(
+                    f"fts binding: {declared.search.fts.table}.{declared.search.fts.column} missing"
+                )
 
     for space in declared.atlas:
         info = tables.get(space.table)

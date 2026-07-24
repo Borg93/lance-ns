@@ -11,12 +11,13 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from annotator.annotations.schema import ANNOTATIONS_TABLE, SaveResult
 from common.core.exceptions import ConflictError
 from common.lancekit.lineage_emit import emit_save
 from common.lancekit.predicate import isin
 from common.lancekit.reader import open_reader
 from common.lancekit.registry import table_dataset
+
+from annotator.annotations.schema import ANNOTATIONS_TABLE, SaveResult
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -31,9 +32,7 @@ def check_base_version_value(current: int, base_version: int | None) -> None:
     version the client loaded — ``current`` may be a direct ``ds.version`` or the
     catalog's version primitive. ``None`` skips it (last-write-wins per id)."""
     if base_version is not None and base_version != current:
-        raise ConflictError(
-            f"annotations changed on the server (loaded v{base_version}, now v{current})"
-        )
+        raise ConflictError(f"annotations changed on the server (loaded v{base_version}, now v{current})")
 
 
 def delete_by_ids(writer: TableWriter, ids: Sequence[str]) -> None:

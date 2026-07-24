@@ -15,14 +15,13 @@ signatures at runtime, so the annotations stay real objects.
 import re
 
 import lance
-from fastapi import APIRouter
-
 from common.core.exceptions import ValidationError
 from common.deps import StateDep
 from common.lancekit import store
 from common.lancekit.predicate import eq
 from common.schemas.diarization import DiarizationResponse, SpeakerTurn
 from common.state import dataset_handle
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/diarization", tags=["diarization"])
 

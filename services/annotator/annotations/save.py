@@ -11,6 +11,12 @@ import logging
 from collections.abc import Mapping, Sequence
 
 import pyarrow as pa
+from common.deps import AuthorDep, DatasetParam, StateDep
+from common.lancekit.keys import chunk_key_filter, validate_doc_key
+from common.lancekit.reader import open_reader
+from common.lancekit.registry import table_dataset
+from common.lancekit.writer import open_writer
+from common.state import dataset_handle
 from fastapi import APIRouter
 
 from annotator.annotations.commit import check_base_version_value, delete_by_ids, finalize_commit
@@ -22,12 +28,6 @@ from annotator.annotations.schema import (
     SaveResult,
     identity_values,
 )
-from common.deps import AuthorDep, DatasetParam, StateDep
-from common.lancekit.keys import chunk_key_filter, validate_doc_key
-from common.lancekit.reader import open_reader
-from common.lancekit.registry import table_dataset
-from common.lancekit.writer import open_writer
-from common.state import dataset_handle
 
 logger = logging.getLogger(__name__)
 
@@ -38,15 +38,11 @@ def build_delta(current: pa.Table, edits_by_id: dict[str, dict[str, object]]) ->
     """The merge_insert source: current rows for the edited ids, editable fields
     patched, everything else (geometry, provenance) carried forward. Same schema as
     ``current`` so merge_insert updates in place."""
-    patched = [
-        {**row, **edits_by_id[row["id"]]} for row in current.to_pylist() if row["id"] in edits_by_id
-    ]
+    patched = [{**row, **edits_by_id[row["id"]]} for row in current.to_pylist() if row["id"] in edits_by_id]
     return pa.Table.from_pylist(patched, schema=current.schema)
 
 
-def new_rows(
-    inserts: Sequence[NewAnnotation], ident: Mapping[str, object], schema: pa.Schema
-) -> pa.Table:
+def new_rows(inserts: Sequence[NewAnnotation], ident: Mapping[str, object], schema: pa.Schema) -> pa.Table:
     """Full new-annotation rows: identity stamped + shape fields; columns absent from
     the payload fall to null via the schema. Same schema ⇒ merge_insert can insert."""
     rows = [{**ident, **ins.model_dump()} for ins in inserts]

@@ -8,15 +8,15 @@ snapshots) that powers the annotator's compare-versions panel.
 from typing import Annotated
 
 import lance
-from fastapi import APIRouter, Query
-from pydantic import BaseModel
-
-from annotator.annotations.schema import ANNOTATIONS_TABLE
 from common.core.exceptions import NotFoundError
 from common.deps import DatasetParam, StateDep
 from common.lancekit.keys import chunk_key_filter, validate_doc_key
 from common.lancekit.registry import table_dataset
 from common.state import dataset_handle
+from fastapi import APIRouter, Query
+from pydantic import BaseModel
+
+from annotator.annotations.schema import ANNOTATIONS_TABLE
 
 router = APIRouter(tags=["annotate"])
 

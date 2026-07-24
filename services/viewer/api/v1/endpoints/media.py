@@ -21,15 +21,15 @@ from typing import Annotated
 from urllib.parse import quote
 
 import lance
-from fastapi import APIRouter, Query, Request, Response
-from fastapi.responses import FileResponse, StreamingResponse
-
 from common.core.exceptions import NotFoundError, ValidationError
 from common.deps import DatasetParam, StateDep
 from common.lancekit.keys import chunk_key_filter, validate_doc_key
 from common.lancekit.predicate import eq
 from common.lancekit.registry import DatasetHandle, table_dataset
 from common.state import dataset_handle
+from fastapi import APIRouter, Query, Request, Response
+from fastapi.responses import FileResponse, StreamingResponse
+
 from viewer.services.clips import MAX_CLIP_S, build_clip
 
 logger = logging.getLogger(__name__)
@@ -119,9 +119,7 @@ def blob_size(ds: lance.LanceDataset, column: str, rowid: int) -> int:
 # ── descriptor lookups local to the media routes ────────────────────────────
 
 
-def _cell_value(
-    ds: lance.LanceDataset, doc_key: str, doc_id: str, column: str | None, default: str
-) -> str:
+def _cell_value(ds: lance.LanceDataset, doc_key: str, doc_id: str, column: str | None, default: str) -> str:
     """A single scalar cell for a validated doc key, or ``default`` when the
     column is undeclared or the cell is absent/null."""
     if column is None:
@@ -154,12 +152,8 @@ def _frames_binding(handle: DatasetHandle) -> tuple[str, str, str | None] | None
     info = handle.descriptor.tables.get(table)
     if info is None or info.column(blob_column) is None:
         return None
-    mime_column = next(
-        (c.name for c in info.columns if c.name.endswith("_mime") and not c.is_blob), None
-    )
+    mime_column = next((c.name for c in info.columns if c.name.endswith("_mime") and not c.is_blob), None)
     return table, blob_column, mime_column
-
-
 
 
 # ── routes ───────────────────────────────────────────────────────────────────
@@ -185,9 +179,7 @@ def thumbnail(doc_id: str, state: StateDep, dataset: DatasetParam = None) -> Res
         data = f.read()
     if not data:
         raise NotFoundError("no thumbnail for doc_id")
-    return Response(
-        content=data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"}
-    )
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/chunk-frame/{doc_id}/{speech_id}/{chunk_id}")
@@ -226,11 +218,7 @@ def chunk_frame(
         with_row_id=True,
     )
     row = next(
-        (
-            i
-            for i in range(keyed.num_rows)
-            if keyed.column(FRAME_INDEX_COLUMN)[i].as_py() == int(frame_idx)
-        ),
+        (i for i in range(keyed.num_rows) if keyed.column(FRAME_INDEX_COLUMN)[i].as_py() == int(frame_idx)),
         None,
     )
     if row is None:
@@ -249,9 +237,7 @@ def chunk_frame(
         data = f.read()
     if not data:
         raise NotFoundError("frame body empty")
-    return Response(
-        content=data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"}
-    )
+    return Response(content=data, media_type=mime, headers={"Cache-Control": "public, max-age=86400"})
 
 
 @router.get("/media-clip/{doc_id}")

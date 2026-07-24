@@ -123,11 +123,7 @@ class Settings(BaseSettings):
         both backends flipped AND a URI set. Mixed configurations keep the local
         table in the loop (pre-merge safety), so paths gate on this, not on the
         individual flags."""
-        return (
-            bool(self.catalog_uri)
-            and self.read_backend == "catalog"
-            and self.write_backend == "catalog"
-        )
+        return bool(self.catalog_uri) and self.read_backend == "catalog" and self.write_backend == "catalog"
 
     @property
     def effective_lineage_sink(self) -> str:

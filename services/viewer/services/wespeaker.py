@@ -126,9 +126,7 @@ def l2_normalize(vectors: np.ndarray) -> np.ndarray:
     return (vectors / np.maximum(norms, 1e-12)).astype(np.float32)
 
 
-def clamped_sample_span(
-    start: float, end: float, *, sample_rate: int, n_samples: int
-) -> tuple[int, int]:
+def clamped_sample_span(start: float, end: float, *, sample_rate: int, n_samples: int) -> tuple[int, int]:
     """A turn's ``[start, end)`` seconds → sample indices clamped to the decoded wav."""
     lo = max(0, round(start * sample_rate))
     hi = min(n_samples, round(end * sample_rate))
@@ -169,9 +167,7 @@ def embed_turn_slices(
     kept: list[TurnSpan] = []
     slices: list[np.ndarray] = []
     for turn in turns:
-        lo, hi = clamped_sample_span(
-            turn.start, turn.end, sample_rate=sample_rate, n_samples=wav.shape[0]
-        )
+        lo, hi = clamped_sample_span(turn.start, turn.end, sample_rate=sample_rate, n_samples=wav.shape[0])
         if hi - lo < min_samples:
             continue
         kept.append(turn)

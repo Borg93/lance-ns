@@ -9,13 +9,12 @@ skipped from the listing (logged), never half-served.
 
 import logging
 
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
-
 from common.deps import StateDep
 from common.lancekit.descriptor import DatasetDescriptor
 from common.lancekit.registry import DatasetRegistry, UnknownDatasetError
 from common.state import AppState, dataset_handle
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -77,9 +76,7 @@ def list_datasets(state: StateDep) -> DatasetsResponse:
                     for name, info in descriptor.tables.items()
                 },
                 capabilities=[
-                    name
-                    for name in descriptor.declared.capabilities
-                    if descriptor.capability_available(name)
+                    name for name in descriptor.declared.capabilities if descriptor.capability_available(name)
                 ],
             )
         )

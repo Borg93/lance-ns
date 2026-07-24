@@ -12,8 +12,6 @@ alignments column is the ``alignments`` capability's column part. Sync handlers
 import logging
 from typing import Any
 
-from fastapi import APIRouter
-
 from common.core.exceptions import NotFoundError
 from common.deps import DatasetParam, StateDep
 from common.lancekit.alignments import parse_alignments_json
@@ -22,6 +20,7 @@ from common.lancekit.keys import chunk_key_filter, validate_doc_key
 from common.lancekit.predicate import eq
 from common.lancekit.registry import table_dataset
 from common.state import dataset_handle
+from fastapi import APIRouter
 
 logger = logging.getLogger(__name__)
 
@@ -65,9 +64,7 @@ def doc_transcript(doc_id: str, state: StateDep, dataset: DatasetParam = None) -
     columns = [c for c in dict.fromkeys(wanted) if c is not None and c in present]
 
     ds = table_dataset(handle, row_table)
-    rows = ds.to_table(
-        columns=columns, filter=eq(identity.doc_key, doc_id)
-    ).to_pylist()
+    rows = ds.to_table(columns=columns, filter=eq(identity.doc_key, doc_id)).to_pylist()
     # Order by the contract field (declared start time) directly — key fields are
     # source-assigned ids, not sequential indexes, so they are only the stable
     # tiebreaker for chunks that share a start.

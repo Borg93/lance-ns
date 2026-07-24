@@ -7,9 +7,8 @@ three), and only service-local knobs (SEARCH_*) are prefixed.
 
 from functools import lru_cache
 
-from pydantic import Field
-
 from common.core.config import Settings
+from pydantic import Field
 
 
 class SearchSettings(Settings):

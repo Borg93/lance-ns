@@ -17,6 +17,15 @@ from viewer.api.v1.endpoints.transcripts import router as transcripts_router
 from viewer.api.v1.endpoints.voice import router as voice_router
 
 router = APIRouter()
-for r in (datasets_router, media_router, transcripts_router, system_router, atlas_router,
-          voice_router, diarization_router, topics_router, graph_router):
+for r in (
+    datasets_router,
+    media_router,
+    transcripts_router,
+    system_router,
+    atlas_router,
+    voice_router,
+    diarization_router,
+    topics_router,
+    graph_router,
+):
     router.include_router(r)

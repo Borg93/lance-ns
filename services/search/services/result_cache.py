@@ -26,6 +26,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping
 
     from common.lancekit.registry import DatasetHandle
+
     from search.services.spec import SearchSpec
 
 logger = logging.getLogger(__name__)

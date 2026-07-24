@@ -40,9 +40,7 @@ def topic_layer_columns(schema_names: Sequence[str]) -> list[str]:
     )
 
 
-def extract_filters(
-    params: Mapping[str, str], filterable: Sequence[str]
-) -> dict[str, str]:
+def extract_filters(params: Mapping[str, str], filterable: Sequence[str]) -> dict[str, str]:
     """Pick the descriptor-declared filter params out of a query-string/form mapping.
 
     Only names in ``filterable`` are honored (everything else in the request is

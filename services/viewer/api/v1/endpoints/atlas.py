@@ -20,8 +20,6 @@ import logging
 from typing import Annotated, Any
 
 import lance
-from fastapi import APIRouter, Query, Response
-
 from common.core.exceptions import NotFoundError, ValidationError
 from common.deps import DatasetParam, StateDep
 from common.lancekit.alignments import parse_alignments_json
@@ -31,6 +29,8 @@ from common.lancekit.predicate import and_, eq, isin
 from common.lancekit.registry import DatasetHandle, table_dataset
 from common.schemas.atlas import ChunkRowIds
 from common.state import dataset_handle
+from fastapi import APIRouter, Query, Response
+
 from viewer.api.v1.endpoints.media import FRAME_INDEX_COLUMN
 from viewer.api.v1.endpoints.system import DURATION_COLUMN
 from viewer.api.v1.endpoints.transcripts import alignments_binding
@@ -75,9 +75,7 @@ def _built_rows(ds: lance.LanceDataset, space: AtlasSpace) -> int:
 
 
 @router.get("/status")
-def atlas_status(
-    state: StateDep, space: SpaceParam = None, dataset: DatasetParam = None
-) -> dict[str, Any]:
+def atlas_status(state: StateDep, space: SpaceParam = None, dataset: DatasetParam = None) -> dict[str, Any]:
     """Which projection spaces are built, plus the requested space's row count.
 
     ``spaces`` always reports every declared space's built-ness (so the UI can
@@ -103,9 +101,7 @@ def atlas_status(
 
 
 @router.get("/points")
-def atlas_points(
-    state: StateDep, space: SpaceParam = None, dataset: DatasetParam = None
-) -> Response:
+def atlas_points(state: StateDep, space: SpaceParam = None, dataset: DatasetParam = None) -> Response:
     """One Apache Arrow IPC stream for the scatter renderer (coords + codes + keys)."""
     handle = dataset_handle(state, dataset)
     declared = handle.descriptor.declared
@@ -234,9 +230,7 @@ def atlas_chunk(
 
 
 @router.post("/chunks")
-def atlas_chunks(
-    state: StateDep, body: ChunkRowIds, dataset: DatasetParam = None
-) -> list[dict[str, Any]]:
+def atlas_chunks(state: StateDep, body: ChunkRowIds, dataset: DatasetParam = None) -> list[dict[str, Any]]:
     """Full hits for a lasso/box/legend selection, addressed by ``_rowid``.
 
     A flat ``_rowid IN (...)`` predicate lets Lance fetch exactly the selected

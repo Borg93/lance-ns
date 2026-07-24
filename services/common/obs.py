@@ -21,7 +21,17 @@ import logging
 #: effective level inherits from these package loggers, so raising the package raises the whole tree.
 #: ``viewer``/``search``/``annotator`` are the folded lance-media services; ``ratch`` covers its
 #: pipeline runs that log through the same process (e.g. ``ratch serve``).
-_APP_LOGGERS = ("catalog", "lineage", "medallion", "compaction", "common", "viewer", "search", "annotator", "ratch")
+_APP_LOGGERS = (
+    "catalog",
+    "lineage",
+    "medallion",
+    "compaction",
+    "common",
+    "viewer",
+    "search",
+    "annotator",
+    "ratch",
+)
 
 
 def configure_app_logging(level: int = logging.INFO) -> None:

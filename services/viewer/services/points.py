@@ -20,7 +20,6 @@ import lance
 import numpy as np
 import pyarrow as pa
 import pyarrow.compute as pc
-
 from common.core.exceptions import ValidationError
 from common.lancekit.descriptor import AtlasSpace, Declared
 
@@ -82,8 +81,8 @@ def _resolve_channels(space: AtlasSpace, present: set[str]) -> list[tuple[str, s
         elif channel.broadest_prefix is not None:
             prefix = channel.broadest_prefix
             layers = sorted(
-                (c for c in present if c.startswith(prefix) and c[len(prefix):].isdigit()),
-                key=lambda c: int(c[len(prefix):]),
+                (c for c in present if c.startswith(prefix) and c[len(prefix) :].isdigit()),
+                key=lambda c: int(c[len(prefix) :]),
             )
             if layers:
                 resolved.append((channel.name, layers[-1]))
@@ -124,9 +123,7 @@ def build_points(declared: Declared, space: AtlasSpace, ds: lance.LanceDataset) 
     # `with_row_id` ships each point's stable Lance row address (`_rowid`) so the
     # selection table can be fetched with an O(selection) `take` (see /chunks)
     # instead of a per-key filtered full-table scan.
-    tbl = ds.scanner(
-        columns=columns, filter=f"{space.x} IS NOT NULL", with_row_id=True
-    ).to_table()
+    tbl = ds.scanner(columns=columns, filter=f"{space.x} IS NOT NULL", with_row_id=True).to_table()
 
     def halves(name: str) -> pa.Array:
         # Ship coords as float16 — ~3 sig-digit precision, sub-pixel on the

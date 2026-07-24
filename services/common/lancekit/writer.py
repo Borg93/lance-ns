@@ -48,9 +48,7 @@ class LanceTableWriter:
         self._ds = ds
 
     def merge_upsert(self, delta: pa.Table, on: str) -> None:
-        self._ds.merge_insert(on).when_matched_update_all().when_not_matched_insert_all().execute(
-            delta
-        )
+        self._ds.merge_insert(on).when_matched_update_all().when_not_matched_insert_all().execute(delta)
 
     def merge_insert_only(self, delta: pa.Table, on: str) -> None:
         # Insert unmatched rows only — matched rows (same key) are left AS-IS, so a
@@ -99,9 +97,7 @@ class LocalCatalogWriteTransport:
         self._ds = ds
 
     def merge_upsert(self, delta: pa.Table, on: str) -> None:
-        self._ds.merge_insert(on).when_matched_update_all().when_not_matched_insert_all().execute(
-            delta
-        )
+        self._ds.merge_insert(on).when_matched_update_all().when_not_matched_insert_all().execute(delta)
 
     def merge_insert_only(self, delta: pa.Table, on: str) -> None:
         self._ds.merge_insert(on).when_not_matched_insert_all().execute(delta)

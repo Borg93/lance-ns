@@ -11,6 +11,14 @@ from collections.abc import Sequence
 from urllib.parse import quote
 
 import pyarrow as pa
+from common.core.exceptions import ValidationError
+from common.deps import AuthorDep, DatasetParam, StateDep
+from common.lancekit.descriptor import Declared
+from common.lancekit.keys import validate_doc_key
+from common.lancekit.reader import open_reader
+from common.lancekit.registry import table_dataset
+from common.lancekit.writer import open_writer
+from common.state import dataset_handle
 from fastapi import APIRouter
 
 from annotator.annotations.commit import check_base_version_value, delete_by_ids, finalize_commit
@@ -22,14 +30,6 @@ from annotator.annotations.schema import (
     TagWrite,
     identity_values,
 )
-from common.core.exceptions import ValidationError
-from common.deps import AuthorDep, DatasetParam, StateDep
-from common.lancekit.descriptor import Declared
-from common.lancekit.keys import validate_doc_key
-from common.lancekit.reader import open_reader
-from common.lancekit.registry import table_dataset
-from common.lancekit.writer import open_writer
-from common.state import dataset_handle
 
 logger = logging.getLogger(__name__)
 
@@ -56,14 +56,10 @@ def check_keys_arity(declared: Declared, writes: Sequence[TagWrite]) -> None:
     expected = len(declared.identity.key_fields) - 1  # non-doc identity fields
     for w in writes:
         if len(w.keys) != expected:
-            raise ValidationError(
-                f"tag keys arity {len(w.keys)} != descriptor identity arity {expected}"
-            )
+            raise ValidationError(f"tag keys arity {len(w.keys)} != descriptor identity arity {expected}")
 
 
-def tag_rows(
-    adds: Sequence[TagWrite], declared: Declared, *, author: str, schema: pa.Schema
-) -> pa.Table:
+def tag_rows(adds: Sequence[TagWrite], declared: Declared, *, author: str, schema: pa.Schema) -> pa.Table:
     """Full annotation rows for chunk tags: per-row identity stamped, ``shape_type='tag'``,
     label carried, server author; every OTHER field comes from ``NewAnnotation``'s
     defaults (human provenance, geometry/temporal zeroed) — the one row contract, not a
@@ -129,7 +125,5 @@ def apply_tags(
         unit_key=f"tags:{len(body.adds)}+{len(body.removes)}",
     )
     if touched:
-        logger.info(
-            "tagged → v%d (%d add-rows, %d remove)", result.version, delta.num_rows, len(remove_ids)
-        )
+        logger.info("tagged → v%d (%d add-rows, %d remove)", result.version, delta.num_rows, len(remove_ids))
     return result

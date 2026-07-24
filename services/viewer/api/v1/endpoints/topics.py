@@ -18,13 +18,12 @@ import json
 from typing import Any
 
 import lance
-from fastapi import APIRouter
-
 from common.deps import StateDep
 from common.lancekit import store
 from common.lancekit.topics_meta import NOISE_LABEL
 from common.schemas.topics import TopicsResponse
 from common.state import dataset_handle
+from fastapi import APIRouter
 
 router = APIRouter(prefix="/api/topics", tags=["topics"])
 

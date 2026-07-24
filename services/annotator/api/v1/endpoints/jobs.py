@@ -17,12 +17,11 @@ import logging
 from typing import Literal
 
 import httpx
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
-
 from common.core.exceptions import ServiceUnavailableError
 from common.deps import StateDep
 from common.state import AppState
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -83,7 +82,11 @@ def apply(state: StateDep, body: JobRequest) -> JobResult:
     n = scope_size(body.scope)
     logger.info(
         "job apply %s:%s over %s (%s items, %d exemplars)",
-        body.producer, body.op, body.scope.level, n, len(body.exemplars),
+        body.producer,
+        body.op,
+        body.scope.level,
+        n,
+        len(body.exemplars),
     )
     url = state.settings.jobs_url
     if url:

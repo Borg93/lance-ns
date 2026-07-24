@@ -14,13 +14,12 @@ catalog transport). Shapes are in IMAGE coordinates — the annotator's own spac
 import logging
 
 import httpx
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
-
 from common.core.exceptions import ServiceUnavailableError
 from common.deps import DatasetParam, StateDep
 from common.lancekit.keys import validate_doc_key
 from common.state import AppState, dataset_handle
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
@@ -78,9 +77,7 @@ def assist(
     doc_id = validate_doc_key(handle.descriptor.declared, doc_id)
     source = f"model:{body.producer}"
     url = state.settings.assist_url
-    shapes = (
-        _remote(state, url, (doc_id, speech_id, chunk_id), body) if url else _mock(body)
-    )
+    shapes = _remote(state, url, (doc_id, speech_id, chunk_id), body) if url else _mock(body)
     # Prompt CONTENT is user free-text — never logged (PII/leak surface); length only.
     logger.info(
         "assist %s (prompt %d chars) → %d shape(s)", body.producer, len(body.prompt or ""), len(shapes)
@@ -101,20 +98,34 @@ def _mock(body: AssistRequest) -> list[AssistShape]:
         x, y, w, h = _region_box(r)
         return [
             AssistShape(
-                shape_type="polygon", x=x, y=y, width=w, height=h,
+                shape_type="polygon",
+                x=x,
+                y=y,
+                width=w,
+                height=h,
                 polygon=_diamond(x, y, w, h),
-                label=(body.prompt or "object").strip(), confidence=0.85,
+                label=(body.prompt or "object").strip(),
+                confidence=0.85,
             )
         ]
     label = (body.prompt or "region").strip()
     if r is not None:
         return [
             AssistShape(
-                shape_type="rectangle", x=r.x, y=r.y, width=r.width, height=r.height,
-                label=label, confidence=0.7,
+                shape_type="rectangle",
+                x=r.x,
+                y=r.y,
+                width=r.width,
+                height=r.height,
+                label=label,
+                confidence=0.7,
             )
         ]
-    return [AssistShape(shape_type="rectangle", x=100.0, y=100.0, width=200.0, height=80.0, label=label, confidence=0.7)]
+    return [
+        AssistShape(
+            shape_type="rectangle", x=100.0, y=100.0, width=200.0, height=80.0, label=label, confidence=0.7
+        )
+    ]
 
 
 def _region_box(r: Region | None) -> tuple[float, float, float, float]:
@@ -136,9 +147,7 @@ def _diamond(x: float, y: float, w: float, h: float) -> list[float]:
     return [cx, y, x + w, cy, cx, y + h, x, cy]
 
 
-def _remote(
-    state: AppState, url: str, key: tuple[str, int, int], body: AssistRequest
-) -> list[AssistShape]:
+def _remote(state: AppState, url: str, key: tuple[str, int, int], body: AssistRequest) -> list[AssistShape]:
     """Proxy to the model endpoint — a Ray Serve deployment (GroundingDINO/SAM) per the
     merge runtime stack. WIRED, not exercised in-repo: posts the chunk-frame image URL +
     prompt + region and expects ``{shapes: [...]}``. A failing or misbehaving model

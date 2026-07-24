@@ -19,12 +19,14 @@ from typing import TYPE_CHECKING, Any
 
 from common.core.exceptions import ServiceUnavailableError
 from common.state import dataset_handle
+
 from search.services.spec import SearchMode
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from common.state import AppState
+
     from search.services.encoders.embedding import EmbeddingClient
     from search.services.encoders.reranker import VLLMReranker
 
@@ -92,9 +94,7 @@ def ensure_reranker(state: AppState) -> VLLMReranker:
     try:
         from search.services.encoders.reranker import VLLMReranker
 
-        state.reranker = _construct(
-            VLLMReranker, {"rerank_url": lambda: state.settings.rerank_url}
-        )
+        state.reranker = _construct(VLLMReranker, {"rerank_url": lambda: state.settings.rerank_url})
         return state.reranker
     except Exception as e:
         logger.exception("failed to initialize reranker client")

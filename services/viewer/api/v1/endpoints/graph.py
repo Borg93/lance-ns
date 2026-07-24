@@ -26,9 +26,6 @@ from typing import TYPE_CHECKING, Any
 
 import lance
 import lance_graph as lg
-from fastapi import APIRouter
-from pydantic import BaseModel, ConfigDict
-
 from common.deps import StateDep
 from common.lancekit import store
 from common.schemas.graph import (
@@ -46,6 +43,8 @@ from common.schemas.graph import (
     SubgraphResponse,
 )
 from common.state import dataset_handle
+from fastapi import APIRouter
+from pydantic import BaseModel, ConfigDict
 
 if TYPE_CHECKING:
     from common.lancekit.descriptor import Declared
@@ -270,9 +269,7 @@ def _resources(handle: DatasetHandle) -> _GraphResources | None:
     all_names = (names.entities, names.chunks, names.mentions, names.relationships)
     if not all(store.exists(handle.table_uri(n), handle.storage_options) for n in all_names):
         return None
-    version = lance.dataset(
-        handle.table_uri(names.entities), storage_options=handle.storage_options
-    ).version
+    version = lance.dataset(handle.table_uri(names.entities), storage_options=handle.storage_options).version
     key = (handle.uri, version)
     # Single-flight + bounded: the ~20s/~370MB build must not run N times under a
     # cold-start thundering herd, and superseded versions must not accumulate.

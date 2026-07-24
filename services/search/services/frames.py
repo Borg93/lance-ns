@@ -14,10 +14,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from lancedb.query import MatchQuery
-
 from common.core.exceptions import ValidationError
 from common.lancekit.predicate import eq
+from lancedb.query import MatchQuery
+
 from search.services.constants import (
     VECTOR_MAX_NPROBES,
     VECTOR_NPROBES,
@@ -37,9 +37,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-def _ranked_or_fallback(
-    rank: Callable[..., list[dict[str, Any]]], *, scoped: bool
-) -> list[dict[str, Any]]:
+def _ranked_or_fallback(rank: Callable[..., list[dict[str, Any]]], *, scoped: bool) -> list[dict[str, Any]]:
     """Run ``rank(scoped=True)``; if the scope prefilter references a column the
     frame table lacks (a metadata filter, which stays on the row-table join),
     retry unscoped. ``[]`` if even the unscoped rank fails (no vector/FTS index
@@ -174,18 +172,13 @@ def frames_to_row_hits(
     # no-query `table.search().where(...)` returns nothing.
     key_filter = " OR ".join(
         "("
-        + " AND ".join(
-            eq(field, value)
-            for field, value in zip(target.key_fields, key, strict=True)
-        )
+        + " AND ".join(eq(field, value) for field, value in zip(target.key_fields, key, strict=True))
         + ")"
         for key in keys
     )
     full_filter = f"({key_filter})" + (f" AND ({where})" if where else "")
     try:
-        rows = target.row_ds.to_table(
-            columns=target.payload_columns, filter=full_filter
-        ).to_pylist()
+        rows = target.row_ds.to_table(columns=target.payload_columns, filter=full_filter).to_pylist()
     except Exception as e:
         logger.warning("frame search join failed", exc_info=True)
         raise ValidationError("frame search join failed") from e

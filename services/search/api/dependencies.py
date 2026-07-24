@@ -14,9 +14,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Annotated
 
+from common.deps import StateDep
 from fastapi import Depends
 
-from common.deps import StateDep
 from search.services.clients import ensure_embedder, ensure_reranker
 
 if TYPE_CHECKING:

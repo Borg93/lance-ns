@@ -26,7 +26,6 @@ import httpx
 import pyarrow as pa
 import pyarrow.ipc as ipc
 import pytest
-
 from annotator.annotations.commit import check_base_version_value
 from annotator.annotations.schema import EMPTY_SCHEMA
 from common.core.exceptions import ConflictError, NotFoundError
@@ -38,9 +37,7 @@ CATALOG_URL = os.environ.get("MEDIA_CATALOG_URL", "")
 pytestmark = [
     pytest.mark.e2e,
     pytest.mark.media_catalog,
-    pytest.mark.skipif(
-        not CATALOG_URL, reason="MEDIA_CATALOG_URL not set — live lance-ns catalog required"
-    ),
+    pytest.mark.skipif(not CATALOG_URL, reason="MEDIA_CATALOG_URL not set — live lance-ns catalog required"),
 ]
 
 #: The milestone-1 annotations schema: descriptor identity + the 25 contract
@@ -160,9 +157,7 @@ def test_milestone_loop(reader: CatalogTableReader, writer: CatalogTableWriter) 
     """The whole condition-4 story in order: human save → 409 handshake → model
     predictions → replace-protects-humans → insert-only never clobbers."""
     # 1. Human save, then read it back.
-    writer.merge_upsert(
-        _table([_row("human-1", source="human", status="accepted", confidence=1.0)]), on="id"
-    )
+    writer.merge_upsert(_table([_row("human-1", source="human", status="accepted", confidence=1.0)]), on="id")
     got = reader.to_table(filter="source = 'human'")
     assert got.num_rows == 1
     assert got["label"][0].as_py() == "person"
@@ -170,9 +165,7 @@ def test_milestone_loop(reader: CatalogTableReader, writer: CatalogTableWriter) 
     # 2. The 409 handshake against THEIR version primitive: client A loads at v,
     #    client B commits, A's stale save must be rejected.
     loaded = reader.table_version()
-    writer.merge_upsert(
-        _table([_row("human-2", source="human", status="accepted", confidence=1.0)]), on="id"
-    )
+    writer.merge_upsert(_table([_row("human-2", source="human", status="accepted", confidence=1.0)]), on="id")
     current = reader.table_version()
     assert current > loaded
     with pytest.raises(ConflictError, match=rf"loaded v{loaded}, now v{current}"):
@@ -183,12 +176,8 @@ def test_milestone_loop(reader: CatalogTableReader, writer: CatalogTableWriter) 
     writer.merge_upsert(
         _table(
             [
-                _row(
-                    "pred-1", source="model:x@1", status="prediction", confidence=0.7, label="car"
-                ),
-                _row(
-                    "pred-2", source="model:x@1", status="prediction", confidence=0.4, label="dog"
-                ),
+                _row("pred-1", source="model:x@1", status="prediction", confidence=0.7, label="car"),
+                _row("pred-2", source="model:x@1", status="prediction", confidence=0.4, label="dog"),
             ]
         ),
         on="id",

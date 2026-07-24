@@ -13,16 +13,13 @@ from typing import TYPE_CHECKING
 import lance
 import pyarrow as pa
 import pytest
-
 from annotator.annotations.save import build_delta, new_rows
 from annotator.annotations.schema import EMPTY_SCHEMA, NewAnnotation, TagWrite
 from annotator.annotations.tags import check_keys_arity, tag_id, tag_rows
 from annotator.annotations.wire import ipc_stream
 from common.lancekit.descriptor import Declared
 
-_MEDIA_DECLARED = Declared.model_validate(
-    {"identity": {"key_fields": ["doc_id", "speech_id", "chunk_id"]}}
-)
+_MEDIA_DECLARED = Declared.model_validate({"identity": {"key_fields": ["doc_id", "speech_id", "chunk_id"]}})
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -330,7 +327,9 @@ def test_tag_resave_preserves_human_review(tmp_path: Path) -> None:
     ds = lance.dataset(uri)
 
     # re-save the workflow tag (label="speech", status="accepted") via insert-only
-    delta = tag_rows([TagWrite(doc_id="d1", keys=[0, 19], labels=["speech"])], _MEDIA_DECLARED, author="x", schema=schema)
+    delta = tag_rows(
+        [TagWrite(doc_id="d1", keys=[0, 19], labels=["speech"])], _MEDIA_DECLARED, author="x", schema=schema
+    )
     _insert_only(ds, delta)
 
     row = {r["id"]: r for r in lance.dataset(uri).to_table().to_pylist()}[tid]
@@ -395,9 +394,7 @@ def test_save_emits_spec_2_0_2_openlineage(tmp_path: Path) -> None:
         ),
         uri,
     )
-    ev = build_save_event(
-        ds=lance.dataset(uri), table_uri=uri, table_name="annotations", unit_key="d1/0/19"
-    )
+    ev = build_save_event(ds=lance.dataset(uri), table_uri=uri, table_name="annotations", unit_key="d1/0/19")
     # spec-2-0-2 RunEvent shape
     assert ev["eventType"] == "COMPLETE"
     assert ev["schemaURL"].endswith("2-0-2/OpenLineage.json#/$defs/RunEvent")

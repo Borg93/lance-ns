@@ -28,8 +28,6 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
-from pydantic import BaseModel
-
 from common.core.exceptions import NotFoundError, ServiceUnavailableError, ValidationError
 from common.lancekit import store
 from common.lancekit.predicate import and_, eq, isin, ne
@@ -40,6 +38,8 @@ from common.schemas.voice import (
     VoiceSimilarResponse,
     VoiceStatusResponse,
 )
+from pydantic import BaseModel
+
 from viewer.services.wespeaker import (
     MIN_TURN_DURATION_S,
     TARGET_SAMPLE_RATE,
@@ -53,6 +53,7 @@ if TYPE_CHECKING:
 
     from common.lancekit.descriptor import Declared
     from common.lancekit.registry import DatasetHandle
+
     from viewer.services.wespeaker import TurnBatchEncoder
 
 logger = logging.getLogger(__name__)
@@ -202,9 +203,7 @@ def resolve_bindings(handle: DatasetHandle) -> VoiceBindings | None:
 def _require_bindings(handle: DatasetHandle) -> VoiceBindings:
     bindings = resolve_bindings(handle)
     if bindings is None:
-        raise ServiceUnavailableError(
-            "voice embeddings not built yet — run `ratch embed-speaker-turns`"
-        )
+        raise ServiceUnavailableError("voice embeddings not built yet — run `ratch embed-speaker-turns`")
     return bindings
 
 
@@ -264,9 +263,7 @@ def _resolve_time_anchor(
         raise NotFoundError("no speaker turn at that time")
     # Overlapped speech can stack several turns over one instant; the most
     # recently started one is the active speaker — and a deterministic pick.
-    return _turn_row_to_anchor(
-        max(rows, key=lambda r: float(r[_TURN_START])), doc_id, embedding_column
-    )
+    return _turn_row_to_anchor(max(rows, key=lambda r: float(r[_TURN_START])), doc_id, embedding_column)
 
 
 def _resolve_speaker_anchor(
@@ -274,9 +271,7 @@ def _resolve_speaker_anchor(
 ) -> tuple[list[float], VoiceAnchor]:
     if speakers_tbl is None:
         raise ServiceUnavailableError("speakers table not built yet — run `ratch build-speakers`")
-    rows = _anchor_rows(
-        speakers_tbl, and_(eq(_TURN_DOC, doc_id), eq(_TURN_SPEAKER, speaker))
-    )
+    rows = _anchor_rows(speakers_tbl, and_(eq(_TURN_DOC, doc_id), eq(_TURN_SPEAKER, speaker)))
     if not rows:
         raise NotFoundError("anchor speaker not found")
     row = rows[0]
@@ -324,8 +319,9 @@ def _chunk_for_turn(
         return None
     return max(
         rows,
-        key=lambda r: min(float(r[bindings.time_end]), turn_end)
-        - max(float(r[bindings.time_start]), turn_start),
+        key=lambda r: (
+            min(float(r[bindings.time_end]), turn_end) - max(float(r[bindings.time_start]), turn_start)
+        ),
     )
 
 
@@ -364,9 +360,7 @@ def _attach_captions(handle: DatasetHandle, bindings: VoiceBindings, hits: list[
         logger.warning("caption attach failed", exc_info=True)
         return
     by_key = {
-        _chunk_key(bindings, r): r.get(bindings.captions_column)
-        for r in rows
-        if int(r[_FRAME_IDX]) == 0
+        _chunk_key(bindings, r): r.get(bindings.captions_column) for r in rows if int(r[_FRAME_IDX]) == 0
     }
     for h in hits:
         h[bindings.captions_column] = by_key.get(_chunk_key(bindings, h))
@@ -440,9 +434,7 @@ def rank_similar_turns(
     """
     n = max(1, min(n, _MAX_N))
     emb_tbl: Any = handle.db.open_table(bindings.embeddings_table)
-    turn_hits = _search_turns(
-        emb_tbl, bindings.embedding_column, vec, n=n, exclude_doc_id=exclude_doc_id
-    )
+    turn_hits = _search_turns(emb_tbl, bindings.embedding_column, vec, n=n, exclude_doc_id=exclude_doc_id)
 
     row_ds: Any = handle.db.open_table(bindings.row_table).to_lance()
     hits: list[dict[str, Any]] = []

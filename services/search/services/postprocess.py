@@ -14,6 +14,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from common.lancekit.predicate import and_, eq, isin
+
 from search.services.constants import REPRESENTATIVE_FRAME_INDEX
 
 if TYPE_CHECKING:
@@ -93,9 +94,7 @@ def attach_captions(
     # scan (~75ms, 2.4x faster, verified identical output). We over-fetch the
     # matched docs' frame-0 rows and pick out the exact keys in Python below.
     doc_field = key_fields[0]
-    key_filter = and_(
-        isin(doc_field, (k[0] for k in keys)), eq("frame_idx", REPRESENTATIVE_FRAME_INDEX)
-    )
+    key_filter = and_(isin(doc_field, (k[0] for k in keys)), eq("frame_idx", REPRESENTATIVE_FRAME_INDEX))
     try:
         rows = (
             frame_tbl.to_lance()

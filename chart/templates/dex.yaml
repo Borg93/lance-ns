@@ -71,6 +71,11 @@ spec:
       labels:
         {{- include "lance.labels" . | nindent 8 }}
         app.kubernetes.io/component: dex
+      annotations:
+        # Restart on config change: Dex reads its ConfigMap at boot only, so without this hash an
+        # issuer change upgrades the ConfigMap but leaves the old pod serving the old issuer
+        # (found live 2026-07-24 — the login fix silently didn't take until a manual pod delete).
+        checksum/config: {{ .Values.dex | toYaml | sha256sum }}
     spec:
       {{- if .Values.security.serviceAccounts.enabled }}
       serviceAccountName: {{ include "lance.fullname" . }}-sa-dex

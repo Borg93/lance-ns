@@ -39,6 +39,20 @@ spec:
                   number: {{ $root.Values.frontend.service.port }}
           {{- end }}
           {{- end }}
+          {{- if .Values.auth.enabled }}
+          {{- /* Dex under the SAME origin as the zones: /dex → the dex Service, so the whole OIDC
+                 round-trip (authorize, login form, token, JWKS) rides the one public origin — no
+                 second hostname, no extra tunnel, no DNS tricks. Dex already serves under the /dex
+                 path (its issuer path); split-horizon: pods fetch via the internal Service URL
+                 (the *_OIDC_DISCOVERY_URL / internalIssuer overrides), browsers via this route. */}}
+          - path: /dex
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "lance.fullname" $root }}-dex
+                port:
+                  number: 5556
+          {{- end }}
           {{- if .Values.media.enabled }}
           {{- /* lance-media API plane (merged per docs/LANCE_NS_HANDOFF.md): the media/annotator zones
                  are ssr=false SPAs with NO BFF — their root-absolute /api/* fetches route HERE, matching

@@ -784,6 +784,21 @@ media:
     search: { port: 8102, daprAppId: search }
     annotator: { port: 8103, daprAppId: annotator }
 
+# --- Model runners (runners/ — the lance-audio fold) ----------------------------------------------
+# Only the CPU-viable subset ships: `assist` (GroundingDINO-tiny + SAM-ViT-base, CPU wheels, weights
+# baked into the image). The CUDA-pinned runners (asr/diarize/voiceprint) and the LLM-dependent batch
+# runners (topics/kg) have no honest deployment on a GPU-less estate — docs/DECISIONS.md "Runner
+# deployment". When enabled (and media.enabled), the annotator's MEDIA_ASSIST_URL points at the
+# assist Service, flipping its in-repo mock to real predictions.
+runners:
+  enabled: false
+  assist:
+    image: { repository: assist-runner, tag: dev }
+    port: 8110
+  # A lance-ns RayJob submit endpoint for the annotator's batch-labeling seam (MEDIA_JOBS_URL).
+  # No such deriver exists yet — leave empty and the annotator keeps its honest submit/poll mock.
+  jobsUrl: ""
+
 # --- API gateway — single entry point (reverse proxy) ---------------------------------------------
 # One nginx that path-routes to the in-cluster services, so a single `kubectl port-forward` fronts the
 # whole platform (kind has no host ports). Non-root nginx-unprivileged (listens on 8080). In prod this
@@ -799,6 +814,11 @@ resources:
   default:
     requests: { cpu: 50m, memory: 128Mi }
     limits: { cpu: "1", memory: 512Mi }
+  # The assist model runner holds two warm torch models (~1.1 GB weights) and burns real CPU per
+  # inference (multi-threaded GEMMs) — the request-pod default would OOM-kill it at load.
+  assist:
+    requests: { cpu: "1", memory: 2Gi }
+    limits: { cpu: "8", memory: 6Gi }
 
 # --- Ingress — fronts the gateway Service in prod (kind uses a port-forward instead) ---------------
 ingress:

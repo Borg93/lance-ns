@@ -86,6 +86,16 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ include "lance.fullname" $root }}-media-catalog-token, key: token }
             {{- end }}
+            {{- if and (eq $name "annotator") $root.Values.runners.enabled }}
+            # The assist runner (runners.yaml): flips the annotator's in-repo assist mock to REAL
+            # GroundingDINO+SAM predictions — same request/response wire shape, zero code change.
+            - { name: MEDIA_ASSIST_URL, value: "http://{{ include "lance.fullname" $root }}-assist:{{ $root.Values.runners.assist.port }}/v1/assist" }
+            {{- if $root.Values.runners.jobsUrl }}
+            # Batch-labeling submit seam — only rendered when an actual RayJob endpoint exists;
+            # unset keeps the annotator's honest submit/poll mock (no fake deriver).
+            - { name: MEDIA_JOBS_URL, value: {{ $root.Values.runners.jobsUrl | quote }} }
+            {{- end }}
+            {{- end }}
           {{- include "lance.appProbes" $root | nindent 10 }}
           resources: {{- include "lance.resources" (dict "root" $root "comp" $name) | nindent 12 }}
           volumeMounts:

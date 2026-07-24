@@ -6253,6 +6253,80 @@
         "title": "MaterializedViewUdtfEntry",
         "type": "object"
       },
+      "MeProject": {
+        "description": "One tenant the caller belongs to, at their strongest role (``admin`` wins over ``member``).",
+        "properties": {
+          "project": {
+            "title": "Project",
+            "type": "string"
+          },
+          "role": {
+            "enum": [
+              "admin",
+              "member"
+            ],
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project",
+          "role"
+        ],
+        "title": "MeProject",
+        "type": "object"
+      },
+      "MeResponse": {
+        "description": "The caller's self-describe: verified claims + effective (possibly degraded) FGA standing.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "estate_admin": {
+            "title": "Estate Admin",
+            "type": "boolean"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "projects": {
+            "items": {
+              "$ref": "#/components/schemas/MeProject"
+            },
+            "title": "Projects",
+            "type": "array"
+          },
+          "sub": {
+            "title": "Sub",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sub",
+          "name",
+          "email",
+          "estate_admin",
+          "projects"
+        ],
+        "title": "MeResponse",
+        "type": "object"
+      },
       "MergeInsertIntoTableResponse": {
         "description": "Response from merge insert operation",
         "properties": {
@@ -8786,6 +8860,33 @@
         "summary": "Refresh Materialized View",
         "tags": [
           "materialized_view"
+        ]
+      }
+    },
+    "/v1/me": {
+      "get": {
+        "description": "Describe the signed-in caller: verified claims, estate standing, and tenant memberships.\n\nAny verified token \u2192 200; anonymous \u2192 401. FGA off \u2192 ``estate_admin=true`` + ``projects=[]`` (dev\nparity). With FGA on, the lookups are display-only and DEGRADE per relation on an OpenFGA\noutage/brownout \u2014 this endpoint never 5xxes over authz-lookup health.",
+        "operationId": "get_me_v1_me_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Me",
+        "tags": [
+          "me"
         ]
       }
     },

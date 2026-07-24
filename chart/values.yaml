@@ -561,9 +561,10 @@ frontend:
     - { name: lineage, path: /lineage }
     - { name: models, path: /models }
     - { name: admin, path: /admin }
-    # The lance-media zones (merged per docs/LANCE_NS_HANDOFF.md): ssr=false SPAs with NO BFF — their
-    # root-absolute /api/* calls are routed by the INGRESS to the media backends (see ingress.yaml,
-    # gated on media.enabled). Deploy these together with media.enabled=true.
+    # The lance-media zones (merged per docs/LANCE_NS_HANDOFF.md): full BFF zones like the rest — SSR on,
+    # the shared session handle, and same-origin /<zone>/api/* proxy routes to the media Services
+    # (VIEWER_API/SEARCH_API/ANNOTATOR_API env, rendered when media.enabled). Deploy together with
+    # media.enabled=true.
     - { name: media, path: /media }
     - { name: annotator, path: /annotator }
   # Per-user OIDC login (opt-in), shared across ALL zones — one origin, one sealed cookie, so a login on any

@@ -54,12 +54,16 @@ spec:
             # fetches (discovery doc, token POST) go to the in-cluster Dex Service — the public issuer may
             # only resolve for browsers. The BROWSER-facing authorize URL and the iss expectation keep the
             # public OIDC_ISSUER; the BFF rewrites the discovered (public) endpoints onto this base.
+            # (The old AUTH_GATE cookie-presence env is gone: the media/annotator zones now run the real
+            # @rask/api/bff makeSessionHandle like every other zone — one gate, derived from this config.)
             - { name: OIDC_INTERNAL_ISSUER, value: "http://{{ include "lance.fullname" $root }}-dex:5556/dex" }
-            # Login-first gate for the media/annotator SPA zones (no BFF — their bun server checks
-            # lance_session cookie PRESENCE and redirects signed-out page loads to /auth/login). A UX
-            # gate, not a security boundary; the shell zones ignore this env (their gate derives from the
-            # OIDC config above).
-            - { name: AUTH_GATE, value: "true" }
+            {{- end }}
+            {{- if and $root.Values.media.enabled (or (eq .name "media") (eq .name "annotator")) }}
+            # The media plane's upstreams for these zones' BFF proxy routes (/<zone>/api/* → the three
+            # lance-media Services): the zone map their retired thin server used, now resolved in-release.
+            - { name: VIEWER_API, value: "http://{{ include "lance.fullname" $root }}-viewer:{{ $root.Values.media.services.viewer.port }}" }
+            - { name: SEARCH_API, value: "http://{{ include "lance.fullname" $root }}-search:{{ $root.Values.media.services.search.port }}" }
+            - { name: ANNOTATOR_API, value: "http://{{ include "lance.fullname" $root }}-annotator:{{ $root.Values.media.services.annotator.port }}" }
             {{- end }}
           ports: [{ name: http, containerPort: 3000 }]
           {{- include "lance.tcpProbes" "http" | nindent 10 }}

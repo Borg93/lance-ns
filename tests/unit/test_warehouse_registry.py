@@ -16,7 +16,7 @@ from typing import Any
 
 import pytest
 from common import warehouse_registry
-from common.warehouse_registry import clear_cache, is_safe_project, project_root
+from common.warehouse_registry import clear_cache, is_safe_project, project_gold_root, project_root
 
 
 @pytest.fixture(autouse=True)
@@ -143,3 +143,57 @@ def test_safe_project_ids_pass(value: str) -> None:
 def test_unsafe_project_ids_are_rejected(value: object) -> None:
     # These become S3 key prefixes and lineage names — anything path-shaped must be refused, not repaired.
     assert not is_safe_project(value)
+
+
+# ── gold serving warehouses (DECISIONS "Medallion tiers — hybrid physical layout") ───────────────────
+
+
+def test_gold_root_resolves_only_serving_gold_records(tmp_path: Path) -> None:
+    _write_record(tmp_path, _record("wh1", "acme", "s3://acme-work", status="active"))
+    _write_record(tmp_path, _record("wh2", "acme", "s3://acme-gold", status="active", serving="gold"))
+    assert project_gold_root(str(tmp_path), {}, "acme") == "s3://acme-gold"
+    assert project_root(str(tmp_path), {}, "acme") == "s3://acme-work"
+
+
+def test_work_root_never_hijacked_by_a_gold_record(tmp_path: Path) -> None:
+    # The gold record's id sorts BELOW the work warehouse's — under the old any-record lowest-id rule it
+    # would have won project_root and routed raw/bronze/silver into the serving bucket. Serving records
+    # are excluded from the work class entirely.
+    _write_record(tmp_path, _record("aaa-gold", "acme", "s3://acme-gold", status="active", serving="gold"))
+    _write_record(tmp_path, _record("zzz-work", "acme", "s3://acme-work", status="active"))
+    assert project_root(str(tmp_path), {}, "acme") == "s3://acme-work"
+
+
+def test_gold_root_none_when_project_has_no_serving_warehouse(tmp_path: Path) -> None:
+    _write_record(tmp_path, _record("wh1", "acme", "s3://acme-work", status="active"))
+    assert project_gold_root(str(tmp_path), {}, "acme") is None  # caller falls back to the work root
+
+
+def test_multiple_gold_warehouses_resolve_deterministically(tmp_path: Path) -> None:
+    _write_record(tmp_path, _record("g2", "acme", "s3://acme-gold-2", status="active", serving="gold"))
+    _write_record(tmp_path, _record("g1", "acme", "s3://acme-gold-1", status="active", serving="gold"))
+    assert project_gold_root(str(tmp_path), {}, "acme", ttl_seconds=0) == "s3://acme-gold-1"
+
+
+def test_deactivated_gold_warehouse_is_invisible(tmp_path: Path) -> None:
+    _write_record(tmp_path, _record("g1", "acme", "s3://acme-gold", status="deactivated", serving="gold"))
+    assert project_gold_root(str(tmp_path), {}, "acme") is None
+
+
+def test_unknown_serving_class_matches_neither_resolver(tmp_path: Path) -> None:
+    # Fail closed: a record from a future build (serving="platinum") must not be routed by THIS build as
+    # either class — never route a tenant into a warehouse class the resolver does not know.
+    _write_record(tmp_path, _record("wh1", "acme", "s3://acme-x", status="active", serving="platinum"))
+    assert project_root(str(tmp_path), {}, "acme") is None
+    assert project_gold_root(str(tmp_path), {}, "acme") is None
+
+
+def test_gold_and_work_caches_are_independent(tmp_path: Path) -> None:
+    # The positive cache is partitioned by serving class — a cached work root must never answer a gold
+    # lookup (they are different buckets by design).
+    _write_record(tmp_path, _record("wh1", "acme", "s3://acme-work", status="active"))
+    assert project_root(str(tmp_path), {}, "acme", ttl_seconds=3600) == "s3://acme-work"
+    assert project_gold_root(str(tmp_path), {}, "acme", ttl_seconds=3600) is None
+    _write_record(tmp_path, _record("g1", "acme", "s3://acme-gold", status="active", serving="gold"))
+    # The gold miss was not cached, so the freshly provisioned serving warehouse resolves immediately.
+    assert project_gold_root(str(tmp_path), {}, "acme", ttl_seconds=3600) == "s3://acme-gold"

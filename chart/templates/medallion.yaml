@@ -265,6 +265,12 @@ spec:
             # the env URIs below; project-less triggers keep them byte-identically. Without this env a
             # project trigger is DROPPED fail-closed.
             - { name: MEDALLION_CONTROL_ROOT, value: "s3://{{ $root.Values.rustfs.bucket }}" }
+            {{- if and $root.Values.medallion.goldWarehouse (eq .toNamespace "gold") }}
+            # Gold SERVING warehouse (docs/DECISIONS.md "Medallion tiers"): ONLY the terminal silver→gold
+            # mover retargets — its tenant target root becomes the project's serving=="gold" registry
+            # record when one exists; absent → work-warehouse behavior, byte-identical.
+            - { name: MEDALLION_GOLD_WAREHOUSE_ENABLED, value: "true" }
+            {{- end }}
             {{- end }}
             {{- if $root.Values.dapr.resiliency.enabled }}
             # Dapr-native DLQ (ships with the Resiliency CRD — see values.yaml dapr.resiliency): retry

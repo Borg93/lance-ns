@@ -42,8 +42,10 @@ _TTL_ENV_VAR = "WAREHOUSE_REGISTRY_TTL_SECONDS"
 #: Small by design: the cache only ever serves stale POSITIVES, and the harm of one (routing a tenant
 #: into a warehouse an admin just deactivated) outweighs the saved registry listing.
 _DEFAULT_TTL_SECONDS = 5.0
-#: ``(control_root, project) → (expires_at_monotonic, root_uri)`` — positive resolutions only.
-_cache: dict[tuple[str, str], tuple[float, str]] = {}
+#: ``(control_root, project, serving) → (expires_at_monotonic, root_uri)`` — positive resolutions only.
+#: ``serving`` partitions the cache by warehouse class (``""`` = work, ``"gold"`` = serving), so a cached
+#: work root can never answer a gold lookup or vice versa.
+_cache: dict[tuple[str, str, str], tuple[float, str]] = {}
 
 
 def _default_ttl_seconds() -> float:
@@ -76,31 +78,23 @@ def clear_cache() -> None:
     _cache.clear()
 
 
-def project_root(
+def _resolve_root(
     control_root: str,
     storage_options: StorageOptions,
     project: str,
     *,
-    ttl_seconds: float | None = None,
+    serving: str,
+    ttl_seconds: float | None,
 ) -> str | None:
-    """The ACTIVE warehouse ``root_uri`` for ``project``, or ``None`` when it has no active warehouse.
+    """Shared resolver behind :func:`project_root` / :func:`project_gold_root` — one serving class.
 
-    Scans ``<control_root>/_warehouses/*.json`` for records whose ``project`` matches and whose status
-    is active (an ABSENT status counts as active — records written before the lifecycle feature are
-    live, matching ``warehouse_status`` on the catalog side). One unreadable record is skipped with a
-    warning, never allowed to void the rest. Multiple active warehouses resolve DETERMINISTICALLY to
-    the lowest warehouse ``id`` (warned) so routing never flaps between roots.
-
-    Positive results are cached per process for ``ttl_seconds`` (``None`` → the
-    ``WAREHOUSE_REGISTRY_TTL_SECONDS`` env value, default 5s); a miss is NOT cached, so a freshly
-    provisioned warehouse resolves immediately. RESIDUAL STALENESS: because only ``status`` ever
-    changes on a record, the cache re-checks it only on expiry — a warehouse deactivated after a
-    positive hit keeps resolving for up to ``ttl_seconds`` per process (set the TTL to 0 to re-read
-    the registry on every call). Blocking IO — callers threadpool it.
+    ``serving=""`` matches WORK warehouses (no ``serving`` field on the record); ``serving="gold"``
+    matches only records carrying ``"serving": "gold"``. A record with an UNKNOWN serving value matches
+    neither class (fail closed: never route a tenant into a warehouse class this build does not know).
     """
     if ttl_seconds is None:
         ttl_seconds = _default_ttl_seconds()
-    key = (control_root, project)
+    key = (control_root, project, serving)
     cached = _cache.get(key)
     if cached is not None and time.monotonic() < cached[0]:
         return cached[1]
@@ -121,13 +115,67 @@ def project_root(
             continue
         if (record.get("status") or "active") != "active":
             continue
+        if (record.get("serving") or "") != serving:
+            continue
         root_uri = record.get("root_uri")
         if isinstance(root_uri, str) and root_uri:
             matches.append((str(record.get("id", "")), root_uri.rstrip("/")))
     if not matches:
         return None
     if len(matches) > 1:
-        log.warning("warehouse_project_ambiguous", extra={"project": project, "count": len(matches)})
+        log.warning(
+            "warehouse_project_ambiguous",
+            extra={"project": project, "serving": serving, "count": len(matches)},
+        )
     root = min(matches)[1]
     _cache[key] = (time.monotonic() + ttl_seconds, root)
     return root
+
+
+def project_root(
+    control_root: str,
+    storage_options: StorageOptions,
+    project: str,
+    *,
+    ttl_seconds: float | None = None,
+) -> str | None:
+    """The ACTIVE **work** warehouse ``root_uri`` for ``project``, or ``None`` when it has none.
+
+    Scans ``<control_root>/_warehouses/*.json`` for records whose ``project`` matches and whose status
+    is active (an ABSENT status counts as active — records written before the lifecycle feature are
+    live, matching ``warehouse_status`` on the catalog side). One unreadable record is skipped with a
+    warning, never allowed to void the rest. Multiple active warehouses resolve DETERMINISTICALLY to
+    the lowest warehouse ``id`` (warned) so routing never flaps between roots.
+
+    Only WORK records match — a record carrying ``"serving": "gold"`` (the project's gold SERVING
+    warehouse, DECISIONS "Medallion tiers") is excluded here so registering a gold warehouse can never
+    hijack the stage routing (its id sorting below the work warehouse's would otherwise win the
+    lowest-id determinism); resolve it with :func:`project_gold_root`.
+
+    Positive results are cached per process for ``ttl_seconds`` (``None`` → the
+    ``WAREHOUSE_REGISTRY_TTL_SECONDS`` env value, default 5s); a miss is NOT cached, so a freshly
+    provisioned warehouse resolves immediately. RESIDUAL STALENESS: because only ``status`` ever
+    changes on a record, the cache re-checks it only on expiry — a warehouse deactivated after a
+    positive hit keeps resolving for up to ``ttl_seconds`` per process (set the TTL to 0 to re-read
+    the registry on every call). Blocking IO — callers threadpool it.
+    """
+    return _resolve_root(control_root, storage_options, project, serving="", ttl_seconds=ttl_seconds)
+
+
+def project_gold_root(
+    control_root: str,
+    storage_options: StorageOptions,
+    project: str,
+    *,
+    ttl_seconds: float | None = None,
+) -> str | None:
+    """The ACTIVE **gold serving** warehouse ``root_uri`` for ``project``, or ``None`` when it has none.
+
+    The mirror of :func:`project_root` matching only records carrying ``"serving": "gold"`` (created via
+    ``POST /v1/warehouses`` with the ``serving`` field — DECISIONS "Medallion tiers — hybrid physical
+    layout"): the silver→gold mover's tenant TARGET root when ``MEDALLION_GOLD_WAREHOUSE_ENABLED`` is on.
+    Same lowest-id determinism, same positive-only TTL cache (partitioned by serving class, so a cached
+    work root never answers a gold lookup). ``None`` means the project has no gold warehouse — the caller
+    falls back to the work root, byte-identically to the pre-gold behavior. Blocking IO — threadpool it.
+    """
+    return _resolve_root(control_root, storage_options, project, serving="gold", ttl_seconds=ttl_seconds)

@@ -245,6 +245,10 @@ class CreateWarehouseRequest(BaseModel):
     id: str
     project: str
     bucket: str | None = None  # defaults to the id (a warehouse = one bucket)
+    # Serving designation (DECISIONS "Medallion tiers — hybrid physical layout"): "gold" marks this as the
+    # project's gold SERVING warehouse — the silver→gold mover's tenant target root when the chart's
+    # medallion.goldWarehouse is on. Absent (default) = a WORK warehouse. Only "gold" is accepted for now.
+    serving: str | None = None
 
 
 class WarehouseResponse(BaseModel):
@@ -253,6 +257,7 @@ class WarehouseResponse(BaseModel):
     root_uri: str
     project: str
     status: str | None = None  # "active" / "deactivated" (P2.3 lifecycle); absent on pre-lifecycle records
+    serving: str | None = None  # "gold" = the project's serving warehouse; absent = a work warehouse
     created_at: str | None = None
 
 

@@ -51,6 +51,13 @@ class MedallionSettings(BaseSettings):
     # the env URIs. Empty (default) = resolution DISABLED: a project-carrying trigger is DROPPED (fail
     # closed — never a fallback to the shared roots), and every project-less path stays byte-identical.
     control_root: str = Field(default="", alias="MEDALLION_CONTROL_ROOT")
+    # Gold SERVING warehouse (DECISIONS "Medallion tiers — hybrid physical layout", opt-in): when set, a
+    # ``project``-carrying trigger's TARGET root becomes the project's gold serving warehouse (the registry
+    # record carrying ``"serving": "gold"``) when one exists — the chart wires this env ONLY onto the
+    # terminal silver→gold mover (medallion.goldWarehouse), so raw/bronze/silver stay in the work
+    # warehouse. Absent gold warehouse or flag off → byte-identical work-warehouse behavior; the
+    # projectless path never retargets (it has no registry resolution at all).
+    gold_warehouse_enabled: bool = Field(default=False, alias="MEDALLION_GOLD_WAREHOUSE_ENABLED")
 
     # --- mover stage config (the 3 movers share medallion.mover:app, differ only by these) ------
     from_dataset: str = Field(default="raw_events", alias="MEDALLION_FROM_DATASET")

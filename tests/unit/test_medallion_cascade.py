@@ -365,3 +365,71 @@ def test_projectless_cascade_is_byte_identical_even_with_routing_configured(tmp_
     )
     assert bronze_event["outputs"][0]["namespace"] == "bronze"
     assert "project" not in bronze_event["run"]["facets"]["lance"]
+
+
+# ── gold serving warehouse: the terminal mover's tenant target root (DECISIONS "Medallion tiers") ──
+
+
+def _provision_gold(control: Path, project: str, root: Path) -> None:
+    """One ACTIVE gold SERVING warehouse record for ``project`` (the ``serving: gold`` registry shape)."""
+    registry = control / "_warehouses"
+    registry.mkdir(parents=True, exist_ok=True)
+    record = {
+        "id": "gold1",
+        "project": project,
+        "root_uri": str(root),
+        "status": "active",
+        "serving": "gold",
+    }
+    (registry / "gold1.json").write_text(json.dumps(record))
+
+
+def _seed_silver(work_wh: Path) -> None:
+    """A tiny upstream silver dataset in the WORK warehouse for the silver→gold hop to read."""
+    import pyarrow as pa
+
+    table = pa.table({"id": [1, 2], "stage": ["silver", "silver"], "source_rowid": [0, 1]})
+    lance.write_dataset(table, str(work_wh / "medallion" / "silver"), mode="overwrite")
+
+
+@pytest.mark.parametrize(
+    ("flag_on", "gold_present", "expect_gold_bucket"),
+    [
+        (True, True, True),  # the only combination that retargets
+        (True, False, False),  # no serving warehouse → fall back to the work root, byte-identical
+        (False, True, False),  # flag off → the gold record is ignored entirely
+        (False, False, False),
+    ],
+)
+def test_gold_mover_target_selection(
+    tmp_path: Any, flag_on: bool, gold_present: bool, expect_gold_bucket: bool
+) -> None:
+    """The silver→gold mover's TENANT target root: retargets to the project's gold serving warehouse
+    ONLY when MEDALLION_GOLD_WAREHOUSE_ENABLED is on AND a serving=="gold" record exists — every other
+    combination is byte-identical work-warehouse behavior (and the read side ALWAYS stays in work)."""
+    control, work_wh, gold_wh = tmp_path / "control", tmp_path / "acme-wh", tmp_path / "acme-gold"
+    _provision(control, "acme", work_wh)
+    if gold_present:
+        _provision_gold(control, "acme", gold_wh)
+    _seed_silver(work_wh)
+    decoys = {ns: str(tmp_path / f"default-{ns}") for ns in ("silver", "gold")}
+    dapr = _FakeDapr()
+
+    settings = _mover_settings(_HOPS[2], decoys, control_root=str(control), gold_warehouse_enabled=flag_on)
+    trigger = {"data": {"token": "t", "project": "acme"}}
+    assert asyncio.run(handle_stage(cast(DaprClient, dapr), settings, trigger)) == {"status": "SUCCESS"}
+
+    gold_in_serving = gold_wh / "medallion" / "gold"
+    gold_in_work = work_wh / "medallion" / "gold"
+    if expect_gold_bucket:
+        assert lance.dataset(str(gold_in_serving)).to_table().num_rows == 2
+        assert not gold_in_work.exists()  # the work warehouse never got the serving data
+    else:
+        assert lance.dataset(str(gold_in_work)).to_table().num_rows == 2
+        assert not gold_in_serving.exists()
+    assert not Path(decoys["gold"]).exists()  # the shared env root is never touched on a tenant trigger
+
+    # The lineage/FGA identities do not move with the physical root: still the project-qualified names.
+    event = next(p["data"] for p in dapr.published if p["topic"] == settings.lineage_topic)
+    assert event["outputs"][0]["namespace"] == "acme-gold"
+    assert event["outputs"][0]["name"] == "acme-gold$catalog"

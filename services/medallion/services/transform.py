@@ -21,7 +21,12 @@ from contextlib import suppress
 from typing import Any
 
 from common import dapr_publish, fga, outbox
-from common.warehouse_registry import UnresolvableProjectError, is_safe_project, project_root
+from common.warehouse_registry import (
+    UnresolvableProjectError,
+    is_safe_project,
+    project_gold_root,
+    project_root,
+)
 from dapr.aio.clients import DaprClient
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import ServiceUnavailableError
@@ -146,6 +151,17 @@ async def handle_stage(
                 raise UnresolvableProjectError(f"project {project!r} has no active warehouse")
             from_uri = f"{root}/medallion/{settings.from_namespace}"
             to_uri = f"{root}/medallion/{settings.to_namespace}"
+            if settings.gold_warehouse_enabled:
+                # Gold tier (DECISIONS "Medallion tiers"): the chart sets this env ONLY on the terminal
+                # silver→gold mover, whose tenant TARGET root becomes the project's gold SERVING
+                # warehouse (the serving=="gold" registry record) when one exists. The upstream READ
+                # stays in the work warehouse; no gold warehouse → fall through to the work root above,
+                # byte-identically. Lineage/FGA identities are untouched — only the physical root moves.
+                gold_root = await run_in_threadpool(
+                    project_gold_root, settings.control_root, settings.storage_options(), project
+                )
+                if gold_root is not None:
+                    to_uri = f"{gold_root}/medallion/{settings.to_namespace}"
         # 0. Fake-Ray compute (opt-in): a REAL in-process Lance write of the downstream dataset, so the
         # emitted lineage carries the actual version + measured output statistics (rows + on-disk bytes),
         # and the cascade produces data, not just provenance. Blocking Lance/S3 IO → threadpool. Off →

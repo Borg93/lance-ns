@@ -3511,6 +3511,17 @@
           "project": {
             "title": "Project",
             "type": "string"
+          },
+          "serving": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serving"
           }
         },
         "required": [
@@ -6708,6 +6719,17 @@
             "title": "Id",
             "type": "string"
           },
+          "serving": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serving"
+          },
           "status": {
             "title": "Status",
             "type": "string"
@@ -8481,6 +8503,17 @@
           "root_uri": {
             "title": "Root Uri",
             "type": "string"
+          },
+          "serving": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Serving"
           },
           "status": {
             "anyOf": [

@@ -108,6 +108,11 @@ async def create_warehouse(
     warehouse_id = _validate_id(body.id, what="warehouse id")
     project = _validate_id(body.project, what="project id")
     bucket = _validate_id(body.bucket or body.id, what="bucket name")
+    # Serving designation (DECISIONS "Medallion tiers"): only the one class the resolver knows is
+    # accepted — an unknown value would mint a record neither project_root nor project_gold_root ever
+    # matches (an unroutable warehouse), so it is rejected up front like a malformed id.
+    if body.serving is not None and body.serving != "gold":
+        raise InvalidInputError(f"invalid serving {body.serving!r}: only 'gold' is supported")
     await fga_deps.require_can_create_warehouse(client, settings, token, project=project)
 
     so = settings.storage_options()
@@ -158,6 +163,14 @@ async def create_warehouse(
         "created_at": (existing.get("created_at") if existing is not None else None)
         or datetime.now(UTC).isoformat(),
     }
+    # Serving carries FORWARD on an idempotent re-create (same rationale as status above): a GitOps
+    # reconcile re-POSTing the gold warehouse WITHOUT the serving field must not silently demote it to a
+    # work warehouse — the silver→gold mover would quietly fall back to the work root while the record
+    # still looks fine. The field stays ABSENT (not null) on work warehouses, matching the resolver's
+    # "absent = work" contract and keeping pre-serving records byte-identical.
+    serving = body.serving or (existing.get("serving") if existing is not None else None)
+    if serving:
+        record["serving"] = serving
     await run_in_threadpool(warehouses.put_warehouse, settings.registry_root, so, record)
     await fga_deps.seed_warehouse(client, settings, token, warehouse_id=warehouse_id, project=project)
     log.info("warehouse_created", extra={"warehouse": warehouse_id, "bucket": bucket, "project": project})

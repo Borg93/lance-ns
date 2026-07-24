@@ -32,11 +32,13 @@
 	if (browser) openFromParams(new URLSearchParams(window.location.search));
 
 	// Track later URL changes (selection-view goto, back/forward) — guarded against
-	// re-opening the keys the store already holds.
+	// re-opening the keys the store already holds. The param is normalized exactly like
+	// openKeys (empty segments dropped), otherwise a hand-edited link such as
+	// `?keys=doc/0/1,` would never equal the held keys and the effect would loop.
 	$effect(() => {
-		const keys = page.url.searchParams.get('keys');
+		const wanted = (page.url.searchParams.get('keys') ?? '').split(',').filter(Boolean).join(',');
 		const held = reviewSelection.units.map((u) => u.key).join(',');
-		if ((keys ?? '') !== held) openFromParams(page.url.searchParams);
+		if (wanted !== held) openFromParams(page.url.searchParams);
 	});
 
 	const unit = $derived(reviewSelection.active);

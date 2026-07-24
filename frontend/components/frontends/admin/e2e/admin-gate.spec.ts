@@ -27,9 +27,7 @@ test('a non-estate-admin sees ForbiddenPage on every admin route + no admin nav 
 	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
 });
 
-test('an estate admin passes the door and gets the Admin + Access navbar entries', async ({
-	page,
-}) => {
+test('an estate admin passes the door and gets the Admin navbar entry', async ({ page }) => {
 	await mockMe(page, ME_ADMIN);
 	await page.route('**/admin/api/projects*', (route) =>
 		route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
@@ -38,7 +36,10 @@ test('an estate admin passes the door and gets the Admin + Access navbar entries
 	await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	await expect(nav.getByRole('link', { name: 'Admin' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Access' })).toBeVisible();
+	// Access is NOT a top-level navbar entry (4b2af0e): it lives in this zone's own sidebar.
+	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
+	// …as this zone's own sidebar leaf instead.
+	await expect(page.getByRole('link', { name: 'Access', exact: true })).toBeVisible();
 });
 
 test('an unresolvable identity (catalog outage) fails CLOSED, never open', async ({ page }) => {

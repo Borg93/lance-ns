@@ -23,7 +23,8 @@ test('an estate admin gets the full navbar entry set + the models sidebar leaves
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	await expect(nav.getByRole('link', { name: 'Models' })).toBeVisible();
 	await expect(nav.getByRole('link', { name: 'Admin' })).toBeVisible();
-	await expect(nav.getByRole('link', { name: 'Access' })).toBeVisible();
+	// Access is NOT a top-level entry (4b2af0e: it folds into the admin zone's own sidebar).
+	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
 	// The sidebar renders ONLY this zone's own routes.
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Registry' })).toBeVisible();
 	await expect(page.getByRole('link', { name: 'Pipeline' })).toBeVisible();

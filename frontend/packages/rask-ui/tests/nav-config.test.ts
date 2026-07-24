@@ -23,19 +23,18 @@ describe('topNav', () => {
 		]);
 	});
 
-	it('appends Admin + Access only for an estate admin', () => {
+	it('appends Admin only for an estate admin', () => {
 		const titles = topNav(true).map((e) => e.title);
-		expect(titles).toEqual([
-			'Home',
-			'Data',
-			'Lineage',
-			'Models',
-			'Media',
-			'Annotator',
-			'Admin',
-			'Access',
-		]);
-		expect(topNav(true).find((e) => e.title === 'Access')?.href).toBe('/admin/access');
+		expect(titles).toEqual(['Home', 'Data', 'Lineage', 'Models', 'Media', 'Annotator', 'Admin']);
+		expect(topNav(true).find((e) => e.title === 'Admin')?.href).toBe('/admin');
+	});
+
+	it('never exposes Access as a navbar entry — it lives inside the admin zone', () => {
+		// 4b2af0e folded Access into the admin zone's own sidebar, so Admin owns the whole
+		// /admin subtree up here. Asserted for BOTH identities so a future regression that
+		// re-adds it (for either) is caught.
+		expect(topNav(false).map((e) => e.title)).not.toContain('Access');
+		expect(topNav(true).map((e) => e.title)).not.toContain('Access');
 	});
 
 	it('active-match: a zone matches its own path and any nested path, not a sibling or root', () => {
@@ -52,15 +51,13 @@ describe('topNav', () => {
 		expect(home.match('/data')).toBe(false);
 	});
 
-	it('active-match: Access owns /admin/access and Admin excludes it (one lit entry per route)', () => {
+	it('active-match: Admin covers the WHOLE /admin subtree, /admin/access included', () => {
 		const admin = topNav(true).find((e) => e.title === 'Admin')!;
-		const access = topNav(true).find((e) => e.title === 'Access')!;
 		expect(admin.match('/admin')).toBe(true);
 		expect(admin.match('/admin/audit')).toBe(true);
-		expect(admin.match('/admin/access')).toBe(false);
-		expect(access.match('/admin/access')).toBe(true);
-		expect(access.match('/admin/access/x')).toBe(true);
-		expect(access.match('/admin')).toBe(false);
+		expect(admin.match('/admin/access')).toBe(true);
+		expect(admin.match('/admin/access/x')).toBe(true);
+		expect(admin.match('/data')).toBe(false);
 	});
 });
 

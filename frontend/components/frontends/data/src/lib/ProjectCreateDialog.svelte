@@ -5,6 +5,13 @@
 	// "Medallion tiers"); the initial admin grant is one raw FGA tuple on /v1/access/tuples
 	// (estate-admin gated, like /v1/events). Every step toasts success/failure honestly — a partial
 	// outcome (work warehouse up, gold or grant failed) is NAMED, never rolled into a fake success.
+	//
+	// The first create is what MINTS the tenant, and the catalog seeds the caller as the new project's
+	// `admin` on that very call (endpoints/warehouses.py — a brand-new project has no tuples, so the
+	// estate-admin door opens once and then hands the project to its creator). So the gold create and
+	// every later project-scoped op run on the creator's OWN project rung, and the admin field below is
+	// for granting a SECOND admin (or handing the tenant to someone else) — never the only thing
+	// standing between the new project and being ungovernable.
 	import { Dialog } from '@rask/ui/dialog';
 	import { toast } from 'svelte-sonner';
 	import { createWarehouse, writeAccessTuple } from './catalog';
@@ -95,7 +102,9 @@
 					);
 				}
 			}
-			// 3. Initial admin grant — a raw admin tuple on the new project object.
+			// 3. Optional extra admin — a raw admin tuple on the new project object, ON TOP of the one the
+			// catalog already seeded for the caller during step 1. Left empty, the project is still
+			// governable (by its creator); filled, it hands a co-admin (or a successor) the same rung.
 			const adminUser = admin.trim();
 			if (adminUser) {
 				const res = await writeAccessTuple({
@@ -130,8 +139,8 @@
 	<Dialog.Content>
 		<Dialog.Title>New project</Dialog.Title>
 		<Dialog.Description>
-			Provisioning the first warehouse under a new project name creates the project; the optional
-			serving warehouse hosts the gold tier in its own bucket.
+			Provisioning the first warehouse under a new project name creates the project and makes you
+			its admin; the optional serving warehouse hosts the gold tier in its own bucket.
 		</Dialog.Description>
 		<form
 			class="form"

@@ -8,6 +8,11 @@ fetched JWKS. Everything downstream of that boundary (``jwt.decode`` with the
 allowlisted algorithms, issuer/audience/exp checks, opaque error mapping) runs for
 real.
 
+The split-horizon section at the bottom goes one level deeper: it runs the *real*
+``_resolve`` and stubs only its two network touch-points (``httpx.Client`` for the
+discovery fetch, ``jwt.PyJWKClient`` for the key fetch) so the tests can assert
+*where* discovery/JWKS are fetched from while the issuer checks run unmodified.
+
 Mirrors the fastapi_oidc conftest approach: ``rsa.generate_private_key`` +
 ``jwt.encode`` against the matching public key.
 
@@ -342,6 +347,188 @@ def test_verify_error_is_opaque(
     assert "expiredsignature" not in message
     assert "pyjwt" not in message
     assert "jwt" not in message
+
+
+# --------------------------------------------------------------------------- #
+# Split-horizon discovery (reverse-proxy IdP): the issuer STRING stays public,
+# only the discovery/JWKS FETCH location moves in-cluster. These run the real
+# ``_resolve`` and stub only its network touch-points.
+# --------------------------------------------------------------------------- #
+
+PUBLIC_ISSUER = "https://public.example/dex"
+INTERNAL_DEX = "https://dex.cluster.local:5556/dex"
+_WELL_KNOWN = "/.well-known/openid-configuration"
+
+
+def _stub_network(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    document: dict[str, Any],
+    public_key: object,
+) -> tuple[list[str], list[str]]:
+    """Serve ``document`` from any discovery URL and the local key from any JWKS URI.
+
+    Returns two recorders — the discovery URLs fetched and the JWKS URIs the
+    ``PyJWKClient`` was constructed with — so tests assert the *fetch locations*
+    while ``_resolve``'s own logic (issuer match, https guard, allowlist) runs real.
+    """
+    discovery_urls: list[str] = []
+    jwks_urls: list[str] = []
+
+    class _Response:
+        def raise_for_status(self) -> None:
+            pass
+
+        def json(self) -> dict[str, Any]:
+            return document
+
+    class _Client:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+        def __enter__(self) -> _Client:
+            return self
+
+        def __exit__(self, *exc: object) -> None:
+            pass
+
+        def get(self, url: str) -> _Response:
+            discovery_urls.append(url)
+            return _Response()
+
+    def _jwk_client(uri: str, **_kwargs: Any) -> _FakeJWKClient:
+        jwks_urls.append(uri)
+        return _FakeJWKClient(public_key)
+
+    monkeypatch.setattr(oidc_module.httpx, "Client", _Client)
+    monkeypatch.setattr(oidc_module.jwt, "PyJWKClient", _jwk_client)
+    return discovery_urls, jwks_urls
+
+
+def _dex_document(issuer: str) -> dict[str, Any]:
+    """A Dex-shaped discovery doc: jwks_uri advertised under the issuer, as Dex does."""
+    return {
+        "issuer": issuer,
+        "jwks_uri": f"{issuer}/keys",
+        "id_token_signing_alg_values_supported": ["RS256"],
+    }
+
+
+def test_split_horizon_fetches_from_override_and_verifies(
+    rsa_keypair: tuple[Any, Any], private_pem: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # (a) Discovery + JWKS are fetched from the override; a token carrying the PUBLIC
+    # issuer as ``iss`` verifies against the configured (public) issuer.
+    _, public_key = rsa_keypair
+    discovery_urls, jwks_urls = _stub_network(
+        monkeypatch, document=_dex_document(PUBLIC_ISSUER), public_key=public_key
+    )
+    verifier = OIDCVerifier(
+        PUBLIC_ISSUER,
+        AUDIENCE,
+        cache_ttl=3600,
+        discovery_overrides={PUBLIC_ISSUER: INTERNAL_DEX},
+    )
+    token = _sign(private_pem, _claims(iss=PUBLIC_ISSUER))
+
+    result = verifier.verify(token)
+
+    assert result.iss == PUBLIC_ISSUER
+    assert discovery_urls == [f"{INTERNAL_DEX}{_WELL_KNOWN}"]
+    # The issuer-hosted jwks_uri is rebased onto the override — the key fetch stays in-cluster.
+    assert jwks_urls == [f"{INTERNAL_DEX}/keys"]
+
+
+def test_split_horizon_discovery_issuer_mismatch_still_rejects(
+    rsa_keypair: tuple[Any, Any], private_pem: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # (b) The security anchor is untouched: a discovery doc whose ``issuer`` differs from
+    # the CONFIGURED issuer is rejected even when fetched from the override (e.g. the
+    # in-cluster Dex misconfigured with its internal URL as issuer).
+    _, public_key = rsa_keypair
+    _stub_network(monkeypatch, document=_dex_document(INTERNAL_DEX), public_key=public_key)
+    verifier = OIDCVerifier(
+        PUBLIC_ISSUER,
+        AUDIENCE,
+        cache_ttl=3600,
+        discovery_overrides={PUBLIC_ISSUER: INTERNAL_DEX},
+    )
+    token = _sign(private_pem, _claims(iss=PUBLIC_ISSUER))
+
+    with pytest.raises(UnauthenticatedError):
+        verifier.verify(token)
+
+
+def test_no_override_fetches_from_issuer_unchanged(
+    rsa_keypair: tuple[Any, Any], private_pem: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # (c) Without an override the fetch locations derive from the issuer exactly as
+    # before: discovery at issuer + well-known, jwks_uri used as advertised.
+    _, public_key = rsa_keypair
+    discovery_urls, jwks_urls = _stub_network(
+        monkeypatch, document=_dex_document(ISSUER), public_key=public_key
+    )
+    verifier = OIDCVerifier(ISSUER, AUDIENCE, cache_ttl=3600)
+    token = _sign(private_pem, _claims())
+
+    result = verifier.verify(token)
+
+    assert result.iss == ISSUER
+    assert discovery_urls == [f"{ISSUER}{_WELL_KNOWN}"]
+    assert jwks_urls == [f"{ISSUER}/keys"]
+
+
+def test_split_horizon_leaves_foreign_jwks_uri_alone(
+    rsa_keypair: tuple[Any, Any], private_pem: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A jwks_uri NOT hosted under the issuer (provider keeps keys elsewhere) is used as
+    # advertised — the override only rebases issuer-hosted URLs.
+    _, public_key = rsa_keypair
+    document = _dex_document(PUBLIC_ISSUER) | {"jwks_uri": "https://keys.example/jwks"}
+    _discovery_urls, jwks_urls = _stub_network(monkeypatch, document=document, public_key=public_key)
+    verifier = OIDCVerifier(
+        PUBLIC_ISSUER,
+        AUDIENCE,
+        cache_ttl=3600,
+        discovery_overrides={PUBLIC_ISSUER: INTERNAL_DEX},
+    )
+    token = _sign(private_pem, _claims(iss=PUBLIC_ISSUER))
+
+    verifier.verify(token)
+
+    assert jwks_urls == ["https://keys.example/jwks"]
+
+
+def test_split_horizon_http_override_requires_allow_insecure(
+    rsa_keypair: tuple[Any, Any], private_pem: bytes, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The HTTPS guard applies to the override URL under the same knob: a plain-http
+    # in-cluster fetch is rejected by default and allowed only with allow_insecure.
+    _, public_key = rsa_keypair
+    public_issuer = "http://localhost:8090/dex"
+    internal_dex = "http://lance-ns-dex:5556/dex"
+    discovery_urls, _jwks_urls = _stub_network(
+        monkeypatch, document=_dex_document(public_issuer), public_key=public_key
+    )
+
+    def _make(*, allow_insecure: bool) -> OIDCVerifier:
+        return OIDCVerifier(
+            public_issuer,
+            AUDIENCE,
+            cache_ttl=3600,
+            allow_insecure=allow_insecure,
+            discovery_overrides={public_issuer: internal_dex},
+        )
+
+    token = _sign(private_pem, _claims(iss=public_issuer))
+
+    with pytest.raises(UnauthenticatedError):
+        _make(allow_insecure=False).verify(token)
+    assert discovery_urls == []  # guard fires BEFORE any fetch
+
+    result = _make(allow_insecure=True).verify(token)
+    assert result.iss == public_issuer
+    assert discovery_urls == [f"{internal_dex}{_WELL_KNOWN}"]
 
 
 def test_module_exposes_asymmetric_only_default_allowlist() -> None:

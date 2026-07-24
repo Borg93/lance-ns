@@ -83,6 +83,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             _oidc.oidc_cache_ttl,
             leeway=_oidc.oidc_leeway,
             allow_insecure=_oidc.oidc_allow_insecure,
+            # Split-horizon (see the catalog twin): in-cluster fetch, public issuer string.
+            discovery_overrides=(
+                {_oidc.oidc_issuer: _oidc.oidc_discovery_url} if _oidc.oidc_discovery_url else None
+            ),
         )
     app.state.startup_complete = True
     try:

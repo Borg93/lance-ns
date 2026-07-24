@@ -88,6 +88,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
             settings.oidc_cache_ttl,
             leeway=settings.oidc_leeway,
             allow_insecure=settings.oidc_allow_insecure,
+            # Split-horizon (see the catalog twin): in-cluster fetch, public issuer string.
+            discovery_overrides=(
+                {settings.oidc_issuer: settings.oidc_discovery_url} if settings.oidc_discovery_url else None
+            ),
         )
     if settings.fga_enabled:
         # Converge on the catalog's store: provision is idempotent by store NAME ("lance-catalog"), so

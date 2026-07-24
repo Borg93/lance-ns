@@ -138,6 +138,9 @@ class Settings(BaseSettings):
     # enabled, every /v1 route requires a valid bearer token from the issuer.
     oidc_enabled: bool = Field(default=False, alias="LANCE_OIDC_ENABLED")
     oidc_issuer: str | None = Field(default=None, alias="LANCE_OIDC_ISSUER")
+    # Split-horizon fetch location (reverse-proxy IdP): where discovery/JWKS are FETCHED when the
+    # public issuer URL isn't reachable in-cluster. Empty = derive from the issuer, as before.
+    oidc_discovery_url: str | None = Field(default=None, alias="LANCE_OIDC_DISCOVERY_URL")
     oidc_audience: str | None = Field(default=None, alias="LANCE_OIDC_AUDIENCE")
     oidc_cache_ttl: int = Field(default=3600, alias="LANCE_OIDC_CACHE_TTL")
     # Clock-skew leeway (seconds) for exp/iat checks, and an explicit opt-in to accept

@@ -106,6 +106,8 @@ class MedallionSettings(BaseSettings):
     # door, mirroring the catalog's OIDC verifier. Off by default; enabled with an issuer + audience. --------
     oidc_enabled: bool = Field(default=False, alias="MEDALLION_OIDC_ENABLED")
     oidc_issuer: str | None = Field(default=None, alias="MEDALLION_OIDC_ISSUER")
+    # Split-horizon fetch location (see the catalog twin): empty = derive from the issuer.
+    oidc_discovery_url: str | None = Field(default=None, alias="MEDALLION_OIDC_DISCOVERY_URL")
     oidc_audience: str | None = Field(default=None, alias="MEDALLION_OIDC_AUDIENCE")
     oidc_cache_ttl: int = Field(default=3600, alias="MEDALLION_OIDC_CACHE_TTL")
     oidc_leeway: int = Field(default=60, alias="MEDALLION_OIDC_LEEWAY")

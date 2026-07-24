@@ -37,6 +37,8 @@ class LineageSettings(BaseSettings):
     # --- OIDC (authn) — verifies the bearer token on reads + ingest --------------------
     oidc_enabled: bool = Field(default=False, alias="LINEAGE_OIDC_ENABLED")
     oidc_issuer: str | None = Field(default=None, alias="LINEAGE_OIDC_ISSUER")
+    # Split-horizon fetch location (see the catalog twin): empty = derive from the issuer.
+    oidc_discovery_url: str | None = Field(default=None, alias="LINEAGE_OIDC_DISCOVERY_URL")
     oidc_audience: str | None = Field(default=None, alias="LINEAGE_OIDC_AUDIENCE")
     oidc_cache_ttl: int = Field(default=3600, alias="LINEAGE_OIDC_CACHE_TTL")
     oidc_leeway: int = Field(default=60, alias="LINEAGE_OIDC_LEEWAY")

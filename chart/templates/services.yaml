@@ -130,6 +130,8 @@ spec:
             {{- if .Values.auth.enabled }}
             - { name: LANCE_OIDC_ENABLED, value: "true" }
             - { name: LANCE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
+            # Split-horizon: the issuer is the PUBLIC URL tokens carry; discovery/JWKS are fetched in-cluster.
+            - { name: LANCE_OIDC_DISCOVERY_URL, value: "http://{{ include "lance.dexHost" . }}:{{ .Values.dex.port }}/dex" }
             - { name: LANCE_OIDC_AUDIENCE, value: {{ .Values.dex.clientId | quote }} }
             # Scheme-derived like the vault skipVerify: the http escape hatch opens ONLY for a plain-http
             # issuer (the in-cluster dev Dex); an https issuer (real IdP) keeps the HTTPS guard enforced.
@@ -326,6 +328,8 @@ spec:
             {{- if .Values.auth.enabled }}
             - { name: LINEAGE_OIDC_ENABLED, value: "true" }
             - { name: LINEAGE_OIDC_ISSUER, value: {{ .Values.dex.issuer | quote }} }
+            # Split-horizon: the issuer is the PUBLIC URL tokens carry; discovery/JWKS are fetched in-cluster.
+            - { name: LINEAGE_OIDC_DISCOVERY_URL, value: "http://{{ include "lance.dexHost" . }}:{{ .Values.dex.port }}/dex" }
             - { name: LINEAGE_OIDC_AUDIENCE, value: {{ .Values.dex.clientId | quote }} }
             # Scheme-derived (see the catalog twin above): https issuer => HTTPS guard stays enforced.
             - { name: LINEAGE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }

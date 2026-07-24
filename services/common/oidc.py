@@ -21,6 +21,14 @@ Security posture (see CHANGELOG in the task notes):
 * **Multiple accepted issuers.** ``issuer`` may be a single string or a list; each
   is discovered independently and a token is verified against the issuer whose
   discovery document matches the token's ``iss`` claim.
+* **Split-horizon discovery.** ``discovery_overrides`` maps a configured issuer to
+  the base URL its discovery document is fetched from — the reverse-proxy IdP
+  topology where tokens carry the *public* issuer (what the browser sees) but that
+  URL is not reachable from inside the cluster. Only the fetch location changes:
+  the discovery document's ``issuer`` must still equal the configured issuer, and
+  tokens are still validated against it. A ``jwks_uri`` under the issuer is rebased
+  onto the override so the key fetch stays in-cluster; HTTPS enforcement applies to
+  the override URL under the same ``allow_insecure`` knob.
 * **Opaque failures.** Every PyJWT / JWKS / crypto error is mapped to a generic
   ``UnauthenticatedError`` — we never leak library names or crypto detail.
 """
@@ -123,12 +131,18 @@ class OIDCVerifier:
         allowed_algorithms: tuple[str, ...] | list[str] = DEFAULT_ALLOWED_ALGORITHMS,
         leeway: int = 60,
         allow_insecure: bool = False,
+        discovery_overrides: dict[str, str] | None = None,
     ) -> None:
         issuers = [issuer] if isinstance(issuer, str) else list(issuer)
         if not issuers:
             raise ValueError("OIDCVerifier requires at least one issuer")
         # Normalise (strip trailing slash) and de-duplicate while preserving order.
         self._issuers = list(dict.fromkeys(iss.rstrip("/") for iss in issuers))
+        # Split-horizon fetch locations, keyed by the normalized configured issuer (see the
+        # module docstring): only where discovery/JWKS are FETCHED — never what tokens carry.
+        self._discovery_overrides = {
+            iss.rstrip("/"): url.rstrip("/") for iss, url in (discovery_overrides or {}).items()
+        }
         self._audience = audience
         self._ttl = cache_ttl
         self._leeway = leeway
@@ -163,13 +177,17 @@ class OIDCVerifier:
         if cached is not None and (now - cached[0]) < self._ttl:
             return cached[1]
 
+        # Split-horizon: fetch discovery from the override when one is configured for this
+        # issuer; the issuer STRING (and every token check against it) is unchanged.
+        override = self._discovery_overrides.get(configured_issuer)
+        discovery_base = configured_issuer if override is None else override
         _require_https(
-            configured_issuer + _DISCOVERY_SUFFIX,
-            label="issuer",
+            discovery_base + _DISCOVERY_SUFFIX,
+            label="issuer" if override is None else "discovery override",
             allow_insecure=self._allow_insecure,
         )
         with httpx.Client(timeout=15.0) as client:
-            response = client.get(f"{configured_issuer}{_DISCOVERY_SUFFIX}")
+            response = client.get(f"{discovery_base}{_DISCOVERY_SUFFIX}")
             response.raise_for_status()
             spec = _Discovery.model_validate(response.json())
 
@@ -178,12 +196,20 @@ class OIDCVerifier:
         if spec.issuer.rstrip("/") != configured_issuer:
             raise UnauthenticatedError("OIDC discovery issuer mismatch")
 
-        _require_https(spec.jwks_uri, label="jwks_uri", allow_insecure=self._allow_insecure)
+        # A jwks_uri the provider advertises under its (public) issuer must be fetched from
+        # the same split-horizon location as discovery; anything not under the issuer is a
+        # provider hosting keys elsewhere and is used as advertised.
+        jwks_uri = spec.jwks_uri
+        if override is not None and (
+            jwks_uri == configured_issuer or jwks_uri.startswith(configured_issuer + "/")
+        ):
+            jwks_uri = override + jwks_uri[len(configured_issuer) :]
+        _require_https(jwks_uri, label="jwks_uri", allow_insecure=self._allow_insecure)
         algorithms = self._safe_algorithms(spec.id_token_signing_alg_values_supported)
         if not algorithms:
             raise UnauthenticatedError("No mutually-supported OIDC signing algorithm")
 
-        jwk_client = jwt.PyJWKClient(spec.jwks_uri, cache_jwk_set=True, max_cached_keys=16)
+        jwk_client = jwt.PyJWKClient(jwks_uri, cache_jwk_set=True, max_cached_keys=16)
         provider = _Provider(spec=spec, jwk_client=jwk_client, algorithms=algorithms)
         self._cache[configured_issuer] = (now, provider)
         return provider

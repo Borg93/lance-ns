@@ -54,7 +54,7 @@
 				type="button"
 				onclick={() => (active = null)}
 				aria-label="Back to topic results"
-				class="text-muted-foreground hover:bg-muted hover:text-foreground rounded p-1 transition-colors"
+				class="text-muted-foreground hover:bg-muted hover:text-foreground rounded-md p-1 transition-colors"
 			>
 				<ArrowLeft class="size-4" />
 			</button>
@@ -76,7 +76,7 @@
 			type="button"
 			onclick={onClose}
 			aria-label="Close topic results"
-			class="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded p-1 transition-colors"
+			class="text-muted-foreground hover:bg-muted hover:text-foreground shrink-0 rounded-md p-1 transition-colors"
 		>
 			<X class="size-4" />
 		</button>

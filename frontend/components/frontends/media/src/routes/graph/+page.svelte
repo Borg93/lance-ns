@@ -22,7 +22,10 @@
 		type Simulation,
 		type SimulationNodeDatum,
 	} from 'd3-force';
-	import { Button, Select, type SelectOption } from '@lance/ui';
+	import { Button } from '@rask/ui';
+	import { Select } from '@rask/ui/select';
+	import { Input, type SelectOption } from '@lance/ui';
+	import { HelpCircle } from '@lucide/svelte';
 	import GpuGraph from '$lib/graph/gpu-graph.svelte';
 	import GraphBreadcrumb from '$lib/graph/graph-breadcrumb.svelte';
 	import {
@@ -394,21 +397,23 @@
 		<div class="border-border bg-card/40 flex flex-col gap-2 border-b p-3">
 			<div class="flex flex-wrap items-center gap-2">
 				<div class="relative w-64">
-					<input
-						class="border-border bg-background focus-visible:ring-ring h-8 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none"
+					<Input
+						class="h-8 rounded-lg"
+						type="search"
 						placeholder="Search entities…"
+						aria-label="Search entities"
 						bind:value={searchQ}
 						onfocus={() => (dropdownOpen = matches.length > 0)}
 						onblur={() => setTimeout(() => (dropdownOpen = false), 150)}
 					/>
 					{#if dropdownOpen}
 						<ul
-							class="border-border bg-card absolute z-20 mt-1 max-h-72 w-80 overflow-auto rounded-md border p-1 shadow-md"
+							class="border-border bg-popover text-popover-foreground absolute z-20 mt-1 max-h-72 w-80 overflow-auto rounded-lg border p-1 shadow-md"
 						>
 							{#each matches as m (m.entity_id)}
 								<li>
 									<button
-										class="hover:bg-secondary/60 flex w-full items-center justify-between gap-2 rounded px-2 py-1.5 text-left text-sm"
+										class="hover:bg-muted flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm"
 										onclick={() => selectEntity(m.entity_id)}
 									>
 										<span class="truncate">{m.name}</span>
@@ -422,36 +427,43 @@
 					{/if}
 				</div>
 
-				<div class="w-56">
-					<Select
-						options={PRESETS}
-						bind:value={presetValue}
-						placeholder="Cypher presets…"
-						ariaLabel="Cypher presets"
-					/>
-				</div>
+				<Select
+					options={PRESETS}
+					bind:value={presetValue}
+					placeholder="Cypher presets…"
+					ariaLabel="Cypher presets"
+				/>
 
 				<Button variant="outline" size="sm" onclick={() => (cypherOpen = !cypherOpen)}>
 					{cypherOpen ? 'Hide' : 'Cypher'}
 				</Button>
 				<Button variant="outline" size="sm" onclick={loadOverview}>Overview</Button>
 
-				<div class="ml-auto flex items-center gap-1">
+				<div class="ml-auto flex items-center gap-2">
 					<Button
-						variant={showHelp ? 'default' : 'ghost'}
-						size="sm"
+						variant={showHelp ? 'secondary' : 'ghost'}
+						size="icon-sm"
+						aria-pressed={showHelp}
 						onclick={() => (showHelp = !showHelp)}
-						title="How to read this">?</Button
+						title="How to read this"
+						aria-label="How to read this"
 					>
-					<div class="bg-border mx-1 h-4 w-px"></div>
-					{#each ['graph', 'table', 'json'] as const as v (v)}
-						<Button
-							variant={view === v ? 'default' : 'ghost'}
-							size="sm"
-							onclick={() => (view = v)}
-							class="capitalize">{v}</Button
-						>
-					{/each}
+						<HelpCircle />
+					</Button>
+					<!-- Result-view picker as one segmented control, matching the search page. -->
+					<div
+						class="border-border bg-background flex items-center gap-0.5 rounded-lg border p-0.5"
+					>
+						{#each ['graph', 'table', 'json'] as const as v (v)}
+							<Button
+								variant={view === v ? 'secondary' : 'ghost'}
+								size="xs"
+								aria-pressed={view === v}
+								onclick={() => (view = v)}
+								class="capitalize">{v}</Button
+							>
+						{/each}
+					</div>
 				</div>
 			</div>
 
@@ -460,7 +472,7 @@
 			{#if cypherOpen}
 				<div class="flex items-start gap-2">
 					<textarea
-						class="border-border bg-background focus-visible:ring-ring h-20 flex-1 rounded-md border p-2 font-mono text-xs focus-visible:ring-2 focus-visible:outline-none"
+						class="border-input dark:bg-input/30 focus-visible:border-ring focus-visible:ring-ring/50 h-20 flex-1 rounded-lg border bg-transparent p-2 font-mono text-xs transition-colors outline-none focus-visible:ring-3"
 						placeholder="MATCH (a:Entity)-[:RELATIONSHIP]->(b:Entity) RETURN a.name, b.name LIMIT 25"
 						bind:value={cypherText}></textarea>
 					<Button size="sm" onclick={runCypher}>Run</Button>
@@ -469,7 +481,7 @@
 
 			{#if showHelp}
 				<div
-					class="bg-muted/40 border-border text-muted-foreground rounded-md border p-3 text-xs leading-relaxed"
+					class="bg-muted/40 border-border text-muted-foreground rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<p class="text-foreground mb-1 font-medium">What is this?</p>
 					A knowledge graph LightRAG extracted from the press-conference transcripts. Each
@@ -553,7 +565,7 @@
 						{/if}
 						{#if hover}
 							<div
-								class="border-border bg-card pointer-events-none fixed z-30 rounded-md border px-2 py-1 text-xs shadow-md"
+								class="border-border bg-popover text-popover-foreground pointer-events-none fixed z-30 rounded-lg border px-2 py-1 text-xs shadow-md"
 								style:left="{hover.x + 12}px"
 								style:top="{hover.y + 12}px"
 							>
@@ -565,7 +577,7 @@
 							<Button variant="outline" size="sm" onclick={recomputeFit}>Fit</Button>
 						</div>
 						<div
-							class="bg-card/70 border-border text-muted-foreground absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border px-2 py-1 text-[10px] backdrop-blur"
+							class="bg-card/70 border-border text-muted-foreground absolute bottom-2 left-2 flex flex-wrap items-center gap-x-3 gap-y-1 rounded-lg border px-2 py-1 text-[0.7rem] backdrop-blur"
 						>
 							{#each Object.entries(TYPE_RGB) as [t, rgb] (t)}
 								<span class="flex items-center gap-1">
@@ -585,7 +597,7 @@
 					<div class="h-full overflow-auto p-3">
 						{#if cypherResult?.error}
 							<pre
-								class="text-destructive border-destructive/40 bg-destructive/10 rounded-md border p-3 text-xs whitespace-pre-wrap">{cypherResult.error}</pre>
+								class="text-destructive border-destructive/40 bg-destructive/10 rounded-lg border p-3 text-xs whitespace-pre-wrap">{cypherResult.error}</pre>
 						{:else if cypherResult && cypherResult.columns.length > 0}
 							<table class="w-full text-left text-sm">
 								<thead class="text-muted-foreground border-border border-b">
@@ -626,13 +638,13 @@
 					</div>
 					{#each HELP_EXAMPLES as ex (ex.label)}
 						<button
-							class="border-border bg-background hover:border-primary/50 hover:bg-secondary/50 block w-full space-y-1 rounded-md border p-2.5 text-left transition-colors"
+							class="border-border bg-background hover:border-primary/50 hover:bg-muted/60 block w-full space-y-1 rounded-lg border p-2.5 text-left transition-colors"
 							onclick={() => runExample(ex.query)}
 						>
 							<span class="text-foreground block text-sm font-medium">{ex.label}</span>
 							<span class="text-muted-foreground block text-xs leading-snug">{ex.desc}</span>
 							<code
-								class="text-muted-foreground/80 bg-muted/50 mt-1 block truncate rounded px-1.5 py-0.5 font-mono text-[10px]"
+								class="text-muted-foreground/80 bg-muted/50 mt-1 block truncate rounded-md px-1.5 py-0.5 font-mono text-[0.7rem]"
 								>{ex.query}</code
 							>
 						</button>
@@ -654,8 +666,8 @@
 				>
 			</div>
 			<div class="text-muted-foreground mt-1 flex flex-wrap gap-1 text-xs">
-				<span class="bg-secondary rounded px-1.5 py-0.5">{e.entity_type}</span>
-				<span class="bg-secondary rounded px-1.5 py-0.5">{e.mention_count} mentions</span>
+				<span class="bg-secondary rounded-full px-2 py-0.5">{e.entity_type}</span>
+				<span class="bg-secondary rounded-full px-2 py-0.5">{e.mention_count} mentions</span>
 			</div>
 
 			{#if detail.clips.length > 0}
@@ -666,7 +678,7 @@
 					{#each detail.clips as c (c.chunk_id)}
 						<li>
 							<button
-								class="hover:bg-secondary/60 w-full rounded p-1.5 text-left"
+								class="hover:bg-muted/60 w-full rounded-md p-1.5 text-left"
 								onclick={() => onClip(c.doc_id, c.start)}
 								title="Open in player"
 							>
@@ -690,7 +702,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each detail.neighbors as nb (nb.entity_id + nb.direction)}
 						<button
-							class="bg-secondary hover:bg-secondary/70 rounded px-1.5 py-0.5 text-xs"
+							class="border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-full border px-2 py-0.5 text-xs transition-colors"
 							title={nb.description || nb.name}
 							onclick={() => selectEntity(nb.entity_id)}
 						>
@@ -707,7 +719,7 @@
 				<div class="flex flex-wrap gap-1">
 					{#each detail.cooccur as co (co.entity_id)}
 						<button
-							class="bg-secondary hover:bg-secondary/70 rounded px-1.5 py-0.5 text-xs"
+							class="border-border bg-secondary text-secondary-foreground hover:bg-secondary/80 rounded-full border px-2 py-0.5 text-xs transition-colors"
 							onclick={() => selectEntity(co.entity_id)}
 						>
 							{co.name} <span class="text-muted-foreground">·{co.shared}</span>

@@ -44,7 +44,11 @@
 		type CategoryChannel,
 		type ClusterRanking,
 	} from './atlas-legend';
-	import { Button, Select, type SelectOption } from '@lance/ui';
+	// The canvas is this component's own WebGPU renderer; only the overlay CONTROLS
+	// use the shared design system, so the map chrome matches the rest of the estate.
+	import { Button } from '@rask/ui';
+	import { Select } from '@rask/ui/select';
+	import type { SelectOption } from '@lance/ui';
 	import { Loader2, Lasso, X, Hand, Settings2 } from '@lucide/svelte';
 	import { useColorMode } from '$lib/theme.svelte';
 
@@ -682,58 +686,55 @@
 
 			<!-- toolbar -->
 			<div
-				class="bg-card/85 absolute top-3 left-3 flex flex-wrap items-center gap-1.5 rounded-md px-2 py-1 text-[11px] shadow-sm backdrop-blur"
+				class="border-border bg-card/85 absolute top-3 left-3 flex flex-wrap items-center gap-1.5 rounded-lg border p-1 text-xs shadow-sm backdrop-blur"
 			>
-				<span class="text-muted-foreground px-1">{(pts.count ?? 0).toLocaleString()} pts</span>
+				<span class="text-muted-foreground px-1.5">{(pts.count ?? 0).toLocaleString()} pts</span>
 
 				<!-- projection space (segmented) -->
-				<div class="border-border flex overflow-hidden rounded border">
+				<div class="border-border flex items-center gap-0.5 rounded-lg border p-0.5">
 					{#each spaceTabs as t (t.value)}
-						<button
-							type="button"
-							class="px-2 py-0.5 transition-colors disabled:opacity-40 {crossFilter.space ===
-							t.value
-								? 'bg-secondary text-foreground'
-								: 'text-muted-foreground hover:bg-secondary/50'}"
+						<Button
+							variant={crossFilter.space === t.value ? 'secondary' : 'ghost'}
+							size="xs"
+							class={crossFilter.space === t.value ? '' : 'text-muted-foreground'}
+							aria-pressed={crossFilter.space === t.value}
 							disabled={t.disabled}
 							title={t.title}
 							onclick={() => switchSpace(t.value)}
 						>
 							{t.label}
-						</button>
+						</Button>
 					{/each}
 				</div>
 
 				<!-- tool: lasso / pan (segmented, icon-only) -->
-				<div class="border-border flex overflow-hidden rounded border">
-					<button
-						type="button"
-						class="px-1.5 py-1 transition-colors {mode === 'lasso'
-							? 'bg-secondary text-foreground'
-							: 'text-muted-foreground hover:bg-secondary/50'}"
+				<div class="border-border flex items-center gap-0.5 rounded-lg border p-0.5">
+					<Button
+						variant={mode === 'lasso' ? 'secondary' : 'ghost'}
+						size="icon-xs"
 						title="Lasso — drag to select a region"
 						aria-label="Lasso select"
+						aria-pressed={mode === 'lasso'}
 						onclick={() => (mode = 'lasso')}
 					>
-						<Lasso class="size-3.5" />
-					</button>
-					<button
-						type="button"
-						class="px-1.5 py-1 transition-colors {mode === 'pan'
-							? 'bg-secondary text-foreground'
-							: 'text-muted-foreground hover:bg-secondary/50'}"
+						<Lasso />
+					</Button>
+					<Button
+						variant={mode === 'pan' ? 'secondary' : 'ghost'}
+						size="icon-xs"
 						title="Pan — drag to move (or shift / middle-drag in any mode; scroll to zoom)"
 						aria-label="Pan"
+						aria-pressed={mode === 'pan'}
 						onclick={() => (mode = 'pan')}
 					>
-						<Hand class="size-3.5" />
-					</button>
+						<Hand />
+					</Button>
 				</div>
 
-				<!-- colour by: a function binding straight to the singleton — the ui
-             Select binds a plain string, so the setter narrows it to the
-             store's ColorBy union at the boundary (no shadow $state to clobber
-             the persisted value on remount). -->
+				<!-- colour by: a function binding straight to the singleton — the design-system
+             Select binds a plain string, so the setter narrows it to the store's
+             ColorBy union at the boundary (no shadow $state to clobber the
+             persisted value on remount). -->
 				<Select
 					bind:value={
 						() => crossFilter.colorBy,
@@ -742,22 +743,21 @@
 						}
 					}
 					options={colorOptions}
-					class="h-7 w-32"
 					ariaLabel="Colour points by"
 				/>
 
 				<!-- display settings (point size, filtered opacity) -->
 				<div class="relative">
-					<button
-						type="button"
-						class="text-muted-foreground hover:bg-secondary/60 hover:text-foreground flex items-center rounded p-1 transition-colors"
-						class:bg-secondary={showSettings}
+					<Button
+						variant={showSettings ? 'secondary' : 'ghost'}
+						size="icon-sm"
 						title="Display settings"
 						aria-label="Display settings"
+						aria-pressed={showSettings}
 						onclick={() => (showSettings = !showSettings)}
 					>
-						<Settings2 class="size-3.5" />
-					</button>
+						<Settings2 />
+					</Button>
 					{#if showSettings}
 						<button
 							type="button"
@@ -766,7 +766,7 @@
 							onclick={() => (showSettings = false)}
 						></button>
 						<div
-							class="border-border bg-card absolute top-full left-0 z-20 mt-1 w-56 space-y-3 rounded-md border p-3 text-[11px] shadow-md"
+							class="border-border bg-popover text-popover-foreground absolute top-full left-0 z-20 mt-1 w-56 space-y-3 rounded-lg border p-3 text-xs shadow-md"
 						>
 							<label class="block">
 								<span class="text-muted-foreground mb-1 flex items-center justify-between">
@@ -793,7 +793,7 @@
 									bind:value={filterAlpha}
 									class="accent-primary w-full"
 								/>
-								<span class="text-muted-foreground/70 mt-0.5 block text-[10px]">
+								<span class="text-muted-foreground/70 mt-0.5 block text-[0.7rem]">
 									How visible excluded points are — search-filtered or not in the lasso/cluster
 									selection (left = hidden).
 								</span>
@@ -822,7 +822,7 @@
 
 			<!-- selection status + actions -->
 			<div
-				class="bg-card/85 absolute bottom-3 left-3 flex items-center gap-2 rounded-md px-2 py-1 text-[11px] shadow-sm backdrop-blur"
+				class="border-border bg-card/85 absolute bottom-3 left-3 flex items-center gap-2 rounded-lg border p-1 pl-2 text-xs shadow-sm backdrop-blur"
 			>
 				{#if tableLoading}
 					<Loader2 class="text-muted-foreground size-3.5 animate-spin" />
@@ -833,15 +833,21 @@
 						<span class="text-muted-foreground/70">· table shows 1000</span>
 					{/if}
 					<Button
-						variant="ghost"
-						size="sm"
+						variant="outline"
+						size="xs"
 						onclick={seedSearch}
 						title="Open this map selection as the full results list (paging, rerank, table/grid views)"
 					>
 						Show as results
 					</Button>
-					<Button variant="ghost" size="icon" onclick={clearSelection} title="Clear selection">
-						<X class="size-3.5" />
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						onclick={clearSelection}
+						title="Clear selection"
+						aria-label="Clear selection"
+					>
+						<X />
 					</Button>
 				{:else}
 					<Lasso class="text-muted-foreground size-3.5" />

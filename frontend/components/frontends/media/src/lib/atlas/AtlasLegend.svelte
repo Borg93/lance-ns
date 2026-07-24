@@ -9,6 +9,7 @@
 	 * handlers through, so the component stays dumb + testable.
 	 */
 	import { Eye, EyeOff } from '@lucide/svelte';
+	import { Button } from '@rask/ui';
 	import type { ClusterLegendRow, CategoryLegendRow } from './atlas-legend';
 	import type { ColorBy } from './cross-filter.svelte';
 
@@ -46,27 +47,28 @@
 <!-- legend / distribution (clickable → select) -->
 {#if legendMode === 'cluster' && clusterRows.length}
 	<div
-		class="bg-card/85 absolute top-3 right-3 max-h-[60%] w-52 overflow-y-auto rounded-md p-2 text-[11px] shadow-sm backdrop-blur"
+		class="border-border bg-card/85 absolute top-3 right-3 max-h-[60%] w-52 overflow-y-auto rounded-lg border p-2 text-xs shadow-sm backdrop-blur"
 	>
 		<div class="mb-1 flex items-center gap-2">
 			<span class="text-muted-foreground font-medium"
 				>Clusters · {clusterStats.total.toLocaleString()}</span
 			>
 			{#if hidden.size > 0}
-				<button
-					type="button"
-					class="text-primary hover:bg-secondary/50 ml-auto rounded px-1 py-0.5"
+				<Button
+					variant="ghost"
+					size="xs"
+					class="text-primary ml-auto"
 					onclick={() => onShowAll()}
 					title="Show all hidden clusters"
 				>
 					Show all
-				</button>
+				</Button>
 			{/if}
 		</div>
 		{#each clusterRows as c (c.id)}
 			{@const isHidden = hidden.has(c.id)}
 			<div
-				class="hover:bg-secondary/50 relative flex w-full items-center gap-1 overflow-hidden rounded px-1 py-0.5"
+				class="hover:bg-muted/60 relative flex w-full items-center gap-1 overflow-hidden rounded-md px-1 py-0.5"
 				class:opacity-40={isHidden}
 			>
 				<span
@@ -87,7 +89,7 @@
 				</button>
 				<button
 					type="button"
-					class="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5"
+					class="text-muted-foreground hover:text-foreground shrink-0 rounded-md p-0.5"
 					onclick={() => onToggleHidden(c.id)}
 					title={isHidden ? 'Show cluster on map' : 'Hide cluster on map'}
 				>
@@ -102,7 +104,7 @@
 		{#if clusterStats.noise > 0}
 			{@const noiseHidden = hidden.has(-1)}
 			<div
-				class="border-border/60 hover:bg-secondary/50 mt-1 flex w-full items-center gap-1 rounded border-t px-1 pt-1"
+				class="border-border/60 hover:bg-muted/60 mt-1 flex w-full items-center gap-1 rounded border-t px-1 pt-1"
 				class:opacity-40={noiseHidden}
 			>
 				<button
@@ -120,7 +122,7 @@
 				</button>
 				<button
 					type="button"
-					class="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5"
+					class="text-muted-foreground hover:text-foreground shrink-0 rounded-md p-0.5"
 					onclick={() => onToggleHidden(-1)}
 					title={noiseHidden ? 'Show noise on map' : 'Hide noise on map'}
 				>
@@ -135,7 +137,7 @@
 	</div>
 {:else if categoryRows.length}
 	<div
-		class="bg-card/85 absolute top-3 right-3 max-h-[60%] w-60 overflow-y-auto rounded-md p-2 text-[11px] shadow-sm backdrop-blur"
+		class="border-border bg-card/85 absolute top-3 right-3 max-h-[60%] w-60 overflow-y-auto rounded-lg border p-2 text-xs shadow-sm backdrop-blur"
 	>
 		<div class="mb-1 flex items-center gap-2">
 			<span class="text-muted-foreground font-medium">
@@ -144,20 +146,21 @@
 					: categoryTotal.toLocaleString()}
 			</span>
 			{#if hidden.size > 0}
-				<button
-					type="button"
-					class="text-primary hover:bg-secondary/50 ml-auto rounded px-1 py-0.5"
+				<Button
+					variant="ghost"
+					size="xs"
+					class="text-primary ml-auto"
 					onclick={() => onShowAll()}
 					title="Show all hidden"
 				>
 					Show all
-				</button>
+				</Button>
 			{/if}
 		</div>
 		{#each categoryRows as c (c.code)}
 			{@const isHidden = hidden.has(c.code)}
 			<div
-				class="hover:bg-secondary/50 relative flex w-full items-center gap-1 overflow-hidden rounded px-1 py-0.5"
+				class="hover:bg-muted/60 relative flex w-full items-center gap-1 overflow-hidden rounded-md px-1 py-0.5"
 				class:opacity-60={c.empty}
 				class:opacity-40={isHidden}
 			>
@@ -183,7 +186,7 @@
 				</button>
 				<button
 					type="button"
-					class="text-muted-foreground hover:text-foreground shrink-0 rounded p-0.5"
+					class="text-muted-foreground hover:text-foreground shrink-0 rounded-md p-0.5"
 					onclick={() => onToggleHidden(c.code)}
 					title={isHidden ? 'Show on map' : 'Hide on map'}
 				>

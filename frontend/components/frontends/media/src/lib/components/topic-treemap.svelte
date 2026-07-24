@@ -24,6 +24,7 @@
 	import { scaleOrdinal } from 'd3-scale';
 	import { schemeTableau10 } from 'd3-scale-chromatic';
 	import { ChevronRight, ArrowRight, Eye, EyeOff } from '@lucide/svelte';
+	import { Button } from '@rask/ui';
 	import type { TopicNode } from '@lance/api';
 	import TopicSankey from './topic-sankey.svelte';
 
@@ -44,6 +45,12 @@
 	const sumLeaves = (d: TopicNode) => (d.children?.length ? 0 : (d.value ?? 0));
 
 	let view = $state<'drill' | 'nested' | 'flow'>('drill');
+	// The layout tabs, rendered as one segmented control in the header.
+	const VIEW_TABS = [
+		{ value: 'drill', label: 'Flat', title: 'One level at a time — click to zoom in' },
+		{ value: 'nested', label: 'Nested', title: 'All levels nested at once' },
+		{ value: 'flow', label: 'Flow', title: 'Sankey flow — ribbon width = chunk count' },
+	] as const;
 	let showNoise = $state(false);
 	let hovered = $state<string | null>(null);
 
@@ -161,16 +168,17 @@
 	>
 		{#each path as node, i (i)}
 			{#if i > 0}<ChevronRight class="text-muted-foreground/50 size-3" />{/if}
-			<button
-				type="button"
-				class="hover:bg-secondary rounded px-1.5 py-0.5 font-medium transition-colors disabled:cursor-default disabled:opacity-100"
-				class:text-foreground={i === path.length - 1}
-				class:text-muted-foreground={i !== path.length - 1}
+			<Button
+				variant="ghost"
+				size="xs"
+				class={i === path.length - 1
+					? 'text-foreground disabled:cursor-default disabled:opacity-100'
+					: 'text-muted-foreground'}
 				disabled={i === path.length - 1}
 				onclick={() => crumbTo(i)}
 			>
 				{node.name}
-			</button>
+			</Button>
 		{/each}
 		<span class="text-muted-foreground/70 ml-1">
 			· {fmt(root.value ?? 0)} chunks{#if hiddenCount > 0}
@@ -179,60 +187,36 @@
 
 		<div class="ml-auto flex items-center gap-2">
 			<!-- noise toggle -->
-			<button
-				type="button"
-				class="border-border text-muted-foreground hover:bg-secondary hover:text-foreground inline-flex items-center gap-1 rounded-md border px-2 py-0.5 transition-colors"
+			<Button
+				variant="outline"
+				size="xs"
+				aria-pressed={showNoise}
 				onclick={() => (showNoise = !showNoise)}
 				title={showNoise ? 'Hide unclustered (övrigt)' : 'Show unclustered (övrigt)'}
 			>
-				{#if showNoise}<EyeOff class="size-3" /> Hide noise{:else}<Eye class="size-3" /> Show noise{/if}
-			</button>
+				{#if showNoise}<EyeOff /> Hide noise{:else}<Eye /> Show noise{/if}
+			</Button>
 
-			<!-- view switch -->
-			<div class="border-border flex items-center gap-0.5 rounded-md border p-0.5">
-				<button
-					type="button"
-					class="hover:bg-secondary/70 rounded px-1.5 py-0.5 font-medium transition-colors"
-					class:bg-secondary={view === 'drill'}
-					class:text-foreground={view === 'drill'}
-					class:text-muted-foreground={view !== 'drill'}
-					onclick={() => (view = 'drill')}
-					title="One level at a time — click to zoom in"
-				>
-					Flat
-				</button>
-				<button
-					type="button"
-					class="hover:bg-secondary/70 rounded px-1.5 py-0.5 font-medium transition-colors"
-					class:bg-secondary={view === 'nested'}
-					class:text-foreground={view === 'nested'}
-					class:text-muted-foreground={view !== 'nested'}
-					onclick={() => (view = 'nested')}
-					title="All levels nested at once"
-				>
-					Nested
-				</button>
-				<button
-					type="button"
-					class="hover:bg-secondary/70 rounded px-1.5 py-0.5 font-medium transition-colors"
-					class:bg-secondary={view === 'flow'}
-					class:text-foreground={view === 'flow'}
-					class:text-muted-foreground={view !== 'flow'}
-					onclick={() => (view = 'flow')}
-					title="Sankey flow — ribbon width = chunk count"
-				>
-					Flow
-				</button>
+			<!-- view switch (the estate segmented-control idiom) -->
+			<div class="border-border bg-background flex items-center gap-0.5 rounded-lg border p-0.5">
+				{#each VIEW_TABS as tab (tab.value)}
+					<Button
+						variant={view === tab.value ? 'secondary' : 'ghost'}
+						size="xs"
+						class={view === tab.value ? '' : 'text-muted-foreground'}
+						aria-pressed={view === tab.value}
+						onclick={() => (view = tab.value)}
+						title={tab.title}
+					>
+						{tab.label}
+					</Button>
+				{/each}
 			</div>
 
 			{#if path.length > 1 && isInteractive(current)}
-				<button
-					type="button"
-					class="border-border bg-secondary text-foreground hover:bg-secondary/70 inline-flex items-center gap-1 rounded-md border px-2 py-0.5 font-medium transition-colors"
-					onclick={() => showResults(current.name)}
-				>
-					Show results <ArrowRight class="size-3" />
-				</button>
+				<Button variant="secondary" size="xs" onclick={() => showResults(current.name)}>
+					Show results <ArrowRight />
+				</Button>
 			{/if}
 		</div>
 	</div>

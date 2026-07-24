@@ -14,6 +14,11 @@
 	export type MedallionNodeType = Node<MedallionData, 'medallion'>;
 
 	const COLORS = ['#ff9457', '#cd7f32', '#9fb6cf', '#ffc14d', '#8aa0bd'];
+
+	/** A busy table writes dozens of versions; one chip each turned the card into a green wall
+	 * that buried the name, the URI and the failure badge. Show the first few and roll the rest
+	 * into a `+N` — the full list stays available in the hover title. */
+	const MAX_VERSION_CHIPS = 3;
 </script>
 
 <script lang="ts">
@@ -36,6 +41,15 @@
 	const ring = $derived(
 		failedRun ? 'var(--fail)' : done ? 'var(--ok)' : running ? 'var(--amber)' : color,
 	);
+	const shownVersions = $derived(data.versions.slice(0, MAX_VERSION_CHIPS));
+	const hiddenVersions = $derived(Math.max(0, data.versions.length - MAX_VERSION_CHIPS));
+	const versionsTitle = $derived(
+		data.versions.length
+			? `${data.versions.length} version${data.versions.length === 1 ? '' : 's'} written: ${data.versions
+					.map((v) => `v${v}`)
+					.join(', ')}`
+			: 'no versions written yet',
+	);
 </script>
 
 <div
@@ -52,9 +66,16 @@
 		<div class="name" title={data.id}><LayerIcon size={12} {color} /> <span>{data.id}</span></div>
 		<div class="uri" title={data.source_uri ?? undefined}>{data.source_uri ?? '(pending)'}</div>
 		<div class="chips">
-			{#each data.versions as v (v)}
-				<span class="chip ok">v{v}</span>
-			{/each}
+			{#if data.versions.length}
+				<span class="versions" title={versionsTitle}>
+					{#each shownVersions as v (v)}
+						<span class="chip ok">v{v}</span>
+					{/each}
+					{#if hiddenVersions}
+						<span class="chip more">+{hiddenVersions}</span>
+					{/if}
+				</span>
+			{/if}
 			{#if data.failed}
 				<span class="chip fail">⚠ failed</span>
 			{/if}
@@ -115,6 +136,13 @@
 	.chips {
 		display: flex;
 		flex-wrap: wrap;
+		align-items: center;
+		gap: 3px;
+	}
+	/* One hover target for the whole version run — the title carries the full list. */
+	.versions {
+		display: inline-flex;
+		align-items: center;
 		gap: 3px;
 	}
 	.chip {
@@ -131,9 +159,14 @@
 		background: var(--fail);
 		color: #2a0307;
 	}
+	.chip.more {
+		background: color-mix(in srgb, var(--ok) 22%, transparent);
+		color: var(--ok);
+		font-variant-numeric: tabular-nums;
+	}
 	.chip.tag {
-		background: #243245;
-		color: #aebfd6;
+		background: var(--panel-2);
+		color: var(--mut);
 		font-weight: 600;
 	}
 </style>

@@ -19,15 +19,33 @@
 		Controls,
 		MiniMap,
 		Panel,
+		type FitViewOptions,
 	} from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import { Radio, Boxes, Cpu } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
 	import { LineageState } from '$lib/store.svelte';
 	import { countUp, stagger } from '@rask/ui/motion';
+	import { useColorMode } from '@rask/ui/color-mode';
 	import { LAYER, type GraphEdge } from '$lib/types';
 
 	const POLL_MS = 5000;
+
+	// The canvas follows the estate theme LIVE (the shell's theme button toggles `.dark` on
+	// <html>). It used to be pinned to `colorMode="dark"`, which painted a black canvas inside
+	// the light shell.
+	const theme = useColorMode();
+
+	/** Screen-space gutters kept clear of nodes so the floating overlays — the plane toggle
+	 * (top-left Panel), the zoom Controls (bottom-left) and the MiniMap (bottom-right) — never
+	 * land on top of a card. Shared by the initial `fitView` and every re-fit. */
+	const FIT_PADDING: FitViewOptions['padding'] = {
+		top: '76px',
+		right: '28px',
+		bottom: '136px',
+		left: '28px',
+	};
+	const fitViewOptions = { padding: FIT_PADDING, maxZoom: 1 };
 
 	const store = new LineageState();
 
@@ -284,17 +302,31 @@
 	</header>
 
 	<section class="graph">
-		<SvelteFlow bind:nodes bind:edges {nodeTypes} colorMode="dark" fitView onnodeclick={openNode}>
+		<SvelteFlow
+			bind:nodes
+			bind:edges
+			{nodeTypes}
+			colorMode={theme.current}
+			fitView
+			{fitViewOptions}
+			onnodeclick={openNode}
+		>
 			<Background variant={BackgroundVariant.Dots} gap={16} />
-			<Controls />
+			<Controls position="bottom-left" />
+			<!-- Themed surface + bottom-right corner: it used to float a hardcoded near-black
+			     rectangle over the cards in the light shell. -->
 			<MiniMap
 				pannable
 				zoomable
-				nodeColor="#6aa9ff"
-				maskColor="rgba(11,15,23,0.72)"
-				bgColor="#0e141d"
+				position="bottom-right"
+				width={150}
+				height={104}
+				bgColor="var(--panel)"
+				nodeColor="var(--primary)"
+				nodeStrokeColor="var(--line)"
+				maskColor="color-mix(in srgb, var(--panel-2) 72%, transparent)"
 			/>
-			<FlowAutoFit trigger={fitKey} />
+			<FlowAutoFit trigger={fitKey} padding={FIT_PADDING} />
 			<Panel position="top-left">
 				<div class="viewtoggle" role="tablist" aria-label="Graph view">
 					<button
@@ -417,10 +449,11 @@
 		min-height: 0;
 		min-width: 0;
 	}
+	/* Sits clear of the top-left plane toggle (which is a flow Panel, not part of this box). */
 	.empty {
 		position: absolute;
-		top: 18px;
-		left: 18px;
+		top: 76px;
+		left: 28px;
 		color: var(--mut);
 		font-size: 13px;
 		line-height: 1.7;
@@ -456,8 +489,18 @@
 	.vt:hover {
 		color: var(--ink);
 	}
+	/* Tint from --primary, not --accent: --accent is a near-white surface token in the light
+	   theme, so the selected pill was invisible there. */
 	.vt.on {
-		color: var(--ink);
-		background: color-mix(in srgb, var(--accent) 18%, transparent);
+		color: var(--primary);
+		background: color-mix(in srgb, var(--primary) 14%, transparent);
+	}
+	/* Give the minimap the panel surface (border + radius + shadow) so it reads as a chrome
+	   overlay in both themes instead of a floating dark rectangle. */
+	:global(.svelte-flow__minimap) {
+		border: 1px solid var(--line);
+		border-radius: var(--radius);
+		box-shadow: 0 6px 20px -10px rgb(0 0 0 / 45%);
+		overflow: hidden;
 	}
 </style>

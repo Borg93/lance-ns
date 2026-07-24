@@ -1,4 +1,4 @@
-import { test, expect, type Route } from '@playwright/test';
+import { test, expect, type Page, type Route } from '@playwright/test';
 
 // Hermetic e2e for the Marquez-parity IA: first-class Datasets / Jobs / Runs / Columns views +
 // per-dataset and per-job detail pages, with the DAG explorer at the zone root. The medallion DAG
@@ -83,6 +83,26 @@ const EVENTS = [
 		event: { run: { runId: 'r-1' } },
 	},
 ];
+
+/** Wait for the fitView tween to stop moving the canvas — a fixed sleep races the 400ms tween on a
+ * loaded machine, and every geometry assertion below measures mid-flight if it does. */
+const settled = async (page: Page) => {
+	const transform = () =>
+		page.locator('.svelte-flow__viewport').evaluate((el) => getComputedStyle(el).transform);
+	// The queued fitView tween runs 400ms and starts a tick AFTER the nodes mount, so sampling
+	// immediately can catch the pre-tween rest and call it settled. Give it time to start, then
+	// require three consecutive identical transforms.
+	await page.waitForTimeout(500);
+	let last = await transform();
+	let stable = 0;
+	for (let i = 0; i < 80 && stable < 3; i += 1) {
+		await page.waitForTimeout(100);
+		const now = await transform();
+		stable = now === last ? stable + 1 : 0;
+		last = now;
+	}
+	expect(stable, 'the flow viewport never stopped moving').toBeGreaterThanOrEqual(3);
+};
 
 const json = (route: Route, body: unknown) =>
 	route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -268,7 +288,7 @@ test('graph nodes lay out by computed depth — no two medallion nodes overlap',
 test('a small estate is framed at 1:1 — fitView never blows the cards up', async ({ page }) => {
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-	await page.waitForTimeout(700); // let the fitView tween settle
+	await settled(page); // measure only once the fitView tween has stopped
 	// The medallion card is 200px wide by design; with fitView maxZoom 1 the rendered card can be
 	// SMALLER (zoomed out to frame a big graph) but never larger, so a 4-node estate no longer
 	// renders as giant blocks filling the canvas.
@@ -292,7 +312,7 @@ test('depth-0 roots pack into a wrapped grid, not one tall column', async ({ pag
 	);
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(9, { timeout: 15_000 });
-	await page.waitForTimeout(700);
+	await settled(page); // measure only once the fitView tween has stopped
 
 	const xs = new Set<number>();
 	const ys = new Set<number>();
@@ -314,6 +334,80 @@ test('clicking a graph node opens the dataset detail page', async ({ page }) => 
 	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
 	await expect(page).toHaveURL(/\/lineage\/datasets\/silver%24features$/);
 	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+});
+
+test('the canvas follows the estate theme in both directions', async ({ page }) => {
+	// Regression: the flow was pinned to colorMode="dark", so the canvas rendered black inside the
+	// light estate shell. It now tracks the `.dark` class on <html> live, both ways.
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
+	const flow = page.locator('.svelte-flow').first();
+
+	await page.evaluate(() => document.documentElement.classList.add('dark'));
+	await expect(flow).toHaveClass(/(^|\s)dark(\s|$)/);
+	await page.evaluate(() => document.documentElement.classList.remove('dark'));
+	await expect(flow).toHaveClass(/(^|\s)light(\s|$)/);
+});
+
+test('the plane toggle, controls and minimap never sit on top of a node card', async ({ page }) => {
+	// Regression: the top-left Datasets/Jobs toggle covered the first node and the minimap floated
+	// over the bottom-right cards. The fitView padding now reserves a gutter per overlay.
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
+	await settled(page);
+
+	const overlays: [string, { x: number; y: number; width: number; height: number } | null][] =
+		await Promise.all(
+			['.viewtoggle', '.svelte-flow__controls', '.svelte-flow__minimap'].map(
+				async (sel) => [sel, await page.locator(sel).boundingBox()] as const,
+			),
+		);
+	const offenders: string[] = [];
+	for (const node of await page.locator('.svelte-flow__node').all()) {
+		const n = await node.boundingBox();
+		const id = (await node.textContent())?.trim().slice(0, 24);
+		for (const [sel, o] of overlays) {
+			if (!n || !o) continue;
+			if (
+				n.x < o.x + o.width &&
+				o.x < n.x + n.width &&
+				n.y < o.y + o.height &&
+				o.y < n.y + n.height
+			)
+				offenders.push(`${sel} ${JSON.stringify(o)} covers node ${id} ${JSON.stringify(n)}`);
+		}
+	}
+	expect(offenders).toEqual([]);
+});
+
+test('a node with many versions caps the chips and keeps the full list in the tooltip', async ({
+	page,
+}) => {
+	const versions = Array.from({ length: 12 }, (_, i) => String(i + 1));
+	await page.route(
+		(url) => url.pathname.endsWith('/lineage/api/graph'),
+		(route) =>
+			json(route, {
+				nodes: NODES.map((n) => ({
+					...n,
+					versions: n.id === 'silver$features' ? versions : [],
+					failed: false,
+				})),
+				edges: EDGES,
+				total: NODES.length,
+				capped: false,
+			}),
+	);
+	await page.goto('/lineage');
+	const node = page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' });
+	await expect(node).toBeVisible({ timeout: 15_000 });
+	// Three chips + a rolled-up "+9" instead of twelve green chips burying the card.
+	await expect(node.locator('.chip.ok')).toHaveCount(3);
+	await expect(node.locator('.chip.more')).toHaveText('+9');
+	await expect(node.locator('.versions')).toHaveAttribute(
+		'title',
+		/^12 versions written: v1, v2, .*v12$/,
+	);
 });
 
 // ---- Datasets (list + detail) ----
@@ -621,11 +715,13 @@ test('graph + columns layout builds stay cheap (measured, printed to stdout)', a
 	expect(colMs).toMatch(/ms$/);
 });
 
+const FLAT_ROOTS = 60;
+
 test('a flat 60-dataset estate packs into a square-ish grid, cheaply', async ({ page }) => {
 	// The other worst case for the packer: 60 datasets, none derived from another — so all 60 are
 	// depth-0 roots. They used to stack into one ~6600px column that fitView had to shrink to a
-	// sliver; they must now wrap into ceil(sqrt(60)) = 8 columns.
-	const FLAT_NODES = Array.from({ length: 60 }, (_, i) => ({
+	// sliver; they must now wrap into a roughly square block.
+	const FLAT_NODES = Array.from({ length: FLAT_ROOTS }, (_, i) => ({
 		id: `ds_${i}`,
 		namespace: 'perf',
 		source_uri: `s3://lakehouse/ds_${i}`,
@@ -633,18 +729,36 @@ test('a flat 60-dataset estate packs into a square-ish grid, cheaply', async ({ 
 	}));
 	await page.route(
 		(url) => url.pathname.endsWith('/lineage/api/graph'),
-		(route) => json(route, { nodes: FLAT_NODES, edges: [], total: 60, capped: false }),
+		(route) => json(route, { nodes: FLAT_NODES, edges: [], total: FLAT_ROOTS, capped: false }),
 	);
 	await page.goto('/lineage');
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(60, { timeout: 20_000 });
-	await page.waitForTimeout(700);
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(FLAT_ROOTS, { timeout: 20_000 });
+	await settled(page); // measure only once the fitView tween has stopped
 
 	const xs = new Set<number>();
+	const ys = new Set<number>();
 	for (const node of await page.locator('.svelte-flow__node').all()) {
-		xs.add(Math.round((await node.boundingBox())?.x ?? 0));
+		const box = await node.boundingBox();
+		xs.add(Math.round(box?.x ?? 0));
+		ys.add(Math.round(box?.y ?? 0));
 	}
 	const flatMs = (await page.locator('header .perf').textContent()) ?? '?';
-	console.log(`[perf] flat 60-root graph layout build: ${flatMs} (${xs.size} packed columns)`);
+	console.log(
+		`[perf] flat 60-root graph layout build: ${flatMs} (${xs.size}×${ys.size} packed grid)`,
+	);
 	expect(flatMs).toMatch(/ms$/);
-	expect(xs.size).toBe(8);
+
+	// Assert the PROPERTY the packer promises, not a pixel count. `placer` in routes/+page.svelte
+	// wraps depth-0 roots every ceil(sqrt(n)) cards, so the block comes out roughly square; the
+	// card pitch (COL_W/ROW_H) is a styling choice that must be free to change — pinning the old
+	// literal 8 reddened this test the moment the node card got more compact.
+	const side = Math.ceil(Math.sqrt(FLAT_ROOTS));
+	expect(xs.size).toBe(side);
+	expect(ys.size).toBe(Math.ceil(FLAT_ROOTS / side));
+	// …and that really is a square-ish block: never the one tall tower this test exists to catch,
+	// never a single sprawling row, and big enough to hold every root.
+	expect(xs.size).toBeGreaterThan(1);
+	expect(ys.size).toBeGreaterThan(1);
+	expect(Math.abs(xs.size - ys.size)).toBeLessThanOrEqual(1);
+	expect(xs.size * ys.size).toBeGreaterThanOrEqual(FLAT_ROOTS);
 });

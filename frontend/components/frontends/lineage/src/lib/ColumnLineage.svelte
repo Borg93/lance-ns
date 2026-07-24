@@ -13,6 +13,7 @@
 	import { Columns3, ShieldAlert } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
 	import { enter } from '@rask/ui/motion';
+	import { useColorMode } from '@rask/ui/color-mode';
 	import { ColumnLineageState } from '$lib/columns.svelte';
 	import type { ColumnEdge, ColumnRef } from '$lib/types';
 
@@ -22,6 +23,9 @@
 	let { dataset }: { dataset: string } = $props();
 
 	const store = new ColumnLineageState();
+
+	// Follow the estate theme live rather than pinning the canvas dark (see the graph page).
+	const theme = useColorMode();
 
 	// Load + poll the subgraph for the current dataset; switching datasets drops any open field
 	// panel (a field from the previous root has no place in the new subgraph).
@@ -164,7 +168,14 @@
 </script>
 
 <div class="canvas">
-	<SvelteFlow bind:nodes bind:edges {nodeTypes} colorMode="dark" fitView onnodeclick={selectNode}>
+	<SvelteFlow
+		bind:nodes
+		bind:edges
+		{nodeTypes}
+		colorMode={theme.current}
+		fitView
+		onnodeclick={selectNode}
+	>
 		<Background variant={BackgroundVariant.Dots} gap={16} />
 		<Controls />
 		<FlowAutoFit trigger={fitKey} />

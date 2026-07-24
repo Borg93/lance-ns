@@ -19,10 +19,9 @@ const config = {
 		// needed. `relative: false` keeps asset URLs absolute, trailing-slash-proof.
 		paths: { base: '/annotator', relative: false },
 		// Bun-server output — the rask MFE build target (`svelte-adapter-bun`).
-		// The app stays client-rendered (`ssr = false` in src/routes/+layout.ts):
-		// the Bun server serves the shell + assets, the browser renders (WebGPU,
-		// localStorage, etc. never run server-side). `/api/*` is not this server's
-		// concern — dev proxies it (vite.config.ts), prod routes it at the gateway.
+		// SSR on (the estate zone contract): hooks.server.ts gates + hydrates the
+		// session per request, and the zone's OWN BFF routes serve `${base}/api/*`
+		// (src/routes/api/**) — the Pixi canvas page opts out per-page (+page.ts).
 		adapter: adapter(),
 		alias: {
 			$lib: './src/lib',

@@ -5,10 +5,13 @@
  * (`doc/speech/chunk`) — and the annotator route opens it here + navigates. This is
  * the `Selection` bridge made concrete (see labeling/types.ts).
  */
+import { base } from '$app/paths';
+
 import type { MediaKind, MediaUnit } from '$lib/viewer/types';
 
 /** Build an annotator unit from a key-path (`doc/speech/chunk`) — the same path the
- *  chunk-frame + annotations endpoints take. Modality defaults to image/document (our
+ *  chunk-frame + annotations endpoints take, under THIS zone's base (the same-origin
+ *  BFF proxy routes at `/annotator/api/*`). Modality defaults to image/document (our
  *  corpus); `kind` selects the temporal viewers (audio waveform / video frame-overlay),
  *  whose media source defaults to the doc's `/api/media` stream — `mediaUrl` overrides
  *  it (a deep-link can annotate any same-origin media, e.g. a fixture clip). */
@@ -17,9 +20,11 @@ export function unitFromKey(key: string, kind: MediaKind = 'image', mediaUrl?: s
 	return {
 		kind,
 		key,
-		imageUrl: `/api/chunk-frame/${key}`,
-		...(kind === 'audio' || kind === 'video' ? { mediaUrl: mediaUrl ?? `/api/media/${doc}` } : {}),
-		annotationsUrl: `/api/annotations/${key}`,
+		imageUrl: `${base}/api/chunk-frame/${key}`,
+		...(kind === 'audio' || kind === 'video'
+			? { mediaUrl: mediaUrl ?? `${base}/api/media/${doc}` }
+			: {}),
+		annotationsUrl: `${base}/api/annotations/${key}`,
 	};
 }
 

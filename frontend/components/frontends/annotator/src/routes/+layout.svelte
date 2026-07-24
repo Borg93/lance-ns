@@ -1,8 +1,10 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount, type Snippet } from 'svelte';
+	import { browser } from '$app/environment';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
+	import { Toaster } from 'svelte-sonner';
 	import { TopNavbar } from '@rask/ui/shell';
 	import { MeSchema, parse, type Me } from '@rask/api';
 	import type { LayoutData } from './$types';
@@ -25,6 +27,10 @@
 		meLoading = false;
 	});
 </script>
+
+{#if browser}
+	<Toaster />
+{/if}
 
 <div class="flex h-svh flex-col overflow-hidden">
 	<!-- The cross-zone estate navbar — the one constant across every microfrontend. -->

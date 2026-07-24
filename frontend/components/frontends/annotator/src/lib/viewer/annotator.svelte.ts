@@ -17,6 +17,7 @@
  * controller later. The layout binds to the controller, never to the engine.
  */
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
+import { toast } from 'svelte-sonner';
 import type { Table } from 'apache-arrow';
 import type { CommitShape, GeometryUpdate, PixiContext, Tool } from '@lance/engine';
 import { LayerStore, buildBatchTable } from '@lance/engine';
@@ -583,6 +584,9 @@ export class AnnotatorController {
 			execution: 'interactive',
 			payload: { fields: { label } },
 		});
+		// The rows relabel in place (the inline feedback); the toast confirms the batch size.
+		const n = picked.length > 1 ? picked.length : this.selectedIndex != null ? 1 : 0;
+		if (n > 0) toast.success(`Labeled ${n} annotation${n === 1 ? '' : 's'} “${label}”`);
 	}
 
 	// ── review-queue navigation (accept-and-advance — the throughput loop) ──
@@ -623,6 +627,8 @@ export class AnnotatorController {
 		// seam (lance-ns runs it; the result surfaces async by media id + Lance version).
 		if (op.execution === 'batch') {
 			if (isChunkSelection(op.target)) {
+				// Fire-and-forget submit; the toasts are the only submit-side feedback (results
+				// surface async on the read plane by media id + Lance version).
 				void submitBatchJob({
 					producer: op.producer,
 					op: op.op,
@@ -631,7 +637,11 @@ export class AnnotatorController {
 					// PROPAGATE (INSID3): the few-shot reference exemplars are annotation INDICES in
 					// the open unit — resolve to stable ids the deriver can fetch masks/features by.
 					exemplars: this._exemplarIds(op.payload.exemplars),
-				}).catch(() => {}); // fire-and-forget; the read-plane trigger surfaces errors
+				})
+					.then((job) => toast.success(`Batch job queued (${op.producer} · ${job.job_id})`))
+					.catch((e: unknown) =>
+						toast.error(`Job submit failed: ${e instanceof Error ? e.message : String(e)}`),
+					);
 			}
 			return { status: 'queued', job: `${spec.source}:${op.op}`, note: 'batch deriver enqueued' };
 		}
@@ -739,11 +749,15 @@ export class AnnotatorController {
 				// The table advanced under us (another reviewer / a deriver). Reload to the
 				// server state; the user's pending edits are dropped — they re-apply on fresh data.
 				this.saveError = 'Annotations changed on the server — reloaded. Re-apply your edits.';
+				toast.error(this.saveError);
+			} else {
+				toast.success('Annotations saved');
 			}
 			await this._reload();
 			this._resetOverlays();
 		} catch (e) {
 			this.saveError = e instanceof Error ? e.message : String(e);
+			toast.error(`Save failed: ${this.saveError}`);
 		} finally {
 			this.saving = false;
 		}

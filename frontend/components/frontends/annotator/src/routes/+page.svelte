@@ -4,6 +4,7 @@
 	// the demo unit — and mount the shell PER unit (re-mount on the active key) so
 	// navigating the selection loads each fresh. (RA_ANNO_MERGE.md §5c–5d.)
 	import { browser } from '$app/environment';
+	import { base } from '$app/paths';
 	import type { MediaKind, MediaUnit } from '$lib/viewer/types';
 	import { reviewSelection } from '$lib/labeling/review-selection.svelte';
 	import AnnotatorShell from '$lib/viewer/layout/AnnotatorShell.svelte';
@@ -12,8 +13,8 @@
 	const DEMO_UNIT: MediaUnit = {
 		kind: 'image',
 		key: DEMO_KEY,
-		imageUrl: `/api/chunk-frame/${DEMO_KEY}`,
-		annotationsUrl: `/api/annotations/${DEMO_KEY}`,
+		imageUrl: `${base}/api/chunk-frame/${DEMO_KEY}`,
+		annotationsUrl: `${base}/api/annotations/${DEMO_KEY}`,
 	};
 
 	// Init synchronously (before first render) so there's no demo flash. Beyond `keys`,

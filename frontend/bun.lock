@@ -51,6 +51,7 @@
       "name": "@lance-media/annotator",
       "version": "0.0.1",
       "dependencies": {
+        "@lance/api": "workspace:*",
         "@lance/engine": "workspace:*",
         "@lance/labeling": "workspace:*",
         "@lance/ui": "workspace:*",
@@ -60,9 +61,11 @@
         "lucide-svelte": "^0.468.0",
         "pixi.js": "^8.19.0",
         "svelte": "^5.36.0",
+        "svelte-sonner": "^1.1.1",
       },
       "devDependencies": {
         "@lance/config": "workspace:*",
+        "@playwright/test": "^1.61.1",
         "@sveltejs/kit": "^2.27.0",
         "@sveltejs/vite-plugin-svelte": "^6.0.0",
         "@tailwindcss/vite": "^4.0.0",
@@ -185,12 +188,14 @@
         "embedding-atlas": "^0.21.0",
         "lucide-svelte": "^0.468.0",
         "svelte": "^5.36.0",
+        "svelte-sonner": "^1.1.1",
         "tailwind-merge": "^2.5.5",
         "tailwind-variants": "^0.3.0",
         "valibot": "^1.4.2",
       },
       "devDependencies": {
         "@lance/config": "workspace:*",
+        "@playwright/test": "^1.61.1",
         "@sveltejs/kit": "^2.27.0",
         "@sveltejs/vite-plugin-svelte": "^6.0.0",
         "@tailwindcss/vite": "^4.0.0",
@@ -272,6 +277,7 @@
       "name": "@lance/labeling",
       "version": "0.0.0",
       "dependencies": {
+        "@lance/api": "workspace:*",
         "apache-arrow": "^21.1.0",
       },
       "devDependencies": {

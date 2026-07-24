@@ -20,6 +20,7 @@
 		"@rask/ui": "workspace:*",
 		"apache-arrow": "^21.1.0",
 		"lucide-svelte": "^0.468.0",
+		"mode-watcher": "^1.1.0",
 		"pixi.js": "^8.19.0",
 		"svelte": "^5.36.0",
 		"svelte-sonner": "^1.1.1"

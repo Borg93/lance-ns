@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
 	<head>
 		<meta charset="utf-8" />
 		<link rel="icon" href="data:," />
@@ -12,17 +12,27 @@
 			rel="stylesheet"
 		/>
 		<!--
-      Dark-first (matches the shared design system). <html> ships with the
-      `dark` class so first paint is dark with no flash; we only DROP it when
-      the user has explicitly chosen light (theme-toggle persists the choice).
+      No-flash theme boot. The estate-shared mode-watcher (mounted in +layout.svelte) owns the
+      `dark` class at runtime, and in every OTHER zone its SSR-injected head script also handles
+      first paint. This zone can't rely on that: the canvas route is `ssr = false` (Pixi/WebGL),
+      so SvelteKit renders no component head at all and `%sveltekit.head%` comes back empty —
+      first paint would use the light `:root` block and then snap. So we inline the equivalent,
+      reading the SAME origin-wide `mode-watcher-mode` key with the same system fallback (the
+      zone-private `lance-media-theme` key that pinned this zone dark is gone). Keep this in
+      lockstep with mode-watcher's setInitialMode.
     -->
 		<script>
 			(function () {
 				try {
-					if (localStorage.getItem('lance-media-theme') === 'light') {
-						document.documentElement.classList.remove('dark');
-					}
-				} catch (_) {}
+					var mode = localStorage.getItem('mode-watcher-mode') || 'system';
+					var light =
+						mode === 'light' ||
+						(mode === 'system' && window.matchMedia('(prefers-color-scheme: light)').matches);
+					document.documentElement.classList.toggle('dark', !light);
+					document.documentElement.style.colorScheme = light ? 'light' : 'dark';
+				} catch (_) {
+					/* private mode / disabled storage — fall through to the CSS default */
+				}
 			})();
 		</script>
 		%sveltekit.head%

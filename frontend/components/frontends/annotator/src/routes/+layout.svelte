@@ -4,6 +4,7 @@
 	import { browser } from '$app/environment';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
+	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
 	import { TopNavbar } from '@rask/ui/shell';
 	import { MeSchema, parse, type Me } from '@rask/api';
@@ -28,6 +29,14 @@
 	});
 </script>
 
+<!-- The estate-shared mode-watcher owns the `.dark` class, mounted exactly as every other zone
+     mounts it. That is the whole point: the theme choice lives in ONE origin-wide localStorage
+     key, so the navbar's toggle works here and a light estate stays light when you hop into the
+     annotator. Previously this zone pinned `class="dark"` on <html> and read its own
+     `lance-media-theme` key, which is why it rendered dark against a light estate. First paint
+     is handled by the boot script in app.html (this zone's canvas route is ssr=false, so the
+     mode-watcher head script other zones rely on never reaches the document). -->
+<ModeWatcher defaultMode="dark" />
 {#if browser}
 	<Toaster />
 {/if}

@@ -107,6 +107,21 @@ test('the server answers under /annotator (hooks live; canvas page opts out per-
 	expect(await res.text()).toContain('base: "/annotator"');
 });
 
+test('the zone follows the ESTATE theme, not a zone-private one', async ({ page }) => {
+	// The regression this guards: the annotator used to pin `class="dark"` on <html> and read
+	// its own `lance-media-theme` key, so it stayed dark while the rest of the estate rendered
+	// light and the navbar's theme toggle did nothing here. It now reads the SAME origin-wide
+	// `mode-watcher-mode` key every other zone reads — set anywhere, honoured here, before
+	// first paint (this zone inlines the boot script; its canvas route is ssr=false).
+	await page.addInitScript(() => localStorage.setItem('mode-watcher-mode', 'light'));
+	await page.goto('/annotator/');
+	await expect(page.locator('html')).not.toHaveClass(/dark/);
+
+	await page.addInitScript(() => localStorage.setItem('mode-watcher-mode', 'dark'));
+	await page.goto('/annotator/');
+	await expect(page.locator('html')).toHaveClass(/dark/);
+});
+
 test('landing = data selection: dataset → document → chunk → the annotate canvas', async ({
 	page,
 }) => {

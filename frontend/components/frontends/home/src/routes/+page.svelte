@@ -1,52 +1,69 @@
 <script lang="ts">
+	import { Badge } from '@rask/ui/badge';
 	import { Button } from '@rask/ui/button';
+	import { Card } from '@rask/ui/card';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();
-
-	const zones = [
-		{ title: 'Data', href: '/data', blurb: 'tables · namespaces · warehouses' },
-		{ title: 'Lineage', href: '/lineage', blurb: 'graph · runs · events · columns' },
-		{ title: 'Models', href: '/models', blurb: 'registry · experiments · pipeline' },
-		{ title: 'Admin', href: '/admin', blurb: 'audit · dlq · access · maintenance' },
-	];
 </script>
 
 <svelte:head><title>lance</title></svelte:head>
 
-<div class="bg-background text-foreground min-h-svh px-6 py-16">
-	<div class="mx-auto max-w-3xl space-y-8">
-		<header class="flex items-start justify-between gap-4">
-			<div class="space-y-2">
-				<h1 class="text-3xl font-semibold">lance</h1>
-				<p class="text-muted-foreground">Governed Lance lakehouse — pick a zone.</p>
-			</div>
-			{#if data.authEnabled}
-				<!-- The auth control mirrors every zone's nav-user: same origin-relative /auth/* the home zone owns. -->
-				<div class="flex shrink-0 items-center gap-3 text-sm">
-					{#if data.user}
-						<span class="text-muted-foreground">Signed in as {data.user.name}</span>
-						<a class="text-foreground underline-offset-4 hover:underline" href="/auth/logout"
-							>Sign out</a
-						>
-					{:else}
-						<Button href="/auth/login?redirect=/">Sign in</Button>
-					{/if}
-				</div>
-			{/if}
+<div class="px-4 py-10">
+	<div class="mx-auto w-full max-w-5xl space-y-6">
+		<header class="space-y-1">
+			<h1 class="text-3xl font-semibold">lance</h1>
+			<p class="text-muted-foreground">
+				Governed Lance lakehouse — {data.estateAdmin
+					? 'every project in the estate'
+					: 'your projects'}.
+			</p>
 		</header>
-		<div class="grid gap-4 sm:grid-cols-2">
-			{#each zones as zone (zone.href)}
-				<a
-					href={zone.href}
-					data-sveltekit-reload
-					class="border-border hover:bg-accent block rounded-lg border p-5 transition-colors"
-				>
-					<div class="text-lg font-medium">{zone.title}</div>
-					<div class="text-muted-foreground text-sm">{zone.blurb}</div>
-				</a>
-			{/each}
-		</div>
-		<Button href="/data">Open the data plane →</Button>
+
+		{#if data.projects.length > 0}
+			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+				{#each data.projects as p (p.project)}
+					<!-- Cross-zone card into the data zone's project page (hard nav). -->
+					<a href={`/data/projects/${p.project}`} data-sveltekit-reload class="group block">
+						<Card
+							class="hover:border-ring/40 hover:bg-accent h-full space-y-2 p-5 transition-colors"
+						>
+							<div class="flex items-start justify-between gap-2">
+								<div class="truncate text-lg font-medium">{p.project}</div>
+								{#if p.role}
+									<Badge variant={p.role === 'admin' ? 'default' : 'secondary'}>{p.role}</Badge>
+								{/if}
+							</div>
+							<div class="text-muted-foreground text-sm">
+								{#if p.warehouses !== null}
+									{p.warehouses}
+									{p.warehouses === 1 ? 'warehouse' : 'warehouses'}
+								{:else}
+									project
+								{/if}
+							</div>
+						</Card>
+					</a>
+				{/each}
+			</div>
+		{:else}
+			<!-- Empty state: signed out (prompt), or signed in with no memberships. -->
+			<div
+				class="border-border flex flex-col items-center gap-3 rounded-lg border border-dashed p-10 text-center"
+			>
+				{#if data.signedIn}
+					<p class="text-muted-foreground">
+						You are not a member of any project yet. Ask a project admin for access.
+					</p>
+				{:else if data.authEnabled}
+					<p class="text-muted-foreground">Sign in to see your projects.</p>
+					<Button href="/auth/login?redirect=/">Sign in</Button>
+				{:else}
+					<p class="text-muted-foreground">
+						No projects to show — sign-in is not configured on this stack.
+					</p>
+				{/if}
+			</div>
+		{/if}
 	</div>
 </div>

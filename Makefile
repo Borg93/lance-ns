@@ -35,7 +35,7 @@ CATALOG_IMG := lance-rest-catalog:dev
 RAY_IMG     := ray-lance:dev
 # The micro-frontend zones (P5): the catch-all `home` + the four domain zones. Each builds from the ONE
 # parametrized .docker/frontend.dockerfile via --build-arg APP=<zone>, image lance-<zone>:dev.
-ZONES       := home data lineage models admin
+ZONES       := home data lineage models admin media annotator
 MEDALLION_PORT := 8000
 # OCI label provenance — supplied to every image build (BUILD_DATE rfc3339, VCS_REF full SHA, VERSION).
 BUILD_DATE  := $(shell date -u +%FT%TZ)

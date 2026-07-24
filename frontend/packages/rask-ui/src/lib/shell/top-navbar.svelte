@@ -87,7 +87,7 @@
 					<li aria-hidden="true">
 						<span class={cn(chrome, 'relative')}>
 							<span class="invisible">{entry.title}</span>
-							{#if entry.items}
+							{#if entry.items || entry.groups}
 								<!-- Reserve the trigger's chevron too, or an entry with a panel would grow by
 								     its width the moment the identity lands. -->
 								<ChevronDown class="invisible size-3" />
@@ -99,7 +99,49 @@
 			{:else}
 				{#each entries as entry (entry.title)}
 					<NavigationMenu.Item>
-						{#if entry.items}
+						{#if entry.groups}
+							<!-- A trigger spanning SEVERAL concerns (Lakehouse: the catalog, the model
+							     registry and — for an estate admin — governance/operations over the same
+							     estate) renders labelled columns, so the panel explains the shape instead
+							     of listing a dozen undifferentiated rows. Column count follows the groups
+							     the viewer actually gets, so a non-admin sees a tighter two-column panel. -->
+							<NavigationMenu.Trigger data-active={entry.match(pathname) ? '' : undefined}>
+								{entry.title}
+							</NavigationMenu.Trigger>
+							<NavigationMenu.Content>
+								<div
+									class="grid gap-x-3 gap-y-1 p-2 md:w-[46rem]"
+									style="grid-template-columns: repeat({entry.groups.length}, minmax(0, 1fr))"
+								>
+									{#each entry.groups as group (group.label)}
+										<div>
+											<p
+												class="text-muted-foreground px-3 pt-1 pb-1.5 text-[0.6875rem] font-semibold tracking-wide uppercase"
+											>
+												{group.label}
+											</p>
+											<ul class="grid gap-1">
+												{#each group.items as item (item.href)}
+													<li>
+														<NavigationMenu.Link
+															href={item.href}
+															active={itemActive(entry, item)}
+															data-sveltekit-reload={crossZone(item.href) ? '' : undefined}
+															{@attach warm(item.href)}
+														>
+															<span class="text-sm leading-none font-medium">{item.title}</span>
+															<span class="text-muted-foreground line-clamp-2 text-xs leading-snug">
+																{item.description}
+															</span>
+														</NavigationMenu.Link>
+													</li>
+												{/each}
+											</ul>
+										</div>
+									{/each}
+								</div>
+							</NavigationMenu.Content>
+						{:else if entry.items}
 							<NavigationMenu.Trigger data-active={entry.match(pathname) ? '' : undefined}>
 								{entry.title}
 							</NavigationMenu.Trigger>

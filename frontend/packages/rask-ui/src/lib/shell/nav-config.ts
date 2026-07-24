@@ -66,6 +66,11 @@ export const under =
  *  description so the panel explains the estate instead of just listing words. */
 export type TopNavItem = { title: string; href: string; description: string };
 
+/** A labelled column inside a navbar panel. A trigger that gathers SEVERAL concerns (Lakehouse:
+ *  catalog + models + governance) needs its rows grouped under headings, or the panel is just a
+ *  long undifferentiated list — the multi-column NavigationMenu.Content shape. */
+export type TopNavGroup = { label: string; items: TopNavItem[] };
+
 /** One top-navbar entry — a whole microfrontend zone (cross-zone = hard nav). */
 export type TopNavEntry = {
 	title: string;
@@ -76,6 +81,9 @@ export type TopNavEntry = {
 	 *  one row in it would be noise. Deliberately a SUBSET of the zone's own sidebar (`ZoneNav`):
 	 *  this is the cross-zone jump list, not a mirror of in-zone navigation. */
 	items?: TopNavItem[];
+	/** Grouped alternative to `items` — rendered as labelled columns. Used by Lakehouse, whose panel
+	 *  spans the catalog, the model registry and the governance surfaces. */
+	groups?: TopNavGroup[];
 };
 
 const DATA_ITEMS: TopNavItem[] = [
@@ -129,21 +137,36 @@ const MEDIA_ITEMS: TopNavItem[] = [
 	{ title: 'Workflow', href: '/media/workflow', description: 'The derivation pipeline.' },
 ];
 
-const ADMIN_ITEMS: TopNavItem[] = [
+const MODEL_ITEMS: TopNavItem[] = [
+	{ title: 'Registry', href: '/models', description: 'Candidate → blessed, per model.' },
+	{
+		title: 'Experiments',
+		href: '/models/experiments',
+		description: 'Training runs and their metrics.',
+	},
+	{ title: 'Pipeline', href: '/models/pipeline', description: 'Train, validate, promote.' },
+];
+
+/** Governance + operations over the SAME estate the catalog and registry describe — so these ride
+ *  in the Lakehouse panel rather than a separate top-level Admin entry. Estate-admin only. */
+const GOVERNANCE_ITEMS: TopNavItem[] = [
+	{
+		title: 'Access',
+		href: '/admin/access',
+		description: 'The FGA workbench: check, tuples, graph.',
+	},
 	{
 		title: 'Tenants',
 		href: '/admin/tenants',
 		description: 'Warehouses per project, and who administers them.',
 	},
 	{ title: 'Audit', href: '/admin/audit', description: 'The compliance trail — who did what.' },
+];
+
+const OPERATIONS_ITEMS: TopNavItem[] = [
+	{ title: 'Events', href: '/admin/events', description: 'The live control-event feed.' },
 	{ title: 'Streams', href: '/admin/streams', description: 'JetStream consumers and their lag.' },
 	{ title: 'DLQ', href: '/admin/dlq', description: 'Dead-lettered lineage runs, with replay.' },
-	{ title: 'Events', href: '/admin/events', description: 'The live control-event feed.' },
-	{
-		title: 'Access',
-		href: '/admin/access',
-		description: 'The FGA workbench: check, tuples, graph.',
-	},
 ];
 
 /**
@@ -161,18 +184,43 @@ const ADMIN_ITEMS: TopNavItem[] = [
  * here and Access appears only as one row of Admin's panel.
  */
 export function topNav(estateAdmin: boolean): TopNavEntry[] {
-	const entries: TopNavEntry[] = [
-		{ title: 'Home', href: '/', match: (p) => norm(p) === '/' },
-		{ title: 'Data', href: '/data', match: under('/data'), items: DATA_ITEMS },
-		{ title: 'Lineage', href: '/lineage', match: under('/lineage'), items: LINEAGE_ITEMS },
-		{ title: 'Models', href: '/models', match: under('/models') },
-		{ title: 'Media', href: '/media', match: under('/media'), items: MEDIA_ITEMS },
-		{ title: 'Annotator', href: '/annotator', match: under('/annotator') },
+	// LAKEHOUSE gathers everything that describes or governs the one governed estate: the catalog
+	// (projects → warehouses → namespaces → tables), the model registry (models are catalog objects
+	// too — models$<model> carries the same rungs), and, for an estate admin, the governance and
+	// operations surfaces over it. Grouping by DOMAIN rather than by zone is what keeps the bar at
+	// three words while the product grows: a new route becomes a row in a panel column, never a new
+	// top-level entry. Home is the product mark, not a nav item; the project switcher sits at the
+	// head of the bar on every zone (global context belongs in global chrome).
+	const lakehouse: TopNavGroup[] = [
+		{ label: 'Catalog', items: DATA_ITEMS },
+		{ label: 'Models', items: MODEL_ITEMS },
 	];
 	if (estateAdmin) {
-		entries.push({ title: 'Admin', href: '/admin', match: under('/admin'), items: ADMIN_ITEMS });
+		lakehouse.push(
+			{ label: 'Governance', items: GOVERNANCE_ITEMS },
+			{ label: 'Operations', items: OPERATIONS_ITEMS },
+		);
 	}
-	return entries;
+	return [
+		{
+			title: 'Lakehouse',
+			href: '/data',
+			// One trigger, so it stays active anywhere in the estate it covers.
+			match: under('/data', '/models', ...(estateAdmin ? ['/admin'] : [])),
+			groups: lakehouse,
+		},
+		{ title: 'Lineage', href: '/lineage', match: under('/lineage'), items: LINEAGE_ITEMS },
+		{
+			title: 'Media',
+			href: '/media',
+			match: under('/media', '/annotator'),
+			// Annotate is the ONE pointer into the annotator zone (its own microfrontend).
+			items: [
+				...MEDIA_ITEMS,
+				{ title: 'Annotate', href: '/annotator', description: 'Label and review the corpus.' },
+			],
+		},
+	];
 }
 
 /** The first path segment = the owning zone ('' = the home zone at the origin root). A link whose

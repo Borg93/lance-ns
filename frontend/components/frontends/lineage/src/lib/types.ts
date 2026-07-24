@@ -20,8 +20,8 @@ export type SchemaField = S['SchemaField'];
 export type EventRecord = S['EventRecord'];
 export type SearchResults = S['SearchResults'];
 export type Events = S['Events'];
-export type DemoDataset = S['DemoDataset'];
-export type DemoDatasets = S['DemoDatasets'];
+export type Neighbors = S['Neighbors'];
+export type DatasetRef = S['DatasetRef'];
 export type RunStatus = S['RunStatus'];
 export type Runs = S['Runs'];
 export type RunInput = S['RunInput'];
@@ -36,8 +36,8 @@ export type JobSummary = S['JobSummary'];
 export type Jobs = S['Jobs'];
 export type Namespaces = S['Namespaces'];
 
-// The medallion datasets, in flow order (raw -> bronze -> silver -> gold). Domain knowledge, not schema.
-export const KNOWN = ['raw_events', 'bronze$events', 'silver$features', 'gold$catalog'] as const;
+// The medallion stages' flow order (raw -> bronze -> silver -> gold) for icon/color parity on the
+// known stage tables. Domain knowledge, not schema — layout depth is computed from the graph itself.
 export const LAYER: Record<string, number> = {
 	raw_events: 0,
 	bronze$events: 1,

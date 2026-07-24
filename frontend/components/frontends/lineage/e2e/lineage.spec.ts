@@ -1,7 +1,9 @@
 import { test, expect, type Route } from '@playwright/test';
 
-// The medallion DAG the mocked lineage API returns. GraphEdge semantics: `source` is derived_from
-// `target` (output → input), matching services/lineage/schemas.py.
+// Hermetic e2e for the Marquez-parity IA: first-class Datasets / Jobs / Runs / Columns views +
+// per-dataset and per-job detail pages, with the DAG explorer at the zone root. The medallion DAG
+// the mocked lineage API returns — GraphEdge semantics: `source` is derived_from `target`
+// (output → input), matching services/lineage/schemas.py.
 const NODES = [
 	{ id: 'raw_events', namespace: 'raw', source_uri: 's3://lakehouse/raw_events', tags: [] },
 	{
@@ -27,6 +29,59 @@ const EDGES = [
 	{ source: 'bronze$events', target: 'raw_events', kind: 'derived_from' },
 	{ source: 'silver$features', target: 'bronze$events', kind: 'derived_from' },
 	{ source: 'gold$catalog', target: 'silver$features', kind: 'derived_from' },
+];
+// run.job is `namespace/name` (repository.py); the jobs list carries the same identity split.
+const RUNS = [
+	{
+		run_id: 'r-1',
+		job: 'ray-jobs/embed_features',
+		state: 'RUNNING',
+		progress_done: 1,
+		progress_total: 3,
+		author: 'alice',
+		outputs: ['silver$features'],
+		updated_at: '2026-07-01T00:00:00Z',
+		events: 2,
+	},
+	{
+		run_id: 'r-2',
+		job: 'ray-jobs/promote_gold',
+		state: 'FAIL',
+		author: 'bob',
+		error_message: 'quality gate: row_count below floor',
+		outputs: [],
+		updated_at: '2026-07-01T00:01:00Z',
+		events: 3,
+	},
+];
+const EVENTS = [
+	{
+		seq: 2,
+		event_type: 'COMPLETE',
+		event_time: '2026-07-01T00:00:30Z',
+		job: 'ray-jobs/embed_features',
+		author: 'alice',
+		inputs: ['bronze$events'],
+		outputs: ['silver$features'],
+		event: {
+			run: { runId: 'r-1', facets: { processing_engine: { name: 'ray' } } },
+			job: {
+				namespace: 'ray-jobs',
+				name: 'embed_features',
+				facets: { jobType: { jobType: 'BATCH' } },
+			},
+		},
+	},
+	{
+		seq: 1,
+		event_type: 'START',
+		event_time: '2026-07-01T00:00:00Z',
+		job: 'ray-jobs/embed_features',
+		author: 'alice',
+		inputs: ['bronze$events'],
+		outputs: ['silver$features'],
+		event: { run: { runId: 'r-1' } },
+	},
 ];
 
 const json = (route: Route, body: unknown) =>
@@ -109,6 +164,16 @@ test.beforeEach(async ({ page }) => {
 				dataset: decodeURIComponent(readers[1]),
 				readers: [{ reader: 'user:alice', reads: 3, last_read: '2026-07-16T09:00:00+00:00' }],
 			});
+		const neighbors = path.match(/^\/datasets\/([^/]+)\/(upstream|downstream)$/);
+		if (neighbors) {
+			const id = decodeURIComponent(neighbors[1]);
+			// GraphEdge semantics: source derived_from target ⇒ upstream(id) = targets of id's edges.
+			const related =
+				neighbors[2] === 'upstream'
+					? EDGES.filter((e) => e.source === id).map((e) => ({ name: e.target }))
+					: EDGES.filter((e) => e.target === id).map((e) => ({ name: e.source }));
+			return json(route, { dataset: id, related });
+		}
 		const m = path.match(/^\/datasets\/([^/]+)\/(producers|graph|columns)/);
 		if (m) {
 			const id = decodeURIComponent(m[1]);
@@ -133,37 +198,11 @@ test.beforeEach(async ({ page }) => {
 				datasets: NODES.map((n) => ({ name: n.id, namespace: n.namespace, tags: n.tags })),
 				total: NODES.length,
 			});
-		if (path === '/events') return json(route, { events: [] });
-		if (path === '/runs')
-			return json(route, {
-				runs: [
-					{
-						run_id: 'r-1',
-						job: 'ray-jobs/embed_features',
-						state: 'RUNNING',
-						progress_done: 1,
-						progress_total: 3,
-						author: 'alice',
-						outputs: ['silver$features'],
-						updated_at: '2026-07-01T00:00:00Z',
-						events: 2,
-					},
-					{
-						run_id: 'r-2',
-						job: 'ray-jobs/promote_gold',
-						state: 'FAIL',
-						author: 'bob',
-						error_message: 'quality gate: row_count below floor',
-						updated_at: '2026-07-01T00:01:00Z',
-						events: 3,
-					},
-				],
-			});
+		if (path === '/events') return json(route, { events: EVENTS });
+		if (path === '/runs') return json(route, { runs: RUNS });
 		if (path === '/jobs')
 			return json(route, {
-				jobs: [
-					{ namespace: 'lance-medallion', name: 'embed_features', outputs: ['silver$features'] },
-				],
+				jobs: [{ namespace: 'ray-jobs', name: 'embed_features', outputs: ['silver$features'] }],
 				total: 1,
 			});
 		if (path === '/namespaces')
@@ -176,52 +215,125 @@ test.beforeEach(async ({ page }) => {
 				],
 				total: 1,
 			});
-		if (path === '/demo/datasets') return json(route, { datasets: [] });
 		return json(route, {});
 	});
 });
 
-test('renders the medallion DAG at /lineage', async ({ page }) => {
+// ---- Graph (the zone root stays a view — fixed) ----
+
+test('the graph renders the medallion DAG with an honest LIVE header and no demo copy', async ({
+	page,
+}) => {
 	await page.goto('/lineage');
 	// SvelteFlow wraps each custom node in .svelte-flow__node — the 4 medallion datasets.
 	const nodes = page.locator('.svelte-flow__node');
 	await expect(nodes).toHaveCount(4, { timeout: 15_000 });
-	// Scope to graph nodes — the browse-panel list also renders these names (the node's URI div also
-	// contains the name, so filter by the node, not exact text).
 	await expect(nodes.filter({ hasText: 'raw_events' })).toBeVisible();
 	await expect(nodes.filter({ hasText: 'gold$catalog' })).toBeVisible();
+	// The status word says LIVE (not the old WAITING-with-data contradiction) …
+	await expect(page.locator('.state-word')).toHaveText('live');
+	// … the developer demo copy is gone …
+	await expect(page.getByText('medallion_demo')).toHaveCount(0);
+	// … and the layout-build perf readout renders a measured number.
+	await expect(page.locator('header .perf')).toContainText('ms');
 });
 
-test('clicking a dataset node shows its upstream + downstream in the detail panel', async ({
-	page,
-}) => {
+test('graph nodes lay out by computed depth — no two medallion nodes overlap', async ({ page }) => {
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
+	// The linear DAG raw → bronze → silver → gold must occupy 4 DISTINCT x columns (the old
+	// hardcoded-layer layout piled unknown datasets onto one x where labels overlapped).
+	const xs = new Set<number>();
+	for (const id of ['raw_events', 'bronze$events', 'silver$features', 'gold$catalog']) {
+		const node = page.locator('.svelte-flow__node').filter({ hasText: id });
+		const box = await node.boundingBox();
+		xs.add(Math.round(box?.x ?? 0));
+	}
+	expect(xs.size).toBe(4);
+});
 
-	// Click the silver node — it has both an upstream (bronze) and a downstream (gold).
+test('clicking a graph node opens the dataset detail page', async ({ page }) => {
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
 	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
-	await page.getByRole('tab', { name: 'Details' }).click();
-
+	await expect(page).toHaveURL(/\/lineage\/datasets\/silver%24features$/);
 	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
-	await expect(page.getByText('Upstream')).toBeVisible();
-	await expect(page.getByRole('button', { name: 'bronze$events' })).toBeVisible();
-	await expect(page.getByText('Downstream')).toBeVisible();
-	await expect(page.getByRole('button', { name: 'gold$catalog' })).toBeVisible();
+});
 
-	// The upstream chip reselects that dataset — the panel follows.
-	await page.getByRole('button', { name: 'bronze$events' }).click();
+// ---- Datasets (list + detail) ----
+
+test('datasets view lists the governed catalog, filters, and row-links to detail', async ({
+	page,
+}) => {
+	await page.goto('/lineage/datasets');
+	const rows = page.locator('tbody tr');
+	await expect(rows).toHaveCount(4, { timeout: 15_000 });
+	await expect(page.getByRole('link', { name: 'raw_events' })).toBeVisible();
+
+	// The text filter narrows the DataTable (name / namespace / tags all searchable).
+	await page.getByPlaceholder('Filter datasets…').fill('silver');
+	await expect(rows).toHaveCount(1);
+
+	// Row-click → the per-dataset detail page.
+	await page.getByRole('link', { name: 'silver$features' }).click();
+	await expect(page).toHaveURL(/\/lineage\/datasets\/silver%24features$/);
+	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+});
+
+test('governed search finds by column (why-chip) and opens the hit detail page', async ({
+	page,
+}) => {
+	await page.goto('/lineage/datasets');
+	await page.getByLabel('search').fill('embed');
+	const hit = page.getByRole('listbox').getByRole('button');
+	await expect(hit).toContainText('silver$features');
+	await expect(hit).toContainText('column:embedding'); // the match-reason chip
+	await hit.click();
+	await expect(page).toHaveURL(/\/lineage\/datasets\/silver%24features$/);
+	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+});
+
+test('dataset detail: creator, schema time-travel, upstream/downstream, runs with pins', async ({
+	page,
+}) => {
+	await page.goto('/lineage/datasets/silver%24features');
+	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+
+	// Creator: who ORIGINATED the table (verified catalog principal), loaded eagerly.
+	await expect(page.getByText('user:founder')).toBeVisible({ timeout: 15_000 });
+
+	// Schema time-travel: latest (v2) carries the embedding column; stepping back to v1 drops it.
+	await page.getByRole('button', { name: 'Schema', exact: false }).click();
+	await expect(page.locator('.fname', { hasText: 'embedding' })).toBeVisible();
+	await page.getByRole('button', { name: 'v1', exact: true }).click();
+	await expect(page.locator('.fname', { hasText: 'embedding' })).toHaveCount(0);
+	await expect(page.locator('.fname')).toHaveText('id');
+
+	// Upstream / downstream from the backend's own neighbor endpoints, as sibling-detail links.
+	await expect(page.getByText('Upstream')).toBeVisible();
+	await expect(page.getByRole('link', { name: 'bronze$events' })).toBeVisible();
+	await expect(page.getByText('Downstream')).toBeVisible();
+	await expect(page.getByRole('link', { name: 'gold$catalog' })).toBeVisible();
+
+	// A producing run reveals its pinned input versions on demand — reproducibility (#115).
+	await expect(page.getByText('bronze$events@1')).toBeHidden();
+	await page.getByRole('button', { name: 'reads' }).click();
+	await expect(page.getByText('bronze$events@1')).toBeVisible();
+
+	// The upstream link navigates to that dataset's own detail page.
+	await page.getByRole('link', { name: 'bronze$events' }).click();
+	await expect(page).toHaveURL(/\/lineage\/datasets\/bronze%24events$/);
 	await expect(page.getByRole('heading', { name: 'bronze$events' })).toBeVisible();
 });
 
-test('the Read by panel lazily loads the read-audit log for the selected dataset (#41)', async ({
+test('the Read by panel lazily loads the read-audit log for the dataset (#41)', async ({
 	page,
 }) => {
-	await page.goto('/lineage');
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-
-	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
-	await page.getByRole('tab', { name: 'Details' }).click();
+	await page.goto('/lineage/datasets/silver%24features');
 	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+	// Wait for a client-fetched fact first — it proves hydration finished, so the toggle click
+	// below lands on a live handler (an SSR-only button swallows it).
+	await expect(page.getByText('user:founder')).toBeVisible({ timeout: 15_000 });
 
 	// Collapsed + lazy: the reader is not fetched/shown until the section is opened.
 	await expect(page.getByText('user:alice')).toBeHidden();
@@ -231,94 +343,101 @@ test('the Read by panel lazily loads the read-audit log for the selected dataset
 	await expect(page.getByText('3 reads')).toBeVisible();
 });
 
-test('a producing run reveals its pinned input versions on demand — reproducibility (#115)', async ({
+test('governance: tag add/remove and description edit round-trip on the detail page', async ({
 	page,
 }) => {
-	await page.goto('/lineage');
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
+	await page.goto('/lineage/datasets/silver%24features');
+	const panel = page.locator('.governance');
+	await expect(panel.locator('.tag', { hasText: 'layer=silver' })).toBeVisible({ timeout: 15_000 });
 
-	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
-	await page.getByRole('tab', { name: 'Details' }).click();
-	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
+	// Add a governance tag — the chip appears from the write response.
+	await panel.getByLabel('Add governance tag').fill('pii');
+	await panel.locator('.tag-add button').click();
+	await expect(panel.locator('.tag', { hasText: 'pii' })).toBeVisible();
+	await expect(panel.locator('.attribution')).toContainText('alice');
 
-	// Lazy: the pin is not shown until the run's "reads" toggle is opened (kept off the hot board).
-	await expect(page.getByText('bronze$events@1')).toBeHidden();
-	await page.getByRole('button', { name: 'reads' }).click();
-	// The pinned READ version the run consumed — "which feature version produced this output".
-	await expect(page.getByText('bronze$events@1')).toBeVisible();
+	// Remove it again — the chip disappears.
+	await panel.locator('.tag', { hasText: 'pii' }).locator('.tag-x').click();
+	await expect(panel.locator('.tag', { hasText: 'pii' })).toHaveCount(0);
+
+	// Description: placeholder → edit → saved text renders.
+	await panel.locator('.desc').click();
+	await panel.locator('textarea').fill('Daily silver feature table');
+	await panel.getByRole('button', { name: 'Save' }).click();
+	await expect(panel.locator('.desc')).toContainText('Daily silver feature table');
 });
 
-test('the detail panel shows the creator and steps schema through Lance versions (#24)', async ({
+// ---- Jobs (list + detail) ----
+
+test('jobs view lists compute identities and row-links to the per-job detail page', async ({
 	page,
 }) => {
-	await page.goto('/lineage');
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
+	await page.goto('/lineage/jobs');
+	const rows = page.locator('tbody tr');
+	await expect(rows).toHaveCount(1, { timeout: 15_000 });
+	await expect(page.getByRole('link', { name: 'embed_features' })).toBeVisible();
 
-	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
-	await page.getByRole('tab', { name: 'Details' }).click();
-	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
-
-	// Creator: who ORIGINATED the table (verified catalog principal), loaded eagerly.
-	await expect(page.getByText('user:founder')).toBeVisible();
-
-	// Schema time-travel: latest (v2) carries the embedding column; stepping back to v1 drops it.
-	await page.getByRole('button', { name: 'Schema', exact: false }).click();
-	await expect(page.locator('.fname', { hasText: 'embedding' })).toBeVisible();
-	await page.getByRole('button', { name: 'v1', exact: true }).click();
-	await expect(page.locator('.fname', { hasText: 'embedding' })).toHaveCount(0);
-	await expect(page.locator('.fname')).toHaveText('id');
+	await page.getByRole('link', { name: 'embed_features' }).click();
+	await expect(page).toHaveURL(/\/lineage\/jobs\/ray-jobs\/embed_features$/);
+	await expect(page.getByRole('heading', { name: 'ray-jobs/embed_features' })).toBeVisible();
 });
 
-test('browse landing lists datasets from /datasets, filters, and focuses on click', async ({
+test('job detail: latest runs, read/write datasets, and the latest event facets', async ({
 	page,
 }) => {
-	await page.goto('/lineage');
-	// Browse is the default aside tab — the governed /datasets catalog renders as a filterable list, so a
-	// visitor can start with no dataset name in hand (GOAL 4 A3).
-	const rows = page.locator('.browse-row');
-	await expect(rows).toHaveCount(4, { timeout: 15_000 });
-	await expect(page.locator('.browse-name', { hasText: 'raw_events' })).toBeVisible();
+	await page.goto('/lineage/jobs/ray-jobs/embed_features');
+	await expect(page.getByRole('heading', { name: 'ray-jobs/embed_features' })).toBeVisible();
 
-	// Filtering narrows the list to matches (by name / namespace / tag).
-	await page.getByLabel('Filter datasets').fill('silver');
+	// Latest runs: only THIS job's runs from the board (r-1), state + progress folded.
+	await expect(page.getByText('RUNNING 1/3')).toBeVisible({ timeout: 15_000 });
+	await expect(page.locator('.runid', { hasText: 'r-1' })).toBeVisible();
+	await expect(page.locator('.runid', { hasText: 'r-2' })).toHaveCount(0); // the other job's run is not shown
+
+	// Reads / writes folded from the job's events, linking to dataset detail pages.
+	await expect(page.getByText('Reads', { exact: true })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'bronze$events' }).first()).toBeVisible();
+	await expect(page.getByText('Writes', { exact: true })).toBeVisible();
+	await expect(page.getByRole('link', { name: 'silver$features' }).first()).toBeVisible();
+
+	// Facets: the latest event's run/job facets render spec-true.
+	await expect(page.locator('.json').first()).toContainText('processing_engine');
+	await expect(page.locator('.json').first()).toContainText('jobType');
+});
+
+// ---- Runs ----
+
+test('runs view: DataTable board with state badges, and a drill-in with error + pins', async ({
+	page,
+}) => {
+	await page.goto('/lineage/runs');
+	const rows = page.locator('tbody tr');
+	await expect(rows).toHaveCount(2, { timeout: 15_000 });
+	await expect(page.getByText('RUNNING 1/3')).toBeVisible();
+	await expect(page.getByText('FAIL', { exact: true })).toBeVisible();
+
+	// The failed run's drill-in: error strip + outputs; the pins load lazily via "reads".
+	await page.getByRole('button', { name: 'r-2' }).click();
+	const drill = page.locator('.drill');
+	await expect(drill).toBeVisible();
+	await expect(drill.getByText('quality gate: row_count below floor')).toBeVisible();
+
+	// The running run's drill-in shows its outputs + reproducibility pins on demand.
+	await page.getByRole('button', { name: 'r-1' }).click();
+	await expect(drill.getByRole('link', { name: 'silver$features' })).toBeVisible();
+	await drill.getByRole('button', { name: 'reads' }).click();
+	await expect(drill.getByText('bronze$events@1')).toBeVisible();
+
+	// The text filter narrows the board.
+	await page.getByPlaceholder('Filter runs…').fill('promote');
 	await expect(rows).toHaveCount(1);
-	await expect(page.locator('.browse-name')).toHaveText('silver$features');
-
-	// Clicking a dataset focuses it — the row is marked selected and Details reflects it.
-	await rows.first().click();
-	await expect(page.locator('.browse-row.on')).toHaveCount(1);
-	await page.getByRole('tab', { name: 'Details' }).click();
-	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
 });
 
-test('governed search finds by column and focuses the hit; jobs tab lists compute identities', async ({
+// ---- Columns (first-class view) ----
+
+test('columns view: deep-link renders the field graph; clicking a field opens provenance/impact with the masking cue', async ({
 	page,
 }) => {
-	// ASSERTS (Batch 12): the SearchBar (packages/ui) drives the governed /search endpoint — a
-	// column-tier hit renders its WHY-chip (column:embedding) and selecting it focuses the dataset;
-	// the new Jobs tab lists the governed compute identities with clickable outputs.
-	await page.goto('/lineage');
-	await page.getByLabel('search').fill('embed');
-	const hit = page.getByRole('listbox').getByRole('button');
-	await expect(hit).toContainText('silver$features');
-	await expect(hit).toContainText('column:embedding'); // the match-reason chip
-	await hit.click();
-	await page.getByRole('tab', { name: 'Details' }).click();
-	await expect(page.getByRole('heading', { name: 'silver$features' })).toBeVisible();
-
-	await page.getByRole('tab', { name: 'Jobs (1)' }).click();
-	// Scope to the jobs list's own class — the status board's run row ALSO contains this job name
-	// and bits-ui keeps inactive tab content in the DOM (the Batch 12 collision lesson).
-	await expect(page.locator('.job-name', { hasText: 'embed_features' })).toBeVisible();
-});
-
-test('columns view: clicking a field opens its provenance/impact panel with the masking cue', async ({
-	page,
-}) => {
-	// ASSERTS (#24 field lineage): the two per-field endpoints (columns/{field}/upstream|downstream) now
-	// have a frontend caller. Clicking a ColumnNode opens the side panel listing that field's direct
-	// provenance + impact, each with its transformation kind, and the same red PII cue on a masking hop.
-	// Column subgraph for silver$features: a masking derivation into pii_hash + a plain hop out of it.
+	// Column subgraph for silver$features: a masking derivation into pii_hash + a plain hop out.
 	const COLGRAPH = {
 		root: 'silver$features',
 		columns: [
@@ -347,8 +466,8 @@ test('columns view: clicking a field opens its provenance/impact panel with the 
 			},
 		],
 	};
-	// Registered after beforeEach → these more-specific routes win for their URLs (columns graph vs the
-	// two per-field neighbor endpoints), leaving every other /api call to the shared mock.
+	// Registered after beforeEach → these more-specific routes win for their URLs, leaving every
+	// other /api call to the shared mock.
 	await page.route('**/datasets/*/columns', (route) => json(route, COLGRAPH));
 	await page.route('**/columns/*/upstream', (route) =>
 		json(route, {
@@ -365,11 +484,8 @@ test('columns view: clicking a field opens its provenance/impact panel with the 
 		}),
 	);
 
-	await page.goto('/lineage');
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-	// Focus silver$features, then switch to the Columns plane — the field-to-field subgraph renders.
-	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
-	await page.getByRole('tab', { name: 'Columns' }).click();
+	// Deep-link with ?dataset= (the detail pages' "column lineage" link shape).
+	await page.goto('/lineage/columns?dataset=silver%24features');
 	const piiNode = page.locator('.svelte-flow__node').filter({ hasText: 'pii_hash' });
 	await expect(piiNode).toBeVisible({ timeout: 15_000 });
 
@@ -390,45 +506,68 @@ test('columns view: clicking a field opens its provenance/impact panel with the 
 	await expect(panel.locator('.fp-field')).toHaveText('pii_email');
 });
 
-test('status board renders live runs from the workspace lib (@rask/ui StatusBoard)', async ({
-	page,
-}) => {
-	// ASSERTS (Batch 14): the EXTRACTED StatusBoard renders real rows under the host app — the
-	// Batch 12 lesson was that a workspace-lib component can compile clean yet break only at
-	// render/interaction time, so the extraction is pinned by rendered output, not just svelte-check.
-	// One RUNNING row (progress label from progress_done/total) + one FAIL row (error strip).
-	await page.goto('/lineage');
-	await page.getByRole('tab', { name: 'Status (2)' }).click();
-	await expect(page.getByText('embed_features', { exact: false }).first()).toBeVisible();
-	await expect(page.getByText('RUNNING 1/3')).toBeVisible();
-	await expect(page.getByText('FAIL', { exact: true })).toBeVisible();
-	await expect(page.getByText('quality gate: row_count below floor')).toBeVisible();
-	await expect(page.getByText('→ silver$features')).toBeVisible();
+test('columns view without a dataset explains how to pick one', async ({ page }) => {
+	await page.goto('/lineage/columns');
+	await expect(page.getByText('Pick a dataset above', { exact: false })).toBeVisible();
+	await expect(page.getByLabel('Dataset')).toBeVisible();
 });
 
-test('governance: tag add/remove and description edit round-trip in the details panel', async ({
-	page,
-}) => {
+// ---- perf numbers (reported by the suite run) ----
+
+test('graph + columns layout builds stay cheap (measured, printed to stdout)', async ({ page }) => {
+	// Fill the graph to its MAX_GRAPH cap (60 datasets in one long derivation chain) so the
+	// measured layout-build number is the worst case the canvas will render, not the 4-node demo.
+	const BIG_NODES = Array.from({ length: 60 }, (_, i) => ({
+		id: `ds_${i}`,
+		namespace: 'perf',
+		source_uri: `s3://lakehouse/ds_${i}`,
+		tags: [],
+	}));
+	const BIG_EDGES = Array.from({ length: 59 }, (_, i) => ({
+		source: `ds_${i + 1}`,
+		target: `ds_${i}`,
+		kind: 'derived_from',
+	}));
+	await page.route(
+		(url) => url.pathname.endsWith('/lineage/api/datasets'),
+		(route) =>
+			json(route, {
+				datasets: BIG_NODES.map((n) => ({ name: n.id, namespace: n.namespace, tags: [] })),
+				total: 60,
+			}),
+	);
+	await page.route('**/lineage/api/datasets/*/graph', (route) =>
+		json(route, { root: 'ds_0', nodes: BIG_NODES, edges: BIG_EDGES }),
+	);
 	await page.goto('/lineage');
-	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-	await page.locator('.svelte-flow__node').filter({ hasText: 'silver$features' }).click();
-	await page.getByRole('tab', { name: 'Details' }).click();
-	const panel = page.locator('.governance');
-	await expect(panel.locator('.tag', { hasText: 'layer=silver' })).toBeVisible();
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(60, { timeout: 20_000 });
+	const graphMs = (await page.locator('header .perf').textContent()) ?? '?';
 
-	// Add a governance tag — the chip appears from the write response.
-	await panel.getByLabel('Add governance tag').fill('pii');
-	await panel.locator('.tag-add button').click();
-	await expect(panel.locator('.tag', { hasText: 'pii' })).toBeVisible();
-	await expect(panel.locator('.attribution')).toContainText('alice');
+	await page.route('**/datasets/*/columns', (route) =>
+		json(route, {
+			root: 'silver$features',
+			columns: [
+				{ dataset: 'bronze$events', field: 'pii_email', type: 'string' },
+				{ dataset: 'silver$features', field: 'pii_hash', type: 'string' },
+			],
+			edges: [
+				{
+					source_dataset: 'bronze$events',
+					source_field: 'pii_email',
+					target_dataset: 'silver$features',
+					target_field: 'pii_hash',
+					transformation_type: 'MASKED',
+					transformation_subtype: 'sha256',
+					masking: true,
+				},
+			],
+		}),
+	);
+	await page.goto('/lineage/columns?dataset=silver%24features');
+	await expect(page.locator('.svelte-flow__node').first()).toBeVisible({ timeout: 15_000 });
+	const colMs = (await page.locator('.canvas .perf').textContent()) ?? '?';
 
-	// Remove it again — the chip disappears.
-	await panel.locator('.tag', { hasText: 'pii' }).locator('.tag-x').click();
-	await expect(panel.locator('.tag', { hasText: 'pii' })).toHaveCount(0);
-
-	// Description: placeholder → edit → saved text renders.
-	await panel.locator('.desc').click();
-	await panel.locator('textarea').fill('Daily silver feature table');
-	await panel.getByRole('button', { name: 'Save' }).click();
-	await expect(panel.locator('.desc')).toContainText('Daily silver feature table');
+	console.log(`[perf] graph layout build: ${graphMs}; columns layout build: ${colMs}`);
+	expect(graphMs).toMatch(/ms$/);
+	expect(colMs).toMatch(/ms$/);
 });

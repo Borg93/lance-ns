@@ -2,7 +2,7 @@
 	// The dataset panel's governance section (#49): curated tag chips (add/remove) + an editable
 	// description, with the last-writer attribution the backend stamps. Self-contained: fetches
 	// /datasets/{name}/governance itself (latest-wins on dataset switches) and refetches after writes,
-	// so LineageExplorer only mounts it with the selected dataset name.
+	// so the dataset detail page only mounts it with the route's dataset name.
 	import { Plus, X } from '@lucide/svelte';
 	import { addDatasetTag, fetchGovernance, removeDatasetTag, setDatasetDescription } from './api';
 	import type { DatasetGovernance } from './types';

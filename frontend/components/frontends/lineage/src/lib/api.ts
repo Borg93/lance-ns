@@ -5,11 +5,11 @@ import type {
 	DatasetSchema,
 	ColumnNeighbors,
 	Datasets,
-	DemoDatasets,
 	Events,
 	Jobs,
 	LineageGraph,
 	Namespaces,
+	Neighbors,
 	Producers,
 	Readers,
 	RunInputs,
@@ -46,8 +46,12 @@ export const fetchEvents = (opts: { after?: number; limit?: number; summary?: bo
 	const qs = p.toString();
 	return getJSON<Events>(`events${qs ? `?${qs}` : ''}`);
 };
-export const fetchDemo = () => getJSON<DemoDatasets>('demo/datasets');
 export const fetchRuns = () => getJSON<Runs>('runs');
+// Direct dataset-level neighbors (the backend's own /upstream + /downstream reads) — what a dataset
+// was derived from / what derives from it, without assembling the whole subgraph client-side.
+export const fetchUpstream = (name: string) => getJSON<Neighbors>(`datasets/${enc(name)}/upstream`);
+export const fetchDownstream = (name: string) =>
+	getJSON<Neighbors>(`datasets/${enc(name)}/downstream`);
 // The inputs a run consumed, each with the version it PINNED (#115 D1 reproducibility) — "which exact
 // feature versions produced this output". Fetched per-run on demand (kept off the hot /runs board to
 // avoid N+1), so it's a plain read: null on any error, an empty list when the run pinned nothing.
@@ -82,6 +86,12 @@ export const fetchColumnUpstream = (name: string, field: string) =>
 	getJSON<ColumnNeighbors>(`datasets/${enc(name)}/columns/${enc(field)}/upstream`);
 export const fetchColumnDownstream = (name: string, field: string) =>
 	getJSON<ColumnNeighbors>(`datasets/${enc(name)}/columns/${enc(field)}/downstream`);
+
+// Status-aware list reads for the DataTable pages — a governed stack without a session must render
+// "sign in" (401), not the same empty state as an open stack with no data (the TableRegistry pattern).
+export const listDatasets = () => requestJSON<Datasets>('/api', 'datasets?limit=500');
+export const listJobs = () => requestJSON<Jobs>('/api', 'jobs');
+export const listRuns = () => requestJSON<Runs>('/api', 'runs');
 
 // Governance metadata (#49) — the writes need the status (401 sign-in vs 403 rung-denial vs offline),
 // so they use the shared status-aware helper instead of getJSON's null-on-error.

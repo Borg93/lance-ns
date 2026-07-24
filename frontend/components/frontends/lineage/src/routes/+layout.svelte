@@ -49,7 +49,19 @@
 	{me}
 	{meLoading}
 >
-	<!-- No scroll wrapper here: the explorer is a full-height SvelteFlow canvas that manages its
-	     own panels' scrolling and needs the shell's sized flex chain intact. -->
-	{@render children()}
+	<!-- The wrapper scrolls the list/detail pages; the Graph + Columns canvases set height:100%
+	     inside it (the wrapper is a sized flex item, so they fill it and never scroll). -->
+	<div class="zone-scroll">
+		{@render children()}
+	</div>
 </AppShell>
+
+<style>
+	.zone-scroll {
+		display: flex;
+		flex-direction: column;
+		flex: 1 1 0;
+		min-height: 0;
+		overflow-y: auto;
+	}
+</style>

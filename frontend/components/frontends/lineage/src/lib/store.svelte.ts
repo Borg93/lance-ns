@@ -1,130 +1,59 @@
-import {
-	fetchColumnDownstream,
-	fetchColumnGraph,
-	fetchColumnUpstream,
-	fetchDatasets,
-	fetchDemo,
-	fetchEvents,
-	fetchGraph,
-	fetchJobs,
-	fetchNamespaces,
-	fetchProducers,
-	fetchRuns,
-} from './api';
-import {
-	KNOWN,
-	type ColumnGraph,
-	type ColumnNeighbors,
-	type DatasetSummary,
-	type DemoDataset,
-	type EventRecord,
-	type JobSummary,
-	type GraphEdge,
-	type GraphNode,
-	type ProducerInfo,
-	type RunStatus,
-} from './types';
+import { fetchDatasets, fetchEvents, fetchGraph, fetchProducers, fetchRuns } from './api';
+import type { EventRecord, GraphEdge, GraphNode, ProducerInfo, RunStatus } from './types';
 
-/** Concurrency cap for the per-dataset fan-outs — the catalog can list up to 500 datasets, and an
- * unbounded Promise.all would fire them ALL at once every 2s tick (and the browser's per-host
- * connection queue would eat into each request's 8s timeout while still queued — review
- * 2026-07-11). Batches of 8 keep the fan-out concurrent but bounded. */
+/** Concurrency cap for the per-dataset fan-outs — an unbounded Promise.all would fire them ALL at
+ * once every poll tick (and the browser's per-host connection queue would eat into each request's 8s
+ * timeout while still queued — review 2026-07-11). Batches of 8 keep the fan-out concurrent but
+ * bounded. */
 const POOL = 8;
 
-async function inPools<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
-	const out: R[] = [];
-	for (let i = 0; i < items.length; i += POOL) {
-		out.push(...(await Promise.all(items.slice(i, i + POOL).map(fn))));
-	}
-	return out;
-}
+/** Hard cap on the datasets the DAG explorer assembles per tick. The graph is a per-dataset
+ * /producers + /graph fan-out; an uncapped catalog (≤500) would mean hundreds of requests AND a
+ * SvelteFlow canvas too dense to read — the full estate belongs to the paginated Datasets table,
+ * not the canvas. The header shows `capped` honestly when the estate exceeds the window. */
+const MAX_GRAPH = 60;
 
-/** Live medallion state, polled from the lineage service. Svelte 5 runes in a class. */
+/** How many recent events feed the jobs plane (job identity/state/edges are folded from these). */
+const EVENTS_WINDOW = 200;
+
+/** Live lineage state for the DAG explorer, polled from the lineage service. Svelte 5 runes in a
+ * class. List pages (Datasets / Jobs / Runs) fetch their own endpoints — this store only carries
+ * what the graph view renders. */
 export class LineageState {
 	nodes = $state<GraphNode[]>([]);
 	edges = $state<GraphEdge[]>([]);
 	producers = $state<Record<string, ProducerInfo[]>>({});
 	events = $state<EventRecord[]>([]);
-	datasets = $state<DemoDataset[]>([]);
-	catalog = $state<DatasetSummary[]>([]);
 	runs = $state<RunStatus[]>([]);
-	jobs = $state<JobSummary[]>([]);
-	namespaceList = $state<string[]>([]);
-	lastUpdated = $state('');
+	/** Total datasets the governed catalog reports (may exceed the MAX_GRAPH window). */
+	total = $state(0);
+	/** True when the estate is larger than the graph window — the header says so honestly. */
+	capped = $state(false);
+	/** True once the FIRST poll settled (success or failure) — before that the UI says "connecting",
+	 * never "waiting/offline" (the old header claimed WAITING while the canvas showed datasets). */
+	settled = $state(false);
 	online = $state(false);
-	selected = $state<string | null>(null);
-	columnGraph = $state<ColumnGraph | null>(null);
-	/** The field the user clicked in the Columns plane — drives the field-level provenance/impact panel
-	 * (#24). Kept separate from ``selected`` (a dataset handle) so a column click never pollutes the
-	 * dataset-scoped Details/upstream panels (bug hunt 2026-07-13). */
-	selectedColumn = $state<{ dataset: string; field: string } | null>(null);
-	columnUpstream = $state<ColumnNeighbors | null>(null);
-	columnDownstream = $state<ColumnNeighbors | null>(null);
+	lastUpdated = $state('');
 
-	/** Overlap guard: a slow tick must not stack behind the 2s interval (§2 perf, 2026-07-11). */
+	/** Overlap guard: a slow tick must not stack behind the poll interval (§2 perf, 2026-07-11). */
 	#polling = false;
 
-	/** Monotonic request id so a slow earlier column fetch can't overwrite a newer dataset's graph. */
-	#colReq = 0;
-	/** Same latest-wins guard, for the per-FIELD neighbor fetches (a slow earlier field's response must
-	 * not overwrite a newer selection's provenance/impact). */
-	#fieldReq = 0;
-
-	/** Load the column-level lineage subgraph for one dataset (the field-to-field view). Latest-wins:
-	 * only the most recent call's response is applied (guards the async race when the selection changes
-	 * mid-flight — bug hunt 2026-07-13). */
-	async loadColumns(name: string): Promise<void> {
-		const req = ++this.#colReq;
-		const graph = await fetchColumnGraph(name);
-		if (req === this.#colReq) this.columnGraph = graph;
-	}
-
-	/** Load one FIELD's provenance (upstream) + impact (downstream) — the two per-field endpoints (#24).
-	 * Mirrors ``loadColumns``'s latest-wins guard so switching the focused column mid-flight can't apply a
-	 * stale field's neighbors. */
-	async loadColumnNeighbors(name: string, field: string): Promise<void> {
-		const req = ++this.#fieldReq;
-		// Clear FIRST (audit B2): the neighbors were previously left in place across a selection change,
-		// so on a slow backend the panel rendered the PREVIOUS field's provenance under the NEW field's
-		// header — and a failed fetch rendered the affirmative lie "No upstream fields — a source column."
-		// null now means "unknown/loading", which the panel distinguishes from an empty result.
-		this.columnUpstream = null;
-		this.columnDownstream = null;
-		const [upstream, downstream] = await Promise.all([
-			fetchColumnUpstream(name, field),
-			fetchColumnDownstream(name, field),
-		]);
-		if (req === this.#fieldReq) {
-			this.columnUpstream = upstream;
-			this.columnDownstream = downstream;
-		}
-	}
-
 	async poll(): Promise<void> {
-		// Overlap guard + per-request timeouts (api.ts): before 2026-07-11 a tick was 1+N+P+3
-		// SEQUENTIAL fetches with no timeout, so slow backends stacked ticks unboundedly. Now the
-		// per-dataset fan-outs run concurrently (Promise.all) and a tick that is still in flight
-		// simply skips the next interval firing.
 		if (this.#polling) return;
 		this.#polling = true;
 		try {
-			// Discover the datasets to render from the governed /datasets catalog (GOAL 4 A1) rather
-			// than a hardcoded list; fall back to the known medallion names when discovery is
-			// empty/unavailable so the demo still renders offline.
-			const cat = await fetchDatasets({ limit: 500 });
-			// HARD-FAILURE GUARD (audit B1). `getJSON` maps timeout / 4xx / 5xx / network error to null —
-			// indistinguishable from "empty". Every assignment below used to be an unconditional `?? []`,
-			// so ONE failed tick blanked the whole UI: the graph emptied, the counters animated to zero,
-			// the empty states fabricated instructions ("run the cascade") from a swallowed error, and the
-			// reconcile effect rebuilt its position map from the emptied nodes — permanently destroying the
-			// user's dragged node positions. A failed discovery now PRESERVES the last good state and just
-			// reports offline; the header's "waiting" is then the honest signal it always claimed to be.
+			// Discover the datasets to render from the governed /datasets catalog. HARD-FAILURE GUARD
+			// (audit B1): `getJSON` maps timeout / 4xx / 5xx / network error to null — indistinguishable
+			// from "empty". A failed discovery PRESERVES the last good state and reports offline; it
+			// never blanks the canvas (or destroys dragged node positions) on a blip.
+			const cat = await fetchDatasets({ limit: MAX_GRAPH });
 			if (cat === null) {
 				this.online = false;
 				return;
 			}
-			this.catalog = cat.datasets ?? [];
-			const names = this.catalog.length ? this.catalog.map((d) => d.name) : [...KNOWN];
+			this.total = cat.total ?? cat.datasets.length;
+			this.capped = this.total > cat.datasets.length;
+			const names = cat.datasets.map((d) => d.name);
 
 			const producers: Record<string, ProducerInfo[]> = {};
 			const producerLists = await inPools(names, (id) => fetchProducers(id));
@@ -136,13 +65,10 @@ export class LineageState {
 
 			const nodeMap = new Map<string, GraphNode>();
 			const edgeSet = new Set<string>();
-			const [graphs, events, demo, runs, jobs, namespaces] = await Promise.all([
+			const [graphs, events, runs] = await Promise.all([
 				inPools(present, (id) => fetchGraph(id)),
-				fetchEvents(),
-				fetchDemo(),
+				fetchEvents({ limit: EVENTS_WINDOW, summary: true }),
 				fetchRuns(),
-				fetchJobs(),
-				fetchNamespaces(),
 			]);
 			for (const g of graphs) {
 				if (!g) continue;
@@ -151,13 +77,9 @@ export class LineageState {
 			}
 
 			// Assign only what actually RESOLVED (audit B1). A null sub-fetch means "this slice failed
-			// this tick", NOT "this slice is now empty" — keeping the prior value is both truthful and
-			// what the user expects (a transient blip must not erase the feed they are reading).
+			// this tick", NOT "this slice is now empty" — a transient blip must not erase live state.
 			if (runs) this.runs = runs.runs ?? [];
-			if (jobs) this.jobs = jobs.jobs ?? [];
-			if (namespaces) this.namespaceList = namespaces.namespaces ?? [];
 			if (events) this.events = events.events ?? [];
-			if (demo) this.datasets = demo.datasets ?? [];
 
 			// The graph is rebuilt from the per-dataset fan-out. Replace it only if at least one graph
 			// fetch succeeded — otherwise every graph call failed and an empty nodeMap would wipe the
@@ -174,10 +96,19 @@ export class LineageState {
 				});
 			}
 
-			this.online = events !== null || present.length > 0;
+			this.online = true;
 			this.lastUpdated = new Date().toLocaleTimeString();
 		} finally {
+			this.settled = true;
 			this.#polling = false;
 		}
 	}
+}
+
+async function inPools<T, R>(items: T[], fn: (item: T) => Promise<R>): Promise<R[]> {
+	const out: R[] = [];
+	for (let i = 0; i < items.length; i += POOL) {
+		out.push(...(await Promise.all(items.slice(i, i + POOL).map(fn))));
+	}
+	return out;
 }

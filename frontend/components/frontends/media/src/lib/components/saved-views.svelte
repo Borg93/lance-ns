@@ -2,10 +2,15 @@
 	// Saved-views control (next to the search bar): save the current query as a named view,
 	// and re-apply / delete saved ones. Thin view over the savedViews store; the query
 	// logic lives in $lib/saved-views. Views are scoped to the active dataset.
-	import { Bookmark, Check, X } from 'lucide-svelte';
+	//
+	// A bits-ui Popover, like the zone's other header menus (Settings, Filters, Help), so
+	// the four triggers share one open/close behaviour and one surface treatment.
+	import { Bookmark, Check, X } from '@lucide/svelte';
+	import { Popover } from 'bits-ui';
 	import { activeView, type SearchSpec } from '@lance/api';
 	import { savedViews } from '$lib/saved-views.svelte';
-	import { Button, Input } from '@lance/ui';
+	import { Badge, Button, buttonVariants } from '@rask/ui';
+	import { Input } from '@lance/ui';
 
 	let { spec, onapply }: { spec: SearchSpec; onapply: (s: SearchSpec) => void } = $props();
 
@@ -25,32 +30,37 @@
 	}
 </script>
 
-<div class="relative">
-	<Button variant="outline" size="sm" onclick={() => (open = !open)} title="Saved views">
-		<Bookmark class="size-3.5" />
-		Views{views.length ? ` (${views.length})` : ''}
-	</Button>
+<Popover.Root bind:open>
+	<Popover.Trigger class={buttonVariants({ variant: 'outline', size: 'sm' })} title="Saved views">
+		<Bookmark />
+		Views
+		{#if views.length}
+			<Badge variant="secondary" class="px-1.5 py-0 text-[0.7rem]">{views.length}</Badge>
+		{/if}
+	</Popover.Trigger>
 
-	{#if open}
-		<div
-			class="border-border bg-card absolute top-full right-0 z-20 mt-1 w-64 rounded-md border p-2 shadow-md"
+	<Popover.Portal>
+		<Popover.Content
+			sideOffset={6}
+			align="end"
+			class="border-border bg-popover text-popover-foreground z-50 w-64 rounded-lg border p-2 text-xs shadow-md"
 		>
 			<div class="flex gap-1">
 				<Input
 					bind:value={name}
 					placeholder="Save current view as…"
-					class="h-7"
+					class="h-7 rounded-lg text-xs"
 					onkeydown={(e) => e.key === 'Enter' && save()}
 				/>
-				<Button size="sm" disabled={!name.trim()} onclick={save} title="Save view">
-					<Check class="size-3.5" />
+				<Button size="icon-sm" disabled={!name.trim()} onclick={save} title="Save view">
+					<Check />
 				</Button>
 			</div>
 
 			{#if views.length}
 				<ul class="mt-2 flex flex-col gap-0.5">
 					{#each views as v (v.name)}
-						<li class="hover:bg-muted/60 flex items-center gap-1 rounded">
+						<li class="hover:bg-muted/60 flex items-center gap-1 rounded-md">
 							<button
 								class="flex-1 truncate px-2 py-1 text-left text-xs"
 								title={v.spec.q || '(browse)'}
@@ -58,19 +68,22 @@
 							>
 								{v.name}
 							</button>
-							<button
-								class="text-muted-foreground hover:text-destructive px-1"
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								class="hover:text-destructive"
 								title="Delete view"
+								aria-label="Delete view {v.name}"
 								onclick={() => savedViews.remove(v.name, dataset)}
 							>
-								<X class="size-3" />
-							</button>
+								<X />
+							</Button>
 						</li>
 					{/each}
 				</ul>
 			{:else}
-				<p class="text-muted-foreground mt-2 px-1 text-[11px]">No saved views yet.</p>
+				<p class="text-muted-foreground mt-2 px-1 text-xs">No saved views yet.</p>
 			{/if}
-		</div>
-	{/if}
-</div>
+		</Popover.Content>
+	</Popover.Portal>
+</Popover.Root>

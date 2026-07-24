@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { Popover } from 'bits-ui';
-	import { Settings2 } from 'lucide-svelte';
+	import { Settings2 } from '@lucide/svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
+	import { buttonVariants } from '@rask/ui';
+	import { Select } from '@rask/ui/select';
 	import {
 		Field,
-		Select,
 		Switch,
 		Slider,
 		RadioGroup,
@@ -87,10 +88,10 @@
 
 <Popover.Root>
 	<Popover.Trigger
-		class="border-border bg-background text-muted-foreground hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition-colors"
+		class={buttonVariants({ variant: 'outline', size: 'sm' })}
 		title="Search settings — result count, reranking, fusion balance, match style"
 	>
-		<Settings2 class="size-3.5" />
+		<Settings2 />
 		<span>Settings</span>
 	</Popover.Trigger>
 
@@ -98,15 +99,10 @@
 		<Popover.Content
 			sideOffset={6}
 			align="end"
-			class="border-border bg-card z-50 flex w-[320px] flex-col gap-3 rounded-md border p-4 text-xs shadow-md"
+			class="border-border bg-popover text-popover-foreground z-50 flex w-[320px] flex-col gap-3 rounded-lg border p-4 text-xs shadow-md"
 		>
 			<Field label="Results to return" inline>
-				<Select
-					bind:value={resultN}
-					options={resultOptions}
-					ariaLabel="Results to return"
-					class="w-24"
-				/>
+				<Select bind:value={resultN} options={resultOptions} ariaLabel="Results to return" />
 			</Field>
 
 			<Field label="Rerank results" inline>
@@ -118,12 +114,7 @@
 					description="Cross-encoder re-scores this many top results (the rest keep their order). Smaller = faster, more precise head."
 					inline
 				>
-					<Select
-						bind:value={rerankN}
-						options={rerankOptions}
-						ariaLabel="Rerank candidates"
-						class="w-24"
-					/>
+					<Select bind:value={rerankN} options={rerankOptions} ariaLabel="Rerank candidates" />
 				</Field>
 			{/if}
 
@@ -131,15 +122,15 @@
 				<div class="border-border flex flex-col gap-1.5 border-t pt-3">
 					<div class="flex items-baseline justify-between">
 						<span class="text-foreground text-xs font-medium">Fusion balance</span>
-						<span class="text-muted-foreground text-[11px]">{balanceLabel}</span>
+						<span class="text-muted-foreground text-xs">{balanceLabel}</span>
 					</div>
 					<label class="flex items-center justify-between">
-						<span class="text-muted-foreground text-[11px]">Auto-fuse (RRF)</span>
+						<span class="text-muted-foreground text-xs">Auto-fuse (RRF)</span>
 						<Switch bind:checked={auto} aria-label="Auto-fuse with RRF" />
 					</label>
 					{#if !auto}
 						<Slider bind:value={weightVal} min={0} max={100} step={5} aria-label="Fusion balance" />
-						<div class="text-muted-foreground flex justify-between text-[10px]">
+						<div class="text-muted-foreground flex justify-between text-[0.7rem]">
 							<span>← keyword</span>
 							<span>vector →</span>
 						</div>
@@ -174,7 +165,7 @@
 							aria-label="Voice results: include the anchor's own video"
 						/>
 					</Field>
-					<span class="text-muted-foreground text-[11px]">
+					<span class="text-muted-foreground text-xs">
 						"Find this voice" normally hides matches from the anchor's own video. Applies
 						immediately to an active voice search.
 					</span>

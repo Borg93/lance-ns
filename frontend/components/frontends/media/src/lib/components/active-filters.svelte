@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { activeView, type SearchSpec } from '@lance/api';
-	import { X } from 'lucide-svelte';
+	import { Badge, Button } from '@rask/ui';
+	import { X } from '@lucide/svelte';
 
 	type Props = {
 		spec: SearchSpec;
@@ -52,32 +53,27 @@
 </script>
 
 {#if pills.length}
-	<div class="flex flex-wrap items-center gap-1.5 px-6 pb-3 text-[11px]">
+	<div class="flex flex-wrap items-center gap-1.5 px-6 pb-3 text-xs">
 		<span class="text-muted-foreground">Active filters:</span>
 		{#each pills as p (p.id)}
-			<span
-				class="border-border bg-secondary flex items-center gap-1 rounded-full border px-2 py-0.5 font-medium"
-			>
+			<Badge variant="secondary" class="gap-1 py-0.5 pr-0.5 pl-2">
 				<span class="text-muted-foreground">{p.label}:</span>
 				<span class="max-w-[280px] truncate">{p.value}</span>
-				<button
-					type="button"
+				<Button
+					variant="ghost"
+					size="icon-xs"
+					class="hover:text-destructive size-4 rounded-full"
 					aria-label="Remove {p.label} filter"
 					onclick={() => clear(p)}
-					class="text-muted-foreground hover:text-destructive"
 				>
-					<X class="size-3" />
-				</button>
-			</span>
+					<X />
+				</Button>
+			</Badge>
 		{/each}
 		{#if pills.length > 1}
-			<button
-				type="button"
-				onclick={clearAll}
-				class="text-muted-foreground hover:text-foreground ml-1"
-			>
+			<Button variant="ghost" size="xs" class="text-muted-foreground" onclick={clearAll}>
 				Clear all
-			</button>
+			</Button>
 		{/if}
 	</div>
 {/if}

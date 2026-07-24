@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { Input, Button, type SelectOption } from '@lance/ui';
+	import { Button, Badge, buttonVariants } from '@rask/ui';
+	import { Select } from '@rask/ui/select';
+	import { Input, type SelectOption } from '@lance/ui';
 	import { Popover } from 'bits-ui';
 	import { activeView, listColumns, type SearchSpec, type ColumnInfo } from '@lance/api';
-	import { Filter, X, Eye, EyeOff, Plus } from 'lucide-svelte';
-	import { cn } from '$lib/utils';
+	import { Filter, X, Eye, EyeOff, Plus } from '@lucide/svelte';
 
 	type Props = {
 		spec: SearchSpec;
@@ -81,6 +82,10 @@
 	}
 
 	const visibleCols = $derived(columns.filter((c) => !hidden.has(c.name)));
+	// The builder's column dial, as design-system Select options ("<name> · <type>").
+	const colOptions = $derived<SelectOption[]>(
+		visibleCols.map((c) => ({ value: c.name, label: `${c.name} · ${c.type}` })),
+	);
 
 	// ── Filter builder: column · operator · value → predicate → WHERE ──────
 	const NUMBER_OPS: SelectOption[] = [
@@ -160,21 +165,13 @@
 
 <Popover.Root>
 	<Popover.Trigger
-		class={cn(
-			'border-border bg-background inline-flex h-8 items-center gap-1.5 rounded-md border px-3 text-xs transition-colors',
-			activeCount > 0 ? 'text-foreground' : 'text-muted-foreground',
-			'hover:bg-muted hover:text-foreground data-[state=open]:bg-muted data-[state=open]:text-foreground',
-		)}
+		class={buttonVariants({ variant: 'outline', size: 'sm' })}
 		title="Filter results by any column"
 	>
-		<Filter class="size-3.5" />
+		<Filter />
 		<span>Filters</span>
 		{#if activeCount > 0}
-			<span
-				class="bg-primary text-primary-foreground ml-1 rounded-full px-1.5 text-[10px] font-bold"
-			>
-				{activeCount}
-			</span>
+			<Badge class="px-1.5 py-0 text-[0.7rem]">{activeCount}</Badge>
 		{/if}
 	</Popover.Trigger>
 
@@ -182,20 +179,16 @@
 		<Popover.Content
 			sideOffset={6}
 			align="end"
-			class="border-border bg-card z-50 flex max-h-[75vh] w-[340px] flex-col gap-3 overflow-y-auto rounded-md border p-3 text-xs shadow-md"
+			class="border-border bg-popover text-popover-foreground z-50 flex max-h-[75vh] w-[340px] flex-col gap-3 overflow-y-auto rounded-lg border p-3 text-xs shadow-md"
 		>
 			<div class="flex items-center">
-				<span class="text-muted-foreground text-[11px] font-semibold tracking-wider uppercase">
+				<span class="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
 					Filter results
 				</span>
 				{#if activeCount > 0}
-					<button
-						type="button"
-						onclick={clearAll}
-						class="text-muted-foreground hover:text-foreground ml-auto flex items-center gap-0.5 text-[11px]"
-					>
-						<X class="size-3" /> Clear
-					</button>
+					<Button variant="ghost" size="xs" class="ml-auto" onclick={clearAll}>
+						<X /> Clear
+					</Button>
 				{/if}
 			</div>
 
@@ -203,25 +196,13 @@
 			<div class="flex flex-col gap-1.5">
 				<span class="text-muted-foreground">Add a filter</span>
 				<div class="flex gap-1.5">
-					<select
+					<Select
 						bind:value={colName}
-						aria-label="Column"
-						class="border-border bg-background text-foreground focus-visible:ring-ring h-8 flex-1 rounded-md border px-2 text-xs focus-visible:ring-2 focus-visible:outline-none"
-					>
-						<option value="" disabled>Column…</option>
-						{#each visibleCols as c (c.name)}
-							<option value={c.name}>{c.name} · {c.type}</option>
-						{/each}
-					</select>
-					<select
-						bind:value={op}
-						aria-label="Operator"
-						class="border-border bg-background text-foreground focus-visible:ring-ring h-8 w-28 rounded-md border px-2 text-xs focus-visible:ring-2 focus-visible:outline-none"
-					>
-						{#each opOptions as o (o.value)}
-							<option value={o.value}>{o.label}</option>
-						{/each}
-					</select>
+						options={colOptions}
+						placeholder="Column…"
+						ariaLabel="Column"
+					/>
+					<Select bind:value={op} options={opOptions} ariaLabel="Operator" />
 				</div>
 				<div class="flex gap-1.5">
 					<Input
@@ -233,7 +214,7 @@
 								: colType === 'boolean'
 									? 'true / false'
 									: 'value…'}
-						class="h-8 flex-1 text-xs"
+						class="h-8 flex-1 rounded-lg text-xs"
 						onkeydown={(e) => {
 							if (e.key === 'Enter') {
 								e.preventDefault();
@@ -241,20 +222,15 @@
 							}
 						}}
 					/>
-					<Button
-						type="button"
-						size="default"
-						disabled={!colName || !val.trim()}
-						onclick={addFilter}
-					>
-						<Plus class="size-4" /> Add
+					<Button type="button" disabled={!colName || !val.trim()} onclick={addFilter}>
+						<Plus /> Add
 					</Button>
 				</div>
-				<span class="text-muted-foreground/70 text-[10px]">
+				<span class="text-muted-foreground/70 text-[0.7rem]">
 					Pick a column, an operator, a value, then Add — the search re-runs immediately.
 				</span>
 				{#if columnsState === 'error'}
-					<span class="text-destructive text-[10px]">
+					<span class="text-destructive text-[0.7rem]">
 						Couldn't load columns — is the backend running?
 					</span>
 				{/if}
@@ -265,38 +241,34 @@
 				<button
 					type="button"
 					onclick={() => (manageOpen = !manageOpen)}
-					class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between text-[11px]"
+					class="text-muted-foreground hover:text-foreground flex w-full items-center justify-between text-xs"
 				>
 					<span>Manage columns ({visibleCols.length}/{columns.length} shown)</span>
-					<span class="text-[10px]">{manageOpen ? 'hide' : 'show'}</span>
+					<span class="text-[0.7rem]">{manageOpen ? 'hide' : 'show'}</span>
 				</button>
 				{#if manageOpen}
 					<div class="mt-1.5 flex flex-wrap gap-1">
 						{#each columns as c (c.name)}
 							{@const isHidden = hidden.has(c.name)}
-							<button
-								type="button"
+							<Button
+								variant={isHidden ? 'ghost' : 'outline'}
+								size="xs"
+								class="font-mono {isHidden ? 'text-muted-foreground/60 border-dashed' : ''}"
 								onclick={() => toggleHide(c.name)}
 								title={isHidden ? `Show '${c.name}'` : `Hide '${c.name}'`}
-								class={cn(
-									'inline-flex items-center gap-1 rounded border px-1.5 py-0.5 font-mono text-[11px] transition-colors',
-									isHidden
-										? 'border-border text-muted-foreground/60 hover:text-foreground border-dashed'
-										: 'border-border text-foreground hover:bg-muted',
-								)}
 							>
-								{#if isHidden}<EyeOff class="size-3" />{:else}<Eye class="size-3" />{/if}
+								{#if isHidden}<EyeOff />{:else}<Eye />{/if}
 								{c.name}
-							</button>
+							</Button>
 						{/each}
 						{#if columnsState === 'loading'}
-							<span class="text-muted-foreground text-[11px]">Loading columns…</span>
+							<span class="text-muted-foreground text-xs">Loading columns…</span>
 						{:else if columnsState === 'error'}
-							<span class="text-destructive text-[11px]">
+							<span class="text-destructive text-xs">
 								Couldn't load columns — is the backend running?
 							</span>
 						{:else if columns.length === 0}
-							<span class="text-muted-foreground text-[11px]">No filterable columns.</span>
+							<span class="text-muted-foreground text-xs">No filterable columns.</span>
 						{/if}
 					</div>
 				{/if}
@@ -304,7 +276,7 @@
 
 			<!-- Advanced raw SQL escape hatch -->
 			<details class="border-border border-t pt-2">
-				<summary class="text-muted-foreground hover:text-foreground cursor-pointer text-[11px]">
+				<summary class="text-muted-foreground hover:text-foreground cursor-pointer text-xs">
 					Advanced — raw SQL (WHERE)
 				</summary>
 				<textarea
@@ -313,9 +285,9 @@
 					onblur={commit}
 					rows={2}
 					placeholder={wherePlaceholder}
-					class="border-border bg-background text-foreground placeholder:text-muted-foreground/70 focus-visible:ring-ring mt-1.5 min-h-[2rem] w-full resize-y rounded-md border px-2 py-1.5 font-mono text-[11px] focus-visible:ring-2 focus-visible:outline-none"
+					class="border-input dark:bg-input/30 text-foreground placeholder:text-muted-foreground/70 focus-visible:border-ring focus-visible:ring-ring/50 mt-1.5 min-h-[2rem] w-full resize-y rounded-lg border bg-transparent px-2.5 py-1.5 font-mono text-xs transition-colors outline-none focus-visible:ring-3"
 				></textarea>
-				<span class="text-muted-foreground/70 text-[10px]">
+				<span class="text-muted-foreground/70 text-[0.7rem]">
 					The builder above writes here. Edit directly for OR / parentheses / functions.
 				</span>
 			</details>

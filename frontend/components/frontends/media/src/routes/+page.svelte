@@ -33,7 +33,8 @@
 	import AtlasMap from '$lib/atlas/AtlasMap.svelte';
 	import { crossFilter } from '$lib/atlas/cross-filter.svelte';
 	import { getAtlasChunks } from '@lance/api';
-	import { Button, Switch } from '@lance/ui';
+	import { Button, Badge } from '@rask/ui';
+	import { Switch } from '@lance/ui';
 	import {
 		LayoutGrid,
 		List as ListIcon,
@@ -47,7 +48,7 @@
 		Plus,
 		AudioLines,
 		X,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 
 	// The active dataset view — corpus column names (identity, time, display,
 	// metadata) are read through it, so this page renders any dataset's schema.
@@ -728,25 +729,24 @@
 		{#if voiceActive}
 			<!-- Voice query chip — mirrors the attached-image chip's lifecycle:
            dismissing returns to the previous text-search results. -->
-			<div class="flex flex-wrap items-center gap-2 px-6 pb-3 text-[11px]">
-				<span
-					class="border-primary bg-primary/10 text-foreground flex items-center gap-1.5 rounded-md border py-1 pr-1 pl-2 font-medium"
-				>
-					<AudioLines class="text-primary size-3.5" />
+			<div class="flex flex-wrap items-center gap-2 px-6 pb-3 text-xs">
+				<Badge variant="secondary" class="gap-1.5 py-0.5 pr-0.5 pl-2">
+					<AudioLines class="text-primary" />
 					<span class="max-w-[24rem] truncate">
 						Voice: {voiceLabel ?? voiceQuery?.doc_id ?? '…'}
 						{#if voiceQuery?.speaker_label}· {voiceQuery.speaker_label}{/if}
 					</span>
-					<button
-						type="button"
+					<Button
+						variant="ghost"
+						size="icon-xs"
+						class="size-4 rounded-full"
 						title="Clear voice search — back to the previous results"
 						aria-label="Clear voice search"
 						onclick={dismissVoice}
-						class="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-5 items-center justify-center rounded-full transition-colors"
 					>
-						<X class="size-3.5" />
-					</button>
-				</span>
+						<X />
+					</Button>
+				</Badge>
 				{#if voiceQuery && voiceQuery.turn_start != null && voiceQuery.turn_end != null}
 					<span class="text-muted-foreground">
 						anchor turn {fmtTime(voiceQuery.turn_start)}–{fmtTime(voiceQuery.turn_end)}
@@ -787,57 +787,73 @@
 								<span class="text-muted-foreground/70 mr-1">cols</span>
 								<Button
 									variant="ghost"
-									size="icon"
+									size="icon-xs"
 									disabled={gridCols <= 2}
 									title="Fewer columns"
+									aria-label="Fewer grid columns"
 									onclick={() => setGridCols(Math.max(2, gridCols - 1))}
 								>
-									<Minus class="size-3.5" />
+									<Minus />
 								</Button>
-								<span class="w-4 text-center font-mono text-[11px]">{gridCols}</span>
+								<span class="w-4 text-center font-mono text-xs">{gridCols}</span>
 								<Button
 									variant="ghost"
-									size="icon"
+									size="icon-xs"
 									disabled={gridCols >= 6}
 									title="More columns"
+									aria-label="More grid columns"
 									onclick={() => setGridCols(Math.min(6, gridCols + 1))}
 								>
-									<Plus class="size-3.5" />
+									<Plus />
 								</Button>
 							</div>
 						{/if}
-						<Button
-							variant={view === 'list' ? 'secondary' : 'ghost'}
-							size="icon"
-							title="List view"
-							onclick={() => (view = 'list')}
+						<!-- Layout picker as one segmented control (the estate's grouped-button
+						     idiom) rather than four free-floating icon buttons. -->
+						<div
+							class="border-border bg-background flex items-center gap-0.5 rounded-lg border p-0.5"
 						>
-							<ListIcon class="size-4" />
-						</Button>
-						<Button
-							variant={view === 'grid' ? 'secondary' : 'ghost'}
-							size="icon"
-							title="Grid view"
-							onclick={() => (view = 'grid')}
-						>
-							<LayoutGrid class="size-4" />
-						</Button>
-						<Button
-							variant={view === 'table' ? 'secondary' : 'ghost'}
-							size="icon"
-							title="Table view — see column values per row"
-							onclick={() => (view = 'table')}
-						>
-							<TableIcon class="size-4" />
-						</Button>
-						<Button
-							variant={view === 'map' ? 'secondary' : 'ghost'}
-							size="icon"
-							title="Map view — the EVōC embedding atlas (cross-filters with search)"
-							onclick={() => (view = 'map')}
-						>
-							<MapIcon class="size-4" />
-						</Button>
+							<Button
+								variant={view === 'list' ? 'secondary' : 'ghost'}
+								size="icon-sm"
+								title="List view"
+								aria-label="List view"
+								aria-pressed={view === 'list'}
+								onclick={() => (view = 'list')}
+							>
+								<ListIcon />
+							</Button>
+							<Button
+								variant={view === 'grid' ? 'secondary' : 'ghost'}
+								size="icon-sm"
+								title="Grid view"
+								aria-label="Grid view"
+								aria-pressed={view === 'grid'}
+								onclick={() => (view = 'grid')}
+							>
+								<LayoutGrid />
+							</Button>
+							<Button
+								variant={view === 'table' ? 'secondary' : 'ghost'}
+								size="icon-sm"
+								title="Table view — see column values per row"
+								aria-label="Table view"
+								aria-pressed={view === 'table'}
+								onclick={() => (view = 'table')}
+							>
+								<TableIcon />
+							</Button>
+							<Button
+								variant={view === 'map' ? 'secondary' : 'ghost'}
+								size="icon-sm"
+								title="Map view — the EVōC embedding atlas (cross-filters with search)"
+								aria-label="Map view"
+								aria-pressed={view === 'map'}
+								onclick={() => (view = 'map')}
+							>
+								<MapIcon />
+							</Button>
+						</div>
 					</div>
 				</div>
 
@@ -871,28 +887,29 @@
 											</span>
 											{#if autoLabelMsg}
 												<span
-													class="text-muted-foreground ml-auto font-mono text-[11px]"
+													class="text-muted-foreground ml-auto font-mono text-xs"
 													title="batch job"
 												>
 													{autoLabelMsg}
 												</span>
 											{/if}
-											<button
-												class={autoLabelMsg
-													? 'border-border hover:bg-muted rounded border px-2 py-0.5 text-xs'
-													: 'border-border hover:bg-muted ml-auto rounded border px-2 py-0.5 text-xs'}
+											<Button
+												variant="outline"
+												size="xs"
+												class={autoLabelMsg ? '' : 'ml-auto'}
 												title="Auto-label this selection (batch deriver over the scope)"
 												onclick={() => autoLabelHits(mapHits)}
 											>
 												Auto-label {mapHits.length}
-											</button>
-											<button
-												class="border-border hover:bg-muted rounded border px-2 py-0.5 text-xs"
+											</Button>
+											<Button
+												variant="outline"
+												size="xs"
 												title="Open this selection in the annotator"
 												onclick={() => annotateHits(mapHits)}
 											>
 												Annotate {mapHits.length}
-											</button>
+											</Button>
 										{:else if hits.length > 0}
 											<span class="text-foreground font-medium">Search results</span>
 											<span class="text-muted-foreground">
@@ -951,20 +968,20 @@
 							{:else if view === 'table'}
 								{@const docCols = DOC_COLUMNS.filter((c) => docTableCols.includes(c.key))}
 								<div
-									class="border-border bg-card/30 flex flex-wrap items-center gap-1 border-b px-3 py-2 text-[11px]"
+									class="border-border bg-card/30 flex flex-wrap items-center gap-1 border-b px-3 py-2 text-xs"
 								>
 									<span class="text-muted-foreground mr-1">Columns:</span>
 									{#each DOC_COLUMNS as c (c.key)}
-										<button
-											type="button"
+										{@const shown = docTableCols.includes(c.key)}
+										<Button
+											variant={shown ? 'secondary' : 'ghost'}
+											size="xs"
+											class={shown ? '' : 'text-muted-foreground'}
+											aria-pressed={shown}
 											onclick={() => toggleDocCol(c.key)}
-											class={'rounded border px-1.5 py-0.5 transition-colors ' +
-												(docTableCols.includes(c.key)
-													? 'border-primary bg-primary/10 text-foreground'
-													: 'border-border text-muted-foreground hover:text-foreground')}
 										>
 											{c.label}
-										</button>
+										</Button>
 									{/each}
 								</div>
 								<div class="overflow-x-auto">
@@ -981,7 +998,7 @@
 										<tbody>
 											{#each docs as doc (ds.docId(doc))}
 												<tr
-													class={'border-border/60 hover:bg-secondary/40 cursor-pointer border-b ' +
+													class={'border-border/60 hover:bg-muted/60 cursor-pointer border-b ' +
 														(activeDocId === ds.docId(doc)
 															? 'bg-primary/15 font-medium [box-shadow:inset_3px_0_0_0_var(--color-primary)]'
 															: '')}
@@ -994,7 +1011,7 @@
 																	src={thumbnailUrl(doc)}
 																	loading="lazy"
 																	alt=""
-																	class="bg-muted h-9 w-16 rounded object-cover"
+																	class="bg-muted h-9 w-16 rounded-md object-cover"
 																	onerror={(e) =>
 																		((e.currentTarget as HTMLImageElement).style.visibility =
 																			'hidden')}
@@ -1021,10 +1038,10 @@
 											<button
 												type="button"
 												onclick={() => openDoc(doc)}
-												class="hover:bg-secondary/40 flex w-full items-center gap-3 px-4 py-2 text-left"
+												class="hover:bg-muted/60 flex w-full items-center gap-3 px-4 py-2 text-left"
 											>
 												<span class="flex-1 truncate text-sm">{ds.title(doc)}</span>
-												<span class="text-muted-foreground font-mono text-[11px]">
+												<span class="text-muted-foreground font-mono text-xs">
 													{ds.metadata(doc).find((m) => m.value !== ds.title(doc))?.value ?? ''}
 												</span>
 											</button>
@@ -1040,19 +1057,21 @@
 									<span class="text-muted-foreground mr-2">page {docsPage} / {docsTotalPages}</span>
 									<Button
 										variant="outline"
-										size="icon"
+										size="icon-sm"
+										aria-label="Previous page"
 										disabled={docsPage <= 1}
 										onclick={() => (docsPage = Math.max(1, docsPage - 1))}
 									>
-										<ChevronLeft class="size-4" />
+										<ChevronLeft />
 									</Button>
 									<Button
 										variant="outline"
-										size="icon"
+										size="icon-sm"
+										aria-label="Next page"
 										disabled={docsPage >= docsTotalPages}
 										onclick={() => (docsPage = Math.min(docsTotalPages, docsPage + 1))}
 									>
-										<ChevronRight class="size-4" />
+										<ChevronRight />
 									</Button>
 								</div>
 							{/if}
@@ -1095,20 +1114,20 @@
 						{:else if view === 'table'}
 							<!-- Column chooser: click a column to show/hide it in the table. -->
 							<div
-								class="border-border bg-card/30 flex flex-wrap items-center gap-1 border-b px-3 py-2 text-[11px]"
+								class="border-border bg-card/30 flex flex-wrap items-center gap-1 border-b px-3 py-2 text-xs"
 							>
 								<span class="text-muted-foreground mr-1">Columns:</span>
 								{#each TABLE_COLUMNS() as c (c.key)}
-									<button
-										type="button"
+									{@const shown = tableCols.includes(c.key)}
+									<Button
+										variant={shown ? 'secondary' : 'ghost'}
+										size="xs"
+										class={shown ? '' : 'text-muted-foreground'}
+										aria-pressed={shown}
 										onclick={() => toggleCol(c.key)}
-										class={'rounded border px-1.5 py-0.5 transition-colors ' +
-											(tableCols.includes(c.key)
-												? 'border-primary bg-primary/10 text-foreground'
-												: 'border-border text-muted-foreground hover:text-foreground')}
 									>
 										{c.label}
-									</button>
+									</Button>
 								{/each}
 								<!-- Wrap toggle: truncate (off) vs wrap-and-grow (on) for the
                      text-like columns. Applies + persists instantly. -->

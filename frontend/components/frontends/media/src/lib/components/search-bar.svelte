@@ -1,12 +1,17 @@
 <script lang="ts">
-	import { Button, Input, Select, type SelectOption } from '@lance/ui';
+	// Chrome on the estate design system: @rask/ui Button + Select (the same primitives
+	// the data/admin zones use). Input stays on @lance/ui — @rask/ui does not export one.
+	import { Button } from '@rask/ui';
+	import { Select } from '@rask/ui/select';
+	import { Input } from '@lance/ui';
+	import type { SelectOption } from '@lance/ui';
 	import FilterPopover from './filter-popover.svelte';
 	import HelpPopover from './help-popover.svelte';
 	import SearchSettings from './search-settings.svelte';
 	import { activeView, type SearchSpec, type SearchMode } from '@lance/api';
 	import { untrack } from 'svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
-	import { AudioLines, Loader2, Paperclip, Search, X, ImagePlus } from 'lucide-svelte';
+	import { AudioLines, Loader2, Paperclip, Search, X, ImagePlus } from '@lucide/svelte';
 
 	type Props = {
 		spec: SearchSpec;
@@ -278,8 +283,8 @@
 	>
 		<!-- ── Row A: mode + actions ── -->
 		<div class="flex flex-wrap items-center gap-2">
-			<Select bind:value={kind} options={kindOptions} ariaLabel="Search mode" class="w-32" />
-			<span class="text-muted-foreground hidden flex-1 truncate text-[11px] lg:inline">
+			<Select bind:value={kind} options={kindOptions} ariaLabel="Search mode" />
+			<span class="text-muted-foreground hidden flex-1 truncate text-xs lg:inline">
 				{summary}
 			</span>
 			<div class="ml-auto flex items-center gap-1.5">
@@ -287,11 +292,11 @@
 					<Button
 						type="button"
 						variant="outline"
-						size="default"
+						size="sm"
 						title="Attach an image (drag-drop also works) — search by visual similarity"
 						onclick={() => fileInput?.click()}
 					>
-						<Paperclip class="size-4" />
+						<Paperclip />
 						Image
 					</Button>
 					<input
@@ -310,15 +315,15 @@
 					<Button
 						type="button"
 						variant="outline"
-						size="default"
+						size="sm"
 						disabled={voiceSearch.uploadPending}
 						title="Attach a short audio clip (≤ 25 MB) — find everywhere this voice speaks"
 						onclick={() => audioInput?.click()}
 					>
 						{#if voiceSearch.uploadPending}
-							<Loader2 class="size-4 animate-spin" />
+							<Loader2 class="animate-spin" />
 						{:else}
-							<AudioLines class="size-4" />
+							<AudioLines />
 						{/if}
 						Voice
 					</Button>
@@ -373,57 +378,63 @@
 				<Input
 					bind:value={q}
 					type="search"
-					class="h-9 sm:w-52"
+					class="h-8 rounded-lg sm:w-52"
 					placeholder="Keyword — exact words"
 					aria-label="Keyword (FTS)"
 				/>
 				<Input
 					bind:value={qVec}
 					type="search"
-					class="h-9 flex-1 sm:max-w-2xl"
+					class="h-8 flex-1 rounded-lg sm:max-w-2xl"
 					placeholder="Vector — search by meaning (primary)"
 					aria-label="Vector — search by meaning"
 				/>
-				<Button type="submit" size="lg">
-					<Search class="size-4" />
+				<Button type="submit">
+					<Search />
 					Search
 				</Button>
 			</div>
 		{:else}
 			<div class="flex items-center gap-2">
-				<Input bind:value={q} type="search" class="h-9 flex-1" placeholder={singlePlaceholder} />
-				<Button type="submit" size="lg">
-					<Search class="size-4" />
+				<Input
+					bind:value={q}
+					type="search"
+					class="h-8 flex-1 rounded-lg"
+					placeholder={singlePlaceholder}
+				/>
+				<Button type="submit">
+					<Search />
 					Search
 				</Button>
 			</div>
 		{/if}
 
 		{#if audioError}
-			<p class="text-destructive text-[11px]" role="alert">{audioError}</p>
+			<p class="text-destructive text-xs" role="alert">{audioError}</p>
 		{/if}
 
 		{#if imagePreview && imageFile}
 			<div
-				class="border-primary bg-primary/10 flex w-fit items-center gap-2 rounded-md border py-1 pr-2 pl-1"
+				class="border-border bg-muted flex w-fit items-center gap-2 rounded-lg border py-1 pr-1 pl-1"
 			>
-				<img src={imagePreview} alt="" class="h-12 w-auto rounded-sm object-cover" />
+				<img src={imagePreview} alt="" class="h-12 w-auto rounded-md object-cover" />
 				<span class="text-foreground max-w-[12rem] truncate text-xs" title={imageFile.name}>
 					{imageFile.name}
 				</span>
-				<button
-					type="button"
+				<Button
+					variant="ghost"
+					size="icon-xs"
 					title="Remove image"
-					class="text-muted-foreground hover:bg-muted hover:text-foreground inline-flex size-6 items-center justify-center rounded-full transition-colors"
+					aria-label="Remove image"
 					onclick={() => (imageFile = null)}
 				>
-					<X class="size-4" />
-				</button>
+					<X />
+				</Button>
 			</div>
 		{/if}
 
 		<!-- Summary on smaller screens (hidden when shown inline in Row A). -->
-		<div class="text-muted-foreground flex items-baseline gap-2 text-[11px] lg:hidden">
+		<div class="text-muted-foreground flex items-baseline gap-2 text-xs lg:hidden">
 			{#if imageFile}<ImagePlus class="text-primary size-3.5 self-center" />{/if}
 			<span>{summary}</span>
 		</div>

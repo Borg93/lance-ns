@@ -628,7 +628,10 @@ export class AnnotatorController {
 		if (op.execution === 'batch') {
 			if (isChunkSelection(op.target)) {
 				// Fire-and-forget submit; the toasts are the only submit-side feedback (results
-				// surface async on the read plane by media id + Lance version).
+				// surface async on the read plane by media id + Lance version). HONEST MOCK:
+				// with no jobs runner deployed (MEDIA_JOBS_URL unset) the service answers with
+				// a deterministic mock and NO job ever runs — the result's `backend` field is
+				// that per-run signal, so a mock submit must never toast as plain success.
 				void submitBatchJob({
 					producer: op.producer,
 					op: op.op,
@@ -638,7 +641,13 @@ export class AnnotatorController {
 					// the open unit — resolve to stable ids the deriver can fetch masks/features by.
 					exemplars: this._exemplarIds(op.payload.exemplars),
 				})
-					.then((job) => toast.success(`Batch job queued (${op.producer} · ${job.job_id})`))
+					.then((job) =>
+						job.backend === 'mock'
+							? toast.warning(
+									`Batch job mocked (${op.producer} · ${job.job_id}) — no jobs runner deployed, nothing will run`,
+								)
+							: toast.success(`Batch job queued (${op.producer} · ${job.job_id})`),
+					)
 					.catch((e: unknown) =>
 						toast.error(`Job submit failed: ${e instanceof Error ? e.message : String(e)}`),
 					);

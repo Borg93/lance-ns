@@ -3,8 +3,9 @@
 	// path. DETECT = GroundingDINO: type a class → boxes. SEGMENT = SAM: click or drag a
 	// box → a mask. Both drop `status=prediction`, `source=model:…` rows the reviewer
 	// accepts/rejects like any prediction. (ra-atr AI-labeling parity.)
-	import { onDestroy } from 'svelte';
-	import { MousePointerClick, Sparkles } from 'lucide-svelte';
+	import { onDestroy, onMount } from 'svelte';
+	import { FlaskConical, MousePointerClick, Sparkles } from 'lucide-svelte';
+	import { base } from '$app/paths';
 	import { Button, Input } from '@lance/ui';
 	import { cn } from '@lance/ui/utils';
 	import type { AnnotatorController } from '../annotator.svelte';
@@ -13,6 +14,24 @@
 
 	let prompt = $state('');
 	let mode = $state<'detect' | 'segment'>('detect');
+
+	// HONEST MOCK: until a real model runner is deployed (MEDIA_ASSIST_URL set), the
+	// backend answers assist calls with a deterministic mock — the shapes LOOK real, so
+	// without this chip a reviewer could mistake them for model output. Presence comes
+	// from the zone's own /api/config (BFF env, never the URL itself). null = unknown
+	// (config unreachable) → no claim either way.
+	let assistMocked = $state<boolean | null>(null);
+	onMount(async () => {
+		try {
+			const res = await fetch(`${base}/api/config`);
+			if (res.ok) {
+				const cfg = (await res.json()) as { assistRunner?: boolean };
+				assistMocked = cfg.assistRunner !== true;
+			}
+		} catch {
+			assistMocked = null;
+		}
+	});
 
 	function setMode(m: 'detect' | 'segment'): void {
 		mode = m;
@@ -72,6 +91,16 @@
 	{:else}
 		<span class={cn('text-muted-foreground px-2 text-xs', controller.saving && 'animate-pulse')}>
 			{controller.saving ? 'segmenting…' : 'Click or drag a box to segment'}
+		</span>
+	{/if}
+
+	{#if assistMocked}
+		<span
+			class="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+			data-testid="assist-mock-chip"
+			title="No model runner is deployed (MEDIA_ASSIST_URL unset) — Detect/Segment return deterministic mock shapes, not model predictions."
+		>
+			<FlaskConical class="size-3" /> mocked — needs runner
 		</span>
 	{/if}
 </div>

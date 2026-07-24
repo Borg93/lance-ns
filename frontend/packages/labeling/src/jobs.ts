@@ -7,6 +7,8 @@
  * the read-plane trigger and the annotator's batch `apply()` route through here, so
  * there's ONE submit path. See labeling/types.ts + docs/ACTIVE_LABELING.md.
  */
+import { apiUrl } from '@lance/api/base';
+
 import type { ChunkSelection, Op } from './types';
 
 export interface JobResult {
@@ -35,7 +37,7 @@ function scopePayload(s: ChunkSelection): { level: string; keys: string[]; where
 
 /** Submit a batch labeling deriver over a chunk-level selection. */
 export async function submitBatchJob(job: BatchJob): Promise<JobResult> {
-	const res = await fetch('/api/jobs/apply', {
+	const res = await fetch(apiUrl('/api/jobs/apply'), {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({
@@ -53,7 +55,7 @@ export async function submitBatchJob(job: BatchJob): Promise<JobResult> {
 
 /** Poll a submitted job's status. */
 export async function jobStatus(jobId: string): Promise<JobResult> {
-	const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`);
+	const res = await fetch(apiUrl(`/api/jobs/${encodeURIComponent(jobId)}`));
 	if (!res.ok) throw new Error(`job status failed (HTTP ${res.status})`);
 	return (await res.json()) as JobResult;
 }

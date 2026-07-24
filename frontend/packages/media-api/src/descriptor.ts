@@ -14,6 +14,8 @@
 
 import * as v from 'valibot';
 
+import { apiUrl } from './base';
+
 // ─────────────────────────────────────────────────────────────────────
 // Descriptor envelope (mirrors services/common/lancekit/descriptor.py)
 // ─────────────────────────────────────────────────────────────────────
@@ -427,16 +429,16 @@ export class DatasetView {
 	}
 
 	mediaUrl(row: Row): string {
-		return `/api/media/${encodeURIComponent(this.docId(row))}${this.datasetQuery('?')}`;
+		return apiUrl(`/api/media/${encodeURIComponent(this.docId(row))}${this.datasetQuery('?')}`);
 	}
 
 	thumbnailUrl(row: Row): string {
-		return `/api/thumbnail/${encodeURIComponent(this.docId(row))}${this.datasetQuery('?')}`;
+		return apiUrl(`/api/thumbnail/${encodeURIComponent(this.docId(row))}${this.datasetQuery('?')}`);
 	}
 
 	/** Per-row frame image (route arity = identity key fields). */
 	frameUrl(row: Row): string {
-		return `/api/chunk-frame/${this.keyPath(row).join('/')}${this.datasetQuery('?')}`;
+		return apiUrl(`/api/chunk-frame/${this.keyPath(row).join('/')}${this.datasetQuery('?')}`);
 	}
 
 	// ── capabilities ──────────────────────────────────────────────────

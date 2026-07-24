@@ -9,6 +9,8 @@
  * chunk tag is a first-class, reviewable, versioned annotation. See labeling/types.ts.
  */
 
+import { apiUrl } from '@lance/api/base';
+
 /** A chunk (or unit) + the tag labels to set. `keys` = the NON-doc identity fields,
  *  positional (pairs with keyFields minus the doc key). */
 export interface TagWrite {
@@ -77,7 +79,7 @@ export async function saveTagsAsAnnotations(
 	dataset?: string,
 ): Promise<SaveResult> {
 	const q = dataset ? `?dataset=${encodeURIComponent(dataset)}` : '';
-	const res = await fetch(`/api/annotations/tags${q}`, {
+	const res = await fetch(apiUrl(`/api/annotations/tags${q}`), {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify(batch),

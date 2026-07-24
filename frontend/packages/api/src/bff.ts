@@ -125,6 +125,23 @@ export function makeSessionHandle(cfg: OidcConfig | null): Handle {
 	};
 }
 
+/** A zero-width `stripPrefix` for backends that serve their routes UNDER `/api` (the lance-media
+ *  viewer/search/annotator services): it matches at the start of the app-relative `/api/...` path —
+ *  so the proxy's base-aware strip still removes the zone base when present — but strips NOTHING
+ *  itself, forwarding `/media/api/health` (or dev's `/api/health`) as `/api/health` upstream. */
+export const KEEP_API_PREFIX = /^(?=\/api\/)/;
+
+/** Response headers never forwarded from an upstream: `fetch()` auto-decompresses the body, so the
+ *  upstream's content-encoding/content-length describe bytes that no longer exist (forwarding them makes
+ *  the browser gunzip plain bytes — ERR_CONTENT_DECODING_FAILED); the rest are hop-by-hop. */
+const DROPPED_RESPONSE_HEADERS = new Set([
+	'content-encoding',
+	'content-length',
+	'transfer-encoding',
+	'connection',
+	'keep-alive',
+]);
+
 /** A same-origin backend-proxy `RequestHandler` factory. Forwards the signed-in user's access token as a
  *  bearer (so the backend verifies + FGA-authorizes the call); a READ-only service-credential fallback lets
  *  a governed stack serve reads without a per-user login — NEVER on writes (the confused-deputy guard). */
@@ -133,6 +150,16 @@ export function makeBackendProxy(opts: {
 	stripPrefix: RegExp;
 	serviceToken?: string | undefined;
 	serviceId?: string | undefined;
+	/** Extra request headers (lowercase) forwarded to the backend — e.g. `['range', 'accept']` so media
+	 *  streaming keeps HTTP Range seeking through the proxy. Default: none (auth + content-type only). */
+	forwardRequestHeaders?: readonly string[] | undefined;
+	/** Pass the upstream's response headers through (minus content-encoding/content-length + hop-by-hop) —
+	 *  needed when the payload contract lives in headers (content-range/accept-ranges on media streams,
+	 *  X-Annotations-Version on Arrow reads). Default: content-type only. */
+	forwardResponseHeaders?: boolean | undefined;
+	/** Fail closed on an auth-enabled stack with no signed-in user (401 without the request leaving the
+	 *  BFF) — the write-route stance: a write must be attributable to a real user. Default: forward. */
+	requireSession?: boolean | undefined;
 }): RequestHandler {
 	return async ({ url, fetch, request, locals }) => {
 		// Base-aware strip: under the patched svelte-adapter-bun the BUILT server sees the zone's
@@ -144,8 +171,19 @@ export function makeBackendProxy(opts: {
 		const appPath = opts.stripPrefix.test(raw) ? raw : raw.replace(/^\/[^/]+(?=\/)/, '');
 		const target = opts.backendUrl + appPath.replace(opts.stripPrefix, '') + url.search;
 		const isRead = request.method === 'GET' || request.method === 'HEAD';
+		const auth = locals as unknown as AuthLocals;
+		if (opts.requireSession && auth.authEnabled && !auth.session) {
+			return new Response(JSON.stringify({ detail: 'sign in required' }), {
+				status: 401,
+				headers: { 'content-type': 'application/json' },
+			});
+		}
 		const headers: Record<string, string> = {};
-		const session = (locals as unknown as AuthLocals).session;
+		for (const name of opts.forwardRequestHeaders ?? []) {
+			const value = request.headers.get(name);
+			if (value !== null) headers[name] = value;
+		}
+		const session = auth.session;
 		if (session) {
 			headers['authorization'] = `Bearer ${session.accessToken}`;
 		} else if (opts.serviceToken && isRead) {
@@ -160,14 +198,25 @@ export function makeBackendProxy(opts: {
 						...headers,
 						'content-type': request.headers.get('content-type') ?? 'application/json',
 					},
-					body: await request.text(),
+					// Bytes, not text: a multipart body (image search, voice upload) is binary — a
+					// text round-trip would corrupt it.
+					body: await request.arrayBuffer(),
 				};
 		try {
 			const upstream = await fetch(target, init);
-			return new Response(upstream.body, {
-				status: upstream.status,
-				headers: { 'content-type': upstream.headers.get('content-type') ?? 'application/json' },
-			});
+			let responseHeaders: HeadersInit;
+			if (opts.forwardResponseHeaders) {
+				const passed = new Headers();
+				upstream.headers.forEach((value, name) => {
+					if (!DROPPED_RESPONSE_HEADERS.has(name.toLowerCase())) passed.set(name, value);
+				});
+				responseHeaders = passed;
+			} else {
+				responseHeaders = {
+					'content-type': upstream.headers.get('content-type') ?? 'application/json',
+				};
+			}
+			return new Response(upstream.body, { status: upstream.status, headers: responseHeaders });
 		} catch (err) {
 			return new Response(JSON.stringify({ error: String(err) }), {
 				status: 502,

@@ -12,6 +12,7 @@
 import { tableFromIPC, type Vector } from 'apache-arrow';
 import * as v from 'valibot';
 
+import { apiUrl } from './base';
 import {
 	activeView,
 	AlignmentSchema,
@@ -24,6 +25,7 @@ import {
 
 export type { Alignment, Row, SearchMode } from './descriptor';
 export { activeView } from './descriptor';
+export { apiUrl, setApiBase } from './base';
 
 /** Legacy alias — a search/browse result row. Field access goes through the
  *  active {@link DatasetView}; this stays for import compatibility. */
@@ -157,7 +159,7 @@ export async function search(spec: SearchSpec, fetcher: typeof fetch = fetch): P
 		fd.append('n', n);
 		fd.append('mode', mode);
 		appendCommonSearchParams(fd, spec);
-		const r = await fetcher('/api/search', { method: 'POST', body: fd });
+		const r = await fetcher(apiUrl('/api/search'), { method: 'POST', body: fd });
 		return asJson(r, HitsArraySchema);
 	}
 
@@ -165,7 +167,7 @@ export async function search(spec: SearchSpec, fetcher: typeof fetch = fetch): P
 	if (spec.fuzziness) params.append('fuzziness', String(spec.fuzziness));
 	if (spec.phrase) params.append('phrase', 'true');
 	appendCommonSearchParams(params, spec);
-	const r = await fetcher(`/api/search?${params}`);
+	const r = await fetcher(apiUrl(`/api/search?${params}`));
 	return asJson(r, HitsArraySchema);
 }
 
@@ -185,7 +187,7 @@ export async function getChunkAlignments(
 	fetcher: typeof fetch = fetch,
 ): Promise<Alignment[]> {
 	const path = keys.map((k) => encodeURIComponent(String(k))).join('/');
-	const r = await fetcher(`/api/chunk-alignments/${path}${datasetSuffix()}`);
+	const r = await fetcher(apiUrl(`/api/chunk-alignments/${path}${datasetSuffix()}`));
 	const data = await asJson(r, ChunkAlignmentsSchema);
 	return data.alignments;
 }
@@ -212,7 +214,7 @@ export async function getDocTranscript(
 ): Promise<DocTranscript> {
 	const suffix = datasetSuffix();
 	const fetchOnce = async (): Promise<DocTranscript> => {
-		const r = await fetcher(`/api/doc-transcript/${encodeURIComponent(docId)}${suffix}`);
+		const r = await fetcher(apiUrl(`/api/doc-transcript/${encodeURIComponent(docId)}${suffix}`));
 		return asJson(r, DocTranscriptSchema);
 	};
 	if (fetcher !== fetch) return fetchOnce();
@@ -256,7 +258,9 @@ export async function getDiarization(
 	docId: string,
 	fetcher: typeof fetch = fetch,
 ): Promise<DiarizationResponse> {
-	const r = await fetcher(`/api/diarization/${encodeURIComponent(docId)}${datasetSuffix()}`);
+	const r = await fetcher(
+		apiUrl(`/api/diarization/${encodeURIComponent(docId)}${datasetSuffix()}`),
+	);
 	return asJson(r, DiarizationResponseSchema);
 }
 
@@ -275,7 +279,7 @@ const HealthSchema = v.object({
 export type Health = v.InferOutput<typeof HealthSchema>;
 
 export async function getHealth(fetcher: typeof fetch = fetch): Promise<Health> {
-	const r = await fetcher('/api/health');
+	const r = await fetcher(apiUrl('/api/health'));
 	return asJson(r, HealthSchema);
 }
 
@@ -297,7 +301,7 @@ export async function listDocuments(
 ): Promise<DocumentsResponse> {
 	const suffix = activeView().datasetParam();
 	const ds = suffix ? `&dataset=${encodeURIComponent(suffix)}` : '';
-	const r = await fetcher(`/api/documents?page=${page}&per_page=${perPage}${ds}`);
+	const r = await fetcher(apiUrl(`/api/documents?page=${page}&per_page=${perPage}${ds}`));
 	return asJson(r, DocumentsResponseSchema);
 }
 
@@ -306,7 +310,7 @@ const ColumnSchema = v.object({ name: v.string(), type: v.string() });
 export type ColumnInfo = v.InferOutput<typeof ColumnSchema>;
 
 export async function listColumns(fetcher: typeof fetch = fetch): Promise<ColumnInfo[]> {
-	const r = await fetcher(`/api/columns${datasetSuffix()}`);
+	const r = await fetcher(apiUrl(`/api/columns${datasetSuffix()}`));
 	return asJson(r, v.array(ColumnSchema));
 }
 
@@ -319,7 +323,7 @@ import {
 
 /** List the datasets the backend serves (id + table stats + capabilities). */
 export async function listDatasets(fetcher: typeof fetch = fetch) {
-	const r = await fetcher('/api/datasets');
+	const r = await fetcher(apiUrl('/api/datasets'));
 	return asJson(r, DatasetsResponseSchema).then((d) => d.datasets);
 }
 
@@ -329,7 +333,7 @@ export async function getDatasetView(
 	isDefault: boolean,
 	fetcher: typeof fetch = fetch,
 ): Promise<DatasetView> {
-	const r = await fetcher(`/api/datasets/${encodeURIComponent(datasetId)}/descriptor`);
+	const r = await fetcher(apiUrl(`/api/datasets/${encodeURIComponent(datasetId)}/descriptor`));
 	if (!r.ok) throw await apiErrorFrom(r);
 	// Parse directly (not via asJson) so the value keeps the schema's OUTPUT type,
 	// where `.default()`-ed fields are required — the DatasetView ctor's shape.
@@ -363,7 +367,7 @@ export async function getAtlasStatus(
 	const ds = activeView().datasetParam();
 	const q = ds ? `&dataset=${encodeURIComponent(ds)}` : '';
 	return asJson(
-		await fetcher(`/api/atlas/status?space=${encodeURIComponent(space)}${q}`),
+		await fetcher(apiUrl(`/api/atlas/status?space=${encodeURIComponent(space)}${q}`)),
 		AtlasStatusSchema,
 	);
 }
@@ -458,7 +462,7 @@ export async function getAtlasPoints(
 	const view = activeView();
 	const ds = view.datasetParam();
 	const dsq = ds ? `&dataset=${encodeURIComponent(ds)}` : '';
-	const r = await fetcher(`/api/atlas/points?space=${encodeURIComponent(space)}&v=6${dsq}`);
+	const r = await fetcher(apiUrl(`/api/atlas/points?space=${encodeURIComponent(space)}&v=6${dsq}`));
 	if (!r.ok) throw await apiErrorFrom(r);
 
 	const buf = await r.arrayBuffer();
@@ -520,7 +524,7 @@ export async function getAtlasChunk(
 	fetcher: typeof fetch = fetch,
 ): Promise<Row> {
 	const path = keys.map((k) => encodeURIComponent(String(k))).join('/');
-	const r = await fetcher(`/api/atlas/chunk/${path}${datasetSuffix()}`);
+	const r = await fetcher(apiUrl(`/api/atlas/chunk/${path}${datasetSuffix()}`));
 	return asJson(r, RowSchema);
 }
 
@@ -531,7 +535,7 @@ export async function getAtlasChunks(
 ): Promise<Row[]> {
 	const ds = activeView().datasetParam();
 	const url = ds ? `/api/atlas/chunks?dataset=${encodeURIComponent(ds)}` : '/api/atlas/chunks';
-	const r = await fetcher(url, {
+	const r = await fetcher(apiUrl(url), {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ rowids }),
@@ -564,7 +568,7 @@ const TopicsResponseSchema = v.object({
 export type TopicsResponse = v.InferOutput<typeof TopicsResponseSchema>;
 
 export async function getTopics(fetcher: typeof fetch = fetch): Promise<TopicsResponse> {
-	return asJson(await fetcher(`/api/topics${datasetSuffix()}`), TopicsResponseSchema);
+	return asJson(await fetcher(apiUrl(`/api/topics${datasetSuffix()}`)), TopicsResponseSchema);
 }
 
 // ── Knowledge graph (Graph page, capability-gated) ──────────────────────────
@@ -584,7 +588,7 @@ export const GraphStatusSchema = v.object({
 export type GraphStatus = v.InferOutput<typeof GraphStatusSchema>;
 
 export async function getGraphStatus(fetcher: typeof fetch = fetch): Promise<GraphStatus> {
-	return asJson(await fetcher(`/api/graph/status${datasetSuffix()}`), GraphStatusSchema);
+	return asJson(await fetcher(apiUrl(`/api/graph/status${datasetSuffix()}`)), GraphStatusSchema);
 }
 
 const CypherValueSchema = v.union([v.string(), v.number(), v.null_()]);
@@ -605,7 +609,7 @@ export async function runGraphCypher(
 ): Promise<GraphCypherResponse> {
 	const ds = activeView().datasetParam();
 	const url = ds ? `/api/graph/cypher?dataset=${encodeURIComponent(ds)}` : '/api/graph/cypher';
-	const r = await fetcher(url, {
+	const r = await fetcher(apiUrl(url), {
 		method: 'POST',
 		headers: { 'Content-Type': 'application/json' },
 		body: JSON.stringify({ query, limit }),
@@ -635,7 +639,7 @@ export async function searchGraphEntities(
 	const ds = activeView().datasetParam();
 	const dsq = ds ? `&dataset=${encodeURIComponent(ds)}` : '';
 	return asJson(
-		await fetcher(`/api/graph/search?q=${encodeURIComponent(q)}${dsq}`),
+		await fetcher(apiUrl(`/api/graph/search?q=${encodeURIComponent(q)}${dsq}`)),
 		GraphSearchResponseSchema,
 	);
 }
@@ -691,7 +695,7 @@ export async function getGraphEntity(
 ): Promise<GraphEntityResponse> {
 	if (!isEntityId(entityId)) throw new ApiError(400, `invalid entity id: ${entityId}`);
 	return asJson(
-		await fetcher(`/api/graph/entity/${encodeURIComponent(entityId)}${datasetSuffix()}`),
+		await fetcher(apiUrl(`/api/graph/entity/${encodeURIComponent(entityId)}${datasetSuffix()}`)),
 		GraphEntityResponseSchema,
 	);
 }
@@ -731,7 +735,10 @@ export async function getGraphSubgraph(
 	}
 	const ds = activeView().datasetParam();
 	if (ds) params.set('dataset', ds);
-	return asJson(await fetcher(`/api/graph/subgraph?${params}`), GraphSubgraphResponseSchema);
+	return asJson(
+		await fetcher(apiUrl(`/api/graph/subgraph?${params}`)),
+		GraphSubgraphResponseSchema,
+	);
 }
 
 // ── Voice search ("Find this voice", capability-gated) ──────────────────────
@@ -743,7 +750,7 @@ const VoiceStatusSchema = v.object({
 export type VoiceStatus = v.InferOutput<typeof VoiceStatusSchema>;
 
 export async function getVoiceStatus(fetcher: typeof fetch = fetch): Promise<VoiceStatus> {
-	return asJson(await fetcher(`/api/voice/status${datasetSuffix()}`), VoiceStatusSchema);
+	return asJson(await fetcher(apiUrl(`/api/voice/status${datasetSuffix()}`)), VoiceStatusSchema);
 }
 
 /** A voice-ranked hit: the matched row (renders as a normal result card) plus
@@ -803,7 +810,7 @@ export async function voiceSimilar(
 		params.set('exclude_same_doc', String(opts.excludeSameDoc));
 	const ds = activeView().datasetParam();
 	if (ds) params.set('dataset', ds);
-	return asJson(await fetcher(`/api/voice/similar?${params}`), VoiceSimilarResponseSchema);
+	return asJson(await fetcher(apiUrl(`/api/voice/similar?${params}`)), VoiceSimilarResponseSchema);
 }
 
 export async function voiceSimilarUpload(
@@ -818,7 +825,7 @@ export async function voiceSimilarUpload(
 	const fd = new FormData();
 	fd.append('file', file);
 	const url = params.size > 0 ? `/api/voice/similar?${params}` : '/api/voice/similar';
-	const r = await fetcher(url, { method: 'POST', body: fd });
+	const r = await fetcher(apiUrl(url), { method: 'POST', body: fd });
 	return asJson(r, VoiceSimilarResponseSchema);
 }
 

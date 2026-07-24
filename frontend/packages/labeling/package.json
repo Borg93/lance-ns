@@ -15,6 +15,7 @@
 		"vitest": "^2.1.0"
 	},
 	"dependencies": {
+		"@lance/api": "workspace:*",
 		"apache-arrow": "^21.1.0"
 	}
 }

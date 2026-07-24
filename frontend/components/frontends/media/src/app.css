@@ -9,10 +9,10 @@
  * `border-border` picks up the palette automatically.
  *
  * Structure note (lance-media-specific): light values live in `:root` and the
- * `.dark` class overrides them, because lance-media's theme toggle flips the
- * `.dark` class (see theme-toggle.svelte). The app boots DARK by default
- * (see app.html). ranymizer keeps the inverse (dark in :root, .light
- * override) — same values, mirrored placement; reconcile at merge time.
+ * `.dark` class overrides them; the estate-shared mode-watcher (mounted in
+ * +layout.svelte, defaultMode dark) owns the `.dark` class. ranymizer keeps
+ * the inverse (dark in :root, .light override) — same values, mirrored
+ * placement; reconcile at merge time.
  * ──────────────────────────────────────────────────────────────────── */
 
 @import 'tailwindcss';
@@ -87,7 +87,7 @@
 	--radius: 0.375rem;
 }
 
-/* ── design tokens — DARK (lance-media boots here; toggle removes .dark) ──
+/* ── design tokens — DARK (lance-media boots here; mode-watcher flips .dark) ──
  * Must be `.dark`, NOT `:where(.dark)`: `:where()` has zero specificity, so the
  * `:root` light block (specificity 0,1,0) would always win and dark mode would
  * never apply. `.dark` ties `:root` on specificity and wins by source order. */

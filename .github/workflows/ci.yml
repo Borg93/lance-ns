@@ -12,7 +12,7 @@ jobs:
 
       - name: Install Dagger CLI (pinned to the module's engineVersion)
         run: |
-          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.21.7 BIN_DIR=/usr/local/bin sh
 
       # Python gates — ruff lint + ty type-check + OpenAPI-spec drift + unit/integration pytest — run
       # hermetically in the pinned uv image via the Dagger module (.dagger/main.go Ci). The pytest leg runs
@@ -64,7 +64,7 @@ jobs:
 
       - name: Install Dagger CLI (pinned to the module's engineVersion)
         run: |
-          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.21.7 BIN_DIR=/usr/local/bin sh
 
       # Turborepo workspace bun gates — svelte-check + tsgo + unit tests fan out over the packages/* AND
       # components/frontends/* (the 5 micro-frontend zones + @rask/{ui,api}) workspace; lint + fmt:check are
@@ -120,7 +120,7 @@ jobs:
 
       - name: Install Dagger CLI (pinned to the module's engineVersion)
         run: |
-          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.20.3 BIN_DIR=/usr/local/bin sh
+          curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.21.7 BIN_DIR=/usr/local/bin sh
 
       - name: Lineage e2e (real AGE graph, hermetic via Dagger)
         env:

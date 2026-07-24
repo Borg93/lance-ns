@@ -58,6 +58,7 @@ from lineage.schemas import (
     DatasetRef,
     DatasetSchema,
     DatasetSummary,
+    EstateGraph,
     EventRecord,
     GraphEdge,
     GraphNode,
@@ -401,6 +402,11 @@ _GRAPH_EDGES: Final = (
     "MATCH (a:Dataset)-[:DERIVED_FROM]->(b:Dataset) "
     "WHERE a.name IN $names AND b.name IN $names RETURN DISTINCT a.name, b.name"
 )
+# The estate-wide variants: every dataset node / DERIVED_FROM edge in one read each, so the graph
+# UI gets the whole picture in ONE request instead of recomposing it client-side from a
+# per-dataset fan-out (which cost 2N+ HTTP calls per poll tick at N datasets).
+_ESTATE_NODES: Final = "MATCH (d:Dataset) RETURN d.name, d.namespace, d.source_uri, d.tags"
+_ESTATE_EDGES: Final = "MATCH (a:Dataset)-[:DERIVED_FROM]->(b:Dataset) RETURN DISTINCT a.name, b.name"
 
 # Column-level lineage (#24). A (:Column {dataset, field}) is MERGEd on the 2-tuple of SCALAR props
 # (no concatenated id — dataset names contain '$', so any delimiter could collide). ``dataset`` is the
@@ -1424,4 +1430,21 @@ class LineageRepository:
                 for n in names
             ],
             edges=[GraphEdge(source=r[0], target=r[1]) for r in edge_rows],
+        )
+
+    async def estate_graph(self) -> EstateGraph:
+        """Every dataset node + ``DERIVED_FROM`` edge, ungoverned — the ``/graph`` bulk read.
+
+        The endpoint owns governance (drop non-visible nodes, then edges touching them) and the
+        honest node cap; this layer just reads the whole graph in two statements.
+        """
+        node_rows = await fetch(self._pool, self._graph, _ESTATE_NODES, columns=4)
+        edge_rows = await fetch(self._pool, self._graph, _ESTATE_EDGES, columns=2)
+        nodes = [
+            GraphNode(id=r[0], namespace=r[1], source_uri=r[2], tags=_tags_from(r[3])) for r in node_rows
+        ]
+        return EstateGraph(
+            nodes=nodes,
+            edges=[GraphEdge(source=r[0], target=r[1]) for r in edge_rows],
+            total=len(nodes),
         )

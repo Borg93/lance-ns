@@ -693,6 +693,41 @@
         "title": "DlqReplayResponse",
         "type": "object"
       },
+      "EstateGraph": {
+        "description": "The whole visible lineage graph in one response \u2014 the graph page's bulk read.\n\n``total`` is the full visible node count; when it exceeds the requested limit the node list\nis truncated and ``capped`` says so, so a UI can render \"N of M\" honestly instead of\npretending the window is the estate.",
+        "properties": {
+          "capped": {
+            "default": false,
+            "title": "Capped",
+            "type": "boolean"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/GraphEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/GraphNode"
+            },
+            "title": "Nodes",
+            "type": "array"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "nodes",
+          "edges",
+          "total"
+        ],
+        "title": "EstateGraph",
+        "type": "object"
+      },
       "EventRecord": {
         "description": "One ingested OpenLineage event, Marquez-style (summary + the full event with facets).",
         "properties": {
@@ -3571,6 +3606,89 @@
         "summary": "Get Events",
         "tags": [
           "query"
+        ]
+      }
+    },
+    "/graph": {
+      "get": {
+        "description": "The whole visible lineage graph in ONE response \u2014 the graph page's bulk read.\n\nBefore this the UI recomposed the estate graph client-side from the per-``{name}`` reads \u2014\none ``/datasets/{name}/graph`` (plus ``/producers``) per dataset per refresh, a 2N+-request\nstorm at N datasets. Governance is identical to ``/datasets``: a node the caller may not see\nis dropped, and an edge needs BOTH endpoints visible (the same transitive-disclosure\nguarantee as the per-dataset graph). Nodes are capped at ``limit`` deterministically (sorted\nby name) with ``total``/``capped`` reporting the truth.",
+        "operationId": "estate_graph_graph_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 300,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "dapr-api-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-lance-service-identity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EstateGraph"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Estate Graph",
+        "tags": [
+          "discovery"
         ]
       }
     },

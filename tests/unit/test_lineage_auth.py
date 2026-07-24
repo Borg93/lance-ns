@@ -36,6 +36,7 @@ from lineage.schemas import (
     ColumnRef,
     DatasetRef,
     DatasetSchema,
+    EstateGraph,
     EventRecord,
     GraphEdge,
     GraphNode,
@@ -378,6 +379,7 @@ class _FakeRepo:
         self.col_related: list[ColumnRef] = []
         self.col_graph: ColumnGraph | None = None
         self.lineage_graph: LineageGraph | None = None
+        self.estate: EstateGraph | None = None
 
     async def ingest_event(self, event: RunEvent) -> None:
         self.ingested = event
@@ -405,6 +407,10 @@ class _FakeRepo:
 
     async def dataset_schema(self, name: str, version: int | None = None) -> DatasetSchema:
         return DatasetSchema(dataset=name, version=version or 2, fields=[SchemaField(name="id", type="int")])
+
+    async def estate_graph(self) -> EstateGraph:
+        assert self.estate is not None
+        return self.estate
 
     async def column_upstream(self, dataset: str, field: str) -> ColumnNeighbors:
         return ColumnNeighbors(dataset=dataset, field=field, related=self.col_related)
@@ -604,6 +610,55 @@ def test_get_graph_drops_hidden_nodes_and_edges_both_directions(
     assert {n.id for n in result.nodes} == {"a", "c"}  # b dropped; the root kept without an FGA check
     assert "table:a" not in checked  # the root was NOT re-checked (the route gate already authorized it)
     assert [(e.source, e.target) for e in result.edges] == [("a", "c")]  # both leak directions dropped
+
+
+def test_estate_graph_governed_like_datasets(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The bulk /graph read carries the SAME transitive-disclosure guarantee as the per-dataset
+    # graph: a non-visible node drops, and an edge needs BOTH endpoints visible (proven in both
+    # leak directions). There is no route-gated root here — every node is checked.
+    from lineage.api.v1.endpoints.discovery import estate_graph
+
+    async def _allow_a_c(_client: object, *, objects: list[str], **_kw: object) -> dict[str, bool]:
+        return {o: o in ("table:a", "table:c") for o in objects}
+
+    monkeypatch.setattr(fga, "batch_check", _allow_a_c)
+    settings = _settings(**_FULL_AUTH)
+    repo = _FakeRepo()
+    repo.estate = EstateGraph(
+        nodes=[GraphNode(id="a"), GraphNode(id="b"), GraphNode(id="c")],
+        edges=[
+            GraphEdge(source="a", target="c"),  # KEEP: both endpoints visible
+            GraphEdge(source="b", target="a"),  # source hidden
+            GraphEdge(source="a", target="b"),  # target hidden
+        ],
+        total=3,
+    )
+    flt = fga_deps.DatasetFilter(_request(fga=cast(OpenFgaClient, object())), settings, _token())
+    result = asyncio.run(estate_graph(cast(LineageRepository, repo), flt, settings))
+    assert {n.id for n in result.nodes} == {"a", "c"}
+    assert [(e.source, e.target) for e in result.edges] == [("a", "c")]
+    assert result.total == 2  # the VISIBLE count — a hidden node is not even counted
+    assert result.capped is False
+
+
+def test_estate_graph_caps_honestly_and_deterministically() -> None:
+    # Auth off: the cap truncates a name-sorted node list (stable across refreshes), drops edges
+    # that leave the window, and reports total/capped truthfully ("N of M", never "the estate").
+    from lineage.api.v1.endpoints.discovery import estate_graph
+
+    settings = _settings()
+    repo = _FakeRepo()
+    repo.estate = EstateGraph(
+        nodes=[GraphNode(id="c"), GraphNode(id="a"), GraphNode(id="b")],
+        edges=[GraphEdge(source="a", target="b"), GraphEdge(source="a", target="c")],
+        total=3,
+    )
+    flt = fga_deps.DatasetFilter(_request(), settings, None)
+    result = asyncio.run(estate_graph(cast(LineageRepository, repo), flt, settings, limit=2))
+    assert [n.id for n in result.nodes] == ["a", "b"]  # sorted, then capped
+    assert [(e.source, e.target) for e in result.edges] == [("a", "b")]  # a→c left the window
+    assert result.total == 3
+    assert result.capped is True
 
 
 def test_get_dataset_columns_drops_edges_touching_hidden_datasets(

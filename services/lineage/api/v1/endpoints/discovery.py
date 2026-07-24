@@ -16,7 +16,15 @@ from fastapi import APIRouter, Query
 
 from lineage.api.dependencies import RepositoryDep, SettingsDep
 from lineage.api.fga_deps import FilterDep, governed
-from lineage.schemas import Datasets, DatasetSummary, Jobs, Namespaces, SearchHit, SearchResults
+from lineage.schemas import (
+    Datasets,
+    DatasetSummary,
+    EstateGraph,
+    Jobs,
+    Namespaces,
+    SearchHit,
+    SearchResults,
+)
 
 router = APIRouter(tags=["discovery"])
 
@@ -92,6 +100,35 @@ async def search(
     ordered = sorted(hits.values(), key=lambda h: h.name)
     visible = await governed(datasets, settings.fga_enabled, ordered, lambda h: {h.name})
     return SearchResults(query=q, results=visible[:limit], total=len(visible))
+
+
+@router.get("/graph")
+async def estate_graph(
+    repository: RepositoryDep,
+    datasets: FilterDep,
+    settings: SettingsDep,
+    limit: Annotated[int, Query(ge=1, le=_MAX_LIMIT)] = 300,
+) -> EstateGraph:
+    """The whole visible lineage graph in ONE response — the graph page's bulk read.
+
+    Before this the UI recomposed the estate graph client-side from the per-``{name}`` reads —
+    one ``/datasets/{name}/graph`` (plus ``/producers``) per dataset per refresh, a 2N+-request
+    storm at N datasets. Governance is identical to ``/datasets``: a node the caller may not see
+    is dropped, and an edge needs BOTH endpoints visible (the same transitive-disclosure
+    guarantee as the per-dataset graph). Nodes are capped at ``limit`` deterministically (sorted
+    by name) with ``total``/``capped`` reporting the truth.
+    """
+    full = await repository.estate_graph()
+    visible = await governed(datasets, settings.fga_enabled, full.nodes, lambda n: {n.id})
+    total = len(visible)
+    kept = sorted(visible, key=lambda n: n.id)[:limit]
+    names = {n.id for n in kept}
+    return EstateGraph(
+        nodes=kept,
+        edges=[e for e in full.edges if e.source in names and e.target in names],
+        total=total,
+        capped=total > limit,
+    )
 
 
 @router.get("/jobs")

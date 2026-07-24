@@ -234,6 +234,20 @@ class LineageGraph(BaseModel):
     edges: list[GraphEdge]
 
 
+class EstateGraph(BaseModel):
+    """The whole visible lineage graph in one response — the graph page's bulk read.
+
+    ``total`` is the full visible node count; when it exceeds the requested limit the node list
+    is truncated and ``capped`` says so, so a UI can render "N of M" honestly instead of
+    pretending the window is the estate.
+    """
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+    total: int
+    capped: bool = False
+
+
 class EventRecord(BaseModel):
     """One ingested OpenLineage event, Marquez-style (summary + the full event with facets)."""
 

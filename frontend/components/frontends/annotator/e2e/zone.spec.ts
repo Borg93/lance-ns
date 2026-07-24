@@ -165,3 +165,11 @@ test('AI assist is labeled mocked while no model runner is deployed', async ({ p
 	await expect(page.getByTestId('assist-mock-chip')).toBeVisible();
 	await expect(page.getByTestId('assist-mock-chip')).toContainText('mocked — needs runner');
 });
+
+test('assist chip stays up (fail-honest) when the config fetch fails', async ({ page }) => {
+	// Mock is the stack's default state — an unreachable /api/config must NOT silently
+	// drop the chip and pass mock shapes off as model output.
+	await page.route('**/annotator/api/config', (route) => json(route, { detail: 'boom' }, 500));
+	await page.goto(`/annotator/?keys=${KEY}`);
+	await expect(page.getByTestId('assist-mock-chip')).toBeVisible();
+});

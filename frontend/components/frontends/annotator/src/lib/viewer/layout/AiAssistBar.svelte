@@ -18,9 +18,11 @@
 	// HONEST MOCK: until a real model runner is deployed (MEDIA_ASSIST_URL set), the
 	// backend answers assist calls with a deterministic mock — the shapes LOOK real, so
 	// without this chip a reviewer could mistake them for model output. Presence comes
-	// from the zone's own /api/config (BFF env, never the URL itself). null = unknown
-	// (config unreachable) → no claim either way.
-	let assistMocked = $state<boolean | null>(null);
+	// from the zone's own /api/config (BFF env, never the URL itself). FAIL-HONEST:
+	// mock is the stack's default state, so the chip shows until the config CONFIRMS a
+	// real runner — a failed/unreachable config fetch keeps the warning up rather than
+	// silently passing mock shapes off as model output.
+	let assistMocked = $state(true);
 	onMount(async () => {
 		try {
 			const res = await fetch(`${base}/api/config`);
@@ -29,7 +31,7 @@
 				assistMocked = cfg.assistRunner !== true;
 			}
 		} catch {
-			assistMocked = null;
+			// config unreachable — keep the fail-honest mock chip
 		}
 	});
 

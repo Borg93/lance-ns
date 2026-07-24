@@ -49,8 +49,8 @@
 	<Handle type="target" position={Position.Left} />
 	<div class="bar"></div>
 	<div class="body">
-		<div class="name"><LayerIcon size={13} {color} /> {data.id}</div>
-		<div class="uri">{data.source_uri ?? '(pending)'}</div>
+		<div class="name" title={data.id}><LayerIcon size={12} {color} /> <span>{data.id}</span></div>
+		<div class="uri" title={data.source_uri ?? undefined}>{data.source_uri ?? '(pending)'}</div>
 		<div class="chips">
 			{#each data.versions as v (v)}
 				<span class="chip ok">v{v}</span>
@@ -67,9 +67,10 @@
 </div>
 
 <style>
+	/* Compact card (~200×64): the graph frames dozens of these, so density beats roominess. */
 	.node {
 		display: flex;
-		width: 220px;
+		width: 200px;
 		border: 1.5px solid var(--ring, var(--accent));
 		border-radius: var(--radius);
 		background: linear-gradient(180deg, var(--panel-2), var(--panel));
@@ -83,36 +84,43 @@
 		outline-offset: 2px;
 	}
 	.bar {
-		width: 6px;
+		width: 4px;
 		background: var(--accent);
 	}
 	.body {
-		padding: 8px 10px;
+		padding: 5px 8px 6px;
 		min-width: 0;
+		flex: 1;
 	}
 	.name {
 		display: flex;
 		align-items: center;
-		gap: 5px;
+		gap: 4px;
 		font-weight: 600;
-		font-size: 13px;
+		font-size: 12px;
 		color: var(--ink);
 	}
+	/* Long ids/URIs truncate (full value in the title tooltip) instead of growing the card. */
+	.name > span,
 	.uri {
-		font-size: 10.5px;
+		overflow: hidden;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+	.uri {
+		font-size: 10px;
 		color: var(--mut);
-		margin: 2px 0 6px;
-		word-break: break-all;
+		margin: 1px 0 4px;
 	}
 	.chips {
 		display: flex;
 		flex-wrap: wrap;
-		gap: 4px;
+		gap: 3px;
 	}
 	.chip {
-		font-size: 10px;
+		font-size: 9.5px;
 		font-weight: 700;
-		padding: 1px 7px;
+		padding: 0.5px 6px;
 		border-radius: 999px;
 	}
 	.chip.ok {

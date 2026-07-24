@@ -46,6 +46,11 @@
 		left: '28px',
 	};
 	const fitViewOptions = { padding: FIT_PADDING, maxZoom: 1 };
+	/** Svelte Flow's default `minZoom` is 0.5 — on the real estate (60+ datasets) that clamp meant
+	 * `fitView` could not frame the graph at all: it stopped at 0.5, the DAG spilled past every
+	 * edge of the canvas and the padding above bought nothing, so the toggle and minimap sat on
+	 * cards again. Let the fit zoom out far enough to actually contain the graph. */
+	const MIN_ZOOM = 0.1;
 
 	const store = new LineageState();
 
@@ -309,6 +314,7 @@
 			colorMode={theme.current}
 			fitView
 			{fitViewOptions}
+			minZoom={MIN_ZOOM}
 			onnodeclick={openNode}
 		>
 			<Background variant={BackgroundVariant.Dots} gap={16} />

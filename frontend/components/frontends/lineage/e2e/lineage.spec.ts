@@ -84,25 +84,70 @@ const EVENTS = [
 	},
 ];
 
-/** Wait for the fitView tween to stop moving the canvas — a fixed sleep races the 400ms tween on a
- * loaded machine, and every geometry assertion below measures mid-flight if it does. */
-const settled = async (page: Page) => {
-	const transform = () =>
-		page.locator('.svelte-flow__viewport').evaluate((el) => getComputedStyle(el).transform);
-	// The queued fitView tween runs 400ms and starts a tick AFTER the nodes mount, so sampling
-	// immediately can catch the pre-tween rest and call it settled. Give it time to start, then
-	// require three consecutive identical transforms.
-	await page.waitForTimeout(500);
-	let last = await transform();
-	let stable = 0;
-	for (let i = 0; i < 80 && stable < 3; i += 1) {
-		await page.waitForTimeout(100);
-		const now = await transform();
-		stable = now === last ? stable + 1 : 0;
-		last = now;
-	}
-	expect(stable, 'the flow viewport never stopped moving').toBeGreaterThanOrEqual(3);
+/** Geometry of every rendered card, measured in ONE browser round-trip. */
+const cardLayout = (page: Page) =>
+	page.evaluate(() => {
+		const flow = document.querySelector('.svelte-flow')!.getBoundingClientRect();
+		const box = (el: Element) => {
+			const r = el.getBoundingClientRect();
+			return { x: r.x, y: r.y, width: r.width, height: r.height };
+		};
+		return {
+			flow: { x: flow.x, y: flow.y, width: flow.width, height: flow.height },
+			nodes: [...document.querySelectorAll('.svelte-flow__node')].map((n) => ({
+				id: (n.textContent ?? '').trim().slice(0, 24),
+				...box(n),
+			})),
+			overlays: ['.viewtoggle', '.svelte-flow__controls', '.svelte-flow__minimap']
+				.map((sel) => ({ sel, el: document.querySelector(sel) }))
+				.filter((o) => o.el)
+				.map((o) => ({ sel: o.sel, ...box(o.el!) })),
+		};
+	});
+type CardLayout = Awaited<ReturnType<typeof cardLayout>>;
+
+/** Poll the LAYOUT until it satisfies `ok`, then hand the settled measurement back for assertions.
+ * fitView animates (400ms) and, on a loaded box, starts late — sleeping a fixed amount before
+ * measuring races it, and every geometry test below then measures a half-finished tween. */
+const settledLayout = async (
+	page: Page,
+	ok: (l: CardLayout) => boolean,
+	message: string,
+): Promise<CardLayout> => {
+	let last: CardLayout | undefined;
+	await expect
+		.poll(async () => ok((last = await cardLayout(page))), { timeout: 20_000, message })
+		.toBe(true);
+	return last!;
 };
+
+const inside = (l: CardLayout) =>
+	l.nodes.every(
+		(n) =>
+			n.x >= l.flow.x - 1 &&
+			n.y >= l.flow.y - 1 &&
+			n.x + n.width <= l.flow.x + l.flow.width + 1 &&
+			n.y + n.height <= l.flow.y + l.flow.height + 1,
+	);
+
+/** Cards covered by a floating overlay (the plane toggle, the zoom controls, the minimap). */
+const occluded = (l: CardLayout) =>
+	l.nodes.flatMap((n) =>
+		l.overlays
+			.filter(
+				(o) =>
+					n.x < o.x + o.width &&
+					o.x < n.x + n.width &&
+					n.y < o.y + o.height &&
+					o.y < n.y + n.height,
+			)
+			.map((o) => `${o.sel} covers ${n.id}`),
+	);
+
+const distinct = (l: CardLayout) => ({
+	xs: new Set(l.nodes.map((n) => Math.round(n.x))).size,
+	ys: new Set(l.nodes.map((n) => Math.round(n.y))).size,
+});
 
 const json = (route: Route, body: unknown) =>
 	route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
@@ -288,13 +333,16 @@ test('graph nodes lay out by computed depth — no two medallion nodes overlap',
 test('a small estate is framed at 1:1 — fitView never blows the cards up', async ({ page }) => {
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-	await settled(page); // measure only once the fitView tween has stopped
 	// The medallion card is 200px wide by design; with fitView maxZoom 1 the rendered card can be
 	// SMALLER (zoomed out to frame a big graph) but never larger, so a 4-node estate no longer
 	// renders as giant blocks filling the canvas.
-	const box = await page.locator('.svelte-flow__node').first().boundingBox();
-	expect(box?.width ?? 0).toBeGreaterThan(0);
-	expect(box?.width ?? 0).toBeLessThanOrEqual(201);
+	const layout = await settledLayout(
+		page,
+		(l) => l.nodes.length === 4 && l.nodes[0].width > 0 && l.nodes[0].width <= 201,
+		'the fitted card never exceeds its natural 200px width',
+	);
+	expect(layout.nodes[0].width).toBeGreaterThan(0);
+	expect(layout.nodes[0].width).toBeLessThanOrEqual(201);
 });
 
 test('depth-0 roots pack into a wrapped grid, not one tall column', async ({ page }) => {
@@ -312,20 +360,12 @@ test('depth-0 roots pack into a wrapped grid, not one tall column', async ({ pag
 	);
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(9, { timeout: 15_000 });
-	await settled(page); // measure only once the fitView tween has stopped
-
-	const xs = new Set<number>();
-	const ys = new Set<number>();
-	for (let i = 0; i < 9; i += 1) {
-		const box = await page
-			.locator('.svelte-flow__node')
-			.filter({ hasText: `root_${i}` })
-			.boundingBox();
-		xs.add(Math.round(box?.x ?? 0));
-		ys.add(Math.round(box?.y ?? 0));
-	}
-	expect(xs.size).toBe(3);
-	expect(ys.size).toBe(3);
+	const layout = await settledLayout(
+		page,
+		(l) => distinct(l).xs === 3 && distinct(l).ys === 3,
+		'nine roots settle into a 3×3 grid',
+	);
+	expect(distinct(layout)).toEqual({ xs: 3, ys: 3 });
 });
 
 test('clicking a graph node opens the dataset detail page', async ({ page }) => {
@@ -354,30 +394,41 @@ test('the plane toggle, controls and minimap never sit on top of a node card', a
 	// over the bottom-right cards. The fitView padding now reserves a gutter per overlay.
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(4, { timeout: 15_000 });
-	await settled(page);
+	const layout = await settledLayout(
+		page,
+		(l) => l.nodes.length === 4 && occluded(l).length === 0,
+		'no overlay covers a card',
+	);
+	expect(occluded(layout)).toEqual([]);
+});
 
-	const overlays: [string, { x: number; y: number; width: number; height: number } | null][] =
-		await Promise.all(
-			['.viewtoggle', '.svelte-flow__controls', '.svelte-flow__minimap'].map(
-				async (sel) => [sel, await page.locator(sel).boundingBox()] as const,
-			),
-		);
-	const offenders: string[] = [];
-	for (const node of await page.locator('.svelte-flow__node').all()) {
-		const n = await node.boundingBox();
-		const id = (await node.textContent())?.trim().slice(0, 24);
-		for (const [sel, o] of overlays) {
-			if (!n || !o) continue;
-			if (
-				n.x < o.x + o.width &&
-				o.x < n.x + n.width &&
-				n.y < o.y + o.height &&
-				o.y < n.y + n.height
-			)
-				offenders.push(`${sel} ${JSON.stringify(o)} covers node ${id} ${JSON.stringify(n)}`);
-		}
-	}
-	expect(offenders).toEqual([]);
+test('an estate too big for the default minZoom still frames inside the overlay gutters', async ({
+	page,
+}) => {
+	// Found live, not here: at 125 datasets the fit wanted ~0.4 zoom, Svelte Flow's default
+	// minZoom of 0.5 clamped it, and the DAG spilled past every edge of the canvas — so the
+	// reserved gutters bought nothing and the chrome sat on cards again. 120 roots reproduce it.
+	const BIG = Array.from({ length: 120 }, (_, i) => ({
+		id: `wide_${i}`,
+		namespace: 'perf',
+		source_uri: `s3://lakehouse/wide_${i}`,
+		tags: [],
+	}));
+	await page.route(
+		(url) => url.pathname.endsWith('/lineage/api/graph'),
+		(route) => json(route, { nodes: BIG, edges: [], total: BIG.length, capped: false }),
+	);
+	await page.goto('/lineage');
+	await expect(page.locator('.svelte-flow__node')).toHaveCount(120, { timeout: 20_000 });
+	const layout = await settledLayout(
+		page,
+		(l) => l.nodes.length === 120 && inside(l) && occluded(l).length === 0,
+		'120 cards frame inside the canvas, clear of the chrome',
+	);
+	// Every card is inside the canvas — the fit really contained the graph …
+	expect(inside(layout)).toBe(true);
+	// … and none of them landed under the chrome.
+	expect(occluded(layout)).toEqual([]);
 });
 
 test('a node with many versions caps the chips and keeps the full list in the tooltip', async ({
@@ -733,32 +784,27 @@ test('a flat 60-dataset estate packs into a square-ish grid, cheaply', async ({ 
 	);
 	await page.goto('/lineage');
 	await expect(page.locator('.svelte-flow__node')).toHaveCount(FLAT_ROOTS, { timeout: 20_000 });
-	await settled(page); // measure only once the fitView tween has stopped
-
-	const xs = new Set<number>();
-	const ys = new Set<number>();
-	for (const node of await page.locator('.svelte-flow__node').all()) {
-		const box = await node.boundingBox();
-		xs.add(Math.round(box?.x ?? 0));
-		ys.add(Math.round(box?.y ?? 0));
-	}
-	const flatMs = (await page.locator('header .perf').textContent()) ?? '?';
-	console.log(
-		`[perf] flat 60-root graph layout build: ${flatMs} (${xs.size}×${ys.size} packed grid)`,
-	);
-	expect(flatMs).toMatch(/ms$/);
-
 	// Assert the PROPERTY the packer promises, not a pixel count. `placer` in routes/+page.svelte
 	// wraps depth-0 roots every ceil(sqrt(n)) cards, so the block comes out roughly square; the
 	// card pitch (COL_W/ROW_H) is a styling choice that must be free to change — pinning the old
 	// literal 8 reddened this test the moment the node card got more compact.
 	const side = Math.ceil(Math.sqrt(FLAT_ROOTS));
-	expect(xs.size).toBe(side);
-	expect(ys.size).toBe(Math.ceil(FLAT_ROOTS / side));
+	const layout = await settledLayout(
+		page,
+		(l) => distinct(l).xs === side && distinct(l).ys === Math.ceil(FLAT_ROOTS / side),
+		'the roots settle into a square-ish grid',
+	);
+	const { xs, ys } = distinct(layout);
+	const flatMs = (await page.locator('header .perf').textContent()) ?? '?';
+	console.log(`[perf] flat 60-root graph layout build: ${flatMs} (${xs}×${ys} packed grid)`);
+	expect(flatMs).toMatch(/ms$/);
+
+	expect(xs).toBe(side);
+	expect(ys).toBe(Math.ceil(FLAT_ROOTS / side));
 	// …and that really is a square-ish block: never the one tall tower this test exists to catch,
 	// never a single sprawling row, and big enough to hold every root.
-	expect(xs.size).toBeGreaterThan(1);
-	expect(ys.size).toBeGreaterThan(1);
-	expect(Math.abs(xs.size - ys.size)).toBeLessThanOrEqual(1);
-	expect(xs.size * ys.size).toBeGreaterThanOrEqual(FLAT_ROOTS);
+	expect(xs).toBeGreaterThan(1);
+	expect(ys).toBeGreaterThan(1);
+	expect(Math.abs(xs - ys)).toBeLessThanOrEqual(1);
+	expect(xs * ys).toBeGreaterThanOrEqual(FLAT_ROOTS);
 });

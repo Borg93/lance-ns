@@ -5,6 +5,7 @@ import type {
 	DatasetSchema,
 	ColumnNeighbors,
 	Datasets,
+	EstateGraph,
 	Events,
 	Jobs,
 	LineageGraph,
@@ -32,6 +33,10 @@ async function getJSON<T>(path: string): Promise<T | null> {
 const enc = encodeURIComponent;
 
 export const fetchGraph = (name: string) => getJSON<LineageGraph>(`datasets/${enc(name)}/graph`);
+// The bulk estate read: every visible node + DERIVED_FROM edge (with per-node version/failed
+// rollups) in ONE request — replaces the per-dataset /producers + /graph fan-out that cost
+// hundreds of requests per refresh at estate scale.
+export const fetchEstateGraph = (limit: number) => getJSON<EstateGraph>(`graph?limit=${limit}`);
 export const fetchProducers = (name: string) =>
 	getJSON<Producers>(`datasets/${enc(name)}/producers`);
 // The read-audit query (#41): who READ this dataset. Owner-gated (stricter than /producers), so it's

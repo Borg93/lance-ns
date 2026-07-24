@@ -861,6 +861,11 @@
       "GraphNode": {
         "description": "A dataset node in the lineage graph (``id`` is the catalog table id).\n\n``source_uri`` is where the table physically lives (the S3-compatible location, from\nthe ``dataSource`` facet) and ``tags`` are its governance labels (from the ``tags`` facet).",
         "properties": {
+          "failed": {
+            "default": false,
+            "title": "Failed",
+            "type": "boolean"
+          },
           "id": {
             "title": "Id",
             "type": "string"
@@ -897,6 +902,13 @@
               "type": "string"
             },
             "title": "Tags",
+            "type": "array"
+          },
+          "versions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Versions",
             "type": "array"
           }
         },

@@ -509,6 +509,33 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Estate Graph
+         * @description The whole visible lineage graph in ONE response — the graph page's bulk read.
+         *
+         *     Before this the UI recomposed the estate graph client-side from the per-``{name}`` reads —
+         *     one ``/datasets/{name}/graph`` (plus ``/producers``) per dataset per refresh, a 2N+-request
+         *     storm at N datasets. Governance is identical to ``/datasets``: a node the caller may not see
+         *     is dropped, and an edge needs BOTH endpoints visible (the same transitive-disclosure
+         *     guarantee as the per-dataset graph). Nodes are capped at ``limit`` deterministically (sorted
+         *     by name) with ``total``/``capped`` reporting the truth.
+         */
+        get: operations["estate_graph_graph_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/jobs": {
         parameters: {
             query?: never;
@@ -988,6 +1015,27 @@ export interface components {
             status: string;
         };
         /**
+         * EstateGraph
+         * @description The whole visible lineage graph in one response — the graph page's bulk read.
+         *
+         *     ``total`` is the full visible node count; when it exceeds the requested limit the node list
+         *     is truncated and ``capped`` says so, so a UI can render "N of M" honestly instead of
+         *     pretending the window is the estate.
+         */
+        EstateGraph: {
+            /**
+             * Capped
+             * @default false
+             */
+            capped: boolean;
+            /** Edges */
+            edges: components["schemas"]["GraphEdge"][];
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /** Total */
+            total: number;
+        };
+        /**
          * EventRecord
          * @description One ingested OpenLineage event, Marquez-style (summary + the full event with facets).
          */
@@ -1047,6 +1095,11 @@ export interface components {
          *     the ``dataSource`` facet) and ``tags`` are its governance labels (from the ``tags`` facet).
          */
         GraphNode: {
+            /**
+             * Failed
+             * @default false
+             */
+            failed: boolean;
             /** Id */
             id: string;
             /**
@@ -1060,6 +1113,8 @@ export interface components {
             source_uri?: string | null;
             /** Tags */
             tags?: string[];
+            /** Versions */
+            versions?: string[];
         };
         /** HTTPValidationError */
         HTTPValidationError: {
@@ -2176,6 +2231,40 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Events"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    estate_graph_graph_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EstateGraph"];
                 };
             };
             /** @description Validation Error */

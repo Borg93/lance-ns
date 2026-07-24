@@ -10,6 +10,7 @@ export type DatasetGovernance = S['DatasetGovernance'];
 export type GraphNode = S['GraphNode'];
 export type GraphEdge = S['GraphEdge'];
 export type LineageGraph = S['LineageGraph'];
+export type EstateGraph = S['EstateGraph'];
 export type ProducerInfo = S['ProducerInfo'];
 export type Producers = S['Producers'];
 export type ReaderInfo = S['ReaderInfo'];

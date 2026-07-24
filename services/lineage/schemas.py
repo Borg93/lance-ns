@@ -212,6 +212,11 @@ class GraphNode(BaseModel):
     kind: str = "dataset"
     source_uri: str | None = None
     tags: list[str] = Field(default_factory=list)
+    # Write rollup, populated by the bulk estate read only (the per-dataset graph leaves the
+    # defaults — its consumers fetch /producers for the full run detail): the distinct written
+    # versions and whether any producing run failed/aborted. Feeds the node badges in ONE request.
+    versions: list[str] = Field(default_factory=list)
+    failed: bool = False
 
 
 class GraphEdge(BaseModel):

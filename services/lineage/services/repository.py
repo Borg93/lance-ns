@@ -407,6 +407,10 @@ _GRAPH_EDGES: Final = (
 # per-dataset fan-out (which cost 2N+ HTTP calls per poll tick at N datasets).
 _ESTATE_NODES: Final = "MATCH (d:Dataset) RETURN d.name, d.namespace, d.source_uri, d.tags"
 _ESTATE_EDGES: Final = "MATCH (a:Dataset)-[:DERIVED_FROM]->(b:Dataset) RETURN DISTINCT a.name, b.name"
+# Per-node write rollup for the estate read: written versions + any-failed, folded in Python
+# (_fold_writes). Keeps the graph UI's node badges (versions, failed ring) at ONE request instead
+# of a per-dataset /producers fan-out.
+_ESTATE_WRITES: Final = "MATCH (r:Run)-[w:WROTE]->(d:Dataset) RETURN d.name, w.version, r.event_type"
 
 # Column-level lineage (#24). A (:Column {dataset, field}) is MERGEd on the 2-tuple of SCALAR props
 # (no concatenated id — dataset names contain '$', so any delimiter could collide). ``dataset`` is the
@@ -472,6 +476,22 @@ _DATASET_COLUMN_EDGES: Final = (
 def _tags_from(value: object) -> list[str]:
     """Split the comma-joined ``tags`` node property back into a list (``None``/"" → [])."""
     return value.split(",") if isinstance(value, str) and value else []
+
+
+_NO_WRITES: Final[tuple[list[str], bool]] = ([], False)
+
+
+def _fold_writes(rows: list[list[Any]]) -> dict[str, tuple[list[str], bool]]:
+    """Fold ``_ESTATE_WRITES`` rows (dataset, version, event_type) into per-dataset node badges:
+    the distinct written versions (sorted) and whether any producing run failed/aborted."""
+    folded: dict[str, tuple[set[str], bool]] = {}
+    for dataset, version, event_type in rows:
+        versions, failed = folded.setdefault(dataset, (set(), False))
+        if version:
+            versions.add(str(version))
+        if not failed and isinstance(event_type, str) and event_type.upper() in ("FAIL", "ABORT"):
+            folded[dataset] = (versions, True)
+    return {name: (sorted(versions), failed) for name, (versions, failed) in folded.items()}
 
 
 class LineageRepository:
@@ -1440,8 +1460,17 @@ class LineageRepository:
         """
         node_rows = await fetch(self._pool, self._graph, _ESTATE_NODES, columns=4)
         edge_rows = await fetch(self._pool, self._graph, _ESTATE_EDGES, columns=2)
+        writes = _fold_writes(await fetch(self._pool, self._graph, _ESTATE_WRITES, columns=3))
         nodes = [
-            GraphNode(id=r[0], namespace=r[1], source_uri=r[2], tags=_tags_from(r[3])) for r in node_rows
+            GraphNode(
+                id=r[0],
+                namespace=r[1],
+                source_uri=r[2],
+                tags=_tags_from(r[3]),
+                versions=writes.get(r[0], _NO_WRITES)[0],
+                failed=writes.get(r[0], _NO_WRITES)[1],
+            )
+            for r in node_rows
         ]
         return EstateGraph(
             nodes=nodes,

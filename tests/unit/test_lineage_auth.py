@@ -641,6 +641,23 @@ def test_estate_graph_governed_like_datasets(monkeypatch: pytest.MonkeyPatch) ->
     assert result.capped is False
 
 
+def test_fold_writes_rolls_up_versions_and_failure() -> None:
+    # The estate read's per-node badge rollup: distinct versions sorted, failed sticky once any
+    # producing run FAILed/ABORTed (case-insensitive), datasets with no writes simply absent.
+    from lineage.services.repository import _fold_writes
+
+    rows = [
+        ["a", "2", "COMPLETE"],
+        ["a", "1", "fail"],
+        ["a", "2", "COMPLETE"],  # duplicate version collapses
+        ["b", None, "COMPLETE"],  # null version → no version recorded
+    ]
+    folded = _fold_writes(rows)
+    assert folded["a"] == (["1", "2"], True)
+    assert folded["b"] == ([], False)
+    assert "c" not in folded
+
+
 def test_estate_graph_caps_honestly_and_deterministically() -> None:
     # Auth off: the cap truncates a name-sorted node list (stable across refreshes), drops edges
     # that leave the window, and reports total/capped truthfully ("N of M", never "the estate").

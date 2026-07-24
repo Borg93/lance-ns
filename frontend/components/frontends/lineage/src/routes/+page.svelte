@@ -185,11 +185,10 @@
 		);
 		const perLayer: Record<number, number> = {};
 		nodes = store.nodes.map((n) => {
-			const runs = store.producers[n.id] ?? [];
-			const versions = [
-				...new Set(runs.map((r) => r.dataset_version).filter(Boolean) as string[]),
-			].sort();
-			const failed = runs.some((r) => /FAIL|ABORT/i.test(r.event_type ?? ''));
+			// Version/failed badges ride the bulk estate read's per-node rollup — no per-dataset
+			// /producers fan-out (the run detail lives on the dataset detail page).
+			const versions = n.versions ?? [];
+			const failed = n.failed ?? false;
 			const layer = dsDepth.get(n.id) ?? 0;
 			const row = (perLayer[layer] = (perLayer[layer] ?? 0) + 1) - 1;
 			return {

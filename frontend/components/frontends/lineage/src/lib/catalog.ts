@@ -62,15 +62,20 @@ export const promoteModel = (model: string, version: number) =>
 		body: JSON.stringify({ version }),
 	});
 
-/** Access review (#51): who holds which can_* action on the table. Owner-gated by the catalog
- * (403 for non-owners); the BFF forwards only the signed-in user's session. */
-export const fetchTableAccess = (table: string) =>
-	requestJSON<AccessList>(`v1/table/${enc(table)}/access/list`, { method: 'POST' });
+/** The FGA object kinds the catalog's access surface is mounted on — the owner-tier gate is
+ * `can_drop` for a table, `can_delete` for a namespace (same bar, per-type relation). */
+export type AccessKind = 'table' | 'namespace';
 
-/** #68 "who can do what" simulator — a live OpenFGA Check: does `user` hold `relation` on this table?
- * Owner-gated by the catalog (can_drop), the same bar as the review (probing the graph == disclosing it). */
-export const checkTableAccess = (table: string, user: string, relation: string) =>
-	requestJSON<AccessCheck>(`v1/table/${enc(table)}/access/check`, {
+/** Access review (#51, kind-generalized like the data zone's namespace.ts): who holds which can_*
+ * action on the object. Owner-gated by the catalog (403 for non-owners); the BFF forwards only the
+ * signed-in user's session. */
+export const fetchAccess = (kind: AccessKind, id: string) =>
+	requestJSON<AccessList>(`v1/${kind}/${enc(id)}/access/list`, { method: 'POST' });
+
+/** #68 "who can do what" simulator — a live OpenFGA Check: does `user` hold `relation` on this
+ * object? Owner-gated by the catalog, the same bar as the review (probing the graph == disclosing it). */
+export const checkAccess = (kind: AccessKind, id: string, user: string, relation: string) =>
+	requestJSON<AccessCheck>(`v1/${kind}/${enc(id)}/access/check`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ user, relation }),
@@ -78,18 +83,18 @@ export const checkTableAccess = (table: string, user: string, relation: string) 
 
 export type AccessGrant = components['schemas']['AccessGrantResponse'];
 
-/** #72 grant a base rung (owner/writer/reader/validator) to a subject on the table. `user` may be a bare
- * id (`alice`) or a userset (`role:…#assignee` / `team:…#member`). Owner-gated by the catalog (can_drop);
+/** #72 grant a base rung (owner/writer/reader/validator) to a subject on the object. `user` may be a
+ * bare id (`alice`) or a userset (`role:…#assignee` / `team:…#member`). Owner-gated by the catalog;
  * the BFF forwards only the signed-in user's session. */
-export const grantTableAccess = (table: string, user: string, relation: string) =>
-	requestJSON<AccessGrant>(`v1/table/${enc(table)}/access/grant`, {
+export const grantAccess = (kind: AccessKind, id: string, user: string, relation: string) =>
+	requestJSON<AccessGrant>(`v1/${kind}/${enc(id)}/access/grant`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ user, relation }),
 	});
-/** #72 revoke a base rung from a subject on the table — the write counterpart of the grant, same gate. */
-export const revokeTableAccess = (table: string, user: string, relation: string) =>
-	requestJSON<AccessGrant>(`v1/table/${enc(table)}/access/revoke`, {
+/** #72 revoke a base rung from a subject on the object — the write counterpart of the grant, same gate. */
+export const revokeAccess = (kind: AccessKind, id: string, user: string, relation: string) =>
+	requestJSON<AccessGrant>(`v1/${kind}/${enc(id)}/access/revoke`, {
 		method: 'POST',
 		headers: { 'content-type': 'application/json' },
 		body: JSON.stringify({ user, relation }),

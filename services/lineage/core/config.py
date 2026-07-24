@@ -139,6 +139,12 @@ class LineageSettings(BaseSettings):
     # so it is effectively a no-op unless OIDC is on. Best-effort: an audit-write failure never fails a read.
     read_audit_enabled: bool = Field(default=False, alias="LINEAGE_READ_AUDIT_ENABLED")
 
+    # Compliance audit trail (#41): gate the dedicated `lance.audit` stream (the DLQ-replay record) exactly
+    # like the catalog — the SHARED LANCE_AUDIT_ENABLED env (not a LINEAGE_* twin), so one flag governs the
+    # estate's compliance posture. Default on; without the lifespan's configure_audit call the stream is
+    # silently OFF (the logger inherits root WARNING and the INFO records drop before any handler).
+    audit_enabled: bool = Field(default=True, alias="LANCE_AUDIT_ENABLED")
+
     # Serve /docs + /openapi.json (default on for dev; prod sets false, like the catalog's LANCE_REST_DOCS).
     docs_enabled: bool = Field(default=True, alias="LINEAGE_DOCS")
 

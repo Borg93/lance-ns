@@ -24,18 +24,22 @@
 	import { Radio, Boxes, Cpu, Columns3, ShieldAlert } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/FlowAutoFit.svelte';
 	import GovernancePanel from '$lib/GovernancePanel.svelte';
-	import GrantsPanel from '$lib/GrantsPanel.svelte';
 	import DatasetProvenance from '$lib/DatasetProvenance.svelte';
 	import ReadersPanel from '$lib/ReadersPanel.svelte';
 	import RunInputs from '$lib/RunInputs.svelte';
 	import { LineageState } from '$lib/store.svelte';
+	import { GrantsPanel, type GrantsClient } from '@rask/ui/grants-panel';
 	import { SearchBar } from '@rask/ui/search-bar';
 	import { StatusBoard } from '@rask/ui/status-board';
 	import { enter, stagger, countUp } from '@rask/ui/motion';
 	import { fetchSearch } from '$lib/api';
+	import { checkAccess, fetchAccess, grantAccess, revokeAccess } from '$lib/catalog';
 	import { LAYER, type ColumnEdge, type ColumnRef, type DemoDataset } from '$lib/types';
 
 	const store = new LineageState();
+
+	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
+	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
 
 	// Which graph plane is shown — Datasets / Jobs (like Marquez) + Columns (field-to-field, #24).
 	let graphView = $state<'datasets' | 'jobs' | 'columns'>('datasets');
@@ -691,7 +695,7 @@
 						<h2 class="mono">{store.selected}</h2>
 						<DatasetProvenance dataset={store.selected} versions={selectedVersions} />
 						<GovernancePanel dataset={store.selected} />
-						<GrantsPanel dataset={store.selected} />
+						<GrantsPanel dataset={store.selected} client={grantsClient} />
 						<ReadersPanel dataset={store.selected} />
 						{#if upstream.length || downstream.length}
 							<div class="rel">

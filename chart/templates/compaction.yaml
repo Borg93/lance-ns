@@ -115,7 +115,7 @@ spec:
             - { name: COMPACTION_S3_EXTRA_BUCKETS, value: {{ $extra | uniq | join "," | quote }} }
             - { name: COMPACTION_S3_REGION, value: "us-east-1" }
           {{- include "lance.appProbes" . | nindent 10 }}
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "compaction") | nindent 12 }}
           volumeMounts:
             {{- include "lance.tmpMount" . | nindent 12 }}
       volumes:

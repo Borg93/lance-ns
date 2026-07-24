@@ -417,6 +417,150 @@
         "title": "Datasets",
         "type": "object"
       },
+      "DemoDataset": {
+        "description": "A peek at a real Lance dataset on S3 \u2014 what's actually in storage and how it evolved.",
+        "properties": {
+          "current_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Version"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "lineage_jsonb": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lineage Jsonb"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "row_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Row Count"
+          },
+          "uri": {
+            "title": "Uri",
+            "type": "string"
+          },
+          "versions": {
+            "items": {
+              "$ref": "#/components/schemas/DemoVersion"
+            },
+            "title": "Versions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "uri",
+          "exists"
+        ],
+        "title": "DemoDataset",
+        "type": "object"
+      },
+      "DemoDatasets": {
+        "description": "The medallion datasets as they currently exist on S3 (demo data peek).",
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/DemoDataset"
+            },
+            "title": "Datasets",
+            "type": "array"
+          }
+        },
+        "required": [
+          "datasets"
+        ],
+        "title": "DemoDatasets",
+        "type": "object"
+      },
+      "DemoField": {
+        "description": "A column of a Lance dataset version (name + Arrow type).",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "type": {
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "type"
+        ],
+        "title": "DemoField",
+        "type": "object"
+      },
+      "DemoVersion": {
+        "description": "One Lance version of a dataset \u2014 its number, time, and schema at that version.",
+        "properties": {
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/DemoField"
+            },
+            "title": "Fields",
+            "type": "array"
+          },
+          "timestamp": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timestamp"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version"
+        ],
+        "title": "DemoVersion",
+        "type": "object"
+      },
       "DescriptionUpdate": {
         "description": "The ``PUT /datasets/{name}/description`` body. An empty string clears the description.",
         "properties": {
@@ -3249,6 +3393,77 @@
         ]
       }
     },
+    "/demo/datasets": {
+      "get": {
+        "description": "The medallion datasets as they currently exist on S3 \u2014 schema per Lance version + rows.\n\nGOVERNED (audit: this endpoint reads real medallion schemas/row-counts + gold's lineage JSONB from S3\nwith the SERVICE root credentials, so it must not disclose a dataset the caller cannot see). Every\nother lineage read gates on ``can_get_metadata``; this now does the same \u2014 authenticate (401 unauth /\n503 if FGA unwired, via ``require_metadata_access``) and filter to the datasets the caller may read.\nFGA off \u2192 pass-through (the dev demo).",
+        "operationId": "demo_datasets_demo_datasets_get",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "dapr-api-token",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Dapr-Api-Token"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-lance-service-identity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Lance-Service-Identity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DemoDatasets"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Demo Datasets",
+        "tags": [
+          "demo"
+        ]
+      }
+    },
     "/events": {
       "get": {
         "description": "The most-recent ingested OpenLineage events (newest first) \u2014 the Marquez-style event feed.\n\n**Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is\non the feed is filtered like the per-dataset reads \u2014 an event is shown only if the caller\n``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the\naudit feed never discloses a table outside the caller's reach. Auth off \u2192 pass-through. (#22)\n\nPagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous\npage's ``next_cursor``); ``limit`` \u2264 500 (server-capped); ``summary=true`` drops the full-JSONB\n``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice \u2014\npagination can never disclose a hidden row's CONTENT. ``next_cursor`` is a WINDOW FLOOR, not\nnecessarily a visible row's seq (on a hidden-dense page it is the fetch window's last seq \u2014\nexclusive, so the hidden row itself is never returned; bare seq numbers were already inferable\nfrom gaps in the pre-pagination feed, so this adds no new disclosure class \u2014 reviewed\n2026-07-11).",
@@ -3699,7 +3914,7 @@
     },
     "/search": {
       "get": {
-        "description": "Governed search over the discovery estate (P1 Search tier 1, 2026-07-11).\n\nCase-insensitive substring over dataset NAMES, NAMESPACES, governance TAGS, and the CURRENT\nCOLUMN inventory \u2014 each hit says WHY it matched (``name`` / ``namespace`` / ``tag:\u2026`` /\n``column:\u2026``), so \"which tables have an embedding column\" and \"what's in layer=gold\" are one\nquery. Governance is identical to ``/datasets``: the visibility filter runs over the FULL hit\nset BEFORE the limit, so search can never disclose (or even count) tables outside the caller's\nreach. \ud83d\udccc Tier 2 (Lance FTS + FLAT vector content search, the rask pattern) stays decision-\npinned in todo \u00a79 behind its measured recall gate \u2014 this tier is metadata-only by design.",
+        "description": "Governed search over the discovery estate (P1 Search tier 1, 2026-07-11).\n\nCase-insensitive substring over dataset NAMES, NAMESPACES, governance TAGS, and the CURRENT\nCOLUMN inventory \u2014 each hit says WHY it matched (``name`` / ``namespace`` / ``tag:\u2026`` /\n``column:\u2026``), so \"which tables have an embedding column\" and \"what's in layer=gold\" are one\nquery. Governance is identical to ``/datasets``: the visibility filter runs over the FULL hit\nset BEFORE the limit, so search can never disclose (or even count) tables outside the caller's\nreach. \ud83d\udccc Tier 2 (Lance FTS + FLAT vector content search, the rask pattern) stays decision-\npinned in docs/DECISIONS.md \u00a79 behind its measured recall gate \u2014 this tier is metadata-only\nby design.",
         "operationId": "search_search_get",
         "parameters": [
           {

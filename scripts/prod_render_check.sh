@@ -52,10 +52,16 @@ grep -A15 "name: lance-ns-openfga$" "$OUT" | grep -q "replicas: 3" \
 awk '/name: dapr-sentry$/{n=1} n&&/replicas:/{print; exit}' "$OUT" | grep -q "replicas: 3" \
   || fail "prod Dapr control-plane must be HA (dapr-sentry replicas: 3)"
 
-# 4. PodDisruptionBudgets render for the 4 request-serving services + OpenFGA (the authz chokepoint).
+# 4. PodDisruptionBudgets: the request-serving backends (catalog/lineage/gateway) + OpenFGA (the authz
+# chokepoint) + one per frontend zone (frontend.replicas=2 in prod; the zones are the Ingress-routed
+# north-south edge — audit 2026-07-24: the raw `>=5` count was inflated by the 5 Dapr-HA subchart PDBs,
+# so the missing zone PDBs sailed through). NAMED asserts on the PDB documents themselves, not a count.
 pdb=$(grep -c "kind: PodDisruptionBudget" "$OUT" || true)
-[ "$pdb" -ge 5 ] || fail "prod must render app + OpenFGA PodDisruptionBudgets (>=5), got $pdb"
-grep -q "name: lance-ns-openfga$" "$OUT" || fail "prod is missing the OpenFGA PDB"
+pdb_names=$(awk '/^kind: PodDisruptionBudget$/{f=1} f&&/^  name: /{print $2; f=0}' "$OUT")
+for p in catalog lineage gateway openfga web-home web-data web-lineage web-models web-admin; do
+  grep -qx "lance-ns-$p" <<<"$pdb_names" \
+    || fail "prod is missing the lance-ns-$p PodDisruptionBudget (got: $(tr '\n' ' ' <<<"$pdb_names"))"
+done
 
 # 5. Anti-affinity: the replicas:2 services spread across nodes (else one node loss defeats their PDB).
 spread=$(grep -c "topologySpreadConstraints:" "$OUT" || true)
@@ -149,4 +155,21 @@ grep -q "kind: ExternalSecret" <<<"$eso" || fail "ESO path must render the Exter
 grep -A2 "name: lance-ns-infra-credentials" <<<"$eso" | grep -q "stringData:" \
   && fail "ESO path must SKIP the static infra-credentials Secret (external-secrets owns it)"
 
-echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb, spread=$spread, tiers=$tiers, alerting on, no-bespoke-scraper, write-cap=$cap fits $cat_mem, rustfs-externalize atomic, ESO path renders"
+# 12. Every Job/CronJob POD TEMPLATE carries a component label (the P4 landmine, audit 2026-07-24: the
+# unlabeled rustfs-mkbucket hook matched no rustfs-ingress client and every prod install wedged before a
+# bucket existed). Pod-template label indents only — 8 spaces (Job) / 12 (CronJob) — so the heredoc'd
+# VolumeSnapshot labels inside a command string can't satisfy the check. Then pin the load-bearing pair:
+# the mkbucket pod label AND its admission in the rustfs ingress client list.
+jobs_missing=$(awk '
+  /^---/     { if (k && !c && n != "") print n; k=0; c=0; n="" }
+  /^kind: Job$/ || /^kind: CronJob$/ { k=1 }
+  k && n == "" && /^  name: /        { n=$2 }
+  k && (/^        app\.kubernetes\.io\/component:/ || /^            app\.kubernetes\.io\/component:/) { c=1 }
+  END        { if (k && !c && n != "") print n }
+' "$OUT")
+[ -z "$jobs_missing" ] \
+  || fail "Job/CronJob pod templates missing the component label (invisible to component-scoped NetworkPolicies): $(tr '\n' ' ' <<<"$jobs_missing")"
+grep -q "app.kubernetes.io/component: rustfs-mkbucket" "$OUT" || fail "the mkbucket hook pod must carry its component label"
+grep -q -- "- rustfs-mkbucket" "$OUT" || fail "the rustfs ingress client list must admit the mkbucket hook component"
+
+echo "✓ prod-render-check: NetworkPolicy=$np, OpenFGA=3, Dapr-HA on, PDBs=$pdb (backends+OpenFGA+zones named), spread=$spread, tiers=$tiers, alerting on, no-bespoke-scraper, write-cap=$cap fits $cat_mem, rustfs-externalize atomic, ESO path renders, hook pods labeled"

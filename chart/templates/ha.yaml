@@ -3,8 +3,9 @@ HA for the stateless request-serving services (catalog, lineage, gateway). Off b
 kind); the prod overlay enables the PDB after bumping replicas. The stateful stores (AGE/RustFS) get HA from
 their operators in rask (CNPG / rustfs-operator), NOT from here. The event-driven movers/producer are
 intentionally excluded — eviction is safe (Dapr redelivers; ingest is idempotent). The P5 micro-frontend
-zones default to 1 replica, so they get NO PDB (a single-replica minAvailable=1 PDB would block every
-voluntary drain); a prod overlay that bumps frontend.replicas should add zone PDBs alongside.
+zones get NO PDB at their 1-replica default (a single-replica minAvailable=1 PDB would block every
+voluntary drain); once frontend.replicas > 1 (the prod overlay) a PDB per zone renders below — the zones
+are the Ingress-routed north-south edge, so an unbounded drain there defeats the replica bump.
 */ -}}
 {{- if .Values.podDisruptionBudget.enabled }}
 {{- range $c := list "catalog" "lineage" "gateway" }}
@@ -20,6 +21,26 @@ spec:
     matchLabels:
       app.kubernetes.io/component: {{ $c }}
       app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- end }}
+{{- if and .Values.frontend.enabled (gt (int (.Values.frontend.replicas | default 1)) 1) }}
+{{- range .Values.frontend.apps }}
+---
+# Zone PDBs (audit 2026-07-24): the P5 zones are the north-south edge (the Ingress path-routes
+# /<zone> → web-<zone>), so once replicas are bumped past 1 they need the same voluntary-disruption
+# bound as the backends — without one, a node drain may evict both replicas at once and the HA replica
+# count buys nothing. Gated on replicas > 1 (see the header: a 1-replica minAvailable=1 PDB blocks drains).
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "lance.fullname" $ }}-web-{{ .name }}
+  labels: {{- include "lance.labels" $ | nindent 4 }}
+spec:
+  minAvailable: {{ $.Values.podDisruptionBudget.minAvailable }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: web-{{ .name }}
+      app.kubernetes.io/instance: {{ $.Release.Name }}
+{{- end }}
 {{- end }}
 {{- if .Values.openfga.enabled }}
 ---

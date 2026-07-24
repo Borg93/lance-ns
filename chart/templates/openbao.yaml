@@ -100,7 +100,7 @@ spec:
             httpGet: { path: "/v1/sys/health?standbyok=true&sealedcode=200&uninitcode=200", port: 8200 }
             initialDelaySeconds: 4
             periodSeconds: 10
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "openbao") | nindent 12 }}
       {{- if not .Values.openbao.devMode }}
       volumes:
         - { name: config, configMap: { name: {{ include "lance.openbaoHost" . }}-config } }
@@ -120,6 +120,13 @@ metadata:
 spec:
   backoffLimit: 20
   template:
+    metadata:
+      # The explicit component label (the P4 landmine, see bootstrap-admin.yaml): devMode-only Job, so it
+      # never meets the prod NetworkPolicy — the label is for release inventory + consistency with every
+      # other hook pod (and would be the admission handle if a dev cluster ever enforced policies).
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: openbao-seed
     spec:
       restartPolicy: OnFailure
       {{- if .Values.security.serviceAccounts.enabled }}

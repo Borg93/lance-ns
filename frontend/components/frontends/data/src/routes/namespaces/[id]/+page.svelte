@@ -5,22 +5,32 @@
 	// table count from the registry the /namespaces page already derives from), the kind-generalized
 	// GrantsPanel, and a maintenance-policy card mirroring the table policy form. Same stack-mode
 	// states as the registry — governed without a session ⇒ sign-in, unreachable ⇒ retrying.
+	import { GrantsPanel, type GrantsClient } from '@rask/ui/grants-panel';
 	import { Boxes, Network, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchTables } from '$lib/catalog';
-	import GrantsPanel from '$lib/GrantsPanel.svelte';
 	import {
 		type AccessGraph,
+		checkAccess,
 		deleteNamespacePolicy,
+		fetchAccess,
 		fetchNamespaceAccessGraph,
 		fetchNamespacePolicy,
+		grantAccess,
 		type NamespacePolicy,
 		type PolicyRequest,
+		revokeAccess,
 		setNamespacePolicy,
 	} from '$lib/namespace';
 
 	const ns = $derived(page.params.id ?? '');
+
+	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
+	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let tables = $state<string[] | null>(null);
 	let lastStatus = $state(0);
@@ -239,7 +249,9 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to view this namespace.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view this namespace.
+			</p>
 		</div>
 	{:else if offline}
 		<div class="empty">
@@ -356,7 +368,7 @@
 
 		<section>
 			<h2>Access</h2>
-			<GrantsPanel dataset={ns} kind="namespace" />
+			<GrantsPanel dataset={ns} kind="namespace" client={grantsClient} />
 			<!-- #81 one hop of the authorization graph, lazy-loaded as a compact list card. -->
 			<button class="btn ghost graphtoggle" onclick={toggleGraph}>
 				{showGraph ? 'Hide' : 'Show'} authorization graph

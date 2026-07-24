@@ -5,9 +5,13 @@
 	// an operator replay one on demand (re-ingest + drop) instead of waiting for the next tick. The list is
 	// governed per-dataset by the service; replay forwards the signed-in user's bearer through a session-only
 	// BFF route (never the service token). Governed without a session → 401.
+	import { RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
+	import { page } from '$app/state';
 	import { fetchDlq, replayDlq } from './api';
 	import type { DlqBacklog, DlqEvent } from './types';
-	import { RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let backlog = $state<DlqBacklog | null>(null);
 	let lastStatus = $state(0);
@@ -17,7 +21,9 @@
 	let msg = $state<{ ok: boolean; text: string } | null>(null);
 
 	const unauthorized = $derived(backlog === null && settled && lastStatus === 401);
-	const offline = $derived(backlog === null && settled && ![0, 200, 401].includes(lastStatus));
+	// 0 stays IN the offline set: after the first settle, a fetch-level failure (network down, BFF timeout)
+	// reports status 0 and must render as offline, not hang on the loading message (audit finding).
+	const offline = $derived(backlog === null && settled && ![200, 401].includes(lastStatus));
 
 	async function load(): Promise<void> {
 		const seq = ++inflight;
@@ -90,7 +96,8 @@
 
 	{#if unauthorized}
 		<div class="empty">
-			<ShieldAlert size={15} /> <a href="/auth/login">Sign in</a> to view the lineage DLQ.
+			<ShieldAlert size={15} /> <a href={loginHref} data-sveltekit-reload>Sign in</a> to view the lineage
+			DLQ.
 		</div>
 	{:else if offline}
 		<div class="empty"><RefreshCw size={15} /> DLQ store unreachable (HTTP {lastStatus}).</div>

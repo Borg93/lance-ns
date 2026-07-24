@@ -1,6 +1,6 @@
 <script lang="ts">
 	// `/streams` — read-only JetStream diagnostics over the estate's event fabric. The /api/jetstream BFF
-	// admin-gates (medallion /authorize), fetches the unauthenticated NATS monitor `/jsz` server-side, and
+	// estate-admin-gates (catalog can_observe_events), fetches the unauthenticated NATS monitor `/jsz` server-side, and
 	// returns a trimmed typed overview — the monitor URL and raw payload never reach the browser. This panel
 	// renders stream cards with per-consumer lag (pending / ack-pending / redelivered): redeliveries are the
 	// wedge signal, backlog the pressure signal. On top of the raw state it diagnoses: EXPECTED consumers
@@ -9,8 +9,12 @@
 	// viewer — no mutation affordances by design.
 	import { Layers, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
 	import { parse } from '@rask/api';
+	import { page } from '$app/state';
 	import { JetStreamOverviewSchema, type JetStreamOverview } from './jetstream';
 	import { requestJSON } from './http';
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let overview = $state<JetStreamOverview | null>(null);
 	// The PREVIOUS successful poll's message counts (totals + per-stream), so a manual Refresh can show
@@ -150,11 +154,12 @@
 
 	{#if unauthorized}
 		<div class="empty">
-			<ShieldAlert size={15} /> <a href="/auth/login">Sign in</a> to view JetStream streams.
+			<ShieldAlert size={15} /> <a href={loginHref} data-sveltekit-reload>Sign in</a> to view JetStream
+			streams.
 		</div>
 	{:else if forbidden}
 		<div class="empty">
-			<ShieldAlert size={15} /> The stream view is admin-only — your account isn't a project admin.
+			<ShieldAlert size={15} /> The stream view is estate-admin only — it maps the whole event fabric.
 		</div>
 	{:else if unavailable}
 		<div class="empty">The stream view needs the NATS monitor (NATS_MONITOR_API unset).</div>

@@ -6,7 +6,11 @@
 	import { Select } from '@rask/ui/select';
 	import { RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
+	import { page } from '$app/state';
 	import { requestJSON } from './http';
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	type AuditEvent = {
 		timestamp: string;
@@ -30,8 +34,10 @@
 	const unauthorized = $derived(events === null && settled && lastStatus === 401);
 	const forbidden = $derived(events === null && settled && lastStatus === 403);
 	const unavailable = $derived(events === null && settled && lastStatus === 501);
+	// 0 stays IN the offline set: after the first settle, a fetch-level failure (network down, BFF timeout)
+	// reports status 0 and must render as offline, not hang on the loading message (audit finding).
 	const offline = $derived(
-		events === null && settled && ![0, 200, 401, 403, 501].includes(lastStatus),
+		events === null && settled && ![200, 401, 403, 501].includes(lastStatus),
 	);
 
 	async function load(): Promise<void> {
@@ -116,11 +122,12 @@
 
 	{#if unauthorized}
 		<div class="empty">
-			<ShieldAlert size={15} /> <a href="/auth/login">Sign in</a> to view the audit trail.
+			<ShieldAlert size={15} /> <a href={loginHref} data-sveltekit-reload>Sign in</a> to view the audit
+			trail.
 		</div>
 	{:else if forbidden}
 		<div class="empty">
-			<ShieldAlert size={15} /> The audit trail is admin-only — your account isn't a project admin.
+			<ShieldAlert size={15} /> The audit trail is estate-admin only — it spans every tenant.
 		</div>
 	{:else if unavailable}
 		<div class="empty">The audit viewer needs the observability stack (GreptimeDB).</div>

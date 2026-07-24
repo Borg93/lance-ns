@@ -4,8 +4,12 @@
 	// bearer-forwards). Read-only observability: creation stays implicit via the warehouse-bind flow.
 	import { Building2, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { parse } from '@rask/api';
+	import { page } from '$app/state';
 	import { ProjectsResponseSchema, type Project } from './tenants';
 	import { requestJSON } from './http';
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let projects = $state<Project[] | null>(null);
 	let lastStatus = $state(0);
@@ -57,7 +61,7 @@
 
 	{#if unauthorized}
 		<div class="empty">
-			<ShieldAlert size={15} /> <a href="/auth/login">Sign in</a> to view tenants.
+			<ShieldAlert size={15} /> <a href={loginHref} data-sveltekit-reload>Sign in</a> to view tenants.
 		</div>
 	{:else if forbidden}
 		<div class="empty">

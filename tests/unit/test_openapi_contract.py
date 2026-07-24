@@ -18,9 +18,18 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 from pathlib import Path
 
 import pytest
+
+# Just enough env to CONSTRUCT the catalog Settings at import (mirrors scripts/gen_openapi.py) — the
+# placeholders are inert (no lifespan runs for schema generation) and setdefault never overrides a real
+# value. Without this the guard only passed when the integration fixtures had already monkeypatched the
+# env and left catalog.main cached in sys.modules — `pytest tests/unit` alone was red (import-order
+# pollution); the guard must be self-sufficient in any filtered run.
+os.environ.setdefault("LANCE_S3_ACCESS_KEY_ID", "spec")
+os.environ.setdefault("LANCE_S3_SECRET_ACCESS_KEY", "spec")
 
 _DOCS = Path(__file__).resolve().parents[2] / "docs"
 

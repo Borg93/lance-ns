@@ -4,6 +4,23 @@
  */
 
 export interface paths {
+    "/dapr/subscribe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Get Subscriptions */
+        get: operations["_get_subscriptions_dapr_subscribe_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/livez": {
         parameters: {
             query?: never;
@@ -30,6 +47,32 @@ export interface paths {
         };
         /** Readyz */
         get: operations["readyz_readyz_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Poll Control Events
+         * @description Return control-plane change-events after ``since`` for a platform (estate) administrator.
+         *
+         *     Fail-closed via FGA: a non-estate-admin gets 403, an OpenFGA outage 503, and the gate is a no-op only
+         *     when FGA is off (parity with every other ``require_*`` site). The ring buffer is per-replica + in-memory,
+         *     so ``cursor`` is a per-replica monotonic counter and ``reset`` means the client missed the buffer window
+         *     (scaling the catalog past one replica needs session affinity or a shared buffer — see docs/DECISIONS.md
+         *     #control-events--per-replica-cursor-boundary).
+         */
+        get: operations["poll_control_events_v1_events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -437,6 +480,125 @@ export interface paths {
          *     ``include_declared=false`` drops declared-only tables (reserved, no storage yet).
          */
         get: operations["list_tables_v1_namespace__id__table_list_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project/{id}/policy/delete": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Delete Project Policy
+         * @description Remove the project's maintenance policy (idempotent) — admin-gated.
+         */
+        post: operations["delete_project_policy_v1_project__id__policy_delete_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project/{id}/policy/describe": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Describe Project Policy
+         * @description The project's maintenance policy — admin-gated like set/delete (``project`` defines no
+         *     reader-tier relation); 404 when none is set.
+         */
+        post: operations["describe_project_policy_v1_project__id__policy_describe_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/project/{id}/policy/set": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Project Policy
+         * @description Set (or replace) the project-level maintenance policy (#84) — the tenant-wide default the sweep
+         *     falls back to when no table or namespace policy matches. Admin-gated (``can_administer`` on
+         *     ``project:<id>``, checked explicitly — see the module docstring).
+         *
+         *     The record's ``buckets`` are the project's ACTIVE warehouse buckets, resolved from the warehouse
+         *     registry NOW: a warehouse provisioned after this set is not covered until the policy is re-set
+         *     (the same set-time-resolution stance as the table policy's physical path). Staleness runs the OTHER
+         *     way too: a warehouse deactivated AFTER this set stays on the stored record — the policy keeps
+         *     governing that bucket's datasets until the policy is re-set (or deleted); a deactivation does not
+         *     rewrite existing policy records. A project with no active warehouse is refused — a policy that
+         *     could never match anything should fail loudly at set time, not lie dormant.
+         *
+         *     Defense in depth (audit 2026-07-23): a resolved bucket that ANOTHER project's warehouse also claims
+         *     is refused with 409 — even if a rival claim somehow got past ``create_warehouse``'s guards, it must
+         *     not become a policy governing (and destroying version history in) the other tenant's data.
+         */
+        post: operations["set_project_policy_v1_project__id__policy_set_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Projects
+         * @description Enumerate the estate's tenants, derived from the warehouse registry. Estate-observer gated.
+         *
+         *     Fail-closed via FGA on the read: a non-estate-observer gets 403, an OpenFGA outage 503, and the gate
+         *     is a no-op only when FGA is off (parity with every ``require_*`` site). ``admins`` degrades to ``[]``
+         *     when FGA is off or the ``list_users`` lookup is unavailable — the registry facts still serve.
+         */
+        get: operations["list_projects_v1_projects_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/projects/{project_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Project
+         * @description One derived tenant — the same shape as the list. Estate-observer gated; unknown project → 404.
+         */
+        get: operations["get_project_v1_projects__project_id__get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1287,6 +1449,11 @@ export interface paths {
          * Merge Insert Into Table
          * @description Upsert Arrow-IPC rows — ``merge_insert_into_table``; emits a MERGE_INSERT lineage event.
          *     The ``*_filt`` SQL filters, ``timeout``, ``use_index`` and ``branch`` are spec-0.9 query params.
+         *
+         *     Training-shaped lineage (optional, catalog stays un-opinionated): ``source`` + ``source_version``
+         *     record the version-pinned upstream this merge DERIVED FROM (a mover's merge from ``source@N`` — the
+         *     reproducibility pin surfaced on the lineage READ edge), and the ``X-Lance-Run-Facets`` header carries
+         *     producer run metadata (e.g. training ``params``) verbatim onto the emitted RunEvent.
          *
          *     IMPLICIT DDL (§4): after the merge commits, a best-effort BTREE index is ensured on the ``on``
          *     key (pylance's ``use_index`` only helps *if an index exists*, and nothing else ever builds one —
@@ -2795,6 +2962,40 @@ export interface components {
             parentVersion: number;
         };
         /**
+         * CatalogControlEvent
+         * @description One control-plane mutation notice. Published AFTER the backend/FGA mutation succeeds; the `actor` is
+         *     the VERIFIED principal from the OIDC token in scope (never self-asserted — the pub/sub topic is an
+         *     internal catalog-only channel, so the subscriber trusts the catalog's stamp, exactly like lineage's
+         *     trusted `author`).
+         */
+        CatalogControlEvent: {
+            /**
+             * Action
+             * @enum {string}
+             */
+            action: "grant_added" | "grant_revoked" | "warehouse_created" | "warehouse_activated" | "warehouse_deactivated" | "warehouse_bound" | "policy_set" | "policy_deleted" | "namespace_created" | "namespace_dropped" | "table_created" | "table_dropped" | "table_renamed" | "table_registered" | "table_deregistered" | "table_declared";
+            /** Actor */
+            actor?: string | null;
+            /** Event Id */
+            event_id?: string;
+            /** Extra */
+            extra?: {
+                [key: string]: unknown;
+            };
+            /** Object Id */
+            object_id: string;
+            /**
+             * Object Type
+             * @enum {string}
+             */
+            object_type: "grant" | "warehouse" | "policy" | "namespace" | "table";
+            /**
+             * Occurred At
+             * Format: date-time
+             */
+            occurred_at?: string;
+        };
+        /**
          * CommitFragmentsRequest
          * @description A client-direct APPEND commit (#2): the serialized Lance ``FragmentMetadata`` the client wrote
          *     DIRECTLY to object storage (``[fragment.to_json() for fragment in write_fragments(...)]``), plus the
@@ -3963,6 +4164,19 @@ export interface components {
             transaction_id?: string | null;
         };
         /**
+         * EventsResponse
+         * @description A poll response: control events strictly after the caller's cursor, the new head cursor, and a reset
+         *     flag (``True`` when the client's cursor fell off the bounded buffer → the console should re-read all).
+         */
+        EventsResponse: {
+            /** Cursor */
+            cursor: number;
+            /** Events */
+            events: components["schemas"]["CatalogControlEvent"][];
+            /** Reset */
+            reset: boolean;
+        };
+        /**
          * ExplainTableQueryPlanRequest
          * @description ExplainTableQueryPlanRequest
          */
@@ -4715,6 +4929,8 @@ export interface components {
         };
         /** PolicyResponse */
         PolicyResponse: {
+            /** Buckets */
+            buckets?: string[] | null;
             /**
              * Compact Enabled
              * @default true
@@ -4734,6 +4950,31 @@ export interface components {
             retention_days?: number | null;
             /** Target Rows Per Fragment */
             target_rows_per_fragment?: number | null;
+        };
+        /**
+         * ProjectResponse
+         * @description A derived tenant: its name, the warehouses claiming it, and its effective FGA admins (``[]`` when
+         *     FGA is off/unavailable — degraded, never fabricated).
+         */
+        ProjectResponse: {
+            /** Admins */
+            admins: string[];
+            /** Project */
+            project: string;
+            /** Warehouses */
+            warehouses: components["schemas"]["ProjectWarehouse"][];
+        };
+        /**
+         * ProjectWarehouse
+         * @description One warehouse owned by the project — the registry facts an estate observer needs at a glance.
+         */
+        ProjectWarehouse: {
+            /** Bucket */
+            bucket: string;
+            /** Id */
+            id: string;
+            /** Status */
+            status: string;
         };
         /**
          * PromoteRequest
@@ -5528,6 +5769,26 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    _get_subscriptions_dapr_subscribe_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
+                };
+            };
+        };
+    };
     livez_livez_get: {
         parameters: {
             query?: never;
@@ -5566,6 +5827,38 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    poll_control_events_v1_events_get: {
+        parameters: {
+            query?: {
+                /** @description the last cursor the client saw (0 = baseline) */
+                since?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["EventsResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -6191,6 +6484,154 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ListTablesResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_project_policy_v1_project__id__policy_delete_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyDeleteResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    describe_project_policy_v1_project__id__policy_describe_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_project_policy_v1_project__id__policy_set_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PolicyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_projects_v1_projects_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectResponse"][];
+                };
+            };
+        };
+    };
+    get_project_v1_projects__project_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                project_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ProjectResponse"];
                 };
             };
             /** @description Validation Error */
@@ -7514,8 +7955,11 @@ export interface operations {
                 timeout?: string | null;
                 use_index?: boolean | null;
                 branch?: string | null;
+                source?: string | null;
+                source_version?: number | null;
             };
             header?: {
+                "X-Lance-Run-Facets"?: string | null;
                 authorization?: string | null;
             };
             path: {

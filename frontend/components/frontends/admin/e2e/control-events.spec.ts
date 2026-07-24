@@ -9,7 +9,7 @@ import { expect, test } from '@playwright/test';
 // not run in parallel — else the 403 test's `mode:forbidden` leaks into the OK tests (fullyParallel is on).
 test.describe.configure({ mode: 'serial' });
 
-const MOCK = 'http://localhost:5296';
+const MOCK = 'http://localhost:5297';
 const control = (path: string, body?: unknown) =>
 	fetch(`${MOCK}/__mock/${path}`, {
 		method: 'POST',

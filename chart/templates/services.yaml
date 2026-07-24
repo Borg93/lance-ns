@@ -136,6 +136,15 @@ spec:
             - { name: LANCE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }
             - { name: LANCE_FGA_ENABLED, value: "true" }
             - { name: LANCE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            {{- with .Values.auth.fgaStoreId }}
+            # Operator-pinned FGA store id (production posture) — the SAME auth.fgaStoreId the
+            # bootstrap-admin Job grants into, so the pinned store can never diverge from the store the
+            # catalog checks against. Unset = provision-by-name at boot (`lance-catalog`).
+            - { name: LANCE_FGA_STORE_ID, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.auth.fgaModelId }}
+            - { name: LANCE_FGA_MODEL_ID, value: {{ . | quote }} }
+            {{- end }}
             # #41 compliance audit trail (who/what/outcome for authn/authz/vending) — configurable.
             # hasKey+ternary, NOT `| default`: Sprig's default() treats boolean false as empty (making
             # `false` un-settable), while a bare reference renders "" when the key is missing entirely —
@@ -145,8 +154,10 @@ spec:
             - { name: LANCE_AUDIT_ENABLED, value: {{ hasKey .Values.auth "audit" | ternary .Values.auth.audit true | quote }} }
             # Lock top-level (root) namespace/table creation to holders of a warehouse-level create grant.
             # Off in dev (self-serve); ON in prod (values-prod) — else any Dex-authenticated user can squat
-            # unlimited root namespaces in the shared warehouse bucket (assessment finding).
-            - { name: LANCE_FGA_LOCK_ROOT_CREATE, value: {{ .Values.auth.lockRootCreate | quote }} }
+            # unlimited root namespaces in the shared warehouse bucket (assessment finding). hasKey+ternary
+            # like LANCE_AUDIT_ENABLED above: a missing key under --reuse-values must render the default,
+            # not "" (pydantic bool_parsing crash).
+            - { name: LANCE_FGA_LOCK_ROOT_CREATE, value: {{ hasKey .Values.auth "lockRootCreate" | ternary .Values.auth.lockRootCreate false | quote }} }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
           resources: {{- include "lance.resources" (dict "root" . "comp" "catalog") | nindent 12 }}
@@ -296,7 +307,9 @@ spec:
             # Bound the DaprClient gRPC deadline (the SDK env) — covers the boot-time secret-store fetch.
             - { name: DAPR_API_TIMEOUT_SECONDS, value: {{ .Values.dapr.apiTimeoutSeconds | quote }} }
             # Demo peek router — values-gated (unauthenticated metadata disclosure; prod ships it off).
-            - { name: LINEAGE_DEMO_DATA_ENABLED, value: {{ .Values.services.lineage.demoData | quote }} }
+            # hasKey+ternary (the LANCE_AUDIT_ENABLED convention): a key missing under --reuse-values (a
+            # stored release predating demoData) must render the default, not "" (bool_parsing boot crash).
+            - { name: LINEAGE_DEMO_DATA_ENABLED, value: {{ hasKey .Values.services.lineage "demoData" | ternary .Values.services.lineage.demoData false | quote }} }
             {{- if .Values.services.lineage.reconcile.enabled }}
             # Mounts the cron reconcile route at this binding name (matches the bindings.cron component above).
             - { name: LINEAGE_RECONCILE_BINDING_NAME, value: {{ .Values.services.lineage.reconcile.bindingName | quote }} }
@@ -318,6 +331,19 @@ spec:
             - { name: LINEAGE_OIDC_ALLOW_INSECURE, value: {{ ternary "false" "true" (hasPrefix "https://" .Values.dex.issuer) | quote }} }
             - { name: LINEAGE_FGA_ENABLED, value: "true" }
             - { name: LINEAGE_FGA_API_URL, value: "http://{{ include "lance.openfgaHost" . }}:8080" }
+            {{- with .Values.auth.fgaStoreId }}
+            # Operator-pinned FGA store id — the same auth.fgaStoreId every consumer + the bootstrap-admin
+            # Job use (see the catalog twin above). Unset = provision-by-name at boot.
+            - { name: LINEAGE_FGA_STORE_ID, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.auth.fgaModelId }}
+            - { name: LINEAGE_FGA_MODEL_ID, value: {{ . | quote }} }
+            {{- end }}
+            # Read-side audit (services.lineage.readAudit): record every ALLOWED FGA-gated data read into
+            # lineage_reads — feeds GET /datasets/{name}/readers + the ReadersPanel. Rendered only under
+            # auth.enabled (a real subject exists), default ON like the catalog's write-side
+            # LANCE_AUDIT_ENABLED — and hasKey+ternary for the same --reuse-values reason.
+            - { name: LINEAGE_READ_AUDIT_ENABLED, value: {{ hasKey .Values.services.lineage "readAudit" | ternary .Values.services.lineage.readAudit true | quote }} }
             # The SERVICE door on the HTTP ingest (lineage/api/security.py ServicePrincipal): bare FGA
             # subjects that may ingest with the shared app token instead of an OIDC bearer. The Ray TRAIN
             # job is a sidecar-less in-cluster producer (RAY-TRAIN.md D2) — before this, every training
@@ -331,7 +357,7 @@ spec:
             - { name: LINEAGE_SERVICE_SUBJECTS, value: "{{ .Values.medallion.train.trainerIdentity }},{{ .Values.frontend.serviceIdentity }}" }
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "lineage") | nindent 12 }}
           volumeMounts:
             {{- include "lance.tmpMount" . | nindent 12 }}
       volumes:

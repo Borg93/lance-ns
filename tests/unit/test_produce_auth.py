@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import inspect
+import logging
+from collections.abc import Iterator
 from types import SimpleNamespace
 from typing import cast
 
 import pytest
+from common.audit import AUDIT_LOGGER, configure_audit
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 from lance_namespace import ServiceUnavailableError, UnauthenticatedError
@@ -127,6 +130,14 @@ def test_bearer_but_oidc_disabled_is_403(monkeypatch: pytest.MonkeyPatch) -> Non
     _expect(
         monkeypatch, 403, app_token="s3cr3t", authz="Bearer good", verifier=_Verifier(), oidc_enabled=False
     )
+
+
+def test_bearer_but_unwired_verifier_is_503(monkeypatch: pytest.MonkeyPatch) -> None:
+    # OIDC enabled but app.state.oidc was never wired (startup/discovery skew): a bearer-presenting caller
+    # must surface the auth-layer OUTAGE (503, the catalog/lineage security.py invariant), never the
+    # terminal 403 — a valid admin would otherwise be misreported as denied, and 503-keyed monitoring
+    # (which the FGA-unwired branch already feeds) would miss the misconfiguration.
+    _expect(monkeypatch, 503, app_token="s3cr3t", authz="Bearer good", verifier=None)
 
 
 def test_wrong_service_token_and_oidc_off_is_403(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -311,3 +322,95 @@ def test_produce_route_keeps_the_per_project_refusal(monkeypatch: pytest.MonkeyP
         "/produce", params={"project": "globex"}, headers={"dapr-api-token": "s3cret"}
     )
     assert res.status_code == 403, res.text
+
+
+# ── audit (#41): every door decision lands on lance.audit — ALLOW/DENY/FAILURE, service path too ───
+
+
+class _CaptureAudit(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def audit_records() -> Iterator[list[logging.LogRecord]]:
+    """Capture the dedicated ``lance.audit`` stream with the trail enabled (as the producer boot does)."""
+    handler = _CaptureAudit()
+    logger = logging.getLogger(AUDIT_LOGGER)
+    configure_audit(enabled=True)
+    logger.addHandler(handler)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        configure_audit(enabled=True)  # leave the stream on for the rest of the suite
+
+
+def _audit_fields(record: logging.LogRecord) -> dict[str, object]:
+    return {k: v for k, v in record.__dict__.items() if k.startswith("audit.")}
+
+
+def test_admin_allow_is_audited(
+    monkeypatch: pytest.MonkeyPatch, audit_records: list[logging.LogRecord]
+) -> None:
+    # The cascade-head trigger is exactly what the #77 audit viewer reviews — the allowed decision must
+    # land with who/what/resource, like every catalog can_administer decision (fga_deps._require parity).
+    _run(monkeypatch, app_token="s3cr3t", authz="Bearer good", verifier=_Verifier(), fga_result=True)
+    assert len(audit_records) == 1
+    assert _audit_fields(audit_records[0]) == {
+        "audit.action": "can_administer",
+        "audit.outcome": "allow",
+        "audit.subject": "alice",
+        "audit.resource": "project:acme",
+    }
+
+
+def test_admin_deny_is_audited(
+    monkeypatch: pytest.MonkeyPatch, audit_records: list[logging.LogRecord]
+) -> None:
+    _expect(monkeypatch, 403, app_token="s3cr3t", authz="Bearer good", verifier=_Verifier(), fga_result=False)
+    fields = _audit_fields(audit_records[0])
+    assert fields["audit.action"] == "can_administer" and fields["audit.outcome"] == "deny"
+
+
+def test_fga_outage_is_audited_as_failure(
+    monkeypatch: pytest.MonkeyPatch, audit_records: list[logging.LogRecord]
+) -> None:
+    _expect(monkeypatch, 503, app_token="s3cr3t", authz="Bearer good", verifier=_Verifier(), fga_raises=True)
+    fields = _audit_fields(audit_records[0])
+    assert fields["audit.outcome"] == "failure" and fields["audit.reason"] == "authz_unavailable"
+
+
+def test_service_token_acceptance_is_audited(
+    monkeypatch: pytest.MonkeyPatch, audit_records: list[logging.LogRecord]
+) -> None:
+    # The service path opens the same door, so its acceptance is recorded too; the shared token names no
+    # principal, hence the fixed "service" subject.
+    _run(monkeypatch, app_token="s3cr3t", dapr_token="s3cr3t")
+    assert _audit_fields(audit_records[0]) == {
+        "audit.action": "produce_service_token",
+        "audit.outcome": "allow",
+        "audit.subject": "service",
+        "audit.resource": "project:acme",
+    }
+
+
+def test_service_token_cross_project_refusal_is_audited(
+    monkeypatch: pytest.MonkeyPatch, audit_records: list[logging.LogRecord]
+) -> None:
+    _expect(monkeypatch, 403, app_token="s3cr3t", dapr_token="s3cr3t", project="globex")
+    fields = _audit_fields(audit_records[0])
+    assert fields["audit.outcome"] == "deny" and fields["audit.reason"] == "cross_project"
+    assert fields["audit.resource"] == "project:globex"
+
+
+def test_medallion_audit_stream_is_env_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The producer boot gates `lance.audit` on the SHARED LANCE_AUDIT_ENABLED (catalog parity — one flag
+    # for the estate's compliance posture): default on, and the env alias turns the stream off.
+    assert MedallionSettings.model_validate({}).audit_enabled is True
+    monkeypatch.setenv("LANCE_AUDIT_ENABLED", "false")
+    assert MedallionSettings().audit_enabled is False

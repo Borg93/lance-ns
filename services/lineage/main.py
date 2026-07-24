@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 from common import fga
+from common.audit import configure_audit
 from common.dapr_auth import assert_app_token_configured
 from common.exceptions import install_problem_handlers
 from common.lance_metrics import instrument_lance_if_available
@@ -42,6 +43,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # shutting_down, so k8s pulls the pod from rotation during boot and graceful drain.
     app.state.startup_complete = False
     app.state.shutting_down = False
+    configure_audit(enabled=settings.audit_enabled)  # #41 gate the compliance audit stream (dlq_replay)
     instrument_lance_if_available()  # Lance-native IO metrics — no-op until the pylance 9 bump
     # Fail closed if ANY sidecar-delivered route mounts — the pub/sub ingest (dapr_enabled) OR the cron
     # reconcile binding — but the app-api-token is unset: either route would otherwise be an

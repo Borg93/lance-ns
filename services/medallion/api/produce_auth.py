@@ -9,7 +9,10 @@ Fail-closed at every step: no service token configured is dev-open (matching the
 a matching Dapr token passes (service path) — but only for the CONFIGURED project, since the shared token
 carries no tenant identity (crossing tenants takes a user bearer); otherwise an OIDC bearer is REQUIRED
 and must be valid (else 401) AND resolve to a project admin (else 403), with an OpenFGA outage failing to
-503 — never a silent allow; a request carrying neither credential is 403.
+503 — never a silent allow; a request carrying neither credential is 403. OIDC enabled with NO verifier
+wired (startup/discovery skew) is 503 for a bearer-presenting caller — an auth-layer outage, not a caller
+verdict (the catalog/lineage ``security.py`` invariant). Every door decision — the ``can_administer``
+allow/deny/outage AND the service-token acceptance — is audited on the ``lance.audit`` stream (#41).
 """
 
 from __future__ import annotations
@@ -19,16 +22,37 @@ import secrets
 from typing import Annotated
 
 from common import fga
+from common.audit import ALLOW, DENY, FAILURE, audit
 from common.oidc import OIDCVerifier
 from common.warehouse_registry import PROJECT_PATTERN
 from fastapi import Header, HTTPException, Query, Request
 from lance_namespace import ServiceUnavailableError, UnauthenticatedError
+from openfga_sdk import OpenFgaClient
 
 from medallion.api.dependencies import FgaClientDep, SettingsDep
 
 #: The optional per-tenant project (#84) — shared by the auth gate and the /produce route (FastAPI
 #: deduplicates the identically-declared query param). Pattern-bound so an unsafe id 422s at the edge.
 ProjectParam = Annotated[str | None, Query(min_length=1, max_length=64, pattern=PROJECT_PATTERN)]
+
+
+async def _require_admin(fga_client: OpenFgaClient, *, user: str, obj: str) -> None:
+    """Check ``can_administer`` on ``obj``, audit the decision, and raise 403 on denial / 503 on outage.
+
+    Mirrors the catalog's ``fga_deps._require`` (#41 audit every authz decision): the cascade-head trigger
+    is exactly the operation the admin audit viewer (#77) reviews, so its allow/deny/outage outcomes must
+    land on the ``lance.audit`` stream like every other ``can_administer`` decision in the estate.
+    """
+    try:
+        allowed = await fga.check(fga_client, user=user, relation="can_administer", obj=obj)
+    except ServiceUnavailableError:  # authz layer down during a trigger attempt — audit, then fail closed
+        audit("can_administer", FAILURE, subject=user, resource=obj, reason="authz_unavailable")
+        raise HTTPException(status_code=503, detail="authorization service is not available") from None
+    audit("can_administer", ALLOW if allowed else DENY, subject=user, resource=obj)
+    if not allowed:
+        raise HTTPException(
+            status_code=403, detail="produce needs project admin (can_administer) or the service token"
+        )
 
 
 async def authorize_produce(
@@ -50,18 +74,28 @@ async def authorize_produce(
     # Dev: no service token configured → open, exactly as require_dapr_token was a no-op.
     if not expected:
         return
+    obj = f"project:{project or settings.produce_admin_project}"
     # Service-to-service path: a matching Dapr app-api-token. The shared token carries NO tenant
     # identity, so it must never be trusted for an arbitrary requested project — that would let any
-    # token holder produce into every tenant. Configured project (or none) only; else 403.
+    # token holder produce into every tenant. Configured project (or none) only; else 403. The door
+    # decision is audited like the human one (#41); the shared token names no principal, so the
+    # subject is the fixed "service" marker.
     if dapr_api_token and secrets.compare_digest(dapr_api_token.encode(), expected.encode()):
         if project and project != settings.produce_admin_project:
+            audit("produce_service_token", DENY, subject="service", resource=obj, reason="cross_project")
             raise HTTPException(
                 status_code=403,
                 detail="the service token cannot produce into another project; use a project-admin bearer",
             )
+        audit("produce_service_token", ALLOW, subject="service", resource=obj)
         return
     # Human path: a signed-in project admin. Only when OIDC is configured + a verifier is wired.
     verifier: OIDCVerifier | None = getattr(request.app.state, "oidc", None)
+    if settings.oidc_enabled and verifier is None and authorization:
+        # OIDC enabled but no verifier wired (startup/discovery skew): an infrastructure fault, not a
+        # caller authz verdict — 503, mirroring catalog/lineage security ("enabled but unavailable"),
+        # so a valid admin bearer is not misreported as denied and 503-keyed monitoring sees the outage.
+        raise HTTPException(status_code=503, detail="authentication is enabled but unavailable")
     if settings.oidc_enabled and verifier is not None and authorization:
         scheme, _, raw = authorization.partition(" ")
         if scheme.lower() != "bearer" or not raw:
@@ -72,16 +106,8 @@ async def authorize_produce(
             raise HTTPException(status_code=401, detail="invalid token") from None
         if fga_client is None:  # OIDC on but FGA unwired → fail closed, never an unauthorized trigger
             raise HTTPException(status_code=503, detail="authorization service is not available")
-        obj = f"project:{project or settings.produce_admin_project}"
-        try:
-            allowed = await fga.check(fga_client, user=token.sub, relation="can_administer", obj=obj)
-        except ServiceUnavailableError:
-            raise HTTPException(status_code=503, detail="authorization service is not available") from None
-        if allowed:
-            return
-        raise HTTPException(
-            status_code=403, detail="produce needs project admin (can_administer) or the service token"
-        )
+        await _require_admin(fga_client, user=token.sub, obj=obj)
+        return
     raise HTTPException(status_code=403, detail="invalid or missing produce credential")
 
 

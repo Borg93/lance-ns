@@ -11,9 +11,13 @@
 	import { AlertDialog } from '@rask/ui/alert-dialog';
 	import { Boxes, Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
+	import { page } from '$app/state';
 	import { dropNamespace, fetchTables } from './catalog';
 
 	const POLL_MS = 5000;
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let tables = $state<string[] | null>(null);
 	let lastStatus = $state(0);
@@ -128,7 +132,9 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to browse namespaces.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to browse namespaces.
+			</p>
 		</div>
 	{:else if offline}
 		<div class="empty">

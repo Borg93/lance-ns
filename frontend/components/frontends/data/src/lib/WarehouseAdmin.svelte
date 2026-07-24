@@ -5,6 +5,7 @@
 	// can_administer) — a non-admin sees the denial banner, never a silent no-op.
 	import { Select } from '@rask/ui/select';
 	import { RefreshCw, ShieldAlert, Warehouse as WarehouseIcon } from '@lucide/svelte';
+	import { page } from '$app/state';
 	import {
 		bindWarehouseNamespace,
 		createWarehouse,
@@ -14,6 +15,9 @@
 	} from './catalog';
 
 	const POLL_MS = 5000;
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let warehouses = $state<Warehouse[] | null>(null);
 	let lastStatus = $state(0);
@@ -137,7 +141,9 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to view warehouses.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view warehouses.
+			</p>
 		</div>
 	{:else if offline}
 		<div class="empty">

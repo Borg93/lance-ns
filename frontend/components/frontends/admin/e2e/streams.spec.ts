@@ -207,9 +207,9 @@ test('a shrinking stream renders a neutral negative delta with an accurate toolt
 
 test('a 403 from the BFF renders the forbidden state', async ({ page }) => {
 	await page.route('**/admin/api/jetstream*', (route) =>
-		json(route, { detail: 'the stream view is admin-only (project admin required)' }, 403),
+		json(route, { detail: 'the stream view is estate-admin only' }, 403),
 	);
 	await page.goto('/admin/streams');
-	await expect(page.getByText('The stream view is admin-only')).toBeVisible();
+	await expect(page.getByText('The stream view is estate-admin only')).toBeVisible();
 	await expect(page.locator('table')).toHaveCount(0);
 });

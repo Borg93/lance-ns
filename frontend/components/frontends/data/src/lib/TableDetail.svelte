@@ -5,16 +5,18 @@
 	// session-only routes. A dataset the catalog does not register (e.g. a storage-managed medallion
 	// zone) renders the honest not-in-catalog state instead of a broken page.
 	import { AlertDialog } from '@rask/ui/alert-dialog';
+	import { GrantsPanel, type GrantsClient } from '@rask/ui/grants-panel';
 	import { Select } from '@rask/ui/select';
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { tableFromJSON, tableToIPC } from 'apache-arrow';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
+	import { page } from '$app/state';
 	import AccessGraph from './AccessGraph.svelte';
 	import { fetchProducers } from './api';
 	import { bffPath } from './http';
+	import { checkAccess, fetchAccess, grantAccess, revokeAccess } from './namespace';
 	import { deriveQuality, type QualityBadge } from './quality';
-	import GrantsPanel from './GrantsPanel.svelte';
 	import ReadersPanel from './ReadersPanel.svelte';
 	import {
 		addColumn,
@@ -54,6 +56,12 @@
 	import TableProperties from './TableProperties.svelte';
 
 	let { table }: { table: string } = $props();
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
+
+	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
+	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
 
 	let detail = $state<TableDetail | null>(null);
 	let lastStatus = $state(0);
@@ -896,13 +904,15 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to view table details.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view table details.
+			</p>
 		</div>
 	{:else if notInCatalog}
 		<div class="empty">
 			<p>
 				Not a catalog-registered table — storage-managed datasets (medallion zones) have no catalog
-				detail. Its lineage is on the <a href="/">explorer</a>.
+				detail. Its lineage is on the <a href="/lineage" data-sveltekit-reload>explorer</a>.
 			</p>
 		</div>
 	{:else if denied}
@@ -910,7 +920,8 @@
 			<ShieldAlert size={16} />
 			<p>
 				You don't have read access to this table's catalog metadata — its lineage is on the <a
-					href="/">explorer</a
+					href="/lineage"
+					data-sveltekit-reload>explorer</a
 				>.
 			</p>
 		</div>
@@ -1589,7 +1600,7 @@
 
 		<section>
 			<h2>Access</h2>
-			<GrantsPanel dataset={table} />
+			<GrantsPanel dataset={table} client={grantsClient} />
 			<ReadersPanel dataset={table} />
 			<!-- #81 the relationship graph is heavy (SvelteFlow) — lazy-mount behind a toggle. -->
 			<button class="btn ghost graphtoggle" onclick={() => (showGraph = !showGraph)}>

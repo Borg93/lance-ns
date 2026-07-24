@@ -110,6 +110,14 @@ spec:
             # copy on this app would only mislead. These two envs are all the gate needs to come alive.
             - { name: MEDALLION_FGA_ENABLED, value: "true" }
             - { name: MEDALLION_FGA_API_URL, value: {{ .Values.medallion.fgaApiUrl | quote }} }
+            {{- with .Values.auth.fgaStoreId }}
+            # Operator-pinned FGA store id — the same auth.fgaStoreId every consumer + the bootstrap-admin
+            # Job use (see the catalog twin, services.yaml). Unset = provision-by-name at boot.
+            - { name: MEDALLION_FGA_STORE_ID, value: {{ . | quote }} }
+            {{- end }}
+            {{- with .Values.auth.fgaModelId }}
+            - { name: MEDALLION_FGA_MODEL_ID, value: {{ . | quote }} }
+            {{- end }}
             {{- end }}
             {{- if .Values.auth.enabled }}
             # #64 human trigger door: a signed-in project admin (OIDC bearer + can_administer) may fire
@@ -143,7 +151,10 @@ spec:
             # namespace-derived URI (MUST match the media mover's fromNamespace-derived FROM_URI), and
             # triggers the media lane. Dataset/namespace/topic/prefix use the code defaults.
             - { name: MEDALLION_MEDIA_SOURCE_BUCKET, value: {{ .Values.rustfs.bucket | quote }} }
-            - { name: MEDALLION_MEDIA_SEED_SAMPLES, value: {{ .Values.medallion.mediaSeedSamples | quote }} }
+            # hasKey+ternary (the LANCE_AUDIT_ENABLED convention, services.yaml): a key missing under
+            # --reuse-values (a stored release predating §9) must render the default, not "" (pydantic
+            # bool_parsing boot crash on this producer).
+            - { name: MEDALLION_MEDIA_SEED_SAMPLES, value: {{ hasKey .Values.medallion "mediaSeedSamples" | ternary .Values.medallion.mediaSeedSamples true | quote }} }
             - { name: MEDALLION_MEDIA_BRONZE_URI, value: "s3://{{ include "lance.stageBucket" (list . "bronze-media") }}/medallion/bronze-media" }
             - { name: MEDALLION_S3_ENDPOINT, value: "{{ include "lance.s3Endpoint" . }}" }
             - { name: MEDALLION_S3_ACCESS_KEY_ID, value: {{ .Values.rustfs.accessKey | quote }} }
@@ -157,7 +168,7 @@ spec:
             {{- end }}
             {{- end }}
           {{- include "lance.appProbes" . | nindent 10 }}
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "lance-ray") | nindent 12 }}
           volumeMounts:
             {{- include "lance.tmpMount" . | nindent 12 }}
       volumes:
@@ -298,11 +309,18 @@ spec:
             {{- if $root.Values.medallion.fgaEnabled }}
             - { name: MEDALLION_FGA_ENABLED, value: "true" }
             - { name: MEDALLION_FGA_API_URL, value: {{ $root.Values.medallion.fgaApiUrl | quote }} }
+            {{- with $root.Values.auth.fgaStoreId }}
+            # Operator-pinned FGA store id — one auth.fgaStoreId across every consumer (see services.yaml).
+            - { name: MEDALLION_FGA_STORE_ID, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $root.Values.auth.fgaModelId }}
+            - { name: MEDALLION_FGA_MODEL_ID, value: {{ . | quote }} }
+            {{- end }}
             - { name: MEDALLION_FGA_SERVICE_IDENTITY, value: {{ .serviceIdentity | quote }} }
             - { name: MEDALLION_FGA_REQUIRED_ACTION, value: {{ .requiredAction | quote }} }
             {{- end }}
           {{- include "lance.appProbes" $root | nindent 10 }}
-          resources: {{- toYaml $root.Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" $root "comp" .name) | nindent 12 }}
           volumeMounts:
             {{- include "lance.tmpMount" $root | nindent 12 }}
       volumes:

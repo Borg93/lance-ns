@@ -15,11 +15,12 @@ import type { RequestHandler } from './$types';
 // estate's event fabric, so an anonymous front-door caller must not read it; auth-off dev answers openly.
 // 501 when NATS_MONITOR_API is unset (no NATS monitor wired).
 const NATS_MONITOR_API = env.NATS_MONITOR_API ?? '';
-// The view is estate-wide, so it is ADMIN-only — not merely authenticated. We reuse the one admin door the
-// estate already owns: the medallion produce door's side-effect-free GET /authorize (a signed-in
-// `can_administer` project admin, or the service/dev paths). We bearer-FORWARD the user's token (never a
-// service token) and only query the NATS monitor if it returns 200.
-const MEDALLION_API = env.MEDALLION_API ?? '';
+// The view is ESTATE-wide (every stream/consumer in the fabric), so it gates on the ESTATE-admin
+// authority — the catalog's `can_observe_events` on the fixed root object, the same rung `/v1/events`
+// and `/v1/projects` check. A per-project door here would hand the configured project's admins the whole
+// estate's topology while 403ing an estate owner not on that project — the exact scope bug
+// docs/DECISIONS.md #control-events--estate-admin-scope records for /v1/events. (audit 2026-07-24)
+const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
 // The dead-subscription detector: JETSTREAM_EXPECTED_CONSUMERS (chart _helpers.tpl frontendEnv) is a
 // comma list of "STREAM:service" rendered from the SAME values the Dapr pubsub components render, so the
 // expectation cannot drift from what the estate actually subscribes. An expected group with no live
@@ -49,23 +50,22 @@ function serviceLabel(bareStream: string, deliverGroup: string | undefined): str
 	return '(ephemeral)';
 }
 
-// Returns null when the caller is an authorized admin; otherwise the {status, detail} to answer with.
-async function adminGate(
+// Returns null when the caller is an estate admin; otherwise the {status, detail} to answer with. The
+// probe is a side-effect-free `GET /v1/events` with a past-any-head cursor: an estate admin gets an
+// empty page (an empty poll is never audited, so the probe leaves no trail noise), anyone else the
+// catalog's own 401/403 verdict. We bearer-FORWARD the user's token (never a service token) and only
+// query the NATS monitor if it returns 200. Governed stack but no reachable catalog → fail closed.
+async function estateAdminGate(
 	fetchFn: typeof fetch,
 	accessToken: string,
 ): Promise<{ status: number; detail: string } | null> {
-	if (!MEDALLION_API) {
-		// Governed stack but no admin authority wired → fail closed rather than leak the topology.
-		return { status: 503, detail: 'jetstream admin authorization is unavailable' };
-	}
 	try {
-		const res = await fetchFn(`${MEDALLION_API}/authorize`, {
+		const res = await fetchFn(`${CATALOG_API}/v1/events?since=${Number.MAX_SAFE_INTEGER}`, {
 			headers: { authorization: `Bearer ${accessToken}` },
 			signal: AbortSignal.timeout(5000),
 		});
 		if (res.ok) return null;
-		if (res.status === 403)
-			return { status: 403, detail: 'the stream view is admin-only (project admin required)' };
+		if (res.status === 403) return { status: 403, detail: 'the stream view is estate-admin only' };
 		if (res.status === 401) return { status: 401, detail: 'sign in to view JetStream streams' };
 		return { status: 503, detail: 'jetstream admin authorization is unavailable' };
 	} catch (err) {
@@ -78,10 +78,10 @@ export const GET: RequestHandler = async ({ fetch, locals }) => {
 	if (locals.authEnabled && !locals.session) {
 		return json({ detail: 'sign in to view JetStream streams' }, { status: 401 });
 	}
-	// Authorization (not just authentication): a governed, signed-in caller must be a project admin — else
-	// any reader could map the estate's whole event fabric. Auth-off dev skips the gate (open).
+	// Authorization (not just authentication): a governed, signed-in caller must be an ESTATE admin — else
+	// any project's admin could map the estate's whole event fabric. Auth-off dev skips the gate (open).
 	if (locals.authEnabled && locals.session) {
-		const denied = await adminGate(fetch, locals.session.accessToken);
+		const denied = await estateAdminGate(fetch, locals.session.accessToken);
 		if (denied) return json({ detail: denied.detail }, { status: denied.status });
 	}
 	if (!NATS_MONITOR_API) {

@@ -151,7 +151,7 @@ spec:
           # rolling update tears nginx down the instant the pod is marked Terminating — while kube-proxy is
           # still routing to it — so in-flight requests are dropped. The sleep lets endpoints propagate first.
           {{- include "lance.preStop" . | nindent 10 }}
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "gateway") | nindent 12 }}
       volumes:
         - name: conf
           configMap: { name: {{ include "lance.fullname" . }}-gateway }

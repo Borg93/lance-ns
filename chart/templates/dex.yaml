@@ -98,7 +98,7 @@ spec:
             httpGet: { path: /dex/.well-known/openid-configuration, port: {{ .Values.dex.port }} }
             initialDelaySeconds: 5
             periodSeconds: 10
-          resources: {{- toYaml .Values.resources.default | nindent 12 }}
+          resources: {{- include "lance.resources" (dict "root" . "comp" "dex") | nindent 12 }}
       volumes:
         - name: config
           configMap: { name: {{ include "lance.dexHost" . }} }

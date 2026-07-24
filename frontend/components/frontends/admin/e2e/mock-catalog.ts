@@ -20,7 +20,8 @@ const json = (data: unknown, status = 200): Response =>
 	new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 
 Bun.serve({
-	port: 5296,
+	// 5297 — the free slot between the zone e2e dev-server ports (models owns 5296; see playwright.config.ts).
+	port: 5297,
 	async fetch(req: Request): Promise<Response> {
 		const url = new URL(req.url);
 

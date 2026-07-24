@@ -10,12 +10,15 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
+from collections.abc import Iterator
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
 import pytest
 from common import fga, outbox
+from common.audit import AUDIT_LOGGER, configure_audit
 from common.oidc import IDToken
 from lance_namespace import (
     PermissionDeniedError,
@@ -232,3 +235,66 @@ def test_replay_seen_but_not_writable_is_403(tmp_path: Path, monkeypatch: pytest
 def list_dlq_off(settings: LineageSettings) -> Any:
     """list_dlq with FGA off (governed is pass-through) — the common view driver."""
     return dlq.list_dlq(settings, None, _filter(_request(), settings, None), limit=100)
+
+
+# --------------------------------------------------------------------------- #
+# Audit (#41): every replay lands on the lance.audit stream, house vocabulary
+# --------------------------------------------------------------------------- #
+
+
+class _CaptureAudit(logging.Handler):
+    def __init__(self) -> None:
+        super().__init__()
+        self.records: list[logging.LogRecord] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.records.append(record)
+
+
+@pytest.fixture
+def audit_records() -> Iterator[list[logging.LogRecord]]:
+    """Capture the dedicated ``lance.audit`` stream with the trail enabled (as the lifespan configures)."""
+    handler = _CaptureAudit()
+    logger = logging.getLogger(AUDIT_LOGGER)
+    configure_audit(enabled=True)
+    logger.addHandler(handler)
+    try:
+        yield handler.records
+    finally:
+        logger.removeHandler(handler)
+        configure_audit(enabled=True)  # leave the stream on for the rest of the suite
+
+
+def test_replay_audits_success_with_the_actor(tmp_path: Path, audit_records: list[logging.LogRecord]) -> None:
+    # House vocabulary: a COMPLETED action records `success` (ALLOW/DENY belong to authz decisions) — an
+    # authenticated governed replay must never surface as outcome=allow (the inverted pre-fix record).
+    s = _settings(tmp_path)
+    _stage(s, "r1", _event_json("r1"))
+    asyncio.run(_replay(s, "r1", _Repo(), _token()))
+    assert len(audit_records) == 1
+    fields = {k: v for k, v in audit_records[0].__dict__.items() if k.startswith("audit.")}
+    assert fields == {
+        "audit.action": "dlq_replay",
+        "audit.outcome": "success",
+        "audit.subject": "alice",
+        "audit.resource": "run:r1",
+    }
+
+
+def test_replay_audits_success_without_a_subject_in_dev(
+    tmp_path: Path, audit_records: list[logging.LogRecord]
+) -> None:
+    # Auth-off dev: still a success record, with an empty subject (no principal to attribute).
+    s = _settings(tmp_path)
+    _stage(s, "r1", _event_json("r1"))
+    asyncio.run(_replay(s, "r1", _Repo()))
+    fields = audit_records[0].__dict__
+    assert fields["audit.outcome"] == "success" and fields["audit.subject"] == ""
+
+
+def test_lineage_audit_stream_is_env_gated(monkeypatch: pytest.MonkeyPatch) -> None:
+    # The lifespan gates `lance.audit` on the SHARED LANCE_AUDIT_ENABLED (catalog parity — one flag for
+    # the estate's compliance posture): default on, and the env alias turns the stream off.
+    assert LineageSettings.model_validate({"database_url": "postgresql://x/y"}).audit_enabled is True
+    monkeypatch.setenv("LANCE_AUDIT_ENABLED", "false")
+    assert LineageSettings(database_url="postgresql://x/y").audit_enabled is False

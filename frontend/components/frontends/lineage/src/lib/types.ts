@@ -1,6 +1,7 @@
 // Frontend types are DERIVED from the backend OpenAPI contract — never hand-mirror the Pydantic models
-// (that silently drifts). `api.generated.ts` is generated from `openapi.json` (itself produced from the
-// FastAPI app); regenerate both with `bun run gen:types`. Only domain constants live here by hand.
+// (that silently drifts). `api.generated.ts` is generated from the committed docs/lineage-openapi.json
+// (dumped by `make openapi`) — regenerate with `bun run gen:types` at the frontend root. Only domain
+// constants live here by hand.
 import type { components } from './api.generated';
 
 type S = components['schemas'];
@@ -19,9 +20,6 @@ export type SchemaField = S['SchemaField'];
 export type EventRecord = S['EventRecord'];
 export type SearchResults = S['SearchResults'];
 export type Events = S['Events'];
-export type DlqEvent = S['DlqEvent'];
-export type DlqBacklog = S['DlqBacklog'];
-export type DlqReplayResponse = S['DlqReplayResponse'];
 export type DemoDataset = S['DemoDataset'];
 export type DemoDatasets = S['DemoDatasets'];
 export type RunStatus = S['RunStatus'];

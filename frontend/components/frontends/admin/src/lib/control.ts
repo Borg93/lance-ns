@@ -1,8 +1,16 @@
 import * as v from 'valibot';
 
-// The control-plane change-event wire contract. Mirrors services/common/control_events.py::CatalogControlEvent
-// and services/catalog/api/v1/endpoints/events.py::EventsResponse — parsed (not cast) at the BFF boundary so
-// a drift from the backend throws here rather than lying downstream (the @rask/api parse-don't-validate rule).
+import type { components } from './catalog.generated';
+
+// The control-plane change-event wire contract (services/catalog endpoints/events.py) — parsed (not cast)
+// at the BFF boundary so a drift from the backend throws here rather than lying downstream (the @rask/api
+// parse-don't-validate rule). The shapes are pinned to the generated docs/catalog-openapi.json types
+// (`bun run gen:types:catalog`) — never hand-mirrored: `satisfies` keeps each schema's keys in lockstep
+// with the spec, so a renamed/removed/added wire field stops compiling here. `action`/`object_type`
+// deliberately stay open strings at runtime — a NEW backend action must render in the feed, not wedge it.
+
+type EventWire = components['schemas']['CatalogControlEvent'];
+type PageWire = components['schemas']['EventsResponse'];
 
 export const ControlEventSchema = v.object({
 	event_id: v.string(),
@@ -12,12 +20,12 @@ export const ControlEventSchema = v.object({
 	object_id: v.string(),
 	actor: v.nullable(v.string()),
 	extra: v.record(v.string(), v.unknown()),
-});
+} satisfies Record<keyof EventWire, unknown>);
 export type ControlEvent = v.InferOutput<typeof ControlEventSchema>;
 
 export const EventsPageSchema = v.object({
 	events: v.array(ControlEventSchema),
 	cursor: v.number(),
 	reset: v.boolean(),
-});
+} satisfies Record<keyof PageWire, unknown>);
 export type EventsPage = v.InferOutput<typeof EventsPageSchema>;

@@ -20,6 +20,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
 
 from common import fga
+from common.audit import configure_audit
 from common.dapr_auth import assert_app_token_configured
 from common.lance_metrics import instrument_lance_if_available
 from common.obs import configure_app_logging
@@ -45,6 +46,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # open forged-trigger path (symmetric with the movers + lineage). No-op in dev (dapr_enabled off).
     app.state.startup_complete = False
     app.state.shutting_down = False
+    configure_audit(enabled=get_settings().audit_enabled)  # #41 gate the compliance audit stream
     assert_app_token_configured(dapr_enabled=get_settings().dapr_enabled)
     # Consume the S3 secret from the Dapr secret store when configured (Batch 7 — strict sole source,
     # fails closed; no-op in dev). Threadpool: the fetch blocks + retries while the store seeds.

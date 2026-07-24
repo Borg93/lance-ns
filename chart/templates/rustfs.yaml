@@ -119,6 +119,15 @@ metadata:
 spec:
   backoffLimit: 20
   template:
+    metadata:
+      # The explicit component label is the P4 landmine (see bootstrap-admin.yaml): hook pods without one
+      # are invisible to any component-scoped NetworkPolicy `from` list. Here it is LOAD-BEARING, not just
+      # hygiene — rustfs:9000's ingress admits an enumerated client list ONLY (network-policy.yaml 3d,
+      # which names rustfs-mkbucket), so an unlabeled pod's `mc alias set` loop waits forever under a
+      # policy-enforcing CNI and every prod install/upgrade wedges before a bucket exists.
+      labels:
+        {{- include "lance.labels" . | nindent 8 }}
+        app.kubernetes.io/component: rustfs-mkbucket
     spec:
       restartPolicy: OnFailure
       {{- if .Values.security.serviceAccounts.enabled }}

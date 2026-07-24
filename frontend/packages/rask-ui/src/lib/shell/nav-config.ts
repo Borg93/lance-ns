@@ -72,8 +72,9 @@ export function navMain(): NavItem[] {
 			match: under(`${b}/lineage`),
 			items: [
 				{ title: 'Graph', href: `${b}/lineage`, match: exact(`${b}/lineage`) },
-				{ title: 'Runs', href: `${b}/lineage/runs`, match: seg(`${b}/lineage/runs`) },
-				{ title: 'Events', href: `${b}/lineage/events`, match: seg(`${b}/lineage/events`) },
+				// ('Runs' and 'Events' leaves used to point at /lineage/runs and /lineage/events, which have no
+				// route in any zone — the runs board and event feed render inside the explorer at /lineage.
+				// Removed rather than advertising a 404, same as the Access leaf below.)
 			],
 		},
 		{

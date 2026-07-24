@@ -19,7 +19,7 @@ import logging
 from typing import Annotated
 
 from common import audit, outbox
-from common.audit import ALLOW, SUCCESS
+from common.audit import SUCCESS
 from fastapi import APIRouter, Query, Request
 from fastapi.concurrency import run_in_threadpool
 from lance_namespace import TransactionNotFoundError, UnauthenticatedError, UnsupportedOperationError
@@ -132,11 +132,8 @@ async def replay_dlq(
     await repository.ingest_event(event)  # idempotent MERGE on run_id
     await record_event_best_effort(repository, event)  # project onto the durable /events feed too
     await run_in_threadpool(outbox.drop_event, settings.outbox_uri, opts, run_id)
-    audit.audit(
-        "dlq_replay",
-        SUCCESS if token is None else ALLOW,
-        subject=token.sub if token else "",
-        resource=f"run:{run_id}",
-    )
+    # A completed ACTION records SUCCESS unconditionally (house vocabulary: ALLOW/DENY belong to authz
+    # decisions — mirror access_grant/vend_credentials); the subject is empty in auth-off dev.
+    audit.audit("dlq_replay", SUCCESS, subject=token.sub if token else "", resource=f"run:{run_id}")
     log.info("lineage_dlq_replayed", extra={"run_id": run_id, "sub": token.sub if token else None})
     return DlqReplayResponse(status="replayed", run_id=run_id)

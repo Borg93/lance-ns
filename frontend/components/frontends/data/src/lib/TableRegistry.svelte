@@ -5,11 +5,15 @@
 	// #85: the "Declare table" form is the browser-shaped create — declare_table takes a JSON body
 	// (no Arrow payload), reserves the id, and seeds the caller's ownership; location left empty lets
 	// the catalog pick. Gated can_create_table on the parent namespace (session-only BFF).
-	import { base } from '$app/paths';
 	import { Plus, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { base } from '$app/paths';
+	import { page } from '$app/state';
 	import { declareTable, fetchTables } from './catalog';
 
 	const POLL_MS = 5000;
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let tables = $state<string[] | null>(null);
 	let lastStatus = $state(0);
@@ -122,7 +126,9 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to browse the catalog.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to browse the catalog.
+			</p>
 		</div>
 	{:else if offline}
 		<div class="empty">

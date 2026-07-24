@@ -6,9 +6,13 @@
 	// reaches the browser. Governed without a session → 401 (sign-in state); no observability → 501
 	// (unavailable state); auth-off dev → open data. Each renders its honest state below.
 	import { BarChart3, ExternalLink, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { page } from '$app/state';
 	import { requestJSON } from './http';
 
 	const POLL_MS = 5000;
+
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	type Panel = { key: string; title: string; series: { model: string; value: number }[] };
 	type Dashboard = { dashboard: string; source: string; panels: Panel[] };
@@ -20,7 +24,9 @@
 
 	const unauthorized = $derived(data === null && settled && lastStatus === 401);
 	const unavailable = $derived(data === null && settled && lastStatus === 501);
-	const offline = $derived(data === null && settled && ![0, 200, 401, 501].includes(lastStatus));
+	// 0 stays IN the offline set: after the first settle, a fetch-level failure (network down, BFF timeout)
+	// reports status 0 and must render as offline, not hang on the loading message (audit finding).
+	const offline = $derived(data === null && settled && ![200, 401, 501].includes(lastStatus));
 
 	async function load(): Promise<void> {
 		const seq = ++inflight;
@@ -60,7 +66,10 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to view experiment metrics.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view experiment
+				metrics.
+			</p>
 		</div>
 	{:else if unavailable}
 		<div class="empty">

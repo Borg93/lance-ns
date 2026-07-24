@@ -4,6 +4,90 @@
  */
 
 export interface paths {
+    "/admin/dlq": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Dlq
+         * @description The outbox saturation snapshot + the visible at-risk events (oldest first, capped at ``limit``).
+         *
+         *     ``depth``/``oldest_age_seconds`` are the raw system-health signal; ``events`` is the per-dataset-governed
+         *     subset the caller may see. Requires an authenticated principal when FGA is on (else the raw depth would
+         *     leak to an anonymous caller); the event list is then filtered by dataset visibility.
+         */
+        get: operations["list_dlq_admin_dlq_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/admin/dlq/{run_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Dlq
+         * @description Re-ingest one staged event on demand, then drop it — the manual twin of the reconcile relay's drain.
+         *
+         *     A replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the
+         *     event's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The
+         *     ingest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop
+         *     is only reached on success — a failed re-ingest leaves the object staged for the relay to retry.
+         *
+         *     Non-disclosure (audit 2026-07-20): replay must not become an oracle for events ``list_dlq`` hid. So a
+         *     run whose datasets the caller cannot SEE (or an unparseable poison object, which the governed list also
+         *     hides) returns the SAME 404 as a missing run — never a distinct 422 or a 403 echoing hidden dataset
+         *     names. Only an event the caller could have listed reaches ``enforce_output_authz``.
+         */
+        post: operations["replay_dlq_admin_dlq__run_id__replay_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/lineage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Ingest Event
+         * @description Ingest one OpenLineage ``RunEvent`` into the lineage graph.
+         *
+         *     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
+         *     (our emitter, Airflow, Spark, dbt, …) configured with ``OPENLINEAGE_URL`` pointed
+         *     here ingests with no glue — the lightweight-Marquez contract.
+         *
+         *     When OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token
+         *     (401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that
+         *     token's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`
+         *     requires ``can_write_data`` on every output dataset (a producer can't record provenance for a table
+         *     it can't write). Both are no-ops when auth is off.
+         */
+        post: operations["ingest_event_api_v1_lineage_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/dapr/subscribe": {
         parameters: {
             query?: never;
@@ -21,7 +105,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/upstream": {
+    "/datasets": {
         parameters: {
             query?: never;
             header?: never;
@@ -29,14 +113,126 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Upstream
-         * @description What ``name`` was derived from (provenance).
+         * List Datasets
+         * @description Browse every dataset the caller may see — the lineage catalog's landing list.
          *
-         *     Gated on ``can_get_metadata`` for ``name``; related datasets the caller may not see are
-         *     dropped so the graph can't disclose tables outside its reach.
+         *     Governed (a dataset is shown only if the caller ``can_get_metadata`` on it), optionally filtered by
+         *     ``?namespace=`` / ``?tag=``, and paginated over the *visible* set. This is the entry point the graph
+         *     reads (``/datasets/{name}/...``) needed but could not provide — you no longer must know a name first.
          */
-        get: operations["get_upstream_datasets__name__upstream_get"];
+        get: operations["list_datasets_datasets_get"];
         put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/columns": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dataset Columns
+         * @description The column-level lineage subgraph around ``name`` (#24) — the field-to-field analogue of
+         *     ``/graph``, for a DAG view of how each column was produced.
+         *
+         *     Nodes/edges touching a dataset the caller can't see are dropped (an edge needs BOTH endpoints'
+         *     datasets visible); ``name``'s own columns are always shown (the route gate authorized it).
+         */
+        get: operations["get_dataset_columns_datasets__name__columns_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/columns/{field}/downstream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Column Downstream
+         * @description Column-level impact (#24): the columns (transitively) derived from ``name.field``. Gated +
+         *     governed exactly like the column upstream view — related columns in datasets the caller can't see
+         *     are dropped.
+         */
+        get: operations["get_column_downstream_datasets__name__columns__field__downstream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/columns/{field}/upstream": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Column Upstream
+         * @description Column-level provenance (#24): the columns ``name.field`` was (transitively) derived from.
+         *
+         *     Our deepest moat — field-to-field lineage neither Marquez nor Lakekeeper derives. Gated on
+         *     ``can_get_metadata`` for the owning ``name``; related columns whose *owning dataset* the caller can't
+         *     see are dropped (a column has no ACL of its own — it inherits its table's), closing the same
+         *     transitive-disclosure hole at column resolution. Auth off → pass-through.
+         */
+        get: operations["get_column_upstream_datasets__name__columns__field__upstream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/creator": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Creator
+         * @description Who created ``name`` (the verified catalog principal). Gated on ``can_get_metadata``.
+         */
+        get: operations["get_creator_datasets__name__creator_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/description": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Description
+         * @description Set the dataset's description (an empty string clears it).
+         */
+        put: operations["set_description_datasets__name__description_put"];
         post?: never;
         delete?: never;
         options?: never;
@@ -56,6 +252,49 @@ export interface paths {
          * @description What derives from ``name`` (impact). Gated; non-visible related datasets are dropped.
          */
         get: operations["get_downstream_datasets__name__downstream_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/governance": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Governance
+         * @description The dataset's curated tags + description with last-writer attribution (who/when per field).
+         */
+        get: operations["get_governance_datasets__name__governance_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/datasets/{name}/graph": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Graph
+         * @description The connected lineage subgraph around ``name`` (nodes + edges) for a DAG view.
+         *
+         *     Nodes the caller may not see (and edges touching them) are dropped; the requested ``name``
+         *     is already authorized by the route gate.
+         */
+        get: operations["get_graph_datasets__name__graph_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -109,7 +348,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/creator": {
+    "/datasets/{name}/reconcile": {
         parameters: {
             query?: never;
             header?: never;
@@ -117,10 +356,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Creator
-         * @description Who created ``name`` (the verified catalog principal). Gated on ``can_get_metadata``.
+         * Get Reconcile
+         * @description Does the lineage graph agree with the **actual Lance file on storage**? (#23)
+         *
+         *     Our moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we
+         *     read the real on-disk version and cross-check it against the version the graph recorded on the
+         *     ``WROTE`` edge — surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim
+         *     with no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the
+         *     Lance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.
          */
-        get: operations["get_creator_datasets__name__creator_get"];
+        get: operations["get_reconcile_datasets__name__reconcile_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -145,146 +390,6 @@ export interface paths {
          *     this is the prerequisite for column-level lineage and powers schema-diffing between Lance versions.
          */
         get: operations["get_schema_datasets__name__schema_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/datasets/{name}/graph": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Graph
-         * @description The connected lineage subgraph around ``name`` (nodes + edges) for a DAG view.
-         *
-         *     Nodes the caller may not see (and edges touching them) are dropped; the requested ``name``
-         *     is already authorized by the route gate.
-         */
-        get: operations["get_graph_datasets__name__graph_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/datasets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Datasets
-         * @description Browse every dataset the caller may see — the lineage catalog's landing list.
-         *
-         *     Governed (a dataset is shown only if the caller ``can_get_metadata`` on it), optionally filtered by
-         *     ``?namespace=`` / ``?tag=``, and paginated over the *visible* set. This is the entry point the graph
-         *     reads (``/datasets/{name}/...``) needed but could not provide — you no longer must know a name first.
-         */
-        get: operations["list_datasets_datasets_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/search": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Search
-         * @description Governed search over the discovery estate (P1 Search tier 1, 2026-07-11).
-         *
-         *     Case-insensitive substring over dataset NAMES, NAMESPACES, governance TAGS, and the CURRENT
-         *     COLUMN inventory — each hit says WHY it matched (``name`` / ``namespace`` / ``tag:…`` /
-         *     ``column:…``), so "which tables have an embedding column" and "what's in layer=gold" are one
-         *     query. Governance is identical to ``/datasets``: the visibility filter runs over the FULL hit
-         *     set BEFORE the limit, so search can never disclose (or even count) tables outside the caller's
-         *     reach. 📌 Tier 2 (Lance FTS + FLAT vector content search, the rask pattern) stays decision-
-         *     pinned in todo §9 behind its measured recall gate — this tier is metadata-only by design.
-         */
-        get: operations["search_search_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/jobs": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Jobs
-         * @description The jobs (compute identities) that have run — governed by the datasets each wrote.
-         *
-         *     A job is shown only if the caller can see every dataset it wrote (a read-only / output-less job is
-         *     hidden when auth is on, mirroring how ``/events`` drops a dataset-less row). Auth off → pass-through.
-         */
-        get: operations["list_jobs_jobs_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/namespaces": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Namespaces
-         * @description The namespaces containing at least one dataset the caller may see (for a namespace-tree browse).
-         *
-         *     Derived from the governed dataset set, so a namespace the caller can see no dataset in never appears.
-         */
-        get: operations["list_namespaces_namespaces_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/datasets/{name}/governance": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Get Governance
-         * @description The dataset's curated tags + description with last-writer attribution (who/when per field).
-         */
-        get: operations["get_governance_datasets__name__governance_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -321,27 +426,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/description": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        /**
-         * Set Description
-         * @description Set the dataset's description (an empty string clears it).
-         */
-        put: operations["set_description_datasets__name__description_put"];
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/datasets/{name}/columns/{field}/upstream": {
+    "/datasets/{name}/upstream": {
         parameters: {
             query?: never;
             header?: never;
@@ -349,15 +434,13 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Column Upstream
-         * @description Column-level provenance (#24): the columns ``name.field`` was (transitively) derived from.
+         * Get Upstream
+         * @description What ``name`` was derived from (provenance).
          *
-         *     Our deepest moat — field-to-field lineage neither Marquez nor Lakekeeper derives. Gated on
-         *     ``can_get_metadata`` for the owning ``name``; related columns whose *owning dataset* the caller can't
-         *     see are dropped (a column has no ACL of its own — it inherits its table's), closing the same
-         *     transitive-disclosure hole at column resolution. Auth off → pass-through.
+         *     Gated on ``can_get_metadata`` for ``name``; related datasets the caller may not see are
+         *     dropped so the graph can't disclose tables outside its reach.
          */
-        get: operations["get_column_upstream_datasets__name__columns__field__upstream_get"];
+        get: operations["get_upstream_datasets__name__upstream_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -366,7 +449,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/columns/{field}/downstream": {
+    "/demo/datasets": {
         parameters: {
             query?: never;
             header?: never;
@@ -374,12 +457,16 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Column Downstream
-         * @description Column-level impact (#24): the columns (transitively) derived from ``name.field``. Gated +
-         *     governed exactly like the column upstream view — related columns in datasets the caller can't see
-         *     are dropped.
+         * Demo Datasets
+         * @description The medallion datasets as they currently exist on S3 — schema per Lance version + rows.
+         *
+         *     GOVERNED (audit: this endpoint reads real medallion schemas/row-counts + gold's lineage JSONB from S3
+         *     with the SERVICE root credentials, so it must not disclose a dataset the caller cannot see). Every
+         *     other lineage read gates on ``can_get_metadata``; this now does the same — authenticate (401 unauth /
+         *     503 if FGA unwired, via ``require_metadata_access``) and filter to the datasets the caller may read.
+         *     FGA off → pass-through (the dev demo).
          */
-        get: operations["get_column_downstream_datasets__name__columns__field__downstream_get"];
+        get: operations["demo_datasets_demo_datasets_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -388,7 +475,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/columns": {
+    "/events": {
         parameters: {
             query?: never;
             header?: never;
@@ -396,14 +483,24 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Dataset Columns
-         * @description The column-level lineage subgraph around ``name`` (#24) — the field-to-field analogue of
-         *     ``/graph``, for a DAG view of how each column was produced.
+         * Get Events
+         * @description The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
          *
-         *     Nodes/edges touching a dataset the caller can't see are dropped (an edge needs BOTH endpoints'
-         *     datasets visible); ``name``'s own columns are always shown (the route gate authorized it).
+         *     **Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is
+         *     on the feed is filtered like the per-dataset reads — an event is shown only if the caller
+         *     ``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the
+         *     audit feed never discloses a table outside the caller's reach. Auth off → pass-through. (#22)
+         *
+         *     Pagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous
+         *     page's ``next_cursor``); ``limit`` ≤ 500 (server-capped); ``summary=true`` drops the full-JSONB
+         *     ``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice —
+         *     pagination can never disclose a hidden row's CONTENT. ``next_cursor`` is a WINDOW FLOOR, not
+         *     necessarily a visible row's seq (on a hidden-dense page it is the fetch window's last seq —
+         *     exclusive, so the hidden row itself is never returned; bare seq numbers were already inferable
+         *     from gaps in the pre-pagination feed, so this adds no new disclosure class — reviewed
+         *     2026-07-11).
          */
-        get: operations["get_dataset_columns_datasets__name__columns_get"];
+        get: operations["get_events_events_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -412,7 +509,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/datasets/{name}/reconcile": {
+    "/jobs": {
         parameters: {
             query?: never;
             header?: never;
@@ -420,16 +517,74 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Reconcile
-         * @description Does the lineage graph agree with the **actual Lance file on storage**? (#23)
+         * List Jobs
+         * @description The jobs (compute identities) that have run — governed by the datasets each wrote.
          *
-         *     Our moat over format-unaware catalogs (Marquez, Lakekeeper): because we own a Lance lakehouse we
-         *     read the real on-disk version and cross-check it against the version the graph recorded on the
-         *     ``WROTE`` edge — surfacing a write that bypassed lineage (``storage_ahead``) or a lineage claim
-         *     with no data behind it (``missing_on_storage``). Gated on ``can_get_metadata`` for ``name``; the
-         *     Lance read runs in the threadpool so the blocking object-store I/O never stalls the event loop.
+         *     A job is shown only if the caller can see every dataset it wrote (a read-only / output-less job is
+         *     hidden when auth is on, mirroring how ``/events`` drops a dataset-less row). Auth off → pass-through.
          */
-        get: operations["get_reconcile_datasets__name__reconcile_get"];
+        get: operations["list_jobs_jobs_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/livez": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Livez */
+        get: operations["livez_livez_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/namespaces": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Namespaces
+         * @description The namespaces containing at least one dataset the caller may see (for a namespace-tree browse).
+         *
+         *     Derived from the governed dataset set, so a namespace the caller can see no dataset in never appears.
+         */
+        get: operations["list_namespaces_namespaces_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/readyz": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Readyz
+         * @description Gate readiness on the AGE pool AND the graph — lineage's sole hard dependency — plus the lifecycle
+         *     flags, so a pod with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of
+         *     serving 500s.
+         */
+        get: operations["readyz_readyz_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -488,7 +643,7 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/events": {
+    "/search": {
         parameters: {
             query?: never;
             header?: never;
@@ -496,173 +651,19 @@ export interface paths {
             cookie?: never;
         };
         /**
-         * Get Events
-         * @description The most-recent ingested OpenLineage events (newest first) — the Marquez-style event feed.
+         * Search
+         * @description Governed search over the discovery estate (P1 Search tier 1, 2026-07-11).
          *
-         *     **Durable** (read from Postgres, survives restart / replica-shared) and **governed**: when auth is
-         *     on the feed is filtered like the per-dataset reads — an event is shown only if the caller
-         *     ``can_get_metadata`` on *every* dataset it references (and a dataset-less event is hidden), so the
-         *     audit feed never discloses a table outside the caller's reach. Auth off → pass-through. (#22)
-         *
-         *     Pagination (additive, defaults = the old behavior): ``after`` = keyset cursor (the previous
-         *     page's ``next_cursor``); ``limit`` ≤ 500 (server-capped); ``summary=true`` drops the full-JSONB
-         *     ``event`` payload at the SQL layer. The governance filter ALWAYS runs before the slice —
-         *     pagination can never disclose a hidden row's CONTENT. ``next_cursor`` is a WINDOW FLOOR, not
-         *     necessarily a visible row's seq (on a hidden-dense page it is the fetch window's last seq —
-         *     exclusive, so the hidden row itself is never returned; bare seq numbers were already inferable
-         *     from gaps in the pre-pagination feed, so this adds no new disclosure class — reviewed
-         *     2026-07-11).
+         *     Case-insensitive substring over dataset NAMES, NAMESPACES, governance TAGS, and the CURRENT
+         *     COLUMN inventory — each hit says WHY it matched (``name`` / ``namespace`` / ``tag:…`` /
+         *     ``column:…``), so "which tables have an embedding column" and "what's in layer=gold" are one
+         *     query. Governance is identical to ``/datasets``: the visibility filter runs over the FULL hit
+         *     set BEFORE the limit, so search can never disclose (or even count) tables outside the caller's
+         *     reach. 📌 Tier 2 (Lance FTS + FLAT vector content search, the rask pattern) stays decision-
+         *     pinned in docs/DECISIONS.md §9 behind its measured recall gate — this tier is metadata-only
+         *     by design.
          */
-        get: operations["get_events_events_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/lineage": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Ingest Event
-         * @description Ingest one OpenLineage ``RunEvent`` into the lineage graph.
-         *
-         *     This is the OpenLineage HTTP-transport default path, so any OpenLineage producer
-         *     (our emitter, Airflow, Spark, dbt, …) configured with ``OPENLINEAGE_URL`` pointed
-         *     here ingests with no glue — the lightweight-Marquez contract.
-         *
-         *     When OIDC is enabled the ``CurrentToken`` dependency requires a verified bearer token
-         *     (401 otherwise), :func:`~lineage.api.fga_deps.enforce_author` binds the run author to that
-         *     token's subject (no self-asserted identity), and :func:`~lineage.api.fga_deps.enforce_output_authz`
-         *     requires ``can_write_data`` on every output dataset (a producer can't record provenance for a table
-         *     it can't write). Both are no-ops when auth is off.
-         */
-        post: operations["ingest_event_api_v1_lineage_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/dlq": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Dlq
-         * @description The outbox saturation snapshot + the visible at-risk events (oldest first, capped at ``limit``).
-         *
-         *     ``depth``/``oldest_age_seconds`` are the raw system-health signal; ``events`` is the per-dataset-governed
-         *     subset the caller may see. Requires an authenticated principal when FGA is on (else the raw depth would
-         *     leak to an anonymous caller); the event list is then filtered by dataset visibility.
-         */
-        get: operations["list_dlq_admin_dlq_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/admin/dlq/{run_id}/replay": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Replay Dlq
-         * @description Re-ingest one staged event on demand, then drop it — the manual twin of the reconcile relay's drain.
-         *
-         *     A replay IS a re-ingest, so it carries the SAME authz as a fresh ingest: ``can_write_data`` on the
-         *     event's outputs + ``can_get_metadata`` on its inputs (:func:`enforce_output_authz`, fail-closed). The
-         *     ingest MERGEs on ``run_id`` (idempotent), the durable feed insert is ON CONFLICT DO NOTHING, and the drop
-         *     is only reached on success — a failed re-ingest leaves the object staged for the relay to retry.
-         *
-         *     Non-disclosure (audit 2026-07-20): replay must not become an oracle for events ``list_dlq`` hid. So a
-         *     run whose datasets the caller cannot SEE (or an unparseable poison object, which the governed list also
-         *     hides) returns the SAME 404 as a missing run — never a distinct 422 or a 403 echoing hidden dataset
-         *     names. Only an event the caller could have listed reaches ``enforce_output_authz``.
-         */
-        post: operations["replay_dlq_admin_dlq__run_id__replay_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/livez": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /** Livez */
-        get: operations["livez_livez_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/readyz": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Readyz
-         * @description Gate readiness on the AGE pool AND the graph — lineage's sole hard dependency — plus the lifecycle
-         *     flags, so a pod with an unhealthy pool (or mid-boot / draining) is pulled from rotation instead of
-         *     serving 500s.
-         */
-        get: operations["readyz_readyz_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/demo/datasets": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Demo Datasets
-         * @description The medallion datasets as they currently exist on S3 — schema per Lance version + rows.
-         *
-         *     GOVERNED (audit: this endpoint reads real medallion schemas/row-counts + gold's lineage JSONB from S3
-         *     with the SERVICE root credentials, so it must not disclose a dataset the caller cannot see). Every
-         *     other lineage read gates on ``can_get_metadata``; this now does the same — authenticate (401 unauth /
-         *     503 if FGA unwired, via ``require_metadata_access``) and filter to the datasets the caller may read.
-         *     FGA off → pass-through (the dev demo).
-         */
-        get: operations["demo_datasets_demo_datasets_get"];
+        get: operations["search_search_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -681,29 +682,6 @@ export interface components {
          *     the ``masking`` governance bit ride the edge.
          */
         ColumnEdge: {
-            /** Source Dataset */
-            source_dataset: string;
-            /** Source Field */
-            source_field: string;
-            /** Target Dataset */
-            target_dataset: string;
-            /** Target Field */
-            target_field: string;
-            /**
-             * Transformation Type
-             * @default
-             */
-            transformation_type: string;
-            /**
-             * Transformation Subtype
-             * @default
-             */
-            transformation_subtype: string;
-            /**
-             * Masking
-             * @default false
-             */
-            masking: boolean;
             /**
              * Description
              * @default
@@ -714,6 +692,29 @@ export interface components {
              * @default derived_from_column
              */
             kind: string;
+            /**
+             * Masking
+             * @default false
+             */
+            masking: boolean;
+            /** Source Dataset */
+            source_dataset: string;
+            /** Source Field */
+            source_field: string;
+            /** Target Dataset */
+            target_dataset: string;
+            /** Target Field */
+            target_field: string;
+            /**
+             * Transformation Subtype
+             * @default
+             */
+            transformation_subtype: string;
+            /**
+             * Transformation Type
+             * @default
+             */
+            transformation_type: string;
         };
         /**
          * ColumnGraph
@@ -721,12 +722,12 @@ export interface components {
          *     dataset ``LineageGraph``, for a field-to-field DAG view.
          */
         ColumnGraph: {
-            /** Root */
-            root: string;
             /** Columns */
             columns?: components["schemas"]["ColumnNode"][];
             /** Edges */
             edges?: components["schemas"]["ColumnEdge"][];
+            /** Root */
+            root: string;
         };
         /**
          * ColumnNeighbors
@@ -774,10 +775,10 @@ export interface components {
          * @description Who created ``dataset`` — the verified catalog principal at create time (or ``None``).
          */
         Creator: {
-            /** Dataset */
-            dataset: string;
             /** Creator */
             creator?: string | null;
+            /** Dataset */
+            dataset: string;
         };
         /**
          * Dataset
@@ -788,14 +789,14 @@ export interface components {
          *     physically lives — the S3-compatible location), and ``tags`` (governance labels).
          */
         Dataset: {
-            /** Namespace */
-            namespace: string;
-            /** Name */
-            name: string;
             /** Facets */
             facets?: {
                 [key: string]: unknown;
             };
+            /** Name */
+            name: string;
+            /** Namespace */
+            namespace: string;
         } & {
             [key: string]: unknown;
         };
@@ -805,20 +806,20 @@ export interface components {
          *     attribution per field family (who/when persisted on the node — the auditable trail for curation).
          */
         DatasetGovernance: {
+            /** Description */
+            description?: string | null;
+            /** Description Updated At */
+            description_updated_at?: string | null;
+            /** Description Updated By */
+            description_updated_by?: string | null;
             /** Name */
             name: string;
             /** Tags */
             tags?: string[];
-            /** Description */
-            description?: string | null;
-            /** Tags Updated By */
-            tags_updated_by?: string | null;
             /** Tags Updated At */
             tags_updated_at?: string | null;
-            /** Description Updated By */
-            description_updated_by?: string | null;
-            /** Description Updated At */
-            description_updated_at?: string | null;
+            /** Tags Updated By */
+            tags_updated_by?: string | null;
         };
         /**
          * DatasetRef
@@ -840,10 +841,10 @@ export interface components {
         DatasetSchema: {
             /** Dataset */
             dataset: string;
-            /** Version */
-            version?: number | null;
             /** Fields */
             fields?: components["schemas"]["SchemaField"][];
+            /** Version */
+            version?: number | null;
         };
         /**
          * DatasetSummary
@@ -874,24 +875,24 @@ export interface components {
          * @description A peek at a real Lance dataset on S3 — what's actually in storage and how it evolved.
          */
         DemoDataset: {
-            /** Name */
-            name: string;
-            /** Uri */
-            uri: string;
-            /** Exists */
-            exists: boolean;
             /** Current Version */
             current_version?: number | null;
-            /** Row Count */
-            row_count?: number | null;
-            /** Versions */
-            versions?: components["schemas"]["DemoVersion"][];
+            /** Error */
+            error?: string | null;
+            /** Exists */
+            exists: boolean;
             /** Lineage Jsonb */
             lineage_jsonb?: {
                 [key: string]: unknown;
             } | null;
-            /** Error */
-            error?: string | null;
+            /** Name */
+            name: string;
+            /** Row Count */
+            row_count?: number | null;
+            /** Uri */
+            uri: string;
+            /** Versions */
+            versions?: components["schemas"]["DemoVersion"][];
         };
         /**
          * DemoDatasets
@@ -916,12 +917,12 @@ export interface components {
          * @description One Lance version of a dataset — its number, time, and schema at that version.
          */
         DemoVersion: {
-            /** Version */
-            version: number;
-            /** Timestamp */
-            timestamp?: string | null;
             /** Fields */
             fields?: components["schemas"]["DemoField"][];
+            /** Timestamp */
+            timestamp?: string | null;
+            /** Version */
+            version: number;
         };
         /**
          * DescriptionUpdate
@@ -942,12 +943,12 @@ export interface components {
         DlqBacklog: {
             /** Depth */
             depth: number;
-            /** Oldest Age Seconds */
-            oldest_age_seconds: number;
             /** Events */
             events: components["schemas"]["DlqEvent"][];
             /** Limit */
             limit: number;
+            /** Oldest Age Seconds */
+            oldest_age_seconds: number;
         };
         /**
          * DlqEvent
@@ -958,16 +959,14 @@ export interface components {
          *     it): its run_id is the filename, the rest is unknown.
          */
         DlqEvent: {
-            /** Run Id */
-            run_id: string;
-            /** Event Type */
-            event_type?: string | null;
             /** Event Time */
             event_time?: string | null;
-            /** Job */
-            job?: string | null;
+            /** Event Type */
+            event_type?: string | null;
             /** Inputs */
             inputs?: string[];
+            /** Job */
+            job?: string | null;
             /** Outputs */
             outputs?: string[];
             /**
@@ -975,40 +974,42 @@ export interface components {
              * @default true
              */
             parseable: boolean;
+            /** Run Id */
+            run_id: string;
         };
         /**
          * DlqReplayResponse
          * @description The result of re-ingesting one staged event (#83): idempotent MERGE on ``run_id``, then drop.
          */
         DlqReplayResponse: {
-            /** Status */
-            status: string;
             /** Run Id */
             run_id: string;
+            /** Status */
+            status: string;
         };
         /**
          * EventRecord
          * @description One ingested OpenLineage event, Marquez-style (summary + the full event with facets).
          */
         EventRecord: {
-            /** Seq */
-            seq: number;
-            /** Event Type */
-            event_type?: string | null;
-            /** Event Time */
-            event_time?: string | null;
-            /** Job */
-            job?: string | null;
             /** Author */
             author?: string | null;
-            /** Inputs */
-            inputs?: string[];
-            /** Outputs */
-            outputs?: string[];
             /** Event */
             event: {
                 [key: string]: unknown;
             };
+            /** Event Time */
+            event_time?: string | null;
+            /** Event Type */
+            event_type?: string | null;
+            /** Inputs */
+            inputs?: string[];
+            /** Job */
+            job?: string | null;
+            /** Outputs */
+            outputs?: string[];
+            /** Seq */
+            seq: number;
         };
         /**
          * Events
@@ -1028,15 +1029,15 @@ export interface components {
          * @description A dataset-level lineage edge: ``source`` is derived from ``target``.
          */
         GraphEdge: {
-            /** Source */
-            source: string;
-            /** Target */
-            target: string;
             /**
              * Kind
              * @default derived_from
              */
             kind: string;
+            /** Source */
+            source: string;
+            /** Target */
+            target: string;
         };
         /**
          * GraphNode
@@ -1048,13 +1049,13 @@ export interface components {
         GraphNode: {
             /** Id */
             id: string;
-            /** Namespace */
-            namespace?: string | null;
             /**
              * Kind
              * @default dataset
              */
             kind: string;
+            /** Namespace */
+            namespace?: string | null;
             /** Source Uri */
             source_uri?: string | null;
             /** Tags */
@@ -1074,14 +1075,14 @@ export interface components {
          *     TRANSFORMATION) facets.
          */
         Job: {
-            /** Namespace */
-            namespace: string;
-            /** Name */
-            name: string;
             /** Facets */
             facets?: {
                 [key: string]: unknown;
             };
+            /** Name */
+            name: string;
+            /** Namespace */
+            namespace: string;
         } & {
             [key: string]: unknown;
         };
@@ -1090,10 +1091,10 @@ export interface components {
          * @description A job (compute identity) that has run, with the datasets it wrote — its governance handle.
          */
         JobSummary: {
-            /** Namespace */
-            namespace?: string | null;
             /** Name */
             name: string;
+            /** Namespace */
+            namespace?: string | null;
             /** Outputs */
             outputs?: string[];
         };
@@ -1115,12 +1116,12 @@ export interface components {
          *     ``DERIVED_FROM`` lineage we model.
          */
         LineageGraph: {
-            /** Root */
-            root: string;
-            /** Nodes */
-            nodes: components["schemas"]["GraphNode"][];
             /** Edges */
             edges: components["schemas"]["GraphEdge"][];
+            /** Nodes */
+            nodes: components["schemas"]["GraphNode"][];
+            /** Root */
+            root: string;
         };
         /**
          * Namespaces
@@ -1157,32 +1158,32 @@ export interface components {
          *     ``None`` / empty when the quality gate did not run.
          */
         ProducerInfo: {
-            /** Run Id */
-            run_id: string;
             /** Author */
             author?: string | null;
+            /** Dataset Version */
+            dataset_version?: string | null;
+            /** Error Message */
+            error_message?: string | null;
             /** Event Time */
             event_time?: string | null;
             /** Event Type */
             event_type?: string | null;
-            /** Dataset Version */
-            dataset_version?: string | null;
+            /** Operation */
+            operation?: string | null;
             /** Producer */
             producer?: string | null;
-            /** Error Message */
-            error_message?: string | null;
-            /** Row Count */
-            row_count?: number | null;
-            /** Size Bytes */
-            size_bytes?: number | null;
-            /** Quality Passed */
-            quality_passed?: boolean | null;
             /** Quality Assertions */
             quality_assertions?: {
                 [key: string]: unknown;
             }[];
-            /** Operation */
-            operation?: string | null;
+            /** Quality Passed */
+            quality_passed?: boolean | null;
+            /** Row Count */
+            row_count?: number | null;
+            /** Run Id */
+            run_id: string;
+            /** Size Bytes */
+            size_bytes?: number | null;
         };
         /**
          * Producers
@@ -1203,10 +1204,10 @@ export interface components {
          *     provenance edges, so they never mint a graph vertex.
          */
         ReaderInfo: {
-            /** Reader */
-            reader: string;
             /** Last Read */
             last_read?: string | null;
+            /** Reader */
+            reader: string;
             /**
              * Reads
              * @default 0
@@ -1241,42 +1242,42 @@ export interface components {
          *     unreadable. Non-empty = those columns failed a real 1-byte probe read.
          */
         ReconcileStatus: {
-            /** Dataset */
-            dataset: string;
-            /** Graph Version */
-            graph_version?: number | null;
-            /** Storage Version */
-            storage_version?: number | null;
-            /** In Sync */
-            in_sync: boolean;
-            status: components["schemas"]["ReconcileState"];
             /**
              * Dangling Blob Columns
              * @default []
              */
             dangling_blob_columns: string[];
-            /**
-             * Stale
-             * @default false
-             */
-            stale: boolean;
+            /** Dataset */
+            dataset: string;
+            /** Graph Version */
+            graph_version?: number | null;
+            /** In Sync */
+            in_sync: boolean;
             /**
              * Missing Declared Columns
              * @default []
              */
             missing_declared_columns: string[];
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            status: components["schemas"]["ReconcileState"];
+            /** Storage Version */
+            storage_version?: number | null;
         };
         /**
          * Run
          * @description A single run of a job. ``facets.author`` carries the OIDC sub when present.
          */
         Run: {
-            /** Runid */
-            runId: string;
             /** Facets */
             facets?: {
                 [key: string]: unknown;
             };
+            /** Runid */
+            runId: string;
         } & {
             [key: string]: unknown;
         };
@@ -1285,18 +1286,18 @@ export interface components {
          * @description An OpenLineage run event (START/RUNNING/COMPLETE/FAIL/ABORT) with its inputs and outputs.
          */
         RunEvent: {
-            /** Eventtype */
-            eventType: string;
             /** Eventtime */
             eventTime: string;
+            /** Eventtype */
+            eventType: string;
+            /** Inputs */
+            inputs?: components["schemas"]["Dataset"][];
+            job: components["schemas"]["Job"];
+            /** Outputs */
+            outputs?: components["schemas"]["Dataset"][];
             /** Producer */
             producer?: string | null;
             run: components["schemas"]["Run"];
-            job: components["schemas"]["Job"];
-            /** Inputs */
-            inputs?: components["schemas"]["Dataset"][];
-            /** Outputs */
-            outputs?: components["schemas"]["Dataset"][];
         } & {
             [key: string]: unknown;
         };
@@ -1323,10 +1324,10 @@ export interface components {
          *     feature versions produced this model*.
          */
         RunInputs: {
-            /** Run Id */
-            run_id: string;
             /** Inputs */
             inputs?: components["schemas"]["RunInput"][];
+            /** Run Id */
+            run_id: string;
         };
         /**
          * RunStatus
@@ -1336,33 +1337,33 @@ export interface components {
          *     ``state`` is the latest run state (START→RUNNING→COMPLETE/FAIL), with progress + error.
          */
         RunStatus: {
-            /** Run Id */
-            run_id: string;
-            /** Job */
-            job?: string | null;
             /** Author */
             author?: string | null;
-            /** State */
-            state?: string | null;
+            /** Error Message */
+            error_message?: string | null;
+            /**
+             * Events
+             * @default 0
+             */
+            events: number;
+            /** Job */
+            job?: string | null;
+            /** Operation */
+            operation?: string | null;
             /** Outputs */
             outputs?: string[];
             /** Progress Done */
             progress_done?: number | null;
             /** Progress Total */
             progress_total?: number | null;
-            /** Error Message */
-            error_message?: string | null;
+            /** Run Id */
+            run_id: string;
             /** Started At */
             started_at?: string | null;
+            /** State */
+            state?: string | null;
             /** Updated At */
             updated_at?: string | null;
-            /**
-             * Events
-             * @default 0
-             */
-            events: number;
-            /** Operation */
-            operation?: string | null;
         };
         /**
          * Runs
@@ -1377,6 +1378,8 @@ export interface components {
          * @description One column in a dataset's persisted per-version schema (from the standard ``schema`` facet).
          */
         SchemaField: {
+            /** Description */
+            description?: string | null;
             /** Name */
             name: string;
             /**
@@ -1384,22 +1387,20 @@ export interface components {
              * @default
              */
             type: string;
-            /** Description */
-            description?: string | null;
         };
         /**
          * SearchHit
          * @description One /search result: the dataset + WHY it matched (name / namespace / tag:* / column:*).
          */
         SearchHit: {
+            /** Matches */
+            matches?: string[];
             /** Name */
             name: string;
             /** Namespace */
             namespace?: string | null;
             /** Tags */
             tags?: string[];
-            /** Matches */
-            matches?: string[];
         };
         /**
          * SearchResults
@@ -1415,16 +1416,16 @@ export interface components {
         };
         /** ValidationError */
         ValidationError: {
+            /** Context */
+            ctx?: Record<string, never>;
+            /** Input */
+            input?: unknown;
             /** Location */
             loc: (string | number)[];
             /** Message */
             msg: string;
             /** Error Type */
             type: string;
-            /** Input */
-            input?: unknown;
-            /** Context */
-            ctx?: Record<string, never>;
         };
     };
     responses: never;
@@ -1435,6 +1436,112 @@ export interface components {
 }
 export type $defs = Record<string, never>;
 export interface operations {
+    list_dlq_admin_dlq_get: {
+        parameters: {
+            query?: {
+                limit?: number;
+            };
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DlqBacklog"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replay_dlq_admin_dlq__run_id__replay_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                run_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DlqReplayResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    ingest_event_api_v1_lineage_post: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RunEvent"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     _get_subscriptions_dapr_subscribe_get: {
         parameters: {
             query?: never;
@@ -1455,7 +1562,44 @@ export interface operations {
             };
         };
     };
-    get_upstream_datasets__name__upstream_get: {
+    list_datasets_datasets_get: {
+        parameters: {
+            query?: {
+                namespace?: string | null;
+                tag?: string | null;
+                offset?: number;
+                limit?: number;
+            };
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Datasets"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_dataset_columns_datasets__name__columns_get: {
         parameters: {
             query?: never;
             header?: {
@@ -1475,7 +1619,149 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Neighbors"];
+                    "application/json": components["schemas"]["ColumnGraph"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_column_downstream_datasets__name__columns__field__downstream_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+                field: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ColumnNeighbors"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_column_upstream_datasets__name__columns__field__upstream_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+                field: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ColumnNeighbors"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_creator_datasets__name__creator_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Creator"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_description_datasets__name__description_put: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DescriptionUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetGovernance"];
                 };
             };
             /** @description Validation Error */
@@ -1510,6 +1796,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Neighbors"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_governance_datasets__name__governance_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DatasetGovernance"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_graph_datasets__name__graph_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path: {
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LineageGraph"];
                 };
             };
             /** @description Validation Error */
@@ -1593,7 +1947,7 @@ export interface operations {
             };
         };
     };
-    get_creator_datasets__name__creator_get: {
+    get_reconcile_datasets__name__reconcile_get: {
         parameters: {
             query?: never;
             header?: {
@@ -1613,7 +1967,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["Creator"];
+                    "application/json": components["schemas"]["ReconcileStatus"];
                 };
             };
             /** @description Validation Error */
@@ -1650,210 +2004,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DatasetSchema"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_graph_datasets__name__graph_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["LineageGraph"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_datasets_datasets_get: {
-        parameters: {
-            query?: {
-                namespace?: string | null;
-                tag?: string | null;
-                offset?: number;
-                limit?: number;
-            };
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Datasets"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    search_search_get: {
-        parameters: {
-            query: {
-                q: string;
-                limit?: number;
-            };
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["SearchResults"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_jobs_jobs_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Jobs"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_namespaces_namespaces_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Namespaces"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_governance_datasets__name__governance_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DatasetGovernance"];
                 };
             };
             /** @description Validation Error */
@@ -1937,115 +2087,7 @@ export interface operations {
             };
         };
     };
-    set_description_datasets__name__description_put: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path: {
-                name: string;
-            };
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["DescriptionUpdate"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DatasetGovernance"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_column_upstream_datasets__name__columns__field__upstream_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path: {
-                name: string;
-                field: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ColumnNeighbors"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_column_downstream_datasets__name__columns__field__downstream_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path: {
-                name: string;
-                field: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["ColumnNeighbors"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    get_dataset_columns_datasets__name__columns_get: {
+    get_upstream_datasets__name__upstream_get: {
         parameters: {
             query?: never;
             header?: {
@@ -2065,7 +2107,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ColumnGraph"];
+                    "application/json": components["schemas"]["Neighbors"];
                 };
             };
             /** @description Validation Error */
@@ -2079,16 +2121,14 @@ export interface operations {
             };
         };
     };
-    get_reconcile_datasets__name__reconcile_get: {
+    demo_datasets_demo_datasets_get: {
         parameters: {
             query?: never;
             header?: {
                 "dapr-api-token"?: string | null;
                 "x-lance-service-identity"?: string | null;
             };
-            path: {
-                name: string;
-            };
+            path?: never;
             cookie?: never;
         };
         requestBody?: never;
@@ -2099,7 +2139,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["ReconcileStatus"];
+                    "application/json": components["schemas"]["DemoDatasets"];
                 };
             };
             /** @description Validation Error */
@@ -2109,6 +2149,148 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_events_events_get: {
+        parameters: {
+            query?: {
+                after?: number | null;
+                limit?: number;
+                summary?: boolean;
+            };
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Events"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_jobs_jobs_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Jobs"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    livez_livez_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": {
+                        [key: string]: string;
+                    };
+                };
+            };
+        };
+    };
+    list_namespaces_namespaces_get: {
+        parameters: {
+            query?: never;
+            header?: {
+                "dapr-api-token"?: string | null;
+                "x-lance-service-identity"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Namespaces"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    readyz_readyz_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": unknown;
                 };
             };
         };
@@ -2179,83 +2361,10 @@ export interface operations {
             };
         };
     };
-    get_events_events_get: {
+    search_search_get: {
         parameters: {
-            query?: {
-                after?: number | null;
-                limit?: number;
-                summary?: boolean;
-            };
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Events"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    ingest_event_api_v1_lineage_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["RunEvent"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_dlq_admin_dlq_get: {
-        parameters: {
-            query?: {
+            query: {
+                q: string;
                 limit?: number;
             };
             header?: {
@@ -2273,115 +2382,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["DlqBacklog"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    replay_dlq_admin_dlq__run_id__replay_post: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path: {
-                run_id: string;
-            };
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DlqReplayResponse"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    livez_livez_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
-                };
-            };
-        };
-    };
-    readyz_readyz_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
-                };
-            };
-        };
-    };
-    demo_datasets_demo_datasets_get: {
-        parameters: {
-            query?: never;
-            header?: {
-                "dapr-api-token"?: string | null;
-                "x-lance-service-identity"?: string | null;
-            };
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["DemoDatasets"];
+                    "application/json": components["schemas"]["SearchResults"];
                 };
             };
             /** @description Validation Error */

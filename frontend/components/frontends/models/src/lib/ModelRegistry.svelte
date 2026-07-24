@@ -5,6 +5,7 @@
 	// signed-out on a governed stack ⇒ 401 ⇒ the sign-in state below, never a broken table.
 	import { Chip } from '@rask/ui/chip';
 	import { Award, RefreshCw, ShieldAlert } from '@lucide/svelte';
+	import { page } from '$app/state';
 	import {
 		fetchModel,
 		fetchModels,
@@ -15,8 +16,12 @@
 
 	const POLL_MS = 5000;
 
+	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
+	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
+
 	let models = $state<ModelSummary[] | null>(null);
 	let lastStatus = $state(0);
+	let settled = $state(false); // distinguishes "still loading" (0, unsettled) from a network error (0, settled)
 	let selected = $state<string | null>(null);
 	let detail = $state<ModelDescribe | null>(null);
 	let promoting = $state(false);
@@ -25,14 +30,17 @@
 
 	// 401 before ANY successful load = governed stack without a session; a poll-tick blip after a
 	// successful load keeps the previous list (the store convention from LineageExplorer, audit B1).
+	// 0 stays IN the offline set once settled: a fetch-level failure (network down, BFF timeout) must
+	// render as offline, not hang on the loading message across poll ticks (audit finding).
 	const unauthorized = $derived(models === null && lastStatus === 401);
-	const offline = $derived(models === null && lastStatus !== 401 && lastStatus !== 0);
+	const offline = $derived(models === null && settled && lastStatus !== 401);
 
 	async function refresh(): Promise<void> {
 		if (polling) return;
 		polling = true;
 		try {
 			const res = await fetchModels();
+			settled = true;
 			if (res.ok) {
 				models = res.data.models;
 				lastStatus = 200;
@@ -126,7 +134,10 @@
 	{#if unauthorized}
 		<div class="empty">
 			<ShieldAlert size={16} />
-			<p>This stack is governed — <a href="/auth/login">sign in</a> to view the model registry.</p>
+			<p>
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view the model
+				registry.
+			</p>
 		</div>
 	{:else if offline}
 		<div class="empty">

@@ -1,22 +1,51 @@
 <script lang="ts">
-	// The dataset panel's access-review section (#51): who holds which can_* action on the object,
-	// expanded through the FGA model (roles, teams, the parent cascade). Kind-generalized (sweep
-	// group 3): `kind` picks the catalog surface — 'table' (the default, unchanged for TableDetail)
-	// or 'namespace' — and the owner gate is the per-type bar (can_drop / can_delete). Owner-only by
-	// design — the catalog gates the enumeration, so a non-owner sees the denial state, never the ACL.
+	// The access-review panel (#51): who holds which can_* action on a catalog object, expanded through
+	// the FGA model (roles, teams, the parent cascade). Kind-generalized (sweep group 3): `kind` picks
+	// the catalog surface — 'table' (the default) or 'namespace' — and the owner gate is the per-type
+	// bar (can_drop / can_delete). Owner-only by design — the catalog gates the enumeration, so a
+	// non-owner sees the denial state, never the ACL. Hoisted into @rask/ui (audit 2026-07-24: the data
+	// and lineage copies had silently drifted apart). Transport-agnostic (rask convention, the
+	// StatusBoard precedent: the lib never owns an API client) — the zone injects its own `client`,
+	// and the Grants* types are the STRUCTURAL shapes this panel reads, so any zone whose generated
+	// catalog types carry these fields can pass its functions straight through without adapters.
 	// Collapsed by default: one owner-tier round-trip per dataset, with definitive outcomes (the ACL,
 	// 401/403/501) cached and transient failures (offline, 5xx) retried on the next open.
-	import { Select } from '@rask/ui/select';
 	import { ChevronRight, ShieldCheck } from '@lucide/svelte';
-	import {
-		type AccessList,
-		checkAccess,
-		fetchAccess,
-		grantAccess,
-		revokeAccess,
-	} from './namespace';
+	import { Select } from '../select/index.js';
 
-	let { dataset, kind = 'table' }: { dataset: string; kind?: 'table' | 'namespace' } = $props();
+	export type GrantsKind = 'table' | 'namespace';
+	/** Mirrors the zones' status-aware ApiResult (http.ts): 0 = fetch-level failure/offline. */
+	export type GrantsResult<T> =
+		{ ok: true; data: T } | { ok: false; status: number; detail: string };
+	export type GrantsAccessList = { grants: { relation: string; users: string[] }[] };
+	/** The zone-owned catalog seam: review + #68 check + #72 grant/revoke, all owner-gated SERVER-side. */
+	export type GrantsClient = {
+		fetchAccess: (kind: GrantsKind, id: string) => Promise<GrantsResult<GrantsAccessList>>;
+		checkAccess: (
+			kind: GrantsKind,
+			id: string,
+			user: string,
+			relation: string,
+		) => Promise<GrantsResult<{ user: string; relation: string; allowed: boolean }>>;
+		grantAccess: (
+			kind: GrantsKind,
+			id: string,
+			user: string,
+			relation: string,
+		) => Promise<GrantsResult<{ user: string }>>;
+		revokeAccess: (
+			kind: GrantsKind,
+			id: string,
+			user: string,
+			relation: string,
+		) => Promise<GrantsResult<{ user: string }>>;
+	};
+
+	let {
+		dataset,
+		kind = 'table',
+		client,
+	}: { dataset: string; kind?: GrantsKind; client: GrantsClient } = $props();
 
 	// #72 the base rungs an owner may hand out (owner/writer/reader/validator) — the model's directly
 	// assignable relations, least→most privilege. NOT the can_* actions the review row shows (those are
@@ -28,9 +57,11 @@
 	// the panel is open only for the dataset it was opened on, a review/spinner/failure is shown
 	// only for the dataset it was produced for — switching datasets blanks them by derivation.
 	let openedFor = $state<string | null>(null);
-	let review = $state<{ for: string; access: AccessList | null; denied: string | null } | null>(
-		null,
-	);
+	let review = $state<{
+		for: string;
+		access: GrantsAccessList | null;
+		denied: string | null;
+	} | null>(null);
 	let loadingFor = $state<string | null>(null);
 	let failedFor = $state<string | null>(null); // transient failure — never cached, reopen retries
 
@@ -66,7 +97,7 @@
 		failedFor = null;
 		const current = dataset;
 		try {
-			const res = await fetchAccess(kind, current);
+			const res = await client.fetchAccess(kind, current);
 			// Latest-wins: the user clicked away while this was in flight — drop the stale result.
 			if (dataset !== current) return;
 			if (res.ok) {
@@ -101,7 +132,7 @@
 		simError = null;
 		const current = dataset;
 		try {
-			const res = await checkAccess(kind, current, user, simRelation);
+			const res = await client.checkAccess(kind, current, user, simRelation);
 			if (dataset !== current) return; // navigated away — drop the stale verdict
 			if (res.ok) {
 				simVerdict = {
@@ -129,14 +160,14 @@
 		const current = dataset;
 		try {
 			const res = grant
-				? await grantAccess(kind, current, user, mgRelation)
-				: await revokeAccess(kind, current, user, mgRelation);
+				? await client.grantAccess(kind, current, user, mgRelation)
+				: await client.revokeAccess(kind, current, user, mgRelation);
 			if (dataset !== current) return; // navigated away — drop the stale result
 			mgFor = current;
 			if (res.ok) {
 				const verb = grant ? 'granted to' : 'revoked from';
 				mgResult = { tone: 'ok', text: `${mgRelation} ${verb} ${res.data.user}.` };
-				const refreshed = await fetchAccess(kind, current);
+				const refreshed = await client.fetchAccess(kind, current);
 				if (dataset === current && refreshed.ok) {
 					review = { for: current, access: refreshed.data, denied: null };
 				}

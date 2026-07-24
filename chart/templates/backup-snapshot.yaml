@@ -43,12 +43,22 @@ spec:
     spec:
       backoffLimit: 3
       template:
+        metadata:
+          # The explicit component label (the P4 landmine, see backup-pg.yaml): rustfs-backup is the
+          # component the rustfs ingress rule already allowlists for this workload (network-policy.yaml 3d)
+          # and the label the created VolumeSnapshot CRs carry — one name for the whole backup surface.
+          labels:
+            {{- include "lance.labels" . | nindent 12 }}
+            app.kubernetes.io/component: rustfs-backup
         spec:
+          # ALWAYS the dedicated RBAC-bound SA — never the zero-grant shared jobs SA the other hook Jobs
+          # take under security.serviceAccounts.enabled. This pod legitimately needs the k8s API (its
+          # kubectl creates the VolumeSnapshot CR via the Role above); the unbound jobs SA (automount off,
+          # zero grants) would silently break every scheduled backup. The old conditional second key here
+          # was a duplicate-map-key render: lenient last-wins parsing swapped the RBAC SA out (audit
+          # 2026-07-24).
           serviceAccountName: {{ include "lance.fullname" . }}-snapshot
           restartPolicy: OnFailure
-          {{- if .Values.security.serviceAccounts.enabled }}
-          serviceAccountName: {{ include "lance.fullname" . }}-sa-jobs
-          {{- end }}
           containers:
             - name: snapshot
               image: {{ .Values.backups.volumeSnapshot.kubectlImage }}

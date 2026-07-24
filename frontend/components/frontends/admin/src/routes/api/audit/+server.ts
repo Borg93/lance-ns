@@ -13,28 +13,29 @@ import type { RequestHandler } from './$types';
 // estate, so an anonymous front-door caller must not read it; without OIDC (auth-off dev) it answers openly.
 // 501 when GREPTIME_API is unset (no observability stack).
 const GREPTIME_API = env.GREPTIME_API ?? '';
-// The audit trail is estate-wide, so the viewer is ADMIN-only — not merely authenticated. We reuse the one
-// admin door the estate already owns: the medallion produce door's side-effect-free GET /authorize (a
-// signed-in `can_administer` project admin, or the service/dev paths). We bearer-FORWARD the user's token
-// (never a service token) and only query GreptimeDB if it returns 200. (audit 2026-07-20)
-const MEDALLION_API = env.MEDALLION_API ?? '';
+// The audit trail is ESTATE-wide (every tenant's authn/authz/vending events), so the viewer gates on the
+// ESTATE-admin authority — the catalog's `can_observe_events` on the fixed root object, the same rung
+// `/v1/events` and `/v1/projects` check. A per-project door here would hand the configured project's
+// admins every other tenant's trail while 403ing an estate owner not on that project — the exact scope
+// bug docs/DECISIONS.md #control-events--estate-admin-scope records for /v1/events. (audit 2026-07-24)
+const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
 
-// Returns null when the caller is an authorized admin; otherwise the {status, detail} to answer with.
-async function adminGate(
+// Returns null when the caller is an estate admin; otherwise the {status, detail} to answer with. The
+// probe is a side-effect-free `GET /v1/events` with a past-any-head cursor: an estate admin gets an
+// empty page (an empty poll is never audited, so the probe leaves no trail noise), anyone else the
+// catalog's own 401/403 verdict. We bearer-FORWARD the user's token (never a service token) and only
+// query GreptimeDB if it returns 200. Governed stack but no reachable catalog → fail closed.
+async function estateAdminGate(
 	fetchFn: typeof fetch,
 	accessToken: string,
 ): Promise<{ status: number; detail: string } | null> {
-	if (!MEDALLION_API) {
-		// Governed stack but no admin authority wired → fail closed rather than leak the trail.
-		return { status: 503, detail: 'audit admin authorization is unavailable' };
-	}
 	try {
-		const res = await fetchFn(`${MEDALLION_API}/authorize`, {
+		const res = await fetchFn(`${CATALOG_API}/v1/events?since=${Number.MAX_SAFE_INTEGER}`, {
 			headers: { authorization: `Bearer ${accessToken}` },
+			signal: AbortSignal.timeout(5000),
 		});
 		if (res.ok) return null;
-		if (res.status === 403)
-			return { status: 403, detail: 'the audit trail is admin-only (project admin required)' };
+		if (res.status === 403) return { status: 403, detail: 'the audit trail is estate-admin only' };
 		if (res.status === 401) return { status: 401, detail: 'sign in to view the audit trail' };
 		return { status: 503, detail: 'audit admin authorization is unavailable' };
 	} catch (err) {
@@ -91,10 +92,10 @@ export const GET: RequestHandler = async ({ url, fetch, locals }) => {
 	if (locals.authEnabled && !locals.session) {
 		return json({ detail: 'sign in to view the audit trail' }, { status: 401 });
 	}
-	// Authorization (not just authentication): a governed, signed-in caller must be a project admin — else
-	// any reader could read the whole estate's cross-tenant trail. Auth-off dev skips the gate (open).
+	// Authorization (not just authentication): a governed, signed-in caller must be an ESTATE admin — else
+	// any project's admin could read the whole estate's cross-tenant trail. Auth-off dev skips the gate (open).
 	if (locals.authEnabled && locals.session) {
-		const denied = await adminGate(fetch, locals.session.accessToken);
+		const denied = await estateAdminGate(fetch, locals.session.accessToken);
 		if (denied) return json({ detail: denied.detail }, { status: denied.status });
 	}
 	if (!GREPTIME_API) {

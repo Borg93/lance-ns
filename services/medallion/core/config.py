@@ -39,6 +39,11 @@ class MedallionSettings(BaseSettings):
     dapr_enabled: bool = Field(default=False, alias="MEDALLION_DAPR_ENABLED")
     # Serve /docs + /openapi.json (default on for dev; prod sets false, like the catalog's LANCE_REST_DOCS).
     docs_enabled: bool = Field(default=True, alias="MEDALLION_DOCS")
+    # Compliance audit trail (#41): gate the dedicated `lance.audit` stream (the /produce + /train admin-door
+    # decisions) exactly like the catalog — the SHARED LANCE_AUDIT_ENABLED env (not a MEDALLION_* twin), so
+    # one flag governs the estate's compliance posture. Default on; without the producer lifespan's
+    # configure_audit call the stream is silently OFF (the logger inherits root WARNING).
+    audit_enabled: bool = Field(default=True, alias="LANCE_AUDIT_ENABLED")
     # #84 per-tenant medallion routing (opt-in): the catalog's warehouse-registry/control root (the
     # LANCE_CONTROL_ROOT / LANCE_REST_ROOT value, e.g. ``s3://<bucket>``). When set, a ``project``-carrying
     # /produce request or stage trigger resolves that project's ACTIVE warehouse root off the registry

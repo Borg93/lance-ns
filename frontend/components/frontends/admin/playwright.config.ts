@@ -31,12 +31,15 @@ export default defineConfig({
 				OIDC_CLIENT_ID: 'lance-admin-e2e',
 				OIDC_REDIRECT_URI: 'http://localhost:5295/auth/callback',
 				// The control-events feed's query.live generator polls this server-side — the mock catalog below.
-				CATALOG_API: 'http://localhost:5296',
+				// 5297, NOT 5296: the zone e2e ports are home 5293 / data 5294 / admin 5295 / models 5296 /
+				// lineage 5298, and a locally parallel `turbo run test:e2e` (reuseExistingServer) would silently
+				// "reuse" the models dev server as the catalog (audit finding).
+				CATALOG_API: 'http://localhost:5297',
 			},
 		},
 		{
 			command: 'bun e2e/mock-catalog.ts',
-			port: 5296,
+			port: 5297,
 			reuseExistingServer: !process.env.CI,
 			timeout: 30_000,
 		},

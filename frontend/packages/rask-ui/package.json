@@ -96,6 +96,10 @@
 		"./status-board": {
 			"types": "./dist/components/status-board/index.d.ts",
 			"svelte": "./dist/components/status-board/index.js"
+		},
+		"./grants-panel": {
+			"types": "./dist/components/grants-panel/index.d.ts",
+			"svelte": "./dist/components/grants-panel/index.js"
 		}
 	},
 	"scripts": {

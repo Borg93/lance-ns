@@ -1,5 +1,5 @@
 import { test, expect, type Route } from '@playwright/test';
-import { signIn } from './session';
+import { mockMe, signIn } from './session';
 
 // Hermetic /streams coverage: the panel reads the trimmed JetStream overview via the /api/jetstream BFF.
 // Mock it; assert the stream cards + consumer lag rows render (service column first, DLQ flagged,
@@ -66,8 +66,9 @@ const OVERVIEW = {
 	missing: [],
 };
 
-test.beforeEach(async ({ context }) => {
+test.beforeEach(async ({ context, page }) => {
 	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
+	await mockMe(page); // estate-admin identity: the admin layout door opens
 });
 
 test('renders stream cards with consumer lag rows', async ({ page }) => {

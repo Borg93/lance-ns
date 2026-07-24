@@ -112,7 +112,8 @@
 
 <svelte:window onkeydown={onKeydown} />
 
-<div class="flex h-screen w-screen">
+<!-- h-full/w-full (not h-screen): the shell now sits under the estate navbar in the zone layout. -->
+<div class="flex h-full w-full">
 	<AnnotatorToolbar {controller} {spatial} />
 
 	<div class="min-w-0 flex-1">

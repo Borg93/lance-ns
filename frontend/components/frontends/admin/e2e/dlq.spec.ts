@@ -1,5 +1,5 @@
 import { test, expect, type Route } from '@playwright/test';
-import { signIn } from './session';
+import { mockMe, signIn } from './session';
 
 // Hermetic /dlq coverage (#83): the ops panel reads the transactional-outbox backlog via /api/admin/dlq and
 // replays one event through the session-only /api/admin/dlq/{run}/replay BFF. Mock both; assert the events
@@ -28,6 +28,7 @@ function backlog() {
 
 test.beforeEach(async ({ context, page }) => {
 	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
+	await mockMe(page); // estate-admin identity: the admin layout door opens
 	replayed.clear();
 	await page.route('**/api/admin/dlq/*/replay', (route) => {
 		const m = route

@@ -1,4 +1,4 @@
-import type { BrowserContext } from '@playwright/test';
+import type { BrowserContext, Page } from '@playwright/test';
 
 // Sign the e2e browser context in. The admin dev server runs auth-ON (OIDC env in playwright.config.ts),
 // and the login-first gate now redirects a signed-out page navigation to /auth/login — owned by the home
@@ -15,6 +15,33 @@ const SESSION = {
 
 /** The display name the shared nav-user renders for the minted session (auth.spec.ts asserts it). */
 export const SESSION_NAME = SESSION.name;
+
+// The frozen /v1/me shapes the layout door + navbar read (mocked at the browser boundary — the
+// layout fetches me through this zone's /capi/v1/me pass-through, so page.route can intercept it).
+export const ME_ADMIN = {
+	sub: 'user:e2e',
+	name: 'E2E Admin',
+	email: 'e2e@example.com',
+	estate_admin: true,
+	projects: [{ project: 'acme', role: 'admin' }],
+};
+
+/** A bob-shaped identity: verified, but WITHOUT the estate-admin privilege — the admin zone's
+ *  layout-level door must answer ForbiddenPage and the navbar must hide Admin + Access. */
+export const ME_MEMBER = {
+	sub: 'user:bob',
+	name: 'Bob',
+	email: 'bob@example.com',
+	estate_admin: false,
+	projects: [{ project: 'acme', role: 'member' }],
+};
+
+/** Mock the zone's /capi/v1/me pass-through (default: an estate admin, so panels render). */
+export async function mockMe(page: Page, me: unknown = ME_ADMIN) {
+	await page.route('**/capi/v1/me', (route) =>
+		route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(me) }),
+	);
+}
 
 export async function signIn(context: BrowserContext, origin = 'http://localhost:5295') {
 	const value = Buffer.from(JSON.stringify(SESSION), 'utf8')

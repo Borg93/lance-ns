@@ -1,5 +1,5 @@
 import { test, expect, type Route } from '@playwright/test';
-import { signIn } from './session';
+import { mockMe, signIn } from './session';
 
 // Hermetic /audit coverage (#77): the viewer reads the #41 compliance trail via the /api/audit BFF. Mock it;
 // assert the events render, the outcome filter re-queries, and the nav exposes the route.
@@ -28,6 +28,7 @@ let lastQuery = '';
 
 test.beforeEach(async ({ context, page }) => {
 	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
+	await mockMe(page); // estate-admin identity: the admin layout door opens
 	lastQuery = '';
 	await page.route('**/api/audit**', (route) => {
 		const url = new URL(route.request().url());

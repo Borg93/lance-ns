@@ -38,7 +38,10 @@ let governance: { tags: string[]; description: string | null };
 
 test.beforeEach(async ({ page }) => {
 	governance = { tags: ['layer=silver'], description: null };
-	await page.route('**/api/**', (route) => {
+	// Scope to the zone's BFF base (/lineage/api/…) — a bare **/api/** also swallows Vite's
+	// /@fs module requests for the @rask/api workspace package (its path contains /api/), which
+	// kills hydration with JSON-as-module (found 2026-07-24 when the layout began importing it).
+	await page.route('**/lineage/api/**', (route) => {
 		const req = route.request();
 		const path = new URL(req.url()).pathname.replace(/^.*\/api/, '');
 		const gov = path.match(/^\/datasets\/([^/]+)\/governance$/);

@@ -17,8 +17,11 @@ test.beforeEach(async ({ page }) => {
 	tables = ['bronze$events', 'gold$catalog', 'gold$metrics'];
 	dropPost = null;
 	await page.route('**/capi/**', (route) => {
-		lastCapiPath = new URL(route.request().url()).pathname;
-		const path = lastCapiPath.replace(/^.*\/capi/, '');
+		const pathname = new URL(route.request().url()).pathname;
+		// The layout's /capi/v1/me identity fetch shares the glob — track only the registry call here.
+		if (!pathname.endsWith('/v1/me')) lastCapiPath = pathname;
+		const path = pathname.replace(/^.*\/capi/, '');
+		if (path === '/v1/me') return json(route, { detail: 'anon' }, 401);
 		if (path === '/v1/table') {
 			return json(route, { tables });
 		}

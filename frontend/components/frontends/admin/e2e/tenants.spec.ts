@@ -1,11 +1,12 @@
 import { expect, test } from '@playwright/test';
-import { signIn } from './session';
+import { mockMe, signIn } from './session';
 
 // The tenants panel (goal cond 6): renders the catalog's first-class projects API through the
 // bearer-forwarding BFF. Hermetic: the BFF route is same-origin, so page.route mocks it.
 
-test.beforeEach(async ({ context }) => {
+test.beforeEach(async ({ context, page }) => {
 	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
+	await mockMe(page); // estate-admin identity: the admin layout door opens
 });
 
 const FIXTURE = [

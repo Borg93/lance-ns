@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { SESSION_NAME, signIn } from './session';
+import { mockMe, SESSION_NAME, signIn } from './session';
 
 // The shared cross-zone auth seam (P5 "auth in every MFE"), under the LOGIN-FIRST gate. This suite runs
 // the admin zone with OIDC CONFIGURED (playwright.config.ts webServer.env). It asserts (1) a signed-out
@@ -34,14 +34,16 @@ test('signed-in: the shared nav-user shows the session identity when auth is ena
 	page,
 }) => {
 	await signIn(context);
+	await mockMe(page); // estate-admin identity: the admin layout door opens
 	await page.route('**/api/audit**', (route) =>
 		route.fulfill({ status: 200, contentType: 'application/json', body: '{"events":[]}' }),
 	);
 	await page.goto('/admin/audit');
 	await expect(page.getByRole('heading', { name: 'Audit log' })).toBeVisible();
-	// The footer profile trigger renders the minted session's name — proof that the cookie session flowed
-	// session→user→AppShell→nav-user and selected the signed-in branch.
-	await expect(page.getByRole('button', { name: SESSION_NAME })).toBeVisible();
+	// The navbar profile dropdown renders the minted session's name — proof that the cookie session
+	// flowed session→user→AppShell→TopNavbar→nav-user and selected the signed-in branch.
+	await page.getByRole('button', { name: 'Account' }).click();
+	await expect(page.getByText(SESSION_NAME)).toBeVisible();
 });
 
 test('/auth was relocated OUT of the domain zones — the home zone owns it (admin 404s)', async ({

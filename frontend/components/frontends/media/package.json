@@ -33,7 +33,9 @@
 		"@lance/engine": "workspace:*",
 		"@lance/labeling": "workspace:*",
 		"@lance/ui": "workspace:*",
-		"@lance/api": "workspace:*"
+		"@lance/api": "workspace:*",
+		"@rask/api": "workspace:*",
+		"@rask/ui": "workspace:*"
 	},
 	"devDependencies": {
 		"@lance/config": "workspace:*",

@@ -14,6 +14,8 @@
 		"@lance/engine": "workspace:*",
 		"@lance/labeling": "workspace:*",
 		"@lance/ui": "workspace:*",
+		"@rask/api": "workspace:*",
+		"@rask/ui": "workspace:*",
 		"apache-arrow": "^21.1.0",
 		"lucide-svelte": "^0.468.0",
 		"pixi.js": "^8.19.0",

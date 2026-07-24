@@ -24,6 +24,8 @@
 @source '../../../packages/ui/src';
 @source './routes';
 @source './app.html';
+/* Scan the shared @rask/ui library (the estate navbar) so its Tailwind classes generate. */
+@source '../../../../packages/rask-ui/dist';
 
 @custom-variant dark (&:where(.dark, .dark *));
 

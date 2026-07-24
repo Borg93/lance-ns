@@ -3,7 +3,8 @@ import { Database } from '@lucide/svelte';
 /** All lucide icons share one component signature, so any icon's type fits. */
 export type IconComponent = typeof Database;
 
-/** A leaf route inside the CURRENT zone's sidebar — always same-zone (soft nav). */
+/** A leaf route inside the CURRENT zone's sidebar — same-zone (soft nav) unless `reload` says
+ *  otherwise. */
 export type ZoneNavLeaf = {
 	title: string;
 	/** ABSOLUTE, domain-relative href (e.g. /data/tables). */
@@ -11,6 +12,9 @@ export type ZoneNavLeaf = {
 	/** Active predicate vs the FULL pathname. */
 	match: (p: string) => boolean;
 	icon?: IconComponent;
+	/** True for a leaf that leaves this zone's route manifest (e.g. media's Annotate → /annotator):
+	 *  the sidebar link then hard-navigates (data-sveltekit-reload) instead of soft-routing. */
+	reload?: boolean;
 };
 
 /** The per-zone sidebar config: each zone passes ITS OWN routes to the shared AppShell. The zone
@@ -70,10 +74,10 @@ export type TopNavEntry = {
  * SEPARATE SvelteKit app under `/<domain>`; Home owns the origin root). The zones-in-sidebar list
  * this replaces is gone: the sidebar now renders only the CURRENT zone's own routes (`ZoneNav`).
  *
- * Admin + Access append ONLY for an estate admin (`me.estate_admin` from the frozen `/v1/me`
- * contract) — fail-closed: an unresolved/absent `me` renders the base entries. Access is the
- * estate access-review surface inside the admin zone, so Admin's own match excludes it (one lit
- * entry per route).
+ * Admin appends ONLY for an estate admin (`me.estate_admin` from the frozen `/v1/me` contract) —
+ * fail-closed: an unresolved/absent `me` renders the base entries. Access is NOT a top-level
+ * entry: it lives inside the admin zone's own sidebar (/admin/access), so Admin covers the whole
+ * /admin subtree here.
  */
 export function topNav(estateAdmin: boolean): TopNavEntry[] {
 	const entries: TopNavEntry[] = [
@@ -85,14 +89,7 @@ export function topNav(estateAdmin: boolean): TopNavEntry[] {
 		{ title: 'Annotator', href: '/annotator', match: under('/annotator') },
 	];
 	if (estateAdmin) {
-		entries.push(
-			{
-				title: 'Admin',
-				href: '/admin',
-				match: (p) => under('/admin')(p) && !seg('/admin/access')(p),
-			},
-			{ title: 'Access', href: '/admin/access', match: seg('/admin/access') },
-		);
+		entries.push({ title: 'Admin', href: '/admin', match: under('/admin') });
 	}
 	return entries;
 }
@@ -101,3 +98,36 @@ export function topNav(estateAdmin: boolean): TopNavEntry[] {
  *  zone differs from the current pathname's leaves this app's route manifest, so it must hard-nav
  *  (data-sveltekit-reload); same-zone links stay soft for SPA speed. */
 export const zoneOf = (p: string) => p.split('/').filter(Boolean)[0] ?? '';
+
+const prefetched = new Set<string>();
+
+/** Warm a CROSS-ZONE target document on intent (hover/focus). SvelteKit's own
+ *  `data-sveltekit-preload-data` only helps same-zone soft navs — a cross-zone link is a full
+ *  document load into another app — so we drop a `<link rel="prefetch">` for the target instead.
+ *  Honest scope: this is a browser HINT that warms the HTTP cache for the target zone's document
+ *  (Chromium and Firefox honor it; Safari does not), so the hard nav paints from cache instead of
+ *  a cold round-trip. Once per href per document; SSR no-op. */
+export function prefetchDocument(href: string) {
+	if (typeof document === 'undefined' || prefetched.has(href)) return;
+	prefetched.add(href);
+	const link = document.createElement('link');
+	link.rel = 'prefetch';
+	link.href = href;
+	document.head.append(link);
+}
+
+/** `{@attach}` factory: warm `href` (prefetchDocument) on pointerenter/focus. Native listeners on
+ *  purpose — inside a `child({ props })` snippet the component's own spread props may carry their
+ *  own pointer handlers (e.g. the sidebar MenuButton's tooltip trigger), and a plain
+ *  `onpointerenter` attribute would be overwritten by (or overwrite) them. */
+export function prefetchOnIntent(href: string) {
+	return (el: HTMLElement) => {
+		const warm = () => prefetchDocument(href);
+		el.addEventListener('pointerenter', warm);
+		el.addEventListener('focus', warm);
+		return () => {
+			el.removeEventListener('pointerenter', warm);
+			el.removeEventListener('focus', warm);
+		};
+	};
+}

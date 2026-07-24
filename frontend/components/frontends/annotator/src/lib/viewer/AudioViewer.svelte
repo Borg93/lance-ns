@@ -7,9 +7,9 @@
 	// annotations table + Save path as spatial shapes.
 	import { untrack } from 'svelte';
 	import { loadAnnotations } from '@lance/labeling/annotations-client';
-	import { Pause, Play } from 'lucide-svelte';
+	import { Pause, Play } from '@lucide/svelte';
 	import { WaveSurface, type TemporalSegment } from '@lance/engine';
-	import { Button } from '@lance/ui';
+	import { Button } from '@rask/ui/button';
 	import type { ViewerProps } from './types';
 
 	let { unit, onload, onerror, controller }: ViewerProps = $props();

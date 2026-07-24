@@ -1,10 +1,11 @@
 <script lang="ts">
 	// Single-annotation inspector/editor. Controlled: edits route through the facade
 	// (canvas + overlay updated together). (Ported from ra-anno AnnotationSidebar detail.)
-	import { Check, X, RotateCcw, ChevronUp, ChevronDown } from 'lucide-svelte';
-	import { Button, Input } from '@lance/ui';
-	import { cn } from '@lance/ui/utils';
-	import { statusBadge } from './statusStyle';
+	import { Check, X, RotateCcw, ChevronUp, ChevronDown } from '@lucide/svelte';
+	import { Badge } from '@rask/ui/badge';
+	import { Button } from '@rask/ui/button';
+	import TextInput from '$lib/ui/TextInput.svelte';
+	import { statusVariant } from './statusStyle';
 	import type { AnnotatorController } from '../annotator.svelte';
 
 	let { controller }: { controller: AnnotatorController } = $props();
@@ -14,11 +15,9 @@
 
 {#if row}
 	<div class="flex flex-col gap-3 p-3" data-testid="annotation-detail">
-		<div class="flex items-center justify-between">
+		<div class="flex items-center justify-between gap-2">
 			<span class="text-muted-foreground text-xs font-medium">Annotation #{row.index}</span>
-			<span class={cn('rounded px-1.5 py-0.5 text-[10px] font-medium', statusBadge(row.status))}>
-				{row.status || '—'}
-			</span>
+			<Badge variant={statusVariant(row.status)}>{row.status || '—'}</Badge>
 		</div>
 
 		<div class="text-muted-foreground flex items-center justify-between text-xs">
@@ -43,18 +42,18 @@
 			</div>
 		</div>
 
-		<label class="flex flex-col gap-1 text-xs">
+		<label class="flex flex-col gap-1.5 text-xs">
 			<span class="text-muted-foreground">Text</span>
-			<Input
+			<TextInput
 				value={row.text}
 				placeholder="—"
 				oninput={(e) => controller.updateField(row.index, 'text', e.currentTarget.value)}
 			/>
 		</label>
 
-		<label class="flex flex-col gap-1 text-xs">
+		<label class="flex flex-col gap-1.5 text-xs">
 			<span class="text-muted-foreground">Label</span>
-			<Input
+			<TextInput
 				value={row.label}
 				placeholder="—"
 				oninput={(e) => controller.updateField(row.index, 'label', e.currentTarget.value)}
@@ -62,24 +61,25 @@
 		</label>
 
 		{#if controller.labelClasses.length}
+			<!-- Quick-label chips ARE buttons, so they get the estate's button primitive (xs outline,
+			     secondary while it is the row's current label) rather than a hand-rolled span. -->
 			<div class="flex flex-wrap gap-1" title="Quick label (applies to the selection)">
 				{#each controller.labelClasses as lc (lc)}
-					<button
-						class={cn(
-							'border-border hover:bg-muted rounded border px-1.5 py-0.5 text-[11px]',
-							row.label === lc && 'border-primary/50 bg-primary/10',
-						)}
+					<Button
+						variant={row.label === lc ? 'secondary' : 'outline'}
+						size="xs"
+						aria-pressed={row.label === lc}
 						onclick={() => controller.applyLabel(lc)}
 					>
 						{lc}
-					</button>
+					</Button>
 				{/each}
 			</div>
 		{/if}
 
-		<label class="flex flex-col gap-1 text-xs">
+		<label class="flex flex-col gap-1.5 text-xs">
 			<span class="text-muted-foreground">Group</span>
-			<Input
+			<TextInput
 				value={row.group}
 				placeholder="—"
 				oninput={(e) => controller.updateField(row.index, 'group', e.currentTarget.value)}

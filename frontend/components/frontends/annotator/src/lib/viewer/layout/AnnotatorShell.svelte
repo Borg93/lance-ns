@@ -8,6 +8,7 @@
 	import { AnnotatorController } from '$lib/viewer/annotator.svelte';
 	import { reviewSelection } from '$lib/labeling/review-selection.svelte';
 	import ResizableSplit from '@lance/ui/resizable-split.svelte';
+	import { Badge } from '@rask/ui/badge';
 	import AnnotatorToolbar from './AnnotatorToolbar.svelte';
 	import AnnotationSidebar from './AnnotationSidebar.svelte';
 	import ZoomControls from './ZoomControls.svelte';
@@ -123,15 +124,20 @@
 		<ResizableSplit storageKey="lance-media-annotate" initial={0.72} minLeft={420} minRight={320}>
 			{#snippet left()}
 				<div class="relative h-full w-full">
-					<div
-						class={[
-							'absolute top-3 left-3 z-10 rounded px-2 py-1 font-mono text-xs text-white',
-							loadFailed ? 'bg-destructive/90' : 'bg-black/70',
-						]}
+					<!-- The load/status chip is a real Badge — secondary while healthy, destructive when
+					     the unit failed to load — instead of a hand-rolled black pill that ignored the
+					     theme entirely (it stayed dark-on-white in light mode). It also moves off the
+					     TOP-left, where the centred assist bar painted over the tail of any message
+					     longer than a few words (a load failure, always, exactly when you need to read
+					     it); bottom-left is the one free corner — page nav is bottom-centre, zoom is
+					     bottom-right — so it can render its full text. -->
+					<Badge
+						variant={loadFailed ? 'destructive' : 'secondary'}
+						class="absolute bottom-2 left-2 z-10 font-mono shadow-sm backdrop-blur"
 						data-testid="annotate-status"
 					>
 						annotate · {unit.kind} · {status}
-					</div>
+					</Badge>
 					<Viewer
 						{unit}
 						{controller}

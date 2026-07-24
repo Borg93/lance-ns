@@ -15,7 +15,7 @@ import {
 	PenLine,
 	Pentagon,
 	Square,
-} from 'lucide-svelte';
+} from '@lucide/svelte';
 import type { Tool } from '@lance/engine';
 
 export interface ToolDef {

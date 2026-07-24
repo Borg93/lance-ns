@@ -1,31 +1,37 @@
-/** Shared status → semantic style map for the sidebar/list. Kept tiny + in one
- *  place so the badge/dot look identical everywhere. */
+import type { BadgeVariant } from '@rask/ui/badge';
+
+/** Shared status → style map for the review surfaces (list, table, detail). Kept tiny and in
+ *  one place so the dot and the badge never disagree, and expressed in the estate's SEMANTIC
+ *  tokens (success / warning / destructive / primary) rather than the bespoke emerald-rose-amber
+ *  ramp this zone used to carry — the tokens already carry a correct value in both themes. */
 export function statusDot(status: string): string {
 	switch (status) {
 		case 'accepted':
-			return 'bg-emerald-500';
+			return 'bg-success';
 		case 'rejected':
-			return 'bg-rose-500';
+			return 'bg-destructive';
 		case 'prediction':
-			return 'bg-amber-500';
+			return 'bg-warning';
 		case 'reviewed':
-			return 'bg-sky-500';
+			return 'bg-primary';
 		default:
 			return 'bg-muted-foreground';
 	}
 }
 
-export function statusBadge(status: string): string {
+/** The @rask/ui Badge variant for a status — the same badge vocabulary the data and admin
+ *  zones use, so a status chip here reads as the same object it does over there. */
+export function statusVariant(status: string): BadgeVariant {
 	switch (status) {
 		case 'accepted':
-			return 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400';
+			return 'success';
 		case 'rejected':
-			return 'bg-rose-500/15 text-rose-600 dark:text-rose-400';
+			return 'destructive';
 		case 'prediction':
-			return 'bg-amber-500/15 text-amber-600 dark:text-amber-400';
+			return 'warning';
 		case 'reviewed':
-			return 'bg-sky-500/15 text-sky-600 dark:text-sky-400';
+			return 'default';
 		default:
-			return 'bg-muted text-muted-foreground';
+			return 'outline';
 	}
 }

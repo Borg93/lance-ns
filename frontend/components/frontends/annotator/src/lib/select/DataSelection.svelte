@@ -5,6 +5,7 @@
 	// grid with thumbnails, then a per-document chunk picker that opens the annotate
 	// canvas via `?keys=` (the existing deep-link contract — the read plane's bridge).
 	import { onMount } from 'svelte';
+	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
 	import {
 		getDatasetView,
 		getHealth,
@@ -14,7 +15,8 @@
 		type DocumentsResponse,
 	} from '@lance/api';
 	import { setActiveView, type DatasetView } from '@lance/api/descriptor';
-	import { Button, Select } from '@lance/ui';
+	import { Button } from '@rask/ui/button';
+	import { Select } from '@rask/ui/select';
 	import DocTile from './DocTile.svelte';
 	import ChunkPicker from './ChunkPicker.svelte';
 
@@ -141,10 +143,12 @@
 			onback={() => (openDoc = null)}
 		/>
 	{:else}
+		<!-- Page header at the estate's scale: text-lg title + text-sm lede, the same pairing the
+		     data and admin index pages open with. -->
 		<div class="flex shrink-0 flex-wrap items-center gap-3">
 			<div>
-				<h1 class="text-base font-semibold">Annotate</h1>
-				<p class="text-muted-foreground text-xs">
+				<h1 class="text-lg font-semibold">Annotate</h1>
+				<p class="text-muted-foreground text-sm">
 					Pick a document, then a chunk — or review a whole document.
 				</p>
 			</div>
@@ -188,14 +192,16 @@
 					<DocTile view={view!} {doc} onclick={() => (openDoc = doc)} />
 				{/each}
 			</div>
-			<div class="flex shrink-0 items-center justify-center gap-2">
+			<!-- Pagination reads like the estate's DataTable footer: outline prev/next flanking a
+			     muted, tabular page counter. -->
+			<div class="flex shrink-0 items-center justify-center gap-3">
 				<Button
 					variant="outline"
 					size="sm"
 					disabled={loadingDocs || docsPage.page <= 1}
 					onclick={() => void loadDocs(docsPage!.page - 1)}
 				>
-					Previous
+					<ChevronLeft class="size-3.5" /> Previous
 				</Button>
 				<span class="text-muted-foreground text-xs tabular-nums">
 					page {docsPage.page} / {totalPages} · {docsPage.total} documents
@@ -206,7 +212,7 @@
 					disabled={loadingDocs || docsPage.page >= totalPages}
 					onclick={() => void loadDocs(docsPage!.page + 1)}
 				>
-					Next
+					Next <ChevronRight class="size-3.5" />
 				</Button>
 			</div>
 		{/if}

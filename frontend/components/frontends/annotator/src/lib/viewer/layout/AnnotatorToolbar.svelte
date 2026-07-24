@@ -12,9 +12,9 @@
 		Undo2,
 		Redo2,
 		Save,
-	} from 'lucide-svelte';
-	import { Button } from '@lance/ui';
-	import { cn } from '@lance/ui/utils';
+	} from '@lucide/svelte';
+	import { Button } from '@rask/ui/button';
+	import { cn } from '@rask/ui/utils';
 	import { TOOL_DEFS } from '../tool-defs';
 	import type { AnnotatorController } from '../annotator.svelte';
 
@@ -37,8 +37,10 @@
 	);
 </script>
 
+<!-- The rail wears the estate's SIDEBAR tokens, not card: it is this zone's left navigation
+     rail, so it should read as the same surface the data/admin sidebars occupy. -->
 <div
-	class="border-border bg-card flex h-full w-11 shrink-0 flex-col items-center gap-1 border-r py-2"
+	class="border-sidebar-border bg-sidebar flex h-full w-11 shrink-0 flex-col items-center gap-1 border-r py-2"
 	data-testid="annotator-toolbar"
 >
 	{#if onexit}
@@ -51,7 +53,7 @@
 		>
 			<LayoutGrid class="size-4" />
 		</Button>
-		<div class="bg-border my-1 h-px w-6"></div>
+		<div class="bg-sidebar-border my-1 h-px w-6"></div>
 	{/if}
 
 	<!-- Mode toggle -->
@@ -66,7 +68,7 @@
 	</Button>
 
 	{#if spatial}
-		<div class="bg-border my-1 h-px w-6"></div>
+		<div class="bg-sidebar-border my-1 h-px w-6"></div>
 
 		{#each visible as t (t.tool)}
 			{@const Icon = t.icon}
@@ -98,7 +100,7 @@
 		{/if}
 	{/if}
 
-	<div class="bg-border my-1 h-px w-6"></div>
+	<div class="bg-sidebar-border my-1 h-px w-6"></div>
 
 	<!-- Undo / redo (field edits: relabel / accept / reject / text) -->
 	<Button
@@ -136,7 +138,7 @@
 		/>
 	</Button>
 
-	<div class="bg-border my-1 h-px w-6"></div>
+	<div class="bg-sidebar-border my-1 h-px w-6"></div>
 
 	<!-- Selection actions -->
 	{#if spatial}
@@ -162,7 +164,7 @@
 
 	<div class="mt-auto flex flex-col items-center gap-1">
 		<span
-			class={cn('size-2 rounded-full', controller.dirty ? 'bg-amber-500' : 'bg-transparent')}
+			class={cn('size-2 rounded-full', controller.dirty ? 'bg-warning' : 'bg-transparent')}
 			title={controller.dirty ? 'Unsaved edits' : 'No pending edits'}
 		></span>
 		<span class="text-muted-foreground text-[10px] tabular-nums" title="Annotation count">

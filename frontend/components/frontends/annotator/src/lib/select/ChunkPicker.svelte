@@ -5,10 +5,10 @@
 	// + body); frames render lazily via /api/chunk-frame and hide themselves when a
 	// chunk has no extracted frame yet.
 	import { onMount } from 'svelte';
-	import { ArrowLeft, ListChecks, Pencil } from 'lucide-svelte';
+	import { ArrowLeft, ListChecks, Pencil } from '@lucide/svelte';
 	import { getDocTranscript, type DocTranscriptChunk, type Document } from '@lance/api';
 	import type { DatasetView } from '@lance/api/descriptor';
-	import { Button } from '@lance/ui';
+	import { Button } from '@rask/ui/button';
 
 	let {
 		view,
@@ -52,7 +52,7 @@
 		<Button variant="ghost" size="sm" onclick={onback}>
 			<ArrowLeft class="size-4" /> Documents
 		</Button>
-		<h2 class="min-w-0 truncate text-sm font-medium" {title}>{title}</h2>
+		<h2 class="min-w-0 truncate text-base font-medium" {title}>{title}</h2>
 		{#if chunks?.length}
 			<Button
 				variant="default"
@@ -77,28 +77,30 @@
 			{#each chunks as chunk, i (keyOf(chunk))}
 				{@const time = view.time(chunk)}
 				<li>
+					<!-- Card geometry lifted from @rask/ui's Card (rounded-lg, border, bg-card,
+					     shadow-sm) so a chunk row and a data-zone card are the same object. -->
 					<button
 						type="button"
 						data-testid="chunk-row"
-						class="border-border hover:border-primary hover:bg-muted/40 flex w-full items-center gap-3 rounded-md border p-2 text-left"
+						class="border-border bg-card text-card-foreground hover:border-primary hover:bg-muted/40 flex w-full items-center gap-3 rounded-lg border p-2 text-left shadow-sm transition-colors"
 						onclick={() => onopen([keyOf(chunk)])}
 					>
 						<img
 							src={view.frameUrl({ ...chunk, [view.docKeyField]: view.docId(doc) })}
 							alt=""
 							loading="lazy"
-							class="bg-muted h-12 w-20 shrink-0 rounded object-cover"
+							class="bg-muted h-12 w-20 shrink-0 rounded-md object-cover"
 							onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = 'hidden')}
 						/>
 						<div class="min-w-0 flex-1">
-							<div class="text-muted-foreground font-mono text-[10px]">
+							<div class="text-muted-foreground truncate font-mono text-xs">
 								#{i + 1}
 								{#if time}
 									· {fmtTime(time.start)}–{fmtTime(time.end)}
 								{/if}
 								· {keyOf(chunk)}
 							</div>
-							<div class="line-clamp-2 text-xs">{view.body(chunk)}</div>
+							<div class="line-clamp-2 text-sm">{view.body(chunk)}</div>
 						</div>
 						<Pencil class="text-muted-foreground size-4 shrink-0" />
 					</button>

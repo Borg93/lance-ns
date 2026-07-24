@@ -2,8 +2,8 @@
 	// Bottom page-navigation bar. Controlled: renders a pages list + current index
 	// and emits navigate. Document-plane today (pages); for audio/video this becomes
 	// a segment/scene strip — same controlled contract. (Ported from ra-anno PageNavBar.)
-	import { ChevronLeft, ChevronRight } from 'lucide-svelte';
-	import { Button } from '@lance/ui';
+	import { ChevronLeft, ChevronRight } from '@lucide/svelte';
+	import { Button } from '@rask/ui/button';
 
 	export interface PageRef {
 		key: string;
@@ -22,8 +22,10 @@
 	};
 </script>
 
+<!-- Floating over the canvas: a card surface at the estate's rounded-lg + shadow-sm, matching
+     the zoom cluster and the assist bar so the three read as one family of overlays. -->
 <nav
-	class="border-border bg-card/90 pointer-events-auto absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border px-1 py-0.5 shadow-md backdrop-blur"
+	class="border-border bg-card/90 text-card-foreground pointer-events-auto absolute bottom-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border p-1 shadow-sm backdrop-blur"
 	data-testid="page-nav"
 >
 	<Button

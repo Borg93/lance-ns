@@ -4,10 +4,12 @@
 	// box → a mask. Both drop `status=prediction`, `source=model:…` rows the reviewer
 	// accepts/rejects like any prediction. (ra-atr AI-labeling parity.)
 	import { onDestroy, onMount } from 'svelte';
-	import { FlaskConical, MousePointerClick, Sparkles } from 'lucide-svelte';
+	import { FlaskConical, MousePointerClick, Sparkles } from '@lucide/svelte';
 	import { base } from '$app/paths';
-	import { Button, Input } from '@lance/ui';
-	import { cn } from '@lance/ui/utils';
+	import { Badge } from '@rask/ui/badge';
+	import { Button } from '@rask/ui/button';
+	import { cn } from '@rask/ui/utils';
+	import TextInput from '$lib/ui/TextInput.svelte';
 	import type { AnnotatorController } from '../annotator.svelte';
 
 	let { controller }: { controller: AnnotatorController } = $props();
@@ -52,11 +54,13 @@
 	onDestroy(() => controller.setAssistProducer(null));
 </script>
 
+<!-- Same floating-card treatment as PageNav and the zoom cluster (card surface, rounded-lg,
+     shadow-sm) so the canvas overlays read as one family. -->
 <div
-	class="border-border bg-card/90 pointer-events-auto absolute top-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1 rounded-lg border p-1 shadow-md backdrop-blur"
+	class="border-border bg-card/90 text-card-foreground pointer-events-auto absolute top-2 left-1/2 z-10 flex -translate-x-1/2 items-center gap-1.5 rounded-lg border p-1 shadow-sm backdrop-blur"
 	data-testid="ai-assist"
 >
-	<div class="border-border flex overflow-hidden rounded border">
+	<div class="border-border flex overflow-hidden rounded-lg border p-0.5">
 		<Button
 			variant={mode === 'detect' ? 'secondary' : 'ghost'}
 			size="sm"
@@ -76,20 +80,14 @@
 	</div>
 
 	{#if mode === 'detect'}
-		<Input
+		<TextInput
 			bind:value={prompt}
 			placeholder="AI detect… (e.g. 'text line')"
+			aria-label="AI detect prompt"
 			class="h-7 w-48"
 			onkeydown={(e) => e.key === 'Enter' && detect()}
 		/>
-		<Button
-			variant="default"
-			size="sm"
-			disabled={!prompt.trim() || controller.saving}
-			onclick={detect}
-		>
-			Run
-		</Button>
+		<Button size="sm" disabled={!prompt.trim() || controller.saving} onclick={detect}>Run</Button>
 	{:else}
 		<span class={cn('text-muted-foreground px-2 text-xs', controller.saving && 'animate-pulse')}>
 			{controller.saving ? 'segmenting…' : 'Click or drag a box to segment'}
@@ -97,12 +95,14 @@
 	{/if}
 
 	{#if assistMocked}
-		<span
-			class="flex items-center gap-1 rounded border border-amber-500/40 bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600 dark:text-amber-400"
+		<!-- The honesty chip is a real warning Badge now, so "this output is not a model" carries
+		     the same weight it does anywhere else in the estate. -->
+		<Badge
+			variant="warning"
 			data-testid="assist-mock-chip"
 			title="No model runner is deployed (MEDIA_ASSIST_URL unset) — Detect/Segment return deterministic mock shapes, not model predictions."
 		>
 			<FlaskConical class="size-3" /> mocked — needs runner
-		</span>
+		</Badge>
 	{/if}
 </div>

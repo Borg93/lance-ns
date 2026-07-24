@@ -2,9 +2,10 @@
 	// Right inspector pane. Composes the review list / single-annotation detail
 	// + the layer panel. Controlled by the facade. (Ported from ra-anno, split into
 	// focused sub-components per our no-god-files rule.)
-	import { ChevronLeft, List, Table } from 'lucide-svelte';
-	import { Button } from '@lance/ui';
-	import { cn } from '@lance/ui/utils';
+	import { ChevronLeft, List, Table } from '@lucide/svelte';
+	import { Badge } from '@rask/ui/badge';
+	import { Button } from '@rask/ui/button';
+	import { cn } from '@rask/ui/utils';
 	import { statusDot } from './statusStyle';
 	import AnnotationDetail from './AnnotationDetail.svelte';
 	import AnnotationList from './AnnotationList.svelte';
@@ -30,10 +31,12 @@
 	class="border-border bg-card flex h-full w-full min-w-0 flex-col border-l"
 	data-testid="annotation-sidebar"
 >
-	<header class="border-border flex items-center justify-between border-b px-3 py-2">
-		<h2 class="text-sm font-semibold">Review queue</h2>
+	<header class="border-border flex items-center justify-between gap-2 border-b px-3 py-2">
+		<h2 class="text-sm font-medium">Review queue</h2>
 		<div class="flex items-center gap-2">
-			<div class="border-border flex overflow-hidden rounded border">
+			<!-- A segmented list/table switch: one bordered group, ghost buttons inside, so it reads
+			     like the estate's other view toggles rather than two loose icon buttons. -->
+			<div class="border-border flex overflow-hidden rounded-lg border p-0.5">
 				<Button
 					variant={view === 'list' ? 'secondary' : 'ghost'}
 					size="icon-xs"
@@ -53,16 +56,18 @@
 					<Table class="size-3.5" />
 				</Button>
 			</div>
-			<span class="text-muted-foreground text-xs tabular-nums">{controller.count}</span>
+			<Badge variant="outline" class="tabular-nums" title="Annotations on this unit">
+				{controller.count}
+			</Badge>
 		</div>
 	</header>
 
 	<!-- status summary -->
-	<div class="border-border flex flex-wrap gap-1.5 border-b px-3 py-2">
+	<div class="border-border flex flex-wrap gap-x-3 gap-y-1.5 border-b px-3 py-2">
 		{#each summary as [status, n] (status)}
-			<span class="text-muted-foreground flex items-center gap-1 text-[11px]">
+			<span class="text-muted-foreground flex items-center gap-1.5 text-xs">
 				<span class={cn('size-2 rounded-full', statusDot(status))}></span>
-				{status || '—'} <span class="tabular-nums">{n}</span>
+				{status || '—'} <span class="text-foreground tabular-nums">{n}</span>
 			</span>
 		{/each}
 	</div>

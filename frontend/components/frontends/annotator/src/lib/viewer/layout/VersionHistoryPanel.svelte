@@ -3,8 +3,8 @@
 	// provenance story: this unit's edit history (version · time · count) + a diff of any
 	// past version against the current rows. Opt-in (an extra fetch), lazy-loaded. All
 	// fetch/diff logic is in @lance/labeling/history (framework-agnostic); this is the view.
-	import { ChevronDown, ChevronRight, History } from 'lucide-svelte';
-	import { cn } from '@lance/ui/utils';
+	import { ChevronDown, ChevronRight, History } from '@lucide/svelte';
+	import { cn } from '@rask/ui/utils';
 	import {
 		diffSignatures,
 		fetchVersions,
@@ -71,7 +71,7 @@
 
 <section class="border-border border-t" data-testid="version-history">
 	<button
-		class="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-3 py-2 text-xs font-medium"
+		class="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 px-3 py-2 text-xs font-medium transition-colors"
 		onclick={() => (collapsed ? open() : (collapsed = true))}
 	>
 		{#if collapsed}<ChevronRight class="size-3.5" />{:else}<ChevronDown class="size-3.5" />{/if}
@@ -91,34 +91,36 @@
 				{#each versions as v, i (v.version)}
 					<button
 						class={cn(
-							'hover:bg-muted/50 flex items-center gap-2 rounded px-1 py-0.5 text-left',
+							'hover:bg-muted/50 flex items-center gap-2 rounded-md px-1 py-0.5 text-left transition-colors',
 							selected === v.version && 'bg-primary/10 ring-primary/40 ring-1',
 						)}
 						title="Compare this version against the current rows"
 						onclick={() => compare(v.version)}
 					>
-						<span class="w-8 shrink-0 font-mono text-[11px] tabular-nums">v{v.version}</span>
-						<span class="text-muted-foreground flex-1 truncate font-mono text-[10px]">
+						<span class="w-8 shrink-0 font-mono text-xs tabular-nums">v{v.version}</span>
+						<span class="text-muted-foreground flex-1 truncate font-mono text-xs">
 							{timeOf(v.timestamp)}{i === 0 ? ' · current' : ''}
 						</span>
 						<span
-							class="text-muted-foreground text-[10px] tabular-nums"
+							class="text-muted-foreground text-xs tabular-nums"
 							title="annotations at this version"
 						>
 							{v.count}
 						</span>
 					</button>
 					{#if selected === v.version}
-						<div class="text-muted-foreground px-2 pb-1 text-[10px]">
+						<!-- Diff counters speak the same semantic tokens as the status dots:
+						     success/destructive/warning, not a bespoke emerald-rose-amber trio. -->
+						<div class="text-muted-foreground px-2 pb-1 text-xs">
 							{#if diffing}
 								comparing…
 							{:else if diffError}
 								<span class="text-destructive">compare failed: {diffError}</span>
 							{:else if diff}
 								vs current:
-								<span class="text-emerald-500">+{diff.added.length}</span>
+								<span class="text-success">+{diff.added.length}</span>
 								<span class="text-destructive">−{diff.removed.length}</span>
-								<span class="text-amber-500">~{diff.changed.length}</span>
+								<span class="text-warning">~{diff.changed.length}</span>
 							{/if}
 						</div>
 					{/if}

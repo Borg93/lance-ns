@@ -745,6 +745,26 @@ backups:
     snapshotClassName: "" # the cluster's VolumeSnapshotClass; "" = the cluster default
     kubectlImage: bitnami/kubectl:1.31 # creates the VolumeSnapshot CR (override to your cluster's kubectl image)
 
+# --- lance-media plane (merged per docs/LANCE_NS_HANDOFF.md) --------------------------------------
+# The viewer/search/annotator services from the lance-audio checkout. All three share the catalog image
+# and read the corpus from a node-local hostPath (NO data move — only the annotations table lives in the
+# catalog; MEDIA_READ/WRITE_BACKEND=catalog is the merge's env flip, "direct" restores standalone dev).
+media:
+  enabled: false
+  # Where the corpus is staged ON THE NODE (kind: `docker cp` into lance-control-plane:/var/media-corpus
+  # — the kind adaptation of the runbook's hostPath/extraMount; prod uses a real PV) and where the pods
+  # mount it (read-only).
+  corpusHostPath: /var/media-corpus
+  corpusMountPath: /media-corpus
+  readBackend: catalog
+  writeBackend: catalog
+  # Default: the in-release catalog Service (rendered in media.yaml); set to override.
+  catalogUri: ""
+  services:
+    viewer: { port: 8101, daprAppId: viewer }
+    search: { port: 8102, daprAppId: search }
+    annotator: { port: 8103, daprAppId: annotator }
+
 # --- API gateway — single entry point (reverse proxy) ---------------------------------------------
 # One nginx that path-routes to the in-cluster services, so a single `kubectl port-forward` fronts the
 # whole platform (kind has no host ports). Non-root nginx-unprivileged (listens on 8080). In prod this

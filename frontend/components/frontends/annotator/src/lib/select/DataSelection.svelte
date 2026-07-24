@@ -45,30 +45,52 @@
 
 	const totalPages = $derived(docsPage ? Math.max(1, Math.ceil(docsPage.total / PER_PAGE)) : 1);
 
+	// Latest-wins token: every dataset pick bumps it, and any response (view or docs)
+	// from a superseded pick is dropped — a slow dataset A must neither revert a newer
+	// pick of B nor mix A's docs under B's view (listDocuments reads the module-level
+	// activeView() singleton at call time).
+	let pickSeq = 0;
+
 	async function loadDocs(page: number): Promise<void> {
+		const seq = pickSeq;
 		loadingDocs = true;
 		try {
-			docsPage = await listDocuments(page, PER_PAGE);
+			const next = await listDocuments(page, PER_PAGE);
+			if (seq !== pickSeq) return; // stale — a newer dataset pick owns the state now
+			docsPage = next;
+			error = null; // a successful load recovers from any earlier failure
 		} catch (e) {
+			if (seq !== pickSeq) return;
 			error = e instanceof Error ? e.message : String(e);
 		} finally {
-			loadingDocs = false;
+			if (seq === pickSeq) loadingDocs = false;
 		}
 	}
 
 	async function selectDataset(id: string, defaultId: string | null): Promise<void> {
+		const seq = ++pickSeq;
 		error = null;
 		openDoc = null;
 		docsPage = null;
 		try {
 			const next = await getDatasetView(id, id === defaultId);
+			if (seq !== pickSeq) return; // superseded by a newer pick — don't revert it
 			setActiveView(next); // the module-level singleton the URL helpers read
 			view = next;
 			datasetChoice = id;
 			await loadDocs(1);
 		} catch (e) {
+			if (seq !== pickSeq) return;
 			error = e instanceof Error ? e.message : String(e);
 		}
+	}
+
+	// Recovery from a failed load — re-run whatever failed (initial listing, dataset
+	// pick, or a docs page) instead of dead-ending the landing on one transient blip.
+	async function retry(): Promise<void> {
+		if (!view) return init();
+		if (datasetChoice && datasetChoice !== view.id) return selectDataset(datasetChoice, defaultId);
+		return loadDocs(docsPage?.page ?? 1);
 	}
 
 	let defaultId = $state<string | null>(null);
@@ -82,7 +104,8 @@
 		}
 	});
 
-	onMount(async () => {
+	async function init(): Promise<void> {
+		error = null;
 		try {
 			// The default dataset id derives from the health endpoint's db path (the same
 			// convention as the media zone's descriptor store) so its URLs skip `?dataset=`.
@@ -103,7 +126,9 @@
 		} catch (e) {
 			error = e instanceof Error ? e.message : String(e);
 		}
-	});
+	}
+
+	onMount(() => void init());
 </script>
 
 <div class="flex h-full min-h-0 flex-col gap-3 overflow-hidden p-4" data-testid="data-selection">
@@ -142,7 +167,17 @@
 		</div>
 
 		{#if error}
-			<p class="text-destructive text-sm" data-testid="selection-error">{error}</p>
+			<div class="flex flex-col items-start gap-2">
+				<p class="text-destructive text-sm" data-testid="selection-error">{error}</p>
+				<Button
+					variant="outline"
+					size="sm"
+					data-testid="selection-retry"
+					onclick={() => void retry()}
+				>
+					Retry
+				</Button>
+			</div>
 		{:else if docsPage === null}
 			<p class="text-muted-foreground text-sm">Loading datasets…</p>
 		{:else}

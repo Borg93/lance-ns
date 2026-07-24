@@ -5,10 +5,12 @@
 	import AppSidebar from './app-sidebar.svelte';
 	import TopNavbar from './top-navbar.svelte';
 	import ProjectSwitcher from './project-switcher.svelte';
-	import { ChevronRight } from '@lucide/svelte';
+	import * as DropdownMenu from '../components/dropdown-menu/index.js';
+	import { IsMobile, SHELL_COLLAPSE_BREAKPOINT } from '../hooks/is-mobile.svelte.js';
+	import { ChevronRight, MoreHorizontal } from '@lucide/svelte';
 	import { gsap } from 'gsap';
 	import type { Me, Project, NavUser, ZoneNav } from './nav-config.js';
-	import { pathCrumbs, projectFromHost } from './breadcrumb.js';
+	import { collapseCrumbs, pathCrumbs, projectFromHost } from './breadcrumb.js';
 
 	// Subtle content settle-in. Runs once when the shell MOUNTS — i.e. on a fresh
 	// document load, which is every cross-zone microfrontend landing — so the page gently
@@ -79,36 +81,84 @@
 	const projectName = $derived(projectSlug || project.name);
 	const shellProject = $derived({ name: projectName, subtitle: project.subtitle ?? 'Project' });
 	const crumbs = $derived(pathCrumbs(pathname));
+	// A deep path (project → domain → collection → a long resource id) does not fit a narrow row, so
+	// the MIDDLE of the trail folds behind an ellipsis menu rather than squeezing every crumb into
+	// illegibility — and the current page, the one crumb worth keeping, is never the thing that
+	// disappears. Same breakpoint the rest of the shell folds on.
+	const narrow = new IsMobile(SHELL_COLLAPSE_BREAKPOINT);
+	const trail = $derived(collapseCrumbs(crumbs, narrow.current ? 2 : 4));
 	// Every crumb but the last is a link back up its own path; the last IS the current page, so it
 	// renders as text and carries aria-current instead.
-	const lastCrumbId = $derived(crumbs.at(-1)?.id);
+	const lastCrumbId = $derived(trail.tail.at(-1)?.id);
 </script>
 
 <Sidebar.Provider class="h-svh overflow-hidden">
 	<AppSidebar {pathname} {zoneNav} footer={sidebarFooter} />
 	<Sidebar.Inset class="flex min-w-0 flex-col overflow-hidden">
-		<header class="flex shrink-0 flex-col">
+		<header class="flex min-w-0 shrink-0 flex-col">
 			<!-- Row 1 — the estate navbar. Integrated (sidebar-07): no border, h-14 → h-12 when the
 			     sidebar is icon-collapsed. Trigger + project switcher on the left; the cross-zone
 			     TopNavbar (zone links + identity/theme) takes the rest of the row on its own. -->
 			<div
-				class="flex h-14 shrink-0 items-center gap-2 px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
+				class="flex h-14 min-w-0 shrink-0 items-center gap-2 px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
 			>
-				<Sidebar.Trigger class="text-muted-foreground hover:text-foreground -ml-1" />
+				<Sidebar.Trigger class="text-muted-foreground hover:text-foreground -ml-1 shrink-0" />
 				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
 				<ProjectSwitcher project={shellProject} />
 				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
 				<TopNavbar {pathname} {me} {meLoading} {user} {authEnabled} class="min-w-0 flex-1" />
 			</div>
 			<!-- Row 2 — the breadcrumb bar. Its own slim row, so it can never be squeezed by (or
-			     overlap) the zone links: the trail truncates within its row instead. -->
+			     overlap) the zone links; within the row, a trail too long to fit folds its MIDDLE
+			     behind the ellipsis menu (`collapseCrumbs`) instead of shrinking the current page. -->
 			<nav
 				aria-label="Breadcrumb"
-				class="border-border/60 bg-muted/20 flex h-9 shrink-0 items-center border-y px-4 text-sm"
+				class="border-border/60 bg-muted/20 flex h-9 min-w-0 shrink-0 items-center overflow-hidden border-y px-4 text-sm"
 			>
 				<ol class="flex min-w-0 items-center gap-1.5">
 					<li class="text-muted-foreground shrink-0 capitalize">{projectName}</li>
-					{#each crumbs as crumb (crumb.id)}
+					{#each trail.lead as crumb (crumb.id)}
+						<li class="flex min-w-0 shrink-0 items-center gap-1.5">
+							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
+							<a
+								href={crumb.href}
+								class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 truncate rounded-sm capitalize transition-colors outline-none focus-visible:ring-3"
+								>{crumb.label}</a
+							>
+						</li>
+					{/each}
+					{#if trail.hidden.length > 0}
+						<!-- The folded middle: an affordance, not a deletion — every skipped ancestor is one
+						     click away, so the trail stays navigable at any width. -->
+						<li class="flex shrink-0 items-center gap-1.5">
+							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
+							<DropdownMenu.Root>
+								<DropdownMenu.Trigger>
+									{#snippet child({ props })}
+										<button
+											{...props}
+											type="button"
+											data-slot="breadcrumb-ellipsis"
+											aria-label="Show hidden breadcrumbs"
+											class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-sm transition-colors outline-none focus-visible:ring-3"
+										>
+											<MoreHorizontal class="size-3.5" />
+										</button>
+									{/snippet}
+								</DropdownMenu.Trigger>
+								<DropdownMenu.Content class="min-w-40 rounded-lg" side="bottom" align="start">
+									{#each trail.hidden as crumb (crumb.id)}
+										<DropdownMenu.Item class="p-0">
+											<a href={crumb.href} class="w-full truncate px-2 py-1.5 capitalize"
+												>{crumb.label}</a
+											>
+										</DropdownMenu.Item>
+									{/each}
+								</DropdownMenu.Content>
+							</DropdownMenu.Root>
+						</li>
+					{/if}
+					{#each trail.tail as crumb (crumb.id)}
 						<li class="flex min-w-0 items-center gap-1.5">
 							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
 							{#if crumb.id === lastCrumbId}
@@ -129,7 +179,10 @@
 				</ol>
 			</nav>
 		</header>
-		<div class="content-enter flex min-h-0 flex-1 flex-col overflow-hidden" {@attach contentEnter}>
+		<div
+			class="content-enter flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"
+			{@attach contentEnter}
+		>
 			{@render children()}
 		</div>
 	</Sidebar.Inset>

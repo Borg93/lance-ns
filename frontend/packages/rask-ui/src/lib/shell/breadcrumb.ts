@@ -44,6 +44,38 @@ export function pathCrumbs(pathname: string): Crumb[] {
 	});
 }
 
+/** A trail split around an elision point. `lead` + `tail` are what render; `hidden` is what folded
+ *  behind the ellipsis affordance (empty when the whole trail fits). The current page is always the
+ *  LAST entry of `tail`, so it is the one crumb elision can never take. */
+export type CrumbTrail = {
+	lead: Crumb[];
+	hidden: Crumb[];
+	tail: Crumb[];
+};
+
+/**
+ * Fold the MIDDLE of a trail so a deep path fits a narrow bar. Keeps the first crumb (the zone —
+ * the anchor that says where you are in the estate) and the last `maxVisible - 1` crumbs (ending
+ * at the current page), and hands everything between back as `hidden` for the caller to put behind
+ * an ellipsis menu — dropped from the row, never from the DOM, so every ancestor stays reachable.
+ *
+ * Truncating the tail instead (the CSS-only answer) is what makes a narrow breadcrumb useless: the
+ * segment you actually need — the page you are on — is the first thing to disappear.
+ *
+ * `maxVisible` is clamped to 2 (a lead and a current page); a trail that already fits is returned
+ * whole as `tail`.
+ */
+export function collapseCrumbs(crumbs: Crumb[], maxVisible: number): CrumbTrail {
+	const max = Math.max(2, Math.trunc(maxVisible));
+	if (crumbs.length <= max) return { lead: [], hidden: [], tail: crumbs };
+	const keepTail = max - 1;
+	return {
+		lead: crumbs.slice(0, 1),
+		hidden: crumbs.slice(1, crumbs.length - keepTail),
+		tail: crumbs.slice(crumbs.length - keepTail),
+	};
+}
+
 /**
  * The project label carried by a request host (e.g. `demo.localhost` -> `demo`),
  * or `null` when the host has none. Only a real subdomain is a project label: bare

@@ -78,6 +78,7 @@
       canvas.style.display = "block";
       canvas.style.maxWidth = "100%";
       canvas.style.maxHeight = "100%";
+      // eslint-disable-next-line svelte/no-dom-manipulating -- Pixi owns this canvas; it is mounted into a plain container div Svelte never renders children into
       containerEl.appendChild(canvas);
       initialized = true;
 

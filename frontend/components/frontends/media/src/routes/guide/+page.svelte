@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { base } from '$app/paths';
   /**
    * Guide — the in-app explainer. Two tabs: how Search works (the full,
    * animated walk-through that used to be crammed in the `?` popover) and how
@@ -1973,7 +1974,7 @@
 
       <a
         use:reveal
-        href="/"
+        href="{base}/"
         class="reveal border-primary/40 bg-primary/10 text-foreground hover:bg-primary/15 group flex items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors"
       >
         Try it on the Search page
@@ -2048,7 +2049,7 @@
 
       <a
         use:reveal
-        href="/atlas"
+        href="{base}/atlas"
         class="reveal border-primary/40 bg-primary/10 text-foreground hover:bg-primary/15 group mt-6 flex items-center gap-2 rounded-lg border px-4 py-3 text-sm font-medium transition-colors"
       >
         Open the Atlas

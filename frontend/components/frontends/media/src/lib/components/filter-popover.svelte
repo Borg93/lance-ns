@@ -13,18 +13,14 @@
 
   // All filters go through the generic column builder below, which compiles to
   // a `where` clause — no hardcoded per-corpus quick filters.
-  let whereSql = $state(spec.where ?? '');
-
-  // Re-sync from `spec` when it changes OUTSIDE this popover — an active-filter
-  // pill removed (active-filters.svelte), a topic seeded, or Clear-all. This was
-  // captured once at mount, so a dropped filter stayed stale here: it still counted
-  // toward the badge and got re-committed on the next edit, so it "came back" — the
-  // not-dropped-when-popped bug. Typing in the raw-SQL box is NOT clobbered: it
-  // mutates `whereSql` locally (not `spec.where`), so this effect only re-fires on an
-  // external change, not mid-keystroke.
-  $effect(() => {
-    whereSql = spec.where ?? '';
-  });
+  //
+  // Writable $derived: re-syncs from `spec` when it changes OUTSIDE this popover
+  // — an active-filter pill removed (active-filters.svelte), a topic seeded, or
+  // Clear-all — fixing the not-dropped-when-popped bug a mount-time snapshot
+  // had. Typing in the raw-SQL box is NOT clobbered: it reassigns `whereSql`
+  // locally (allowed on a writable derived) and only an external `spec.where`
+  // change recomputes it.
+  let whereSql = $derived(spec.where ?? '');
 
   function commit() {
     // Always prefilter (correct + uses the scalar index; never returns < n).

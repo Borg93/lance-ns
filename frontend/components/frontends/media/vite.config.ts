@@ -16,9 +16,9 @@ export default defineConfig({
     // skill: annotator owns the write plane, search owns retrieval, viewer owns
     // the rest. Production goes through frontend/server.ts with the same map.
     proxy: {
-      // Zone composition: the annotator app owns /annotate (micro-frontends
+      // Zone composition: the annotator app owns /annotator (micro-frontends
       // routing-based zones) — one origin, path-routed to the sibling app.
-      '/annotate': { target: 'http://127.0.0.1:5176', changeOrigin: true, ws: true },
+      '/annotator': { target: 'http://127.0.0.1:5176', changeOrigin: true, ws: true },
       '/api/annotations': { target: 'http://127.0.0.1:8103', changeOrigin: true },
       '/api/assist': { target: 'http://127.0.0.1:8103', changeOrigin: true },
       '/api/jobs': { target: 'http://127.0.0.1:8103', changeOrigin: true },

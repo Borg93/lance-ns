@@ -1,5 +1,6 @@
 <script lang="ts">
   import { goto } from '$app/navigation';
+  import { base } from '$app/paths';
   import { type Hit, thumbnailUrl, chunkFrameUrl, isVoiceHit, voiceBandOf } from '@lance/api';
   import { activeView } from '@lance/api/descriptor';
   import { features } from '$lib/feature-flags.svelte';
@@ -82,9 +83,9 @@
       voiceSearch.request({ docId, t: mid }, label, { docId, t: start });
     }
     // Only +page.svelte consumes `pending`, but HitCard also renders on /tree
-    // (topic results panel) — navigate like player-pane does. goto('/') is a
+    // (topic results panel) — navigate like player-pane does. goto(home) is a
     // no-op-safe same-route navigation when the Search page is already up.
-    void goto('/');
+    void goto(`${base}/`);
   }
 </script>
 
@@ -213,6 +214,7 @@
         {@render voiceMeta()}
         <div class="line-clamp-3 text-xs leading-snug [overflow-wrap:anywhere]">
           <!-- highlight() HTML-escapes then wraps matches — safe to inject -->
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
           {@html highlight(body)}
         </div>
         {#if caption}
@@ -285,6 +287,7 @@
         {@render voiceMeta()}
         <div class="line-clamp-3 text-sm leading-snug [overflow-wrap:anywhere]">
           <!-- highlight() HTML-escapes then wraps matches — safe to inject -->
+          <!-- eslint-disable-next-line svelte/no-at-html-tags -->
           {@html highlight(body)}
         </div>
         {#if caption}

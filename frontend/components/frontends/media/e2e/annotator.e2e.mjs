@@ -72,7 +72,7 @@ async function draws(name, key, gesture) {
 }
 
 async function suite() {
-  await page.goto(`${BASE}/annotate?keys=${KEY}`, { waitUntil: "networkidle", timeout: 60000 });
+  await page.goto(`${BASE}/annotator?keys=${KEY}`, { waitUntil: "networkidle", timeout: 60000 });
   await page.waitForTimeout(2500);
   const status = await page.locator('[data-testid="annotate-status"]').textContent().catch(() => "");
   ok("annotator loads", /annotations from Lance/.test(status ?? ""), status ?? "");
@@ -199,7 +199,7 @@ const saved = page
 await page.keyboard.press("Control+s");
 ok("save POSTs the batch", await saved);
 await page.waitForTimeout(600);
-await page.goto(`${BASE}/annotate?keys=${KEY}`, { waitUntil: "networkidle", timeout: 60000 });
+await page.goto(`${BASE}/annotator?keys=${KEY}`, { waitUntil: "networkidle", timeout: 60000 });
 await page.waitForTimeout(2500);
 const persisted = await count();
 ok("all shapes persist across reload", Number.isFinite(persisted) && persisted === beforeSave, `${persisted} (expected ${beforeSave})`);

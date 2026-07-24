@@ -1,9 +1,9 @@
 /**
  * Local production serve for the annotator zone (svelte-adapter-bun). Serves the
- * base-pathed app (/annotate) AND reverse-proxies /api/* per domain to the three
+ * base-pathed app (/annotator) AND reverse-proxies /api/* per domain to the three
  * lance-media services — the same zone map as the viewer server, minus the
- * /annotate route (this IS the annotate zone). The viewer origin proxies
- * /annotate here in prod; a real gateway owns both at merge.
+ * /annotator route (this IS the annotator zone). The viewer origin proxies
+ * /annotator here locally; in-cluster the lance ingress owns the routing.
  *
  *   bun run build && bun run server.ts --port 5176
  */
@@ -59,23 +59,16 @@ async function proxy(req: Request, base: string): Promise<Response> {
   return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
 }
 
-// svelte-adapter-bun serves this based app's PAGES at /annotate/ but its ASSETS
-// at the bare /_app/ — so a direct /annotate/_app/* request (not pre-stripped by
-// an upstream proxy) is rewritten to /_app/* before the app handler sees it.
-function stripAssetBase(req: Request): Request {
-  const url = new URL(req.url);
-  if (!url.pathname.startsWith('/annotate/_app/')) return req;
-  url.pathname = url.pathname.slice('/annotate'.length);
-  return new Request(url, req);
-}
-
+// The workspace-patched svelte-adapter-bun serves this based app's assets at
+// the based path (/annotator/_app/…) like its pages, so requests pass through
+// verbatim — no asset-base rewriting.
 Bun.serve({
   port: PORT,
   websocket: app.websocket as never,
   async fetch(req, server) {
     const { pathname } = new URL(req.url);
     if (pathname.startsWith('/api/')) return proxy(req, apiUpstream(pathname));
-    return app.fetch(stripAssetBase(req), server);
+    return app.fetch(req, server);
   },
 });
-console.log(`→ annotator zone:  http://localhost:${PORT}/annotate`);
+console.log(`→ annotator zone:  http://localhost:${PORT}/annotator`);

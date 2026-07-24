@@ -1,4 +1,4 @@
-import { Application, ColorMatrixFilter, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, ColorMatrixFilter, Sprite, Texture } from "pixi.js";
 import type { ViewportBounds } from "./types.js";
 
 export class ImagePlugin {
@@ -254,7 +254,7 @@ export class ImagePlugin {
     this.applyTransform();
   };
 
-  private onPointerUp = (e: PointerEvent): void => {
+  private onPointerUp = (_e: PointerEvent): void => {
     if (this.dragging) {
       this.dragging = false;
       this.canvas.style.cursor = "default";

@@ -18,6 +18,11 @@ const config = {
     // localStorage, etc. never run server-side). `/api/*` is not this server's
     // concern — dev proxies it (vite.config.ts), prod routes it at the gateway.
     adapter: adapter(),
+    // Zone base: this zone owns /media behind the lance ingress (same STATIC
+    // per-app asset prefix as the other domain zones). The workspace-patched
+    // svelte-adapter-bun serves assets at the based path too, so no
+    // base-stripping proxy is needed in front of the built server.
+    paths: { base: '/media', relative: false },
     alias: {
       $lib: './src/lib',
       '$lib/*': './src/lib/*',

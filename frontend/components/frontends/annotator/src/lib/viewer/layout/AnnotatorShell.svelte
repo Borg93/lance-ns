@@ -1,7 +1,7 @@
 <script lang="ts">
   // The annotator shell — three-zone layout (tool rail · resizable canvas+overlays ·
   // review inspector) over ONE media unit. Owns the AnnotatorController + the keyboard
-  // controller; every child is dumb + controlled. The /annotate route re-mounts this
+  // controller; every child is dumb + controlled. The /annotator route re-mounts this
   // per unit (via {#key}) so navigating a review selection loads each unit fresh.
   import { viewerFor } from '$lib/viewer/registry';
   import type { MediaUnit } from '$lib/viewer/types';

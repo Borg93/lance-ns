@@ -78,7 +78,7 @@ async function suite() {
   ok("view deletes", (await page.locator("li", { hasText: "e2e-view" }).count()) === 0);
 
   // ── annotator provenance: the History panel fetches /versions + lists rows ──
-  await page.goto(`${BASE}/annotate?keys=${KEY}`, { waitUntil: "networkidle", timeout: 60000 });
+  await page.goto(`${BASE}/annotator?keys=${KEY}`, { waitUntil: "networkidle", timeout: 60000 });
   await page.waitForTimeout(2000);
   const history = page.locator('[data-testid="version-history"]');
   ok("History panel present", (await history.count()) > 0);

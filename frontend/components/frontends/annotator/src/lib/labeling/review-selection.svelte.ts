@@ -1,7 +1,7 @@
 /**
  * The read→annotate bridge: a selection of media units to review, stepped through in
  * the annotator. The READ plane (atlas lasso / search) forms it — deep-linking to
- * `/annotate?keys=k1,k2,…` where each key is the descriptor key-path
+ * `/annotator?keys=k1,k2,…` where each key is the descriptor key-path
  * (`doc/speech/chunk`) — and the annotator route opens it here + navigates. This is
  * the `Selection` bridge made concrete (see labeling/types.ts).
  */

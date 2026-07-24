@@ -2,6 +2,7 @@
   import '../app.css';
   import { onMount, type Snippet } from 'svelte';
   import { browser } from '$app/environment';
+  import { base } from '$app/paths';
   import { page } from '$app/state';
   import { descriptor } from '$lib/descriptor-store.svelte';
   import {
@@ -23,45 +24,67 @@
 
   // `typeof LucideIcon` (not Svelte 5's `Component<…>`): lucide-svelte 0.468
   // still types its icons as legacy class components, so this is the accurate
-  // common type for this dependency version.
-  const NAV: { href: string; label: string; icon: typeof LucideIcon; hint: string }[] = [
+  // common type for this dependency version. Same-zone hrefs carry `{base}`
+  // (this zone serves under /media); the annotator entry is CROSS-ZONE — a
+  // literal /annotator path that must hard-navigate (`reload`).
+  const NAV: {
+    href: string;
+    label: string;
+    icon: typeof LucideIcon;
+    hint: string;
+    reload?: boolean;
+  }[] = [
     {
-      href: '/',
+      href: `${base}/`,
       label: 'Search',
       icon: Search,
       hint: 'Find moments across transcripts, video & scenes',
     },
-    { href: '/atlas', label: 'Atlas', icon: Map, hint: 'Explore the embedding map of every chunk' },
-    { href: '/tree', label: 'Tree', icon: FolderTree, hint: 'Browse topics as a zoomable treemap' },
     {
-      href: '/graph',
+      href: `${base}/atlas`,
+      label: 'Atlas',
+      icon: Map,
+      hint: 'Explore the embedding map of every chunk',
+    },
+    {
+      href: `${base}/tree`,
+      label: 'Tree',
+      icon: FolderTree,
+      hint: 'Browse topics as a zoomable treemap',
+    },
+    {
+      href: `${base}/graph`,
       label: 'Graph',
       icon: Share2,
       hint: 'Explore the knowledge graph — entities, relations & clips',
     },
     {
-      href: '/workflow',
+      href: `${base}/workflow`,
       label: 'Workflow',
       icon: Workflow,
       hint: 'Build & run a retrieval pipeline as a node graph',
     },
     {
-      href: '/annotate',
+      href: '/annotator',
       label: 'Annotate',
       icon: SquarePen,
       hint: 'View & annotate documents/HTR — canvas + review-queue table',
+      reload: true,
     },
     {
-      href: '/guide',
+      href: `${base}/guide`,
       label: 'Guide',
       icon: BookOpen,
       hint: 'How search works — signals, fusion & rerank',
     },
   ];
 
-  // '/' must match exactly; deeper routes match on prefix so nested pages stay active.
+  // Home must match exactly (with or without a trailing slash after the zone
+  // base); deeper routes match on prefix so nested pages stay active.
   const isActive = (href: string): boolean =>
-    href === '/' ? page.url.pathname === '/' : page.url.pathname.startsWith(href);
+    href === `${base}/`
+      ? page.url.pathname === base || page.url.pathname === `${base}/`
+      : page.url.pathname.startsWith(href);
 
   const current = $derived(NAV.find((n) => isActive(n.href)));
 
@@ -85,7 +108,7 @@
     <!-- header -->
     <div data-slot="sidebar-header" class="flex flex-col gap-2 p-2">
       <a
-        href="/"
+        href="{base}/"
         title="lance-media — home"
         aria-label="lance-media home"
         class="hover:bg-sidebar-accent flex items-center gap-2 rounded-md p-1.5 transition-colors"
@@ -117,7 +140,14 @@
             {@const active = isActive(item.href)}
             {@const Icon = item.icon}
             <li data-slot="sidebar-menu-item" class="group/menu-item relative">
-              <Sidebar.MenuButton href={item.href} isActive={active} tooltip={item.label}>
+              <!-- Cross-zone entries hard-navigate: a soft client nav into another
+                   zone targets a route this app doesn't own (→ 404). -->
+              <Sidebar.MenuButton
+                href={item.href}
+                isActive={active}
+                tooltip={item.label}
+                data-sveltekit-reload={item.reload ? '' : undefined}
+              >
                 <Icon />
                 <span>{item.label}</span>
               </Sidebar.MenuButton>

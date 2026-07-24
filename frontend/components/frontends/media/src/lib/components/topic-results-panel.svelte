@@ -9,6 +9,7 @@
    */
   import { ArrowLeft, ArrowUpRight, X } from 'lucide-svelte';
   import { search, type Hit } from '@lance/api';
+  import { base } from '$app/paths';
   import HitList from './hit-list.svelte';
   import PlayerPane from './player-pane.svelte';
 
@@ -65,7 +66,7 @@
       </span>
     {/if}
     <a
-      href={`/?topic=${encodeURIComponent(topic)}`}
+      href={`${base}/?topic=${encodeURIComponent(topic)}`}
       class="ml-auto inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       title="Refine this topic in the full Search UI"
     >

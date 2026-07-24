@@ -4,6 +4,7 @@
   // Guide page (linked at the bottom), so this stays compact.
   import { Popover } from 'bits-ui';
   import { HelpCircle, ArrowRight, Image as ImageIcon } from 'lucide-svelte';
+  import { base } from '$app/paths';
 
   type Example = { label: string; example: string; explain: string };
   type Props = {
@@ -64,7 +65,7 @@
       </div>
 
       <a
-        href="/guide"
+        href="{base}/guide"
         onclick={() => (open = false)}
         class="mt-2 flex items-center gap-1.5 rounded px-2 py-1.5 font-medium text-primary transition-colors hover:bg-secondary/50"
       >

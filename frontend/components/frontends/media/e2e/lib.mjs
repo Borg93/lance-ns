@@ -10,7 +10,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright-core";
 
 // The viewer-zone origin (dev proxy). It path-routes /api/* to the three
-// services AND /annotate to the annotator zone (:5176), so the suites drive the
+// services AND /annotator to the annotator zone (:5176), so the suites drive the
 // full split composition through one origin — the real prod topology.
 export const BASE = process.env.E2E_BASE ?? "http://127.0.0.1:5175";
 // API goes through the dev proxy (same origin the app uses) — under the split
@@ -18,7 +18,7 @@ export const BASE = process.env.E2E_BASE ?? "http://127.0.0.1:5175";
 // exercise the real zone composition, not one monolith port.
 export const API = process.env.E2E_API ?? "http://127.0.0.1:5175";
 export const KEY = process.env.E2E_KEY ?? "fe00cd746463ad2c/0/19";
-export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../..");
+export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../../../..");
 
 export function chromePath() {
   if (process.env.E2E_CHROME) return process.env.E2E_CHROME;

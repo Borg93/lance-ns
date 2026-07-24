@@ -43,7 +43,7 @@ async function fetchRows() {
 
 async function suite() {
   // ════ AUDIO — waveform · drag-create · region-resize · save · review times ════
-  await page.goto(`${BASE}/annotate?keys=${KEY}&kind=audio&media=/e2e/tone.wav`, {
+  await page.goto(`${BASE}/annotator?keys=${KEY}&kind=audio&media=/e2e/tone.wav`, {
     waitUntil: "networkidle",
     timeout: 60000,
   });
@@ -109,7 +109,7 @@ async function suite() {
   ok("segment times are real (resize round-trip)", resized);
 
   // reload → the segment survives + still listed
-  await page.goto(`${BASE}/annotate?keys=${KEY}&kind=audio&media=/e2e/tone.wav`, {
+  await page.goto(`${BASE}/annotator?keys=${KEY}&kind=audio&media=/e2e/tone.wav`, {
     waitUntil: "networkidle",
     timeout: 60000,
   });
@@ -119,7 +119,7 @@ async function suite() {
 
   // ════ VIDEO — frame under overlay · scrub · draw-on-frame pinned at playhead ════
   seed(); // fresh table for the video leg
-  await page.goto(`${BASE}/annotate?keys=${KEY}&kind=video&media=/e2e/clip.mp4`, {
+  await page.goto(`${BASE}/annotator?keys=${KEY}&kind=video&media=/e2e/clip.mp4`, {
     waitUntil: "networkidle",
     timeout: 60000,
   });
@@ -166,7 +166,7 @@ async function suite() {
     pinned ? `t_start=${pinned.t_start.toFixed(2)}` : "(no pinned rect)");
 
   // reload → persists
-  await page.goto(`${BASE}/annotate?keys=${KEY}&kind=video&media=/e2e/clip.mp4`, {
+  await page.goto(`${BASE}/annotator?keys=${KEY}&kind=video&media=/e2e/clip.mp4`, {
     waitUntil: "networkidle",
     timeout: 60000,
   });

@@ -10,6 +10,8 @@ import dataSvelteConfig from './components/frontends/data/svelte.config.js';
 import lineageSvelteConfig from './components/frontends/lineage/svelte.config.js';
 import modelsSvelteConfig from './components/frontends/models/svelte.config.js';
 import adminSvelteConfig from './components/frontends/admin/svelte.config.js';
+import mediaSvelteConfig from './components/frontends/media/svelte.config.js';
+import annotatorSvelteConfig from './components/frontends/annotator/svelte.config.js';
 import uiSvelteConfig from './packages/rask-ui/svelte.config.js';
 // Local cross-zone-reload rule lives in its own module so its zone-matching logic is
 // unit-tested (eslint-rules/cross-zone-reload.test.js).
@@ -73,6 +75,8 @@ export default defineConfig(
 		['lineage', lineageSvelteConfig],
 		['models', modelsSvelteConfig],
 		['admin', adminSvelteConfig],
+		['media', mediaSvelteConfig],
+		['annotator', annotatorSvelteConfig],
 	].map(([zone, cfg]) => ({
 		files: [`components/frontends/${zone}/**/*.svelte`, `components/frontends/${zone}/**/*.svelte.ts`],
 		languageOptions: {
@@ -92,6 +96,18 @@ export default defineConfig(
 				extraFileExtensions: ['.svelte'],
 				parser: ts.parser,
 				svelteConfig: uiSvelteConfig,
+			},
+		},
+	},
+	{
+		// @lance/ui (the lance-media component lib) has no svelte.config.js — plain
+		// Svelte 5 + lang="ts" components, so the TS parser mapping alone suffices.
+		files: ['packages/ui/**/*.svelte', 'packages/ui/**/*.svelte.ts'],
+		languageOptions: {
+			parserOptions: {
+				projectService: true,
+				extraFileExtensions: ['.svelte'],
+				parser: ts.parser,
 			},
 		},
 	},

@@ -6,7 +6,7 @@
   import { cn } from '@lance/ui/utils';
   import { ChevronUp, ChevronDown } from 'lucide-svelte';
   import { statusDot } from './statusStyle';
-  import type { AnnotatorController, AnnoRow } from '../annotator.svelte';
+  import type { AnnotatorController } from '../annotator.svelte';
 
   let { controller }: { controller: AnnotatorController } = $props();
 

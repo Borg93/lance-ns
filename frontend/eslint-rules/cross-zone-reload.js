@@ -6,7 +6,7 @@
 // this rule guards the hand-written links in app pages so the convention can't
 // silently drift. Same-zone links use `{base}/…` (a `{base}` expression, never a
 // literal `/<domain>`), so they read as an opaque placeholder here and are ignored.
-const ZONES = ['data', 'lineage', 'models', 'admin'];
+const ZONES = ['data', 'lineage', 'models', 'admin', 'media', 'annotator'];
 // A cross-zone path is domain-relative and single-segment-rooted: `/<domain>` or `/<domain>/…`.
 const ZONE_PATH = new RegExp(`^\\/(${ZONES.join('|')})(?:\\/|$)`);
 const EXPR = '￿'; // opaque-expression placeholder (can't contain a '/')

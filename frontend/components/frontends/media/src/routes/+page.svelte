@@ -1,7 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
   import { page } from '$app/state';
-  import { goto } from '$app/navigation';
   import {
     search,
     listDocuments,
@@ -184,11 +183,13 @@
   }
 
   /** Read→annotate handoff: open the current map/search selection in the annotator
-   *  (deep-link the descriptor key-paths; the route steps through them). */
+   *  (deep-link the descriptor key-paths; the route steps through them). The
+   *  annotator is a SEPARATE zone, so this is a hard document navigation — a
+   *  soft goto() would target a route this app does not own (→ 404). */
   function annotateHits(reviewHits: Hit[]) {
     const dv = activeView();
     const keys = reviewHits.map((h) => dv.keyPath(h).join('/')).filter(Boolean);
-    if (keys.length) void goto(`/annotate?keys=${keys.join(',')}`);
+    if (keys.length) location.assign(`/annotator?keys=${keys.join(',')}`);
   }
 
   // Applying a saved view replaces `spec` wholesale, but SearchBar snapshots spec into
@@ -373,7 +374,6 @@
    *  which would collide on the keyed `{#each}` lists. Keep the best-ranked
    *  (first) hit per chunk key. */
   function dedupeVoiceHits(vh: VoiceHit[]): VoiceHit[] {
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- function-local scratch, never reactive state
     const seen = new Set<string>();
     return vh.filter((h) => {
       const k = hitKey(h);

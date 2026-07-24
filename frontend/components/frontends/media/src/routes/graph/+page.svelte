@@ -11,6 +11,7 @@
 
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { base } from '$app/paths';
   import {
     forceSimulation,
     forceManyBody,
@@ -349,7 +350,7 @@
   });
 
   function onClip(docId: string, start: number): void {
-    void goto(`/?doc=${encodeURIComponent(docId)}&t=${Math.max(0, Math.floor(start))}`);
+    void goto(`${base}/?doc=${encodeURIComponent(docId)}&t=${Math.max(0, Math.floor(start))}`);
   }
 
   function onPick(index: number | null): void {

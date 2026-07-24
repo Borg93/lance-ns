@@ -497,6 +497,7 @@
                 title={body}
               >
                 <!-- highlight() escapes then wraps matches — safe to inject -->
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -->
                 <div class={wrap ? '' : 'line-clamp-2'}>{@html highlight(body)}</div>
               </td>
             {:else}

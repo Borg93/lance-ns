@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { goto } from '$app/navigation';
+  import { base } from '$app/paths';
   import {
     type Hit,
     type DocTranscriptChunk,
@@ -106,8 +107,8 @@
 
   // "Find this voice" → queue the request on the shared voiceSearch store,
   // then navigate to the Search page, which consumes `pending` in an $effect.
-  // A store + goto('/') — NOT a `/?voice_*` URL — because when this pane is
-  // already hosted on "/" a same-route goto() does not remount the page, and
+  // A store + goto(home) — NOT a `/?voice_*` URL — because when this pane is
+  // already hosted on the Search page a same-route goto() does not remount it, and
   // +page.svelte reads those params in onMount only; the store path works from
   // every PlayerPane host (search, tree panel, atlas overlay, workflow
   // inspector). External `/?voice_doc=…` deep-links still work on fresh loads.
@@ -122,7 +123,7 @@
       'speaker' in pick ? { docId, speaker: pick.speaker } : { docId, turnId: pick.turnId },
       label,
     );
-    void goto('/');
+    void goto(`${base}/`);
   };
 
   // Which chunk the playhead is in. Reactive on currentTime + docChunks + hit.

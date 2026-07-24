@@ -10,7 +10,7 @@
  *   # override any upstream: --viewer … --search … --annotator … --annotate-zone …
  *
  * The Python services own Lance; this process serves the viewer app + forwards
- * /api/* per domain (HTTP Range preserved) and /annotate → the annotator zone.
+ * /api/* per domain (HTTP Range preserved) and /annotator → the annotator zone.
  */
 
 import { resolve, dirname } from 'node:path';
@@ -31,7 +31,7 @@ const args = Object.fromEntries(
 const VIEWER = (args.viewer ?? args.api ?? 'http://127.0.0.1:8101').replace(/\/$/, '');
 const SEARCH = (args.search ?? 'http://127.0.0.1:8102').replace(/\/$/, '');
 const ANNOTATOR = (args.annotator ?? 'http://127.0.0.1:8103').replace(/\/$/, '');
-// The annotator ZONE app (owns /annotate + /annotate_app) — its own bun server.
+// The annotator ZONE app (owns /annotator) — its own bun server.
 const ANNOTATE_ZONE = (args['annotate-zone'] ?? 'http://127.0.0.1:5176').replace(/\/$/, '');
 
 /** Route an /api/* path to the service that owns that domain. */
@@ -59,15 +59,12 @@ const { getHandler } = (await import(resolve(here, 'build/handler.js'))) as {
 const app = getHandler();
 
 // ─── streaming proxy to an explicit base (Range headers flow through) ─────────
-// `stripBase` handles the svelte-adapter-bun quirk: the annotator zone's built
-// server serves its pages at the BASED path (/annotate/) but its immutable
-// assets at the BARE path (/_app/). So /annotate/_app/* is forwarded with the
-// /annotate prefix removed; pages and everything else go through verbatim.
-async function proxy(req: Request, base: string, stripBase?: string): Promise<Response> {
+// The workspace-patched svelte-adapter-bun serves a based zone's assets at the
+// based path (/annotator/_app/…), so the annotator zone is forwarded verbatim —
+// no base-stripping needed.
+async function proxy(req: Request, base: string): Promise<Response> {
   const url = new URL(req.url);
-  let pathname = url.pathname;
-  if (stripBase && pathname.startsWith(`${stripBase}/_app/`))
-    pathname = pathname.slice(stripBase.length);
+  const pathname = url.pathname;
   const headers = new Headers(req.headers);
   headers.delete('host');
   const upstream = await fetch(`${base}${pathname}${url.search}`, {
@@ -84,15 +81,15 @@ async function proxy(req: Request, base: string, stripBase?: string): Promise<Re
   return new Response(upstream.body, { status: upstream.status, headers: respHeaders });
 }
 
-// ─── Router: /api → per-domain service, /annotate → annotator zone, else app ──
+// ─── Router: /api → per-domain service, /annotator → annotator zone, else app ──
 Bun.serve({
   port: PORT,
   websocket: app.websocket as never,
   async fetch(req, server) {
     const { pathname } = new URL(req.url);
     if (pathname.startsWith('/api/')) return proxy(req, apiUpstream(pathname));
-    if (pathname === '/annotate' || pathname.startsWith('/annotate/'))
-      return proxy(req, ANNOTATE_ZONE, '/annotate');
+    if (pathname === '/annotator' || pathname.startsWith('/annotator/'))
+      return proxy(req, ANNOTATE_ZONE);
     return app.fetch(req, server);
   },
 });
@@ -101,4 +98,4 @@ console.log(`→ frontend:  http://localhost:${PORT}  (svelte-adapter-bun)`);
 console.log(`  /api/annotations|assist|jobs → ${ANNOTATOR}`);
 console.log(`  /api/search                  → ${SEARCH}`);
 console.log(`  /api/*                       → ${VIEWER}`);
-console.log(`  /annotate                    → ${ANNOTATE_ZONE}`);
+console.log(`  /annotator                   → ${ANNOTATE_ZONE}`);

@@ -9,22 +9,40 @@ describe('pathCrumbs', () => {
 	it('keeps the domain as the first crumb on a nested path', () => {
 		// /compute/jobs -> Compute > Jobs (the domain must NOT be dropped)
 		expect(pathCrumbs('/compute/jobs')).toEqual([
-			{ id: 'compute', label: 'compute' },
-			{ id: 'compute/jobs', label: 'jobs' },
+			{ id: 'compute', label: 'compute', href: '/compute' },
+			{ id: 'compute/jobs', label: 'jobs', href: '/compute/jobs' },
 		]);
 	});
 
 	it('yields a single domain crumb for a bare domain landing', () => {
 		// /overview -> Overview (previously produced an empty trail)
-		expect(pathCrumbs('/overview')).toEqual([{ id: 'overview', label: 'overview' }]);
+		expect(pathCrumbs('/overview')).toEqual([
+			{ id: 'overview', label: 'overview', href: '/overview' },
+		]);
 	});
 
 	it('humanises dashed segments and keeps repeated segments unique', () => {
 		expect(pathCrumbs('/compute/api-docs')).toEqual([
-			{ id: 'compute', label: 'compute' },
-			{ id: 'compute/api-docs', label: 'api docs' },
+			{ id: 'compute', label: 'compute', href: '/compute' },
+			{ id: 'compute/api-docs', label: 'api docs', href: '/compute/api-docs' },
 		]);
 		expect(pathCrumbs('/studio/studio').map((c) => c.id)).toEqual(['studio', 'studio/studio']);
+	});
+
+	it('percent-decodes a segment for the label but keeps the href encoded', () => {
+		// A table/dataset id reaches the URL encoded (silver$features -> silver%24features);
+		// the crumb must READ as the id, while still linking to the path that resolves.
+		const crumbs = pathCrumbs('/lineage/datasets/silver%24features');
+		expect(crumbs.at(-1)).toEqual({
+			id: 'lineage/datasets/silver%24features',
+			label: 'silver$features',
+			href: '/lineage/datasets/silver%24features',
+		});
+	});
+
+	it('falls back to the raw segment when the escape is malformed', () => {
+		// decodeURIComponent throws on a lone '%': the trail must still render.
+		expect(pathCrumbs('/data/100%').at(-1)?.label).toBe('100%');
 	});
 
 	it('returns no crumbs for the root path', () => {

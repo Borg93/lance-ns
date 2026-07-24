@@ -21,5 +21,12 @@ export default defineConfig({
 		reuseExistingServer: !process.env.CI,
 		timeout: 120_000,
 	},
-	projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+	projects: [
+		// Warmup compiles the heavy routes ONCE before the parallel suite (same pattern as the data
+		// zone): with fullyParallel on a big box a cold Vite cache makes the whole first wave starve
+		// behind the initial compile and time out at 30s in a bundle — this suite was landing at ~27s
+		// of a 30s budget purely on compile, so every added test moved it closer to the cliff.
+		{ name: 'warmup', testMatch: /warmup\.setup\.ts/ },
+		{ name: 'chromium', use: { ...devices['Desktop Chrome'] }, dependencies: ['warmup'] },
+	],
 });

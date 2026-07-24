@@ -41,3 +41,19 @@ test('a signed-out / unresolved identity renders the base entries only (fail-clo
 	await expect(nav.getByRole('link', { name: 'Admin' })).toHaveCount(0);
 	await expect(nav.getByRole('link', { name: 'Access' })).toHaveCount(0);
 });
+
+test('the project switcher heads the navbar row — it no longer lives in the sidebar', async ({
+	page,
+}) => {
+	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
+	await page.goto('/models');
+	const switcher = page.getByRole('button', { name: 'Switch project' });
+	await expect(switcher).toBeVisible();
+	// The sidebar header is gone entirely: the sidebar is in-zone routes only.
+	await expect(page.locator('[data-sidebar="header"]')).toHaveCount(0);
+	// It sits on the navbar row, left of the zone links.
+	const switcherBox = (await switcher.boundingBox())!;
+	const zonesBox = (await page.getByRole('navigation', { name: 'Zones' }).boundingBox())!;
+	expect(switcherBox.x).toBeLessThan(zonesBox.x);
+	expect(switcherBox.y).toBeLessThan(zonesBox.y + zonesBox.height);
+});

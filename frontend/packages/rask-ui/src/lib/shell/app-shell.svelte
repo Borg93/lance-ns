@@ -4,6 +4,7 @@
 	import { Separator } from '../components/separator/index.js';
 	import AppSidebar from './app-sidebar.svelte';
 	import TopNavbar from './top-navbar.svelte';
+	import ProjectSwitcher from './project-switcher.svelte';
 	import { ChevronRight } from '@lucide/svelte';
 	import { gsap } from 'gsap';
 	import type { Me, Project, NavUser, ZoneNav } from './nav-config.js';
@@ -32,11 +33,13 @@
 	}
 
 	// The shared application shell: a zone-scoped sidebar (the CURRENT zone's routes, from `zoneNav`)
-	// + a content inset whose top bar carries the breadcrumb AND the cross-zone TopNavbar (with the
-	// identity/theme control on its right — the old sidebar-footer nav-user). Every microfrontend
-	// wraps its routes in this so they share identical chrome (no drift). `pathname` comes from the
-	// consuming app's $app/state and drives the breadcrumb + active nav; `me`/`meLoading` come from
-	// the zone's fetchMe() and gate the navbar's admin entries.
+	// + a content inset headed by TWO rows — the estate navbar (sidebar trigger, project switcher,
+	// cross-zone zone links, identity/theme) and, under it, a slim breadcrumb bar. They used to share
+	// one row, where the breadcrumb and the zone links fought for the same horizontal space and
+	// overlapped on a narrow viewport; giving each its own row is what makes the header hold up at
+	// any width. Every microfrontend wraps its routes in this so they share identical chrome (no
+	// drift). `pathname` comes from the consuming app's $app/state and drives the breadcrumb + active
+	// nav; `me`/`meLoading` come from the zone's fetchMe() and gate the navbar's admin entries.
 	let {
 		pathname = '',
 		project = { name: 'Default', subtitle: 'Project' },
@@ -74,38 +77,57 @@
 		projectSlug = projectFromHost(window.location.host) ?? '';
 	});
 	const projectName = $derived(projectSlug || project.name);
-	const sidebarProject = $derived({ name: projectName, subtitle: project.subtitle ?? 'Project' });
+	const shellProject = $derived({ name: projectName, subtitle: project.subtitle ?? 'Project' });
 	const crumbs = $derived(pathCrumbs(pathname));
+	// Every crumb but the last is a link back up its own path; the last IS the current page, so it
+	// renders as text and carries aria-current instead.
+	const lastCrumbId = $derived(crumbs.at(-1)?.id);
 </script>
 
 <Sidebar.Provider class="h-svh overflow-hidden">
-	<AppSidebar {pathname} project={sidebarProject} {zoneNav} footer={sidebarFooter} />
+	<AppSidebar {pathname} {zoneNav} footer={sidebarFooter} />
 	<Sidebar.Inset class="flex min-w-0 flex-col overflow-hidden">
-		<!-- Integrated top bar (sidebar-07): no border, h-16 → h-12 when the sidebar is
-		     icon-collapsed. Trigger + breadcrumb on the left; the cross-zone TopNavbar
-		     (zones + identity/theme) fills the right. -->
-		<header
-			class="flex h-16 shrink-0 items-center gap-2 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
-		>
-			<div class="flex w-full min-w-0 items-center gap-2 px-4">
+		<header class="flex shrink-0 flex-col">
+			<!-- Row 1 — the estate navbar. Integrated (sidebar-07): no border, h-14 → h-12 when the
+			     sidebar is icon-collapsed. Trigger + project switcher on the left; the cross-zone
+			     TopNavbar (zone links + identity/theme) takes the rest of the row on its own. -->
+			<div
+				class="flex h-14 shrink-0 items-center gap-2 px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
+			>
 				<Sidebar.Trigger class="text-muted-foreground hover:text-foreground -ml-1" />
-				<Separator orientation="vertical" class="mr-2 data-[orientation=vertical]:h-4" />
-				<nav aria-label="Breadcrumb" class="flex min-w-0 items-center gap-1.5 text-sm">
-					<span class="text-muted-foreground shrink-0 capitalize">{projectName}</span>
-					{#each crumbs as crumb (crumb.id)}
-						<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
-						<span class="text-foreground truncate font-medium capitalize">{crumb.label}</span>
-					{/each}
-				</nav>
-				<TopNavbar
-					{pathname}
-					{me}
-					{meLoading}
-					{user}
-					{authEnabled}
-					class="ml-auto flex-initial justify-end"
-				/>
+				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
+				<ProjectSwitcher project={shellProject} />
+				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
+				<TopNavbar {pathname} {me} {meLoading} {user} {authEnabled} class="min-w-0 flex-1" />
 			</div>
+			<!-- Row 2 — the breadcrumb bar. Its own slim row, so it can never be squeezed by (or
+			     overlap) the zone links: the trail truncates within its row instead. -->
+			<nav
+				aria-label="Breadcrumb"
+				class="border-border/60 bg-muted/20 flex h-9 shrink-0 items-center border-y px-4 text-sm"
+			>
+				<ol class="flex min-w-0 items-center gap-1.5">
+					<li class="text-muted-foreground shrink-0 capitalize">{projectName}</li>
+					{#each crumbs as crumb (crumb.id)}
+						<li class="flex min-w-0 items-center gap-1.5">
+							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
+							{#if crumb.id === lastCrumbId}
+								<span
+									aria-current="page"
+									class="text-foreground truncate font-medium capitalize"
+									data-slot="breadcrumb-page">{crumb.label}</span
+								>
+							{:else}
+								<a
+									href={crumb.href}
+									class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 truncate rounded-sm capitalize transition-colors outline-none focus-visible:ring-3"
+									>{crumb.label}</a
+								>
+							{/if}
+						</li>
+					{/each}
+				</ol>
+			</nav>
 		</header>
 		<div class="content-enter flex min-h-0 flex-1 flex-col overflow-hidden" {@attach contentEnter}>
 			{@render children()}

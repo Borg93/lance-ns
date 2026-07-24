@@ -1,119 +1,94 @@
 import { describe, expect, it } from 'vitest';
 import { exact, norm, seg, topNav, under, zoneOf } from '../src/lib/shell/nav-config';
 
-// The top-navbar IA (one entry per microfrontend zone, admin entries estate-gated) + the shared
-// matchers every zone builds its ZoneNav sidebar config with.
+// The top-navbar IA + the shared matchers every zone builds its ZoneNav sidebar config with.
+// The bar groups by DOMAIN, not by zone: Lakehouse gathers everything that describes or governs
+// the one estate (the catalog, the model registry, and — estate-admin only — governance and
+// operations), so the bar stays three words while the product grows. A new route becomes a row in
+// a panel column, never a new top-level entry; these tests pin that rule.
 describe('topNav', () => {
-	it('exposes the base zones, in order, for a non-admin (fail-closed)', () => {
-		expect(topNav(false).map((e) => e.title)).toEqual([
-			'Home',
-			'Data',
-			'Lineage',
-			'Models',
-			'Media',
-			'Annotator',
-		]);
-		expect(topNav(false).map((e) => e.href)).toEqual([
-			'/',
-			'/data',
-			'/lineage',
-			'/models',
-			'/media',
-			'/annotator',
-		]);
+	it('exposes three domain triggers, in order, for a non-admin (fail-closed)', () => {
+		expect(topNav(false).map((e) => e.title)).toEqual(['Lakehouse', 'Lineage', 'Media']);
+		expect(topNav(false).map((e) => e.href)).toEqual(['/data', '/lineage', '/media']);
 	});
 
-	it('appends Admin only for an estate admin', () => {
-		const titles = topNav(true).map((e) => e.title);
-		expect(titles).toEqual(['Home', 'Data', 'Lineage', 'Models', 'Media', 'Annotator', 'Admin']);
-		expect(topNav(true).find((e) => e.title === 'Admin')?.href).toBe('/admin');
+	it('keeps the same three triggers for an estate admin — admin earns COLUMNS, not an entry', () => {
+		expect(topNav(true).map((e) => e.title)).toEqual(['Lakehouse', 'Lineage', 'Media']);
 	});
 
-	it('never exposes Access as a navbar entry — it lives inside the admin zone', () => {
-		// 4b2af0e folded Access into the admin zone's own sidebar, so Admin owns the whole
-		// /admin subtree up here. Asserted for BOTH identities so a future regression that
-		// re-adds it (for either) is caught.
+	it('gates governance + operations behind estate-admin, inside the Lakehouse panel', () => {
+		const labels = (admin: boolean) =>
+			topNav(admin)
+				.find((e) => e.title === 'Lakehouse')!
+				.groups!.map((g) => g.label);
+		// The governance guarantee, both polarities: a non-admin's panel cannot even name them.
+		expect(labels(false)).toEqual(['Catalog', 'Models']);
+		expect(labels(true)).toEqual(['Catalog', 'Models', 'Governance', 'Operations']);
+	});
+
+	it('never exposes Access as a navbar entry — it is one row of the Governance column', () => {
 		expect(topNav(false).map((e) => e.title)).not.toContain('Access');
 		expect(topNav(true).map((e) => e.title)).not.toContain('Access');
+		const governance = topNav(true)
+			.find((e) => e.title === 'Lakehouse')!
+			.groups!.find((g) => g.label === 'Governance')!;
+		expect(governance.items.find((i) => i.title === 'Access')?.href).toBe('/admin/access');
+		// …and a non-admin gets no row carrying it at all, in any panel.
+		const nonAdminHrefs = topNav(false).flatMap((e) => [
+			...(e.items ?? []),
+			...(e.groups ?? []).flatMap((g) => g.items),
+		]);
+		expect(nonAdminHrefs.map((i) => i.href)).not.toContain('/admin/access');
 	});
 
-	it('active-match: a zone matches its own path and any nested path, not a sibling or root', () => {
-		const data = topNav(false).find((e) => e.title === 'Data')!;
-		expect(data.match('/data')).toBe(true);
-		expect(data.match('/data/tables/db$t')).toBe(true);
-		expect(data.match('/lineage')).toBe(false);
-		expect(data.match('/')).toBe(false);
-	});
-
-	it('active-match: Home matches ONLY the origin root (trailing-slash tolerant)', () => {
-		const home = topNav(false).find((e) => e.title === 'Home')!;
-		expect(home.match('/')).toBe(true);
-		expect(home.match('/data')).toBe(false);
-	});
-
-	it('carries panel sub-areas for the zones that have them, plain links for the rest', () => {
-		const byTitle = Object.fromEntries(topNav(true).map((e) => [e.title, e]));
-		expect(byTitle.Data!.items?.map((i) => i.title)).toEqual([
-			'Projects',
-			'Tables',
-			'Namespaces',
-			'Warehouses',
-		]);
-		expect(byTitle.Lineage!.items?.map((i) => i.title)).toEqual([
-			'Datasets',
-			'Jobs',
-			'Runs',
-			'Columns',
-			'Graph',
-		]);
-		expect(byTitle.Media!.items?.map((i) => i.title)).toEqual([
-			'Search',
-			'Atlas',
-			'Tree',
-			'Graph',
-			'Workflow',
-		]);
-		expect(byTitle.Admin!.items?.map((i) => i.title)).toEqual([
-			'Tenants',
-			'Audit',
-			'Streams',
-			'DLQ',
-			'Events',
-			'Access',
-		]);
-		// A zone with a single surface stays a plain link — no one-row dropdown.
-		for (const title of ['Home', 'Models', 'Annotator']) {
-			expect(byTitle[title]!.items).toBeUndefined();
+	it('active-match: Lakehouse lights across every subtree it covers, and only those', () => {
+		const lakehouse = topNav(true).find((e) => e.title === 'Lakehouse')!;
+		for (const p of ['/data', '/data/tables/db$t', '/models', '/models/pipeline', '/admin/audit']) {
+			expect(lakehouse.match(p)).toBe(true);
 		}
+		expect(lakehouse.match('/lineage')).toBe(false);
+		expect(lakehouse.match('/')).toBe(false);
+		// A non-admin's trigger must NOT claim /admin — it carries no rows for it.
+		expect(
+			topNav(false)
+				.find((e) => e.title === 'Lakehouse')!
+				.match('/admin'),
+		).toBe(false);
 	});
 
-	it('every panel row is an absolute path inside its own zone, and each carries a description', () => {
+	it('active-match: Media covers the annotator zone too — Annotate is its panel row', () => {
+		const media = topNav(false).find((e) => e.title === 'Media')!;
+		expect(media.match('/media')).toBe(true);
+		expect(media.match('/annotator')).toBe(true);
+		expect(media.items?.find((i) => i.title === 'Annotate')?.href).toBe('/annotator');
+	});
+
+	it('carries the expected rows per column', () => {
+		const groups = Object.fromEntries(
+			topNav(true)
+				.find((e) => e.title === 'Lakehouse')!
+				.groups!.map((g) => [g.label, g.items.map((i) => i.title)]),
+		);
+		expect(groups.Catalog).toEqual(['Projects', 'Tables', 'Namespaces', 'Warehouses']);
+		expect(groups.Models).toEqual(['Registry', 'Experiments', 'Pipeline']);
+		expect(groups.Governance).toEqual(['Access', 'Tenants', 'Audit']);
+		expect(groups.Operations).toEqual(['Events', 'Streams', 'DLQ']);
+		expect(
+			topNav(false)
+				.find((e) => e.title === 'Lineage')!
+				.items?.map((i) => i.title),
+		).toEqual(['Datasets', 'Jobs', 'Runs', 'Columns', 'Graph']);
+	});
+
+	it('every panel row is an absolute path with a description', () => {
 		for (const entry of topNav(true)) {
-			for (const item of entry.items ?? []) {
-				expect(item.href.startsWith(entry.href)).toBe(true);
+			const rows = [...(entry.items ?? []), ...(entry.groups ?? []).flatMap((g) => g.items)];
+			expect(rows.length).toBeGreaterThan(0);
+			for (const item of rows) {
+				expect(item.href.startsWith('/')).toBe(true);
 				expect(item.description.length).toBeGreaterThan(0);
 			}
 		}
-	});
-
-	it('Access is a row of the Admin panel only — never a navbar entry of its own', () => {
-		const admin = topNav(true).find((e) => e.title === 'Admin')!;
-		expect(admin.items?.find((i) => i.title === 'Access')?.href).toBe('/admin/access');
-		// …and a non-admin gets no panel carrying it at all.
-		expect(
-			topNav(false)
-				.flatMap((e) => e.items ?? [])
-				.map((i) => i.href),
-		).not.toContain('/admin/access');
-	});
-
-	it('active-match: Admin covers the WHOLE /admin subtree, /admin/access included', () => {
-		const admin = topNav(true).find((e) => e.title === 'Admin')!;
-		expect(admin.match('/admin')).toBe(true);
-		expect(admin.match('/admin/audit')).toBe(true);
-		expect(admin.match('/admin/access')).toBe(true);
-		expect(admin.match('/admin/access/x')).toBe(true);
-		expect(admin.match('/data')).toBe(false);
 	});
 });
 

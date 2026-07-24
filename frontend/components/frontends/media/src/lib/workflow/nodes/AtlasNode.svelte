@@ -6,7 +6,7 @@
 	 *  captures the hit set onto the node's config; the executor emits exactly that
 	 *  downstream (so /atlas and the workflow no longer share live map state). */
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-	import { Map as MapIcon } from 'lucide-svelte';
+	import { Map as MapIcon } from '@lucide/svelte';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import type { Hit } from '@lance/api';
 	import NodeShell from './NodeShell.svelte';

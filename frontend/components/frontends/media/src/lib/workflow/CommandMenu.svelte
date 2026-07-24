@@ -21,7 +21,7 @@
 		Trash2,
 		Undo2,
 		Wand2,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { graph, nodeLabel } from '$lib/workflow/graph.svelte';
 	import { commandMenu } from '$lib/workflow/command-menu.svelte';
 

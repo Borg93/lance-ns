@@ -7,7 +7,7 @@
 	import { voiceSearch } from '$lib/voice-search.svelte';
 	import { audioPreview } from '$lib/audio-preview.svelte';
 	import { fmtTime, queryTerms, makeHighlighter, cn, hitKey } from '$lib/utils';
-	import { AudioLines, Play, Pause } from 'lucide-svelte';
+	import { AudioLines, Play, Pause } from '@lucide/svelte';
 
 	type Props = {
 		hit: Hit;

@@ -1,7 +1,7 @@
 <script lang="ts">
 	import type { DiarTurn } from '@lance/api';
 	import { fmtTime } from '$lib/utils';
-	import { AudioLines } from 'lucide-svelte';
+	import { AudioLines } from '@lucide/svelte';
 
 	/** "Find this voice" pick: a whole lane (per-video speaker centroid) or one
 	 *  diarized turn (right-click on a segment). The host owns doc_id and turns

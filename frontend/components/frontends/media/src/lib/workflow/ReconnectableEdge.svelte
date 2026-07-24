@@ -7,7 +7,7 @@
 	 *  button that disconnects it without touching the nodes. */
 	import { getBezierPath } from '@xyflow/system';
 	import { BaseEdge, EdgeLabel, EdgeReconnectAnchor, type EdgeProps } from '@xyflow/svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { edgePayload } from '$lib/workflow/edges';
 

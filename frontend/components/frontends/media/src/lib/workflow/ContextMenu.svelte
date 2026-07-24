@@ -2,7 +2,7 @@
 	/** Right-click menu for a node (duplicate / disable / delete) or the pane
 	 *  (add a node at the cursor). Self-contained: reads/acts on the graph; the
 	 *  FlowPane owns the open/position state and the dismiss handlers. */
-	import { Copy, Eye, EyeOff, Play, Plus, RefreshCw, Trash2 } from 'lucide-svelte';
+	import { Copy, Eye, EyeOff, Play, Plus, RefreshCw, Trash2 } from '@lucide/svelte';
 	import { graph, NODE_KINDS, nodeLabel } from '$lib/workflow/graph.svelte';
 
 	interface Menu {

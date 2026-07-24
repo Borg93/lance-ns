@@ -23,7 +23,7 @@
 	import { hierarchy as d3hierarchy, type HierarchyRectangularNode } from 'd3-hierarchy';
 	import { scaleOrdinal } from 'd3-scale';
 	import { schemeTableau10 } from 'd3-scale-chromatic';
-	import { ChevronRight, ArrowRight, Eye, EyeOff } from 'lucide-svelte';
+	import { ChevronRight, ArrowRight, Eye, EyeOff } from '@lucide/svelte';
 	import type { TopicNode } from '@lance/api';
 	import TopicSankey from './topic-sankey.svelte';
 

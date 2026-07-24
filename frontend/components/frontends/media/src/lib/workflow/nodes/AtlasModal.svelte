@@ -19,7 +19,7 @@
 	 * Reuses the existing AtlasMap WebGPU scatter — it does NOT build its own.
 	 */
 	import { onMount } from 'svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import AtlasMap from '$lib/atlas/AtlasMap.svelte';
 	import { crossFilter } from '$lib/atlas/cross-filter.svelte';
 	import { Button } from '@lance/ui';

@@ -10,7 +10,7 @@
 	 */
 	// `Map as MapIcon` (same aliasing as routes/+page.svelte): the bare icon name
 	// would shadow the global Map constructor used by rrfRows' rankOf below.
-	import { Search, Map as MapIcon, Sparkles, ArrowRight } from 'lucide-svelte';
+	import { Search, Map as MapIcon, Sparkles, ArrowRight } from '@lucide/svelte';
 
 	let tab = $state<'search' | 'atlas'>('search');
 
@@ -797,7 +797,7 @@
 					<strong class="text-foreground">embedding</strong> is just that pin. Vector search drops your
 					query on the same map and hands back the nearest chunks — so wording barely matters.
 				</p>
-				<div class="border-border bg-surface2 rounded-lg border p-3 text-xs leading-relaxed">
+				<div class="border-border bg-muted rounded-lg border p-3 text-xs leading-relaxed">
 					<ul class="text-muted-foreground space-y-1.5">
 						<li>
 							<strong class="text-foreground">Embedding = a map pin for meaning.</strong> Close = similar;
@@ -831,7 +831,7 @@
 					paraphraser, a set photographer — and trusts the clips they <em>agree</em> on. Agreement across
 					independent signals is the strongest hint a clip is really relevant.
 				</p>
-				<div class="border-border bg-surface2 rounded-lg border p-3 text-xs leading-relaxed">
+				<div class="border-border bg-muted rounded-lg border p-3 text-xs leading-relaxed">
 					<ul class="text-muted-foreground space-y-1.5">
 						<li>
 							<strong class="text-foreground">Wide net first, tighten later.</strong> In the fused
@@ -878,7 +878,7 @@
 						{#each LANES as lane, i (lane.name)}
 							<div
 								use:reveal={{ delay: i * 80 }}
-								class="reveal bg-surface2 border-border relative overflow-hidden rounded-lg border p-2.5 text-center"
+								class="reveal bg-muted border-border relative overflow-hidden rounded-lg border p-2.5 text-center"
 							>
 								<div class="{lane.text} text-xs font-semibold">{lane.name}</div>
 								<div class="text-muted-foreground text-[10px]">{lane.sub}</div>
@@ -937,7 +937,7 @@
 				<!-- traced example -->
 				<div
 					use:reveal
-					class="reveal bg-surface2 border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
+					class="reveal bg-muted border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<div class="text-foreground mb-1 font-medium">
 						Traced: <code class="font-mono">"arbete"</code> + a photo of a snowy street
@@ -1066,7 +1066,7 @@
 					{#each JUDGES as j, i (j.mode)}
 						<div
 							use:reveal={{ delay: i * 90 }}
-							class="reveal bg-surface2 border-border {j.accent} rounded-lg border border-l-[3px] p-3"
+							class="reveal bg-muted border-border {j.accent} rounded-lg border border-l-[3px] p-3"
 						>
 							<div class="flex items-center gap-2">
 								<span class="text-base leading-none">{j.icon}</span>
@@ -1087,7 +1087,7 @@
 			<section use:reveal class="reveal mb-10">
 				<h2 class="text-foreground mb-3 text-lg font-semibold">What each judge actually does</h2>
 				<div class="border-border overflow-hidden rounded-lg border text-xs">
-					<div class="bg-surface2 text-foreground grid grid-cols-[84px_1fr_1.4fr] font-medium">
+					<div class="bg-muted text-foreground grid grid-cols-[84px_1fr_1.4fr] font-medium">
 						<div class="border-border border-b p-2">Judge</div>
 						<div class="border-border border-b border-l p-2">You give it</div>
 						<div class="border-border border-b border-l p-2">Compared against</div>
@@ -1127,7 +1127,7 @@
 					{#each SIGNAL_EXAMPLES as s, i (s.name)}
 						<div
 							use:reveal={{ delay: i * 80 }}
-							class="reveal bg-surface2 border-border {s.accent} rounded-lg border border-l-[3px] p-3 text-xs leading-relaxed"
+							class="reveal bg-muted border-border {s.accent} rounded-lg border border-l-[3px] p-3 text-xs leading-relaxed"
 						>
 							<div class="mb-1.5 flex items-center gap-2">
 								<span class="text-base leading-none">{s.icon}</span>
@@ -1178,7 +1178,7 @@
 			<section use:reveal class="reveal mb-10">
 				<h2 class="text-foreground mb-3 text-lg font-semibold">How many passes each mode runs</h2>
 				<div class="border-border overflow-hidden rounded-lg border text-xs">
-					<div class="bg-surface2 text-foreground grid grid-cols-[1fr_auto_1.6fr] font-medium">
+					<div class="bg-muted text-foreground grid grid-cols-[1fr_auto_1.6fr] font-medium">
 						<div class="border-border border-b p-2">Mode</div>
 						<div class="border-border border-b border-l p-2 text-center">Passes</div>
 						<div class="border-border border-b border-l p-2">What runs · fused by</div>
@@ -1297,7 +1297,7 @@
 						<span
 							class="rounded px-2 py-0.5 transition-colors {demoLegs.length > 1
 								? 'bg-primary/10 text-primary'
-								: 'bg-surface2 text-muted-foreground'}"
+								: 'bg-muted text-muted-foreground'}"
 							>{demoLegs.length > 1
 								? demoMode === 'hybrid'
 									? 'fused: RRF / slider'
@@ -1307,12 +1307,12 @@
 						<span
 							class="rounded px-2 py-0.5 transition-all {demoSlider
 								? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
-								: 'bg-surface2 text-muted-foreground line-through opacity-60'}">Balance slider</span
+								: 'bg-muted text-muted-foreground line-through opacity-60'}">Balance slider</span
 						>
 						<span
 							class="rounded px-2 py-0.5 transition-all {demoRerank
 								? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-300'
-								: 'bg-surface2 text-muted-foreground line-through opacity-60'}">Rerank</span
+								: 'bg-muted text-muted-foreground line-through opacity-60'}">Rerank</span
 						>
 					</div>
 
@@ -1341,7 +1341,7 @@
 				<div class="border-border overflow-x-auto rounded-lg border">
 					<table class="w-full border-collapse text-xs">
 						<thead>
-							<tr class="bg-surface2 text-foreground text-left">
+							<tr class="bg-muted text-foreground text-left">
 								<th class="border-border border-b p-2 font-medium whitespace-nowrap">You give</th>
 								<th class="border-border border-b border-l p-2 font-medium">Mode</th>
 								<th class="border-border border-b border-l p-2 font-medium">Passes that run</th>
@@ -1464,7 +1464,7 @@
 						</div>
 						<div
 							use:reveal
-							class="reveal bg-surface2 border-border mt-2 rounded-lg border p-3 text-xs leading-relaxed"
+							class="reveal bg-muted border-border mt-2 rounded-lg border p-3 text-xs leading-relaxed"
 						>
 							<span class="text-foreground font-semibold">Takeaway:</span>
 							<span class="text-muted-foreground">{w.takeaway}</span>
@@ -1479,17 +1479,17 @@
 				<div class="flex flex-col items-center">
 					<div class="grid w-full grid-cols-3 gap-2">
 						<div
-							class="bg-surface2 border-border rounded-md border border-l-[3px] border-l-sky-400 px-2 py-2 text-center text-xs"
+							class="bg-muted border-border rounded-md border border-l-[3px] border-l-sky-400 px-2 py-2 text-center text-xs"
 						>
 							⌨️ Keyword text
 						</div>
 						<div
-							class="bg-surface2 border-border border-l-primary rounded-md border border-l-[3px] px-2 py-2 text-center text-xs"
+							class="bg-muted border-border border-l-primary rounded-md border border-l-[3px] px-2 py-2 text-center text-xs"
 						>
 							💬 Meaning text
 						</div>
 						<div
-							class="bg-surface2 border-border rounded-md border border-l-[3px] border-l-amber-400 px-2 py-2 text-center text-xs"
+							class="bg-muted border-border rounded-md border border-l-[3px] border-l-amber-400 px-2 py-2 text-center text-xs"
 						>
 							🖼️ Image
 						</div>
@@ -1535,7 +1535,7 @@
 					<div class="flow-line"><span class="flow-dot" style="animation-delay:.3s"></span></div>
 
 					<div
-						class="bg-surface2 border-border w-full rounded-md border px-4 py-2 text-center text-sm"
+						class="bg-muted border-border w-full rounded-md border px-4 py-2 text-center text-sm"
 					>
 						Rerank top <em>K</em> <span class="text-muted-foreground">(optional)</span> — re-read each
 						transcript vs your text
@@ -1563,7 +1563,7 @@
 					#1. Here it is with two judges on 5 clips (A–E), each returning a ranked list:
 				</p>
 				<div class="grid gap-3 sm:grid-cols-2">
-					<div use:reveal class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs">
+					<div use:reveal class="reveal bg-muted border-border rounded-lg border p-3 text-xs">
 						<div class="text-foreground mb-1 font-medium">⌨️ Keyword</div>
 						<div class="text-muted-foreground">
 							{#each keywordRanked as c, i (c)}<span class="text-foreground font-mono"
@@ -1573,7 +1573,7 @@
 					</div>
 					<div
 						use:reveal={{ delay: 90 }}
-						class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs"
+						class="reveal bg-muted border-border rounded-lg border p-3 text-xs"
 					>
 						<div class="text-foreground mb-1 font-medium">💬 Meaning</div>
 						<div class="text-muted-foreground">
@@ -1584,7 +1584,7 @@
 					</div>
 				</div>
 				<p class="text-muted-foreground mt-3 mb-2 text-sm">
-					Each clip scores <code class="text-primary bg-surface2 rounded px-1 font-mono text-[11px]"
+					Each clip scores <code class="text-primary bg-muted rounded px-1 font-mono text-[11px]"
 						>Σ 1/(60 + rank)</code
 					>
 					over the lists it appears in (rank counts from 0, so the #1 clip uses 1/60):
@@ -1658,7 +1658,7 @@
 				</p>
 				<div
 					use:reveal
-					class="reveal bg-surface2 border-border mb-3 rounded-lg border p-3 text-xs leading-relaxed"
+					class="reveal bg-muted border-border mb-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">For instance:</span> searching
 					<code class="bg-card text-primary rounded px-1 font-mono">elcertifikat</code> → slide
@@ -1672,7 +1672,7 @@
 					— a weighted blend of their scores, not rank-voting — and does nothing for Scene or Image.
 				</div>
 				<div class="grid gap-3 sm:grid-cols-2">
-					<div use:reveal class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs">
+					<div use:reveal class="reveal bg-muted border-border rounded-lg border p-3 text-xs">
 						<div class="text-foreground font-medium">Slider (2 judges only)</div>
 						<div class="text-muted-foreground mt-0.5">Hybrid keyword ↔ meaning.</div>
 						<div class="text-foreground mt-2 font-mono">w·vectorScore + (1−w)·ftsScore</div>
@@ -1680,7 +1680,7 @@
 					</div>
 					<div
 						use:reveal={{ delay: 90 }}
-						class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs"
+						class="reveal bg-muted border-border rounded-lg border p-3 text-xs"
 					>
 						<div class="text-foreground font-medium">RRF (2, 3 or 4 judges)</div>
 						<div class="text-muted-foreground mt-0.5">
@@ -1709,7 +1709,7 @@
 						<div class="border-border text-foreground border-b p-2 font-medium">Reads</div>
 						<div class="border-border border-b border-l p-2">
 							one column — each candidate's transcript, the <code
-								class="bg-surface2 text-primary rounded px-1 font-mono">text</code
+								class="bg-muted text-primary rounded px-1 font-mono">text</code
 							> field on the chunk. Nothing else.
 						</div>
 					</div>
@@ -1739,7 +1739,7 @@
 				</div>
 				<div
 					use:reveal
-					class="reveal bg-surface2 border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
+					class="reveal bg-muted border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">Before → after</span>, query
 					<code class="bg-card text-primary rounded px-1 font-mono">höjda räntor</code>: the fused
@@ -1752,7 +1752,7 @@
 			</section>
 
 			<!-- 10 · the one real prefilter: Filters -->
-			<section use:reveal class="reveal border-border bg-surface2 mb-10 rounded-lg border p-4">
+			<section use:reveal class="reveal border-border bg-muted mb-10 rounded-lg border p-4">
 				<h2 class="text-foreground mb-2 text-lg font-semibold">
 					The one real "narrow-first": Filters
 				</h2>
@@ -1770,7 +1770,7 @@
 				</p>
 
 				<div use:reveal class="reveal border-border mt-3 overflow-hidden rounded-lg border text-xs">
-					<div class="bg-surface2 text-foreground grid grid-cols-[1fr_1.5fr] font-medium">
+					<div class="bg-muted text-foreground grid grid-cols-[1fr_1.5fr] font-medium">
 						<div class="border-border border-b p-2">Filter</div>
 						<div class="border-border border-b border-l p-2">
 							What it targets (all on the chunk's metadata)
@@ -1819,9 +1819,8 @@
 					class="reveal bg-card border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">For instance:</span> search
-					<code class="bg-surface2 text-primary rounded px-1 font-mono">nya regler</code> with a
-					filter
-					<code class="bg-surface2 rounded px-1 font-mono">namn = "Andersson"</code> and N = 10.
+					<code class="bg-muted text-primary rounded px-1 font-mono">nya regler</code> with a filter
+					<code class="bg-muted rounded px-1 font-mono">namn = "Andersson"</code> and N = 10.
 					<strong class="text-foreground">Prefilter (on):</strong> every leg that runs (here Keyword
 					+ Vector) searches <em>only</em> Andersson's chunks → a full 10 ranked Andersson hits.
 					<strong class="text-foreground">Postfilter (off):</strong> each leg first finds its top 10
@@ -1883,7 +1882,7 @@
 				<div class="mt-4 grid gap-3 sm:grid-cols-2">
 					<div
 						use:reveal
-						class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs leading-relaxed"
+						class="reveal bg-muted border-border rounded-lg border p-3 text-xs leading-relaxed"
 					>
 						<div class="text-foreground font-medium">Two tables, one key</div>
 						<p class="text-muted-foreground mt-1">
@@ -1897,7 +1896,7 @@
 					</div>
 					<div
 						use:reveal={{ delay: 90 }}
-						class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs leading-relaxed"
+						class="reveal bg-muted border-border rounded-lg border p-3 text-xs leading-relaxed"
 					>
 						<div class="text-foreground font-medium">One shared embedding space</div>
 						<p class="text-muted-foreground mt-1">
@@ -1908,7 +1907,7 @@
 					</div>
 					<div
 						use:reveal={{ delay: 180 }}
-						class="reveal bg-surface2 border-border rounded-lg border p-3 text-xs leading-relaxed sm:col-span-2"
+						class="reveal bg-muted border-border rounded-lg border p-3 text-xs leading-relaxed sm:col-span-2"
 					>
 						<div class="text-foreground font-medium">Where the work happens</div>
 						<p class="text-muted-foreground mt-1">
@@ -1945,7 +1944,7 @@
 			</section>
 
 			<!-- 12 · limitations -->
-			<section use:reveal class="reveal bg-surface2 border-border mb-8 rounded-lg border p-4">
+			<section use:reveal class="reveal bg-muted border-border mb-8 rounded-lg border p-4">
 				<h2 class="text-foreground mb-2 text-lg font-semibold">Known limitations</h2>
 				<ul class="text-muted-foreground list-disc space-y-1 pl-5 text-sm leading-relaxed">
 					{#each LIMITS as l (l)}<li>{l}</li>{/each}
@@ -1992,7 +1991,7 @@
 			<div class="grid gap-3 sm:grid-cols-2">
 				<div
 					use:reveal
-					class="reveal bg-surface2 border-border border-l-primary rounded-lg border border-l-[3px] p-3"
+					class="reveal bg-muted border-border border-l-primary rounded-lg border border-l-[3px] p-3"
 				>
 					<div class="text-foreground font-medium">What it shows</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
@@ -2003,7 +2002,7 @@
 				</div>
 				<div
 					use:reveal={{ delay: 90 }}
-					class="reveal bg-surface2 border-border rounded-lg border border-l-[3px] border-l-emerald-400 p-3"
+					class="reveal bg-muted border-border rounded-lg border border-l-[3px] border-l-emerald-400 p-3"
 				>
 					<div class="text-foreground font-medium">How to read it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
@@ -2014,7 +2013,7 @@
 				</div>
 				<div
 					use:reveal={{ delay: 180 }}
-					class="reveal bg-surface2 border-border rounded-lg border border-l-[3px] border-l-sky-400 p-3"
+					class="reveal bg-muted border-border rounded-lg border border-l-[3px] border-l-sky-400 p-3"
 				>
 					<div class="text-foreground font-medium">How to use it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
@@ -2025,7 +2024,7 @@
 				</div>
 				<div
 					use:reveal={{ delay: 270 }}
-					class="reveal bg-surface2 border-border rounded-lg border border-l-[3px] border-l-amber-400 p-3"
+					class="reveal bg-muted border-border rounded-lg border border-l-[3px] border-l-amber-400 p-3"
 				>
 					<div class="text-foreground font-medium">Build / rebuild it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">

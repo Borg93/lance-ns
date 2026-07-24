@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { activeView, type DocTranscriptChunk } from '@lance/api';
 	import { fmtTime, hitKey } from '$lib/utils';
-	import { Play } from 'lucide-svelte';
+	import { Play } from '@lucide/svelte';
 	import TranscriptHighlighter from './transcript-highlighter.svelte';
 
 	type Props = {

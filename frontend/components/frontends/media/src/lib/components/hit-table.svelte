@@ -169,7 +169,7 @@
 	import { thumbnailUrl } from '@lance/api';
 	import { queryTerms, makeHighlighter, hitKey } from '$lib/utils';
 	import { audioPreview } from '$lib/audio-preview.svelte';
-	import { Play, Pause } from 'lucide-svelte';
+	import { Play, Pause } from '@lucide/svelte';
 
 	let {
 		hits,

@@ -3,7 +3,7 @@
 	 *  shared tag store), then forwards them unchanged. Those tags ride into Export
 	 *  and show on the chunk everywhere it appears. */
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-	import { X } from 'lucide-svelte';
+	import { X } from '@lucide/svelte';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { FIELD_CLASS } from './field';
 	import NodeShell from './NodeShell.svelte';

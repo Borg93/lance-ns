@@ -16,7 +16,7 @@
 	import PlayerPane from '$lib/components/player-pane.svelte';
 	import HitTable, { TABLE_COLUMNS } from '$lib/components/hit-table.svelte';
 	import { activeView, type Hit } from '@lance/api';
-	import { Columns3, Check } from 'lucide-svelte';
+	import { Columns3, Check } from '@lucide/svelte';
 
 	let active = $state<Hit | null>(null);
 	let tableHits = $state<Hit[]>([]);

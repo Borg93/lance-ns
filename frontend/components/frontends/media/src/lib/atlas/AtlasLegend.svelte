@@ -8,7 +8,7 @@
 	 * AtlasMap computes the rows (via ./atlas-legend) and threads the click/toggle
 	 * handlers through, so the component stays dumb + testable.
 	 */
-	import { Eye, EyeOff } from 'lucide-svelte';
+	import { Eye, EyeOff } from '@lucide/svelte';
 	import type { ClusterLegendRow, CategoryLegendRow } from './atlas-legend';
 	import type { ColorBy } from './cross-filter.svelte';
 

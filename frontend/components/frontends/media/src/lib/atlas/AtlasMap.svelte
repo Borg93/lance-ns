@@ -45,7 +45,7 @@
 		type ClusterRanking,
 	} from './atlas-legend';
 	import { Button, Select, type SelectOption } from '@lance/ui';
-	import { Loader2, Lasso, X, Hand, Settings2 } from 'lucide-svelte';
+	import { Loader2, Lasso, X, Hand, Settings2 } from '@lucide/svelte';
 	import { useColorMode } from '$lib/theme.svelte';
 
 	let {

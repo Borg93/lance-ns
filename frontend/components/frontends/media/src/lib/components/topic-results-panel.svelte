@@ -7,7 +7,7 @@
 	 * Backed by the topic-only browse branch of `/api/search` (empty query +
 	 * `topic=`), the same call the Search page makes for `/?topic=<name>`.
 	 */
-	import { ArrowLeft, ArrowUpRight, X } from 'lucide-svelte';
+	import { ArrowLeft, ArrowUpRight, X } from '@lucide/svelte';
 	import { search, type Hit } from '@lance/api';
 	import { base } from '$app/paths';
 	import HitList from './hit-list.svelte';

@@ -121,7 +121,7 @@
 
 <div
 	bind:this={scrollContainer}
-	class={chrome ? 'border-border bg-surface2 rounded-md border p-3 text-sm leading-7' : 'p-3'}
+	class={chrome ? 'border-border bg-muted rounded-md border p-3 text-sm leading-7' : 'p-3'}
 >
 	{#each alignments as a (a.start)}
 		{@const sentEndsWithSpace = (a.text ?? '').endsWith(' ')}

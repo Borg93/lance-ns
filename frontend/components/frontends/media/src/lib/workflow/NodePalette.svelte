@@ -7,7 +7,7 @@
 	/** The single way to add nodes: drag an item onto the canvas to drop a new
 	 *  node where you release (the FlowPane handles ondrop). Replaces the old
 	 *  toolbar "Add" row. */
-	import { GripVertical } from 'lucide-svelte';
+	import { GripVertical } from '@lucide/svelte';
 	import { NODE_KINDS, nodeLabel } from '$lib/workflow/graph.svelte';
 
 	function onDragStart(e: DragEvent, kind: string): void {

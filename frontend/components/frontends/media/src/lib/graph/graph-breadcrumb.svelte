@@ -5,7 +5,7 @@
   collapse to "Overview › … › last two"; clicking the ellipsis expands.
 -->
 <script lang="ts">
-	import { ChevronRight, Ellipsis } from 'lucide-svelte';
+	import { ChevronRight, Ellipsis } from '@lucide/svelte';
 
 	interface Crumb {
 		id: string;

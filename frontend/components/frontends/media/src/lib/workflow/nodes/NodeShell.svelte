@@ -3,7 +3,7 @@
 	 *  run-status dot and hover-revealed actions (duplicate / disable / delete).
 	 *  Title falls back to the node's custom `label` when set. */
 	import type { Snippet } from 'svelte';
-	import { Copy, Eye, EyeOff, Play, X } from 'lucide-svelte';
+	import { Copy, Eye, EyeOff, Play, X } from '@lucide/svelte';
 	import { graph, STATUS_DOT, type RunStatus } from '$lib/workflow/graph.svelte';
 
 	let {

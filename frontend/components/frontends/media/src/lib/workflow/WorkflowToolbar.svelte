@@ -10,7 +10,7 @@
 		Redo2,
 		Wand2,
 		Command,
-	} from 'lucide-svelte';
+	} from '@lucide/svelte';
 	import { Button } from '@lance/ui';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { commandMenu } from '$lib/workflow/command-menu.svelte';

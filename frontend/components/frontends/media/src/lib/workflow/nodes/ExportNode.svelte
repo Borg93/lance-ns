@@ -3,7 +3,7 @@
 	 *  the columns chosen in the Inspector. Format + columns are configured there;
 	 *  the node itself shows a summary and a one-click Download. */
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
-	import { Download, Tags } from 'lucide-svelte';
+	import { Download, Tags } from '@lucide/svelte';
 	import { activeView } from '@lance/api';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { exportColumns, exportHits } from '$lib/workflow/export';

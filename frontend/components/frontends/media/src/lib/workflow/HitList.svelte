@@ -3,7 +3,7 @@
 	 *  row plays it in the Inspector; each row also carries inline tags you can add
 	 *  or remove anywhere a hit appears (shared tag store → flows into Export).
 	 *  Shared by the Results node and the Inspector so both render identically. */
-	import { Play, Plus, X } from 'lucide-svelte';
+	import { Play, Plus, X } from '@lucide/svelte';
 	import { activeView, chunkFrameUrl, type Hit } from '@lance/api';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { hitKey } from '$lib/utils';

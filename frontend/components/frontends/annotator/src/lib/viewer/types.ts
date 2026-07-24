@@ -34,6 +34,9 @@ export interface ViewerProps {
 	unit: MediaUnit;
 	/** Fired once the viewer has loaded + rendered (`count` = annotations shown). */
 	onload?: (count: number) => void;
+	/** Fired when the unit's media or annotations fail to load — the shell surfaces the
+	 *  message honestly instead of hanging on "loading…" (403/404/network alike). */
+	onerror?: (message: string) => void;
 	/** Optional route-level annotator facade. A spatial viewer `attach`es its engine
 	 *  + loaded table here so the ra-anno layout (toolbar/sidebar/zoom/layers) can bind
 	 *  to a single reactive source; temporal viewers may attach their own surface later.

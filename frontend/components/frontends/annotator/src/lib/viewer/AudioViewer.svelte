@@ -12,7 +12,7 @@
 	import { Button } from '@lance/ui';
 	import type { ViewerProps } from './types';
 
-	let { unit, onload, controller }: ViewerProps = $props();
+	let { unit, onload, onerror, controller }: ViewerProps = $props();
 
 	let container = $state<HTMLDivElement | null>(null);
 	let surface = $state<WaveSurface | null>(null);
@@ -40,7 +40,9 @@
 		const url = unit.annotationsUrl;
 		void loadAnnotations(url)
 			.then(({ table, version }) => controller.attachData(table, url, version))
-			.catch(() => {}); // unreachable annotations → the viewer stays read-only
+			// Unreachable annotations → the viewer stays read-only, but say so (the shell's
+			// status chip) instead of failing silently.
+			.catch((e: unknown) => onerror?.(e instanceof Error ? e.message : String(e)));
 	});
 
 	// Surface lifecycle — synchronous so the cleanup captures the instance. Depends only

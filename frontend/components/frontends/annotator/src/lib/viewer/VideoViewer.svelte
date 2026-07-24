@@ -14,7 +14,7 @@
 	import PixiCanvas from './PixiCanvas.svelte';
 	import type { ViewerProps } from './types';
 
-	let { unit, onload, controller }: ViewerProps = $props();
+	let { unit, onload, onerror, controller }: ViewerProps = $props();
 
 	let video = $state<HTMLVideoElement | null>(null);
 	let ctx: PixiContext | null = null;
@@ -37,12 +37,18 @@
 
 	async function onready(c: PixiContext): Promise<void> {
 		ctx = c;
-		const { table, version } = await loadAnnotations(unit.annotationsUrl);
-		c.plugins.arrow.load(table);
-		c.plugins.arrow.sync();
-		// Spatial attach (this viewer HAS a canvas) — draw tools, zoom, layers all bind.
-		controller?.attach(c, table, unit.annotationsUrl, version);
-		onload?.(table.numRows);
+		try {
+			const { table, version } = await loadAnnotations(unit.annotationsUrl);
+			c.plugins.arrow.load(table);
+			c.plugins.arrow.sync();
+			// Spatial attach (this viewer HAS a canvas) — draw tools, zoom, layers all bind.
+			controller?.attach(c, table, unit.annotationsUrl, version);
+			onload?.(table.numRows);
+		} catch (e) {
+			// Honest failure over a hung "loading…" chip; not rethrown (onready is fired
+			// un-awaited by PixiCanvas). The video itself may still play read-only.
+			onerror?.(e instanceof Error ? e.message : String(e));
+		}
 		await snapshot(); // draw the first available frame under the overlay
 	}
 

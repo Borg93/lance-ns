@@ -15,11 +15,14 @@
 	import AiAssistBar from './AiAssistBar.svelte';
 	import { TOOL_KEYS, isCvTool } from '../tool-defs';
 
-	let { unit }: { unit: MediaUnit } = $props();
+	let { unit, onexit }: { unit: MediaUnit; onexit?: () => void } = $props();
 
 	const Viewer = $derived(viewerFor(unit.kind));
 	const controller = new AnnotatorController();
 	let status = $state('loading…');
+	// True when the unit's media/annotations failed to load — the status chip turns
+	// destructive and carries the reason (never a silent, eternal "loading…").
+	let loadFailed = $state(false);
 
 	// Audio is temporal-only (no canvas): hide the spatial chrome — drawing tools, zoom,
 	// and the GroundingDINO box-assist. Image + video keep it (video draws on its frame).
@@ -114,19 +117,33 @@
 
 <!-- h-full/w-full (not h-screen): the shell now sits under the estate navbar in the zone layout. -->
 <div class="flex h-full w-full">
-	<AnnotatorToolbar {controller} {spatial} />
+	<AnnotatorToolbar {controller} {spatial} {onexit} />
 
 	<div class="min-w-0 flex-1">
 		<ResizableSplit storageKey="lance-media-annotate" initial={0.72} minLeft={420} minRight={320}>
 			{#snippet left()}
 				<div class="relative h-full w-full">
 					<div
-						class="absolute top-3 left-3 z-10 rounded bg-black/70 px-2 py-1 font-mono text-xs text-white"
+						class={[
+							'absolute top-3 left-3 z-10 rounded px-2 py-1 font-mono text-xs text-white',
+							loadFailed ? 'bg-destructive/90' : 'bg-black/70',
+						]}
 						data-testid="annotate-status"
 					>
 						annotate · {unit.kind} · {status}
 					</div>
-					<Viewer {unit} {controller} onload={(n) => (status = `${n} annotations from Lance`)} />
+					<Viewer
+						{unit}
+						{controller}
+						onload={(n) => {
+							status = `${n} annotations from Lance`;
+							loadFailed = false;
+						}}
+						onerror={(message) => {
+							status = `load failed — ${message}`;
+							loadFailed = true;
+						}}
+					/>
 					{#if spatial && controller.canDraw}
 						<AiAssistBar {controller} />
 					{/if}

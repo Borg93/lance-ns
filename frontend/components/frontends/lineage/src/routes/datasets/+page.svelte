@@ -35,9 +35,13 @@
 	let datasets = $state<DatasetSummary[] | null>(null);
 	let lastStatus = $state(0);
 	let settled = $state(false); // "still loading" (0, unsettled) vs a network error (0, settled)
+	let lastUpdated = $state(''); // when the rows on screen were last confirmed live
 
 	const unauthorized = $derived(datasets === null && lastStatus === 401);
 	const offline = $derived(datasets === null && settled && lastStatus !== 401);
+	// A later poll failed while rows are on screen: the table is a last-good snapshot, not live —
+	// say so (the graph page's store tracks online/lastUpdated for the same reason).
+	const stale = $derived(datasets !== null && settled && lastStatus !== 200);
 
 	async function load(): Promise<void> {
 		const res = await listDatasets();
@@ -45,8 +49,14 @@
 		if (res.ok) {
 			datasets = res.data.datasets ?? [];
 			lastStatus = 200;
+			lastUpdated = new Date().toLocaleTimeString();
+		} else if (res.status === 401) {
+			// Session expired mid-view: clear the rows so the sign-in state shows — an expired
+			// session must not keep rendering the governed list (the admin audit viewer's rule).
+			datasets = null;
+			lastStatus = 401;
 		} else {
-			lastStatus = res.status;
+			lastStatus = res.status; // keep the last-good rows; the stale banner names the failure
 		}
 	}
 
@@ -171,6 +181,16 @@
 			<p>Lineage service unreachable (HTTP {lastStatus}) — retrying.</p>
 		</div>
 	{:else}
+		{#if stale}
+			<div class="stale" role="status">
+				<RefreshCw size={13} />
+				<span>
+					Lineage service unreachable (HTTP {lastStatus}) — showing the last snapshot{lastUpdated
+						? ` from ${lastUpdated}`
+						: ''}, retrying.
+				</span>
+			</div>
+		{/if}
 		<!-- Server-side GOVERNED search: reaches tags + the column inventory the client-side
 		     filter below can't see; hits show WHY they matched (e.g. column:embedding). -->
 		<div class="searchbar">
@@ -264,5 +284,16 @@
 		gap: 8px;
 		color: var(--mut);
 		padding: 32px 0;
+	}
+	.stale {
+		display: flex;
+		align-items: center;
+		gap: 8px;
+		border: 1px solid color-mix(in srgb, var(--warn, #d18b28) 45%, var(--line));
+		border-radius: 6px;
+		color: var(--warn, #d18b28);
+		font-size: 12px;
+		padding: 6px 10px;
+		margin-bottom: 10px;
 	}
 </style>

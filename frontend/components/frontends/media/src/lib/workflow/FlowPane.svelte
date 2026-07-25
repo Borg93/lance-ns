@@ -15,7 +15,6 @@
 		type Edge,
 		type EdgeTypes,
 	} from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import { useColorMode } from '@repo/ui/color-mode';
 	import { graph, isNodeKind } from '$lib/workflow/graph.svelte';
 	import { nodeTypes } from '$lib/workflow/node-types';

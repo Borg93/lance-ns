@@ -9,7 +9,6 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
 	import { SvelteFlow, Background, BackgroundVariant, Controls } from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import { Columns3, ShieldAlert } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/lineage/FlowAutoFit.svelte';
 	import { enter } from '@repo/ui/motion';

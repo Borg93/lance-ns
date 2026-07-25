@@ -13,6 +13,9 @@
 @import 'tailwindcss';
 @import 'tw-animate-css';
 @import '@repo/ui/styles/tokens.css';
+/* Svelte Flow's stylesheet, ONCE for the zone and under `base` so Tailwind utilities still win over
+   it (svelte-flow rule 3 — importing it per component lands it in that component's layer instead). */
+@import '@xyflow/svelte/dist/style.css' layer(base);
 
 /* Tailwind 4 + Vite auto-discovery isn't reliable for .svelte under Bun;
  * point it at the source roots explicitly (paths relative to this file). */

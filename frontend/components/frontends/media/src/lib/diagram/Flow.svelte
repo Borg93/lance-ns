@@ -4,7 +4,6 @@
 	// contract from the Svelte Flow SSR docs). Used by src/routes/diagram/+server.ts
 	// to emit a static HTML pipeline diagram (docs / OG images / non-JS).
 	import { SvelteFlow, Background } from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import type { Node, Edge } from '@xyflow/svelte';
 
 	let {

@@ -16,7 +16,6 @@
 	import { enter } from '@repo/ui/motion';
 	import { Network, ShieldAlert } from '@lucide/svelte';
 	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import {
 		type AccessGraph,
 		fetchAccessGraph,

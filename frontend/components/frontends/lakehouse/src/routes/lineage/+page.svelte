@@ -21,7 +21,6 @@
 		Panel,
 		type FitViewOptions,
 	} from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import { Radio, Boxes, Cpu } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/lineage/FlowAutoFit.svelte';
 	import { LineageState } from '$lib/lineage/store.svelte';

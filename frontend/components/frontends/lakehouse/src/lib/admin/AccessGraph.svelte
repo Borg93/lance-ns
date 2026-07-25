@@ -17,7 +17,6 @@
 	import { Network, ShieldAlert } from '@lucide/svelte';
 	import { parse } from '@repo/api';
 	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from '@xyflow/svelte';
-	import '@xyflow/svelte/dist/style.css';
 	import {
 		AccessModelSchema,
 		fetchAccessModel,

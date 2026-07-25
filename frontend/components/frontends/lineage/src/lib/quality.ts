@@ -1,4 +1,4 @@
-import type { Producers } from './types';
+import type { Producers } from '@rask/api/lineage';
 
 // scope #6 quality gate. The validator records its dataQualityAssertions verdict on the run that produced a
 // dataset (medallion stages do; a plain catalog table has none). `quality_passed=false` means the gate ran

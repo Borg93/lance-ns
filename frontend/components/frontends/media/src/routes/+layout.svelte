@@ -2,13 +2,13 @@
 	import '../app.css';
 	import { onMount, type Snippet } from 'svelte';
 	import { browser } from '$app/environment';
-	import { base } from '$app/paths';
 	import { onNavigate } from '$app/navigation';
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
 	import { AppShell } from '@rask/ui/shell';
-	import { MeSchema, parse, type Me } from '@rask/api';
+	import type { Me } from '@rask/api';
+	import { fetchMeViaBff } from '$lib/http';
 	import { MEDIA_ZONE_NAV } from '$lib/nav';
 	import { descriptor } from '$lib/descriptor-store.svelte';
 	import StatusBadge from '$lib/components/status-badge.svelte';
@@ -22,12 +22,7 @@
 	let me = $state<Me | null>(null);
 	let meLoading = $state(true);
 	onMount(async () => {
-		try {
-			const res = await fetch(`${base}/capi/v1/me`);
-			me = res.ok ? parse(MeSchema, await res.json()) : null;
-		} catch {
-			me = null;
-		}
+		me = await fetchMeViaBff();
 		meLoading = false;
 	});
 

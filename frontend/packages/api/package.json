@@ -9,6 +9,22 @@
 			"types": "./src/index.ts",
 			"default": "./src/index.ts"
 		},
+		"./client": {
+			"types": "./src/client.ts",
+			"default": "./src/client.ts"
+		},
+		"./lineage": {
+			"types": "./src/lineage/index.ts",
+			"default": "./src/lineage/index.ts"
+		},
+		"./generated/lineage": {
+			"types": "./src/generated/lineage.ts",
+			"default": "./src/generated/lineage.ts"
+		},
+		"./generated/catalog": {
+			"types": "./src/generated/catalog.ts",
+			"default": "./src/generated/catalog.ts"
+		},
 		"./oidc": {
 			"types": "./src/oidc.ts",
 			"default": "./src/oidc.ts"

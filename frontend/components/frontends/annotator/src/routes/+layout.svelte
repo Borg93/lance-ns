@@ -2,12 +2,12 @@
 	import '../app.css';
 	import { onMount, type Snippet } from 'svelte';
 	import { browser } from '$app/environment';
-	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
 	import { TopNavbar } from '@rask/ui/shell';
-	import { MeSchema, parse, type Me } from '@rask/api';
+	import type { Me } from '@rask/api';
+	import { fetchMeViaBff } from '$lib/http';
 	import type { LayoutData } from './$types';
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
@@ -19,12 +19,7 @@
 	let me = $state<Me | null>(null);
 	let meLoading = $state(true);
 	onMount(async () => {
-		try {
-			const res = await fetch(`${base}/capi/v1/me`);
-			me = res.ok ? parse(MeSchema, await res.json()) : null;
-		} catch {
-			me = null;
-		}
+		me = await fetchMeViaBff();
 		meLoading = false;
 	});
 </script>

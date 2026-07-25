@@ -8,7 +8,7 @@
 	// dataset bleed: a stale fetch for a clicked-away dataset never lands (latest-wins by derivation).
 	import { ChevronRight, Table2, UserRound } from '@lucide/svelte';
 	import { fetchCreator, fetchSchema } from './api';
-	import type { SchemaField } from './types';
+	import type { SchemaField } from '@rask/api/lineage';
 
 	// `versions` = the distinct Lance versions this dataset was written at (newest-first), from its runs.
 	let { dataset, versions }: { dataset: string; versions: string[] } = $props();

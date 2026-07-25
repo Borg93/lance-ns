@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { activeView, type DocTranscriptChunk } from '@lance/api';
+	import { activeView, type DocTranscriptChunk } from '@lance/media-api';
 	import { hitKey } from '$lib/utils';
 
 	type Props = {

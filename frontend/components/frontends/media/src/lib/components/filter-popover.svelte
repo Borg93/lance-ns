@@ -3,7 +3,7 @@
 	import { Select } from '@rask/ui/select';
 	import { Input, type SelectOption } from '@lance/ui';
 	import { Popover } from 'bits-ui';
-	import { activeView, listColumns, type SearchSpec, type ColumnInfo } from '@lance/api';
+	import { activeView, listColumns, type SearchSpec, type ColumnInfo } from '@lance/media-api';
 	import { Filter, X, Eye, EyeOff, Plus } from '@lucide/svelte';
 
 	type Props = {

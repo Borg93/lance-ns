@@ -23,7 +23,7 @@
  *    active voice query immediately when it flips.
  */
 
-import { getVoiceStatus, type VoiceAnchor, type VoiceStatus } from '@lance/api';
+import { getVoiceStatus, type VoiceAnchor, type VoiceStatus } from '@lance/media-api';
 
 export type VoiceRequest =
 	| {

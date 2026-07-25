@@ -9,7 +9,7 @@
 // instead of lying downstream.
 import { parse } from '@rask/api';
 import * as v from 'valibot';
-import type { components } from './catalog.generated';
+import type { components } from '@rask/api/generated/catalog';
 import { type ApiResult, requestJSON as request } from './http';
 
 export type AccessList = components['schemas']['AccessListResponse'];

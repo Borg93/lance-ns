@@ -12,7 +12,7 @@
  * guard below. Mirrors the `voiceSearch` singleton pattern.
  */
 import { SvelteSet } from 'svelte/reactivity';
-import { activeView } from '@lance/api/descriptor';
+import { activeView } from '@lance/media-api/descriptor';
 
 /** Grace past the clip end before the manual stop kicks in — engines that DO
  *  honor the end fragment pause themselves first and never reach it. */

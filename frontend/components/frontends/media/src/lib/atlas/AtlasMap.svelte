@@ -26,9 +26,9 @@
 		type AtlasPoints,
 		type AtlasSpace,
 		type Hit,
-	} from '@lance/api';
+	} from '@lance/media-api';
 	import { crossFilter, buildKeyIndex, hitKey, type ColorBy } from './cross-filter.svelte';
-	import { activeView } from '@lance/api/descriptor';
+	import { activeView } from '@lance/media-api/descriptor';
 	import { buildGrid, nearestIndex, type SpatialGrid } from './atlas-grid';
 	import { hexToRgb, hueRgb, buildHuePalette, type Rgb } from './atlas-colors';
 	import { indicesInPolygon, type Pt } from './atlas-geometry';

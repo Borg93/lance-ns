@@ -3,8 +3,8 @@
  * "WHERE" a refining Search runs under) plus hit de-duplication. No state, no
  * runes — just functions over `Hit[]`, so they're trivial to test and reuse.
  */
-import { activeView, type Row } from '@lance/api/descriptor';
-import type { Hit } from '@lance/api';
+import { activeView, type Row } from '@lance/media-api/descriptor';
+import type { Hit } from '@lance/media-api';
 import { hitKey } from '$lib/utils';
 
 /** Cap on the distinct videos a video-level refine scopes to: the `doc_id IN (…)`

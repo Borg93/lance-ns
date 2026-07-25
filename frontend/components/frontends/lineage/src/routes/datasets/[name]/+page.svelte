@@ -14,7 +14,7 @@
 	import RunInputs from '$lib/RunInputs.svelte';
 	import { fetchDownstream, fetchProducers, fetchUpstream } from '$lib/api';
 	import { checkAccess, fetchAccess, grantAccess, revokeAccess } from '$lib/catalog';
-	import type { DatasetRef, ProducerInfo } from '$lib/types';
+	import type { DatasetRef, ProducerInfo } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 

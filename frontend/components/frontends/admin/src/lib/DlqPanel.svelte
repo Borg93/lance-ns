@@ -24,7 +24,7 @@
 	import { ExternalLink, RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { fetchDlq, replayDlq } from './api';
-	import type { DlqBacklog, DlqEvent } from './types';
+	import type { DlqBacklog, DlqEvent } from '@rask/api/lineage';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);

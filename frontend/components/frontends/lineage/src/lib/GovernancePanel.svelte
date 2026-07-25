@@ -5,7 +5,7 @@
 	// so the dataset detail page only mounts it with the route's dataset name.
 	import { Plus, X } from '@lucide/svelte';
 	import { addDatasetTag, fetchGovernance, removeDatasetTag, setDatasetDescription } from './api';
-	import type { DatasetGovernance } from './types';
+	import type { DatasetGovernance } from '@rask/api/lineage';
 
 	let { dataset }: { dataset: string } = $props();
 

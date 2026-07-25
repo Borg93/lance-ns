@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import type { components } from './catalog.generated';
+import type { components } from '@rask/api/generated/catalog';
 
 // The control-plane change-event wire contract (services/catalog endpoints/events.py) — parsed (not cast)
 // at the BFF boundary so a drift from the backend throws here rather than lying downstream (the @rask/api

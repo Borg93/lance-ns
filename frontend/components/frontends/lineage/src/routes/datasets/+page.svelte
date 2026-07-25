@@ -25,7 +25,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchSearch, listDatasets } from '$lib/api';
-	import type { DatasetSummary } from '$lib/types';
+	import type { DatasetSummary } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 

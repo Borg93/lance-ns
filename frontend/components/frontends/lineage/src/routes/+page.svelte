@@ -27,7 +27,7 @@
 	import { LineageState } from '$lib/store.svelte';
 	import { countUp, stagger } from '@rask/ui/motion';
 	import { useColorMode } from '@rask/ui/color-mode';
-	import { LAYER, type GraphEdge } from '$lib/types';
+	import { LAYER, type GraphEdge } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 

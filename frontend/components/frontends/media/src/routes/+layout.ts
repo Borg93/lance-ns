@@ -1,5 +1,5 @@
 import { base } from '$app/paths';
-import { setApiBase } from '@lance/api/base';
+import { setApiBase } from '@lance/media-api/base';
 
 // Every media-plane fetch (and every media/thumbnail/frame URL) goes through THIS zone's
 // same-origin BFF proxy routes at `${base}/api/*` — set the shared client's base once,

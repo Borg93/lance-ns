@@ -4,7 +4,7 @@
 	 *  or remove anywhere a hit appears (shared tag store → flows into Export).
 	 *  Shared by the Results node and the Inspector so both render identically. */
 	import { Play, Plus, X } from '@lucide/svelte';
-	import { activeView, chunkFrameUrl, type Hit } from '@lance/api';
+	import { activeView, chunkFrameUrl, type Hit } from '@lance/media-api';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { hitKey } from '$lib/utils';
 

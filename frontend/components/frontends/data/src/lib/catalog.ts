@@ -4,7 +4,7 @@
 // read optional fields with `?? null` rather than trusting the generated required-nullable shape.
 import { parse } from '@rask/api';
 import * as v from 'valibot';
-import type { components } from './catalog.generated';
+import type { components } from '@rask/api/generated/catalog';
 import { type ApiResult, requestBinary as requestBin, requestJSON as request } from './http';
 
 export type ModelSummary = components['schemas']['ModelSummary'];

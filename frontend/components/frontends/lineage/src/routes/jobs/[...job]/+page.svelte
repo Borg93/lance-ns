@@ -8,7 +8,7 @@
 	import { page } from '$app/state';
 	import { enter } from '@rask/ui/motion';
 	import { fetchEvents, fetchRuns } from '$lib/api';
-	import type { EventRecord, RunStatus } from '$lib/types';
+	import type { EventRecord, RunStatus } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 	const EVENTS_WINDOW = 200; // recent-events window the facet/neighbor fold reads

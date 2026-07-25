@@ -12,7 +12,7 @@
 		"prepare": "svelte-kit sync"
 	},
 	"dependencies": {
-		"@lance/api": "workspace:*",
+		"@lance/media-api": "workspace:*",
 		"@lance/engine": "workspace:*",
 		"@lance/labeling": "workspace:*",
 		"@lance/ui": "workspace:*",

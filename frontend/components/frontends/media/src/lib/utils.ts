@@ -1,4 +1,4 @@
-import { activeView, type Row } from '@lance/api/descriptor';
+import { activeView, type Row } from '@lance/media-api/descriptor';
 
 /** shadcn-svelte's standard `cn` helper: clsx for conditionals, twMerge for conflicts. */
 export { cn } from '@lance/ui/utils';

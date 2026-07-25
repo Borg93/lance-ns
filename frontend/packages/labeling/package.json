@@ -15,7 +15,7 @@
 		"vitest": "^4.1.10"
 	},
 	"dependencies": {
-		"@lance/api": "workspace:*",
+		"@lance/media-api": "workspace:*",
 		"apache-arrow": "^21.2.0"
 	}
 }

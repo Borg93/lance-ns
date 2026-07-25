@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import type { components } from './catalog.generated';
+import type { components } from '@rask/api/generated/catalog';
 
 // Wire contract for the catalog's first-class projects API (endpoints/projects.py): a BARE ARRAY of
 // project summaries — parsed, not cast, at the browser boundary (the @rask/api parse-don't-validate rule).

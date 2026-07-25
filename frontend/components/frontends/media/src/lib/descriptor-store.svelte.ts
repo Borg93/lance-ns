@@ -9,8 +9,8 @@
  * endpoint's db path.
  */
 
-import { getDatasetView, getHealth } from '@lance/api';
-import { setActiveView, type DatasetView } from '@lance/api/descriptor';
+import { getDatasetView, getHealth } from '@lance/media-api';
+import { setActiveView, type DatasetView } from '@lance/media-api/descriptor';
 
 class DescriptorStore {
 	view = $state<DatasetView | null>(null);

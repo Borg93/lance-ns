@@ -25,7 +25,7 @@
 
 import type { Edge, Node } from '@xyflow/svelte';
 import { browser } from '$app/environment';
-import { type Hit, type SearchMode } from '@lance/api';
+import { type Hit, type SearchMode } from '@lance/media-api';
 import { nodeFingerprint } from './fingerprint';
 import { WorkflowTags } from './tags.svelte';
 import { UndoHistory } from './history.svelte';

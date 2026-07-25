@@ -8,7 +8,7 @@
 	import FilterPopover from './filter-popover.svelte';
 	import HelpPopover from './help-popover.svelte';
 	import SearchSettings from './search-settings.svelte';
-	import { activeView, type SearchSpec, type SearchMode } from '@lance/api';
+	import { activeView, type SearchSpec, type SearchMode } from '@lance/media-api';
 	import { untrack } from 'svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
 	import { AudioLines, Loader2, Paperclip, Search, X, ImagePlus } from '@lucide/svelte';

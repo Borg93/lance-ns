@@ -15,7 +15,7 @@
 	import { enter } from '@rask/ui/motion';
 	import { useColorMode } from '@rask/ui/color-mode';
 	import { ColumnLineageState } from '$lib/columns.svelte';
-	import type { ColumnEdge, ColumnRef } from '$lib/types';
+	import type { ColumnEdge, ColumnRef } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 

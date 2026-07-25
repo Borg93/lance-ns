@@ -52,9 +52,9 @@
       "name": "@lance-media/annotator",
       "version": "0.0.1",
       "dependencies": {
-        "@lance/api": "workspace:*",
         "@lance/engine": "workspace:*",
         "@lance/labeling": "workspace:*",
+        "@lance/media-api": "workspace:*",
         "@lance/ui": "workspace:*",
         "@lucide/svelte": "^1.26.0",
         "@rask/api": "workspace:*",
@@ -172,9 +172,9 @@
       "name": "@lance-media/media",
       "version": "0.1.0",
       "dependencies": {
-        "@lance/api": "workspace:*",
         "@lance/engine": "workspace:*",
         "@lance/labeling": "workspace:*",
+        "@lance/media-api": "workspace:*",
         "@lance/ui": "workspace:*",
         "@lucide/svelte": "^1.26.0",
         "@rask/api": "workspace:*",
@@ -209,6 +209,7 @@
         "@types/d3-scale-chromatic": "^3.1.0",
         "@typescript/native-preview": "^7.0.0-dev.20260707.2",
         "@webgpu/types": "^0.1.71",
+        "apache-arrow": "^21.2.0",
         "layerchart": "^2.0.2",
         "playwright-core": "^1.62.0",
         "svelte-adapter-bun": "^1.0.1",
@@ -283,7 +284,7 @@
       "name": "@lance/labeling",
       "version": "0.0.0",
       "dependencies": {
-        "@lance/api": "workspace:*",
+        "@lance/media-api": "workspace:*",
         "apache-arrow": "^21.2.0",
       },
       "devDependencies": {
@@ -292,7 +293,7 @@
       },
     },
     "packages/media-api": {
-      "name": "@lance/api",
+      "name": "@lance/media-api",
       "version": "0.0.0",
       "dependencies": {
         "apache-arrow": "^21.2.0",
@@ -469,13 +470,13 @@
 
     "@lance-media/media": ["@lance-media/media@workspace:components/frontends/media"],
 
-    "@lance/api": ["@lance/api@workspace:packages/media-api"],
-
     "@lance/config": ["@lance/config@workspace:packages/config"],
 
     "@lance/engine": ["@lance/engine@workspace:packages/engine"],
 
     "@lance/labeling": ["@lance/labeling@workspace:packages/labeling"],
+
+    "@lance/media-api": ["@lance/media-api@workspace:packages/media-api"],
 
     "@lance/ui": ["@lance/ui@workspace:packages/ui"],
 

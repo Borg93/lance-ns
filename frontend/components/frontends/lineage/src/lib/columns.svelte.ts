@@ -1,5 +1,5 @@
 import { fetchColumnDownstream, fetchColumnGraph, fetchColumnUpstream } from './api';
-import type { ColumnGraph, ColumnNeighbors } from './types';
+import type { ColumnGraph, ColumnNeighbors } from '@rask/api/lineage';
 
 /** Field-to-field lineage state for the Columns view (#24): one dataset's column subgraph plus the
  * focused field's provenance/impact. Svelte 5 runes in a class, with the latest-wins guards the

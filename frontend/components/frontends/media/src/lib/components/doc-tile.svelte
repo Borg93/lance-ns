@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { thumbnailUrl, type Document } from '@lance/api';
-	import { activeView } from '@lance/api/descriptor';
+	import { thumbnailUrl, type Document } from '@lance/media-api';
+	import { activeView } from '@lance/media-api/descriptor';
 	import { fmtTime, cn } from '$lib/utils';
 
 	type Props = {

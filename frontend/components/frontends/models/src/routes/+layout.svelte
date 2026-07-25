@@ -7,7 +7,8 @@
 	import { Toaster } from 'svelte-sonner';
 	import { AppShell } from '@rask/ui/shell';
 	import { onMount, type Snippet } from 'svelte';
-	import { fetchMeViaBff, type Me } from '$lib/me';
+	import type { Me } from '@rask/api';
+	import { fetchMeViaBff } from '$lib/http';
 	import { MODELS_ZONE_NAV } from '$lib/nav';
 	import type { LayoutData } from './$types';
 

@@ -9,7 +9,7 @@
 	import { Select } from '@rask/ui/select';
 	import ColumnLineage from '$lib/ColumnLineage.svelte';
 	import { listDatasets } from '$lib/api';
-	import type { DatasetSummary } from '$lib/types';
+	import type { DatasetSummary } from '@rask/api/lineage';
 
 	const POLL_MS = 15_000; // the catalog options list only — the canvas has its own poll
 

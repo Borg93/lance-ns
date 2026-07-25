@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import type { LayoutServerLoad } from './$types';
-import { sessionToUser } from '@rask/api/bff';
+import { zoneLayoutLoad } from '@rask/api/bff';
 import { fetchMe } from '@rask/api';
 
 const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
@@ -13,7 +13,6 @@ const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
 // skeleton→resolved swap. Degrade, never hang: fetchMe times out internally and answers null
 // (signed out / catalog unreachable → base entries only, fail-closed on the admin surfaces).
 export const load: LayoutServerLoad = async ({ locals }) => ({
-	user: sessionToUser(locals.session),
-	authEnabled: locals.authEnabled,
+	...zoneLayoutLoad({ locals }),
 	me: await fetchMe({ catalogUrl: CATALOG_API, accessToken: locals.session?.accessToken }),
 });

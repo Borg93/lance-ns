@@ -7,7 +7,8 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchProjects, type ProjectSummary } from '$lib/catalog';
-	import { fetchMeViaBff, type Me } from '$lib/me';
+	import type { Me } from '@rask/api';
+	import { fetchMeViaBff } from '$lib/http';
 	import ProjectCreateDialog from '$lib/ProjectCreateDialog.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).

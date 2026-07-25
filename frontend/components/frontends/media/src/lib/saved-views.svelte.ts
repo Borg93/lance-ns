@@ -3,7 +3,7 @@
  * Thin runes wrapper over the pure logic in saved-views.ts.
  */
 import { browser } from '$app/environment';
-import type { SearchSpec } from '@lance/api';
+import type { SearchSpec } from '@lance/media-api';
 import {
 	removeView,
 	stripEphemeral,

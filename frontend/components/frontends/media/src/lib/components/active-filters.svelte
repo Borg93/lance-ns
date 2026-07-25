@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { activeView, type SearchSpec } from '@lance/api';
+	import { activeView, type SearchSpec } from '@lance/media-api';
 	import { Badge, Button } from '@rask/ui';
 	import { X } from '@lucide/svelte';
 

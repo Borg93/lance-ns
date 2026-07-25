@@ -2,6 +2,7 @@
 // passes its own $env values in, so this is the shared, single-sourced auth trailer (mirroring the
 // backend services' shared auth). Imports @sveltejs/kit TYPES only, so it lives in server bundles.
 import type { Handle, RequestHandler } from '@sveltejs/kit';
+import { makeGatewayHandleFetch } from './gateway';
 import {
 	SESSION_COOKIE,
 	decodeSession,
@@ -224,4 +225,90 @@ export function makeBackendProxy(opts: {
 			});
 		}
 	};
+}
+
+// ─── Zone wiring ──────────────────────────────────────────────────────────────────────────────────
+// Every zone's `hooks.server.ts`, `+layout.server.ts` and its two catch-all BFF proxy routes used to
+// be byte-identical files copy-pasted per zone (with a second, also byte-identical, variant across the
+// media zones). The factories below are the single source; a zone's file is now the wiring line plus
+// its own `$env` — which is the ONE thing that genuinely cannot be hoisted, since `$env/dynamic/private`
+// is a SvelteKit virtual module and this package stays env-free on purpose.
+
+/** Default upstreams — the local dev topology. In-cluster the chart sets each `*_API` explicitly. */
+const DEFAULT_CATALOG_API = 'http://localhost:2333';
+const DEFAULT_LINEAGE_API = 'http://localhost:8001';
+const DEFAULT_VIEWER_API = 'http://localhost:8101';
+const DEFAULT_GATEWAY_URL = 'http://localhost:8001';
+
+/**
+ * The `load` every zone's `+layout.server.ts` re-exports: surface the signed-in identity + the
+ * auth-enabled flag to the shared AppShell/TopNavbar (nav-user renders Sign in / Sign out). Derived
+ * through `sessionToUser` so every zone produces the SAME user — "auth is identical in every MFE".
+ * No-op shape on an auth-off stack: `user` null, `authEnabled` false.
+ */
+export const zoneLayoutLoad = ({ locals }: { locals: AuthLocals }) => ({
+	user: sessionToUser(locals.session),
+	authEnabled: locals.authEnabled,
+});
+
+/**
+ * The server hooks every zone re-exports.
+ *
+ * `handle` hydrates the session per request from the sealed OIDC cookie and runs the login-first gate;
+ * it is a no-op when OIDC is unconfigured (the zone runs auth-off — dev servers and hermetic e2e are
+ * unchanged). `handleFetch` rewrites SSR `/api/*` to the in-cluster gateway and is only wired for the
+ * zones that read the lineage plane during SSR (`gateway: true`); the media zones reach their services
+ * through their own BFF routes instead, so they leave it undefined.
+ */
+export function makeZoneHooks(env: Env, opts: { gateway?: boolean } = {}) {
+	return {
+		handle: makeSessionHandle(makeOidcConfig(env)),
+		handleFetch: opts.gateway
+			? makeGatewayHandleFetch(env.LANCE_GATEWAY_URL ?? DEFAULT_GATEWAY_URL)
+			: undefined,
+	};
+}
+
+/**
+ * `capi/**` → the CATALOG service. The catalog is OIDC-only (no service-token door), so the only
+ * credential ever attached is the signed-in user's bearer. GET-only: the same confused-deputy stance as
+ * rask/apps/web — no blanket write proxy. Serves the frozen `/capi/v1/me` identity pass-through in every
+ * zone, plus the catch-all in the zones that read the catalog directly. Anon stays the catalog's honest
+ * 401 and the navbar renders signed-out chrome.
+ */
+export function makeCatalogProxy(env: Env): RequestHandler {
+	return makeBackendProxy({
+		backendUrl: env.CATALOG_API ?? DEFAULT_CATALOG_API,
+		stripPrefix: /^\/capi/,
+	});
+}
+
+/**
+ * `api/**` → the LINEAGE service (the `/capi` proxy covers catalog). GET-only, forwards the signed-in
+ * user's bearer; a READ-only service-credential fallback lets a governed stack serve reads without a
+ * per-user login (never on writes — the confused-deputy guard).
+ */
+export function makeLineageProxy(env: Env): RequestHandler {
+	return makeBackendProxy({
+		backendUrl: env.LINEAGE_API ?? DEFAULT_LINEAGE_API,
+		stripPrefix: /^\/api/,
+		serviceToken: env.LINEAGE_SERVICE_TOKEN,
+		serviceId: env.LINEAGE_SERVICE_ID,
+	});
+}
+
+/**
+ * `api/**` → the VIEWER service: the media-plane catch-all (documents, media/thumbnail/chunk-frame
+ * streams, atlas, graph, voice, topics, datasets, health). GET-only, forwarding the signed-in user's
+ * bearer so the backend can attribute the caller. Range rides through (media seeking) and the upstream's
+ * response headers pass back (content-range/accept-ranges/cache-control). The search + annotations/
+ * assist/jobs domains have their own more-specific routes beside this one.
+ */
+export function makeViewerProxy(env: Env): RequestHandler {
+	return makeBackendProxy({
+		backendUrl: env.VIEWER_API ?? DEFAULT_VIEWER_API,
+		stripPrefix: KEEP_API_PREFIX,
+		forwardRequestHeaders: ['range', 'accept', 'if-none-match', 'if-modified-since'],
+		forwardResponseHeaders: true,
+	});
 }

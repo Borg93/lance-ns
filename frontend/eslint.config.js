@@ -29,6 +29,8 @@ export default defineConfig(
 			'**/build/',
 			'**/dist/',
 			'**/*.generated.ts',
+			// The single-sourced OpenAPI output (bun run gen:types) — generated, never hand-edited.
+			'packages/api/src/generated/',
 			'storybook-static/',
 		],
 	},

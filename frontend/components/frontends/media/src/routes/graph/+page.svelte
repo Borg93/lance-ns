@@ -39,7 +39,7 @@
 		type GraphEntityResponse,
 		type GraphMatch,
 		type GraphCypherResponse,
-	} from '@lance/api';
+	} from '@lance/media-api';
 
 	type View = 'graph' | 'table' | 'json';
 	type SimNode = SimulationNodeDatum & { id: string; idx: number };

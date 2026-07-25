@@ -7,7 +7,7 @@
 	// outcomes (the log, 401/403) cache per dataset; transient failures (offline/5xx) retry on the next open.
 	import { ChevronRight, Eye } from '@lucide/svelte';
 	import { fetchReaders } from './api';
-	import type { ReaderInfo } from './types';
+	import type { ReaderInfo } from '@rask/api/lineage';
 
 	let { dataset }: { dataset: string } = $props();
 

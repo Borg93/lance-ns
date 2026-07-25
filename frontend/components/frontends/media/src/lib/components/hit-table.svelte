@@ -1,7 +1,7 @@
 <script lang="ts" module>
-	import type { Hit } from '@lance/api';
-	import { relevanceOf, isVoiceHit } from '@lance/api';
-	import { activeView, type DatasetView } from '@lance/api/descriptor';
+	import type { Hit } from '@lance/media-api';
+	import { relevanceOf, isVoiceHit } from '@lance/media-api';
+	import { activeView, type DatasetView } from '@lance/media-api/descriptor';
 	import { fmtTime } from '$lib/utils';
 
 	/** A table column. `render` gives the displayed string. Set `numeric` for
@@ -166,7 +166,7 @@
 </script>
 
 <script lang="ts">
-	import { thumbnailUrl } from '@lance/api';
+	import { thumbnailUrl } from '@lance/media-api';
 	import { queryTerms, makeHighlighter, hitKey } from '$lib/utils';
 	import { audioPreview } from '$lib/audio-preview.svelte';
 	import { ChevronDown, ChevronUp, Play, Pause } from '@lucide/svelte';

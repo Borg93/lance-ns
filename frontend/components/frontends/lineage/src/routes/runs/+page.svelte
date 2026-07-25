@@ -24,7 +24,7 @@
 	import { enter } from '@rask/ui/motion';
 	import { listRuns } from '$lib/api';
 	import RunInputs from '$lib/RunInputs.svelte';
-	import type { RunStatus } from '$lib/types';
+	import type { RunStatus } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 

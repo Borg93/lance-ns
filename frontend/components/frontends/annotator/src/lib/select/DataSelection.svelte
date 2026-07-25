@@ -13,8 +13,8 @@
 		listDocuments,
 		type Document,
 		type DocumentsResponse,
-	} from '@lance/api';
-	import { setActiveView, type DatasetView } from '@lance/api/descriptor';
+	} from '@lance/media-api';
+	import { setActiveView, type DatasetView } from '@lance/media-api/descriptor';
 	import { Button } from '@rask/ui/button';
 	import { Select } from '@rask/ui/select';
 	import DocTile from './DocTile.svelte';

@@ -5,7 +5,7 @@
 	// kept off the hot /runs board (an N+1 READ-edge fetch), so it loads only when the user expands one run.
 	import { ArrowDownLeft, ChevronRight } from '@lucide/svelte';
 	import { fetchRunInputs } from './api';
-	import type { RunInput } from './types';
+	import type { RunInput } from '@rask/api/lineage';
 
 	let { runId }: { runId: string } = $props();
 

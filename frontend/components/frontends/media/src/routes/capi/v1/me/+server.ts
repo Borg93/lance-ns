@@ -1,9 +1,6 @@
 import { env } from '$env/dynamic/private';
-import { makeBackendProxy } from '@rask/api/bff';
+import { makeCatalogProxy } from '@rask/api/bff';
 
-// The frozen /v1/me identity pass-through: same-origin /capi/v1/me → catalog GET /v1/me, forwarding
-// ONLY the signed-in user's bearer (no service fallback — identity is per-user by definition; anon
-// stays the catalog's honest 401 and the navbar renders signed-out chrome).
-const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
-
-export const GET = makeBackendProxy({ backendUrl: CATALOG_API, stripPrefix: /^\/capi/ });
+// Same-origin, GET-only pass-through to the CATALOG service, forwarding ONLY the signed-in user's
+// bearer (the catalog is OIDC-only — no service-token door). Single-sourced in @rask/api/bff.
+export const GET = makeCatalogProxy(env);

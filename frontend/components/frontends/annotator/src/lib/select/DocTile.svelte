@@ -2,8 +2,8 @@
 	// One document card in the selection grid — thumbnail (cheap: the viewer's cached
 	// /api/thumbnail blob), descriptor-driven title/metadata, duration badge. Dumb +
 	// controlled, mirroring the media zone's gallery tile.
-	import type { Document } from '@lance/api';
-	import type { DatasetView } from '@lance/api/descriptor';
+	import type { Document } from '@lance/media-api';
+	import type { DatasetView } from '@lance/media-api/descriptor';
 	import { cn } from '@rask/ui/utils';
 
 	let { view, doc, onclick }: { view: DatasetView; doc: Document; onclick?: () => void } = $props();

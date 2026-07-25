@@ -21,7 +21,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { listJobs } from '$lib/api';
-	import type { JobSummary } from '$lib/types';
+	import type { JobSummary } from '@rask/api/lineage';
 
 	const POLL_MS = 5000;
 

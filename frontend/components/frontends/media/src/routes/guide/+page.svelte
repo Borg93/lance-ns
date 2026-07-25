@@ -919,11 +919,9 @@
 					</div>
 					<div
 						use:reveal={{ delay: 90 }}
-						class="reveal rounded-lg border border-red-500/40 bg-red-500/5 p-3 text-xs leading-relaxed"
+						class="reveal border-destructive/40 bg-destructive/5 rounded-lg border p-3 text-xs leading-relaxed"
 					>
-						<div class="mb-1 font-semibold text-red-600 line-through dark:text-red-300">
-							✗ Not this
-						</div>
+						<div class="text-destructive mb-1 font-semibold line-through">✗ Not this</div>
 						<p class="text-muted-foreground">
 							The image runs first, grabs a shortlist of look-alike clips, and the text then
 							searches

@@ -73,7 +73,7 @@
 	{:else if chunks.length === 0}
 		<p class="text-muted-foreground text-sm">This document has no chunks to annotate.</p>
 	{:else}
-		<ul class="min-h-0 flex-1 space-y-1 overflow-y-auto pr-1">
+		<ul class="flex min-h-0 flex-1 flex-col gap-1 overflow-y-auto pr-1">
 			{#each chunks as chunk, i (keyOf(chunk))}
 				{@const time = view.time(chunk)}
 				<li>

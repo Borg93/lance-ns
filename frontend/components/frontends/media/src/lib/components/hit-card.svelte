@@ -268,7 +268,7 @@
 				{/if}
 			</div>
 
-			<div class="min-w-0 flex-1 space-y-0.5">
+			<div class="flex min-w-0 flex-1 flex-col gap-0.5">
 				<div class="line-clamp-2 text-sm leading-snug font-semibold [overflow-wrap:anywhere]">
 					{title}
 				</div>

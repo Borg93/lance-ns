@@ -59,11 +59,16 @@ spec:
             - { name: OIDC_INTERNAL_ISSUER, value: "http://{{ include "lance.fullname" $root }}-dex:5556/dex" }
             {{- end }}
             {{- if and $root.Values.media.enabled (or (eq .name "media") (eq .name "annotator")) }}
-            # The media plane's upstreams for these zones' BFF proxy routes (/<zone>/api/* → the three
-            # lance-media Services): the zone map their retired thin server used, now resolved in-release.
+            # The media plane's upstreams for these zones' BFF proxy routes (/<zone>/api/* → the
+            # lance-media Services). Scoped PER ZONE, not handed to both: a zone should not hold a
+            # service URL it never routes to. media searches and reads the viewer, and reaches the
+            # annotator only for the workflow's tag write + batch-job submit; the annotator reads the
+            # viewer for the media it draws on the canvas and never searches.
             - { name: VIEWER_API, value: "http://{{ include "lance.fullname" $root }}-viewer:{{ $root.Values.media.services.viewer.port }}" }
-            - { name: SEARCH_API, value: "http://{{ include "lance.fullname" $root }}-search:{{ $root.Values.media.services.search.port }}" }
             - { name: ANNOTATOR_API, value: "http://{{ include "lance.fullname" $root }}-annotator:{{ $root.Values.media.services.annotator.port }}" }
+            {{- if eq .name "media" }}
+            - { name: SEARCH_API, value: "http://{{ include "lance.fullname" $root }}-search:{{ $root.Values.media.services.search.port }}" }
+            {{- end }}
             {{- if and (eq .name "annotator") $root.Values.runners.enabled }}
             # Mirror of the annotator SERVICE's runner seams (media.yaml) onto the zone's web pod:
             # its /api/config endpoint reads these to render the honest "mocked — needs runner"

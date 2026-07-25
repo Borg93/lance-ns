@@ -10,8 +10,8 @@
 <svelte:head><title>lance</title></svelte:head>
 
 <div class="px-4 py-10">
-	<div class="mx-auto w-full max-w-5xl space-y-6">
-		<header class="space-y-1">
+	<div class="mx-auto flex w-full max-w-5xl flex-col gap-6">
+		<header class="flex flex-col gap-1">
 			<h1 class="text-3xl font-semibold">lance</h1>
 			<p class="text-muted-foreground">
 				Governed Lance lakehouse — {data.estateAdmin
@@ -26,7 +26,7 @@
 					<!-- Cross-zone card into the data zone's project page (hard nav). -->
 					<a href={`/data/projects/${p.project}`} data-sveltekit-reload class="group block">
 						<Card
-							class="hover:border-ring/40 hover:bg-accent h-full space-y-2 p-5 transition-colors"
+							class="hover:border-ring/40 hover:bg-accent flex h-full flex-col gap-2 p-5 transition-colors"
 						>
 							<div class="flex items-start justify-between gap-2">
 								<div class="truncate text-lg font-medium">{p.project}</div>

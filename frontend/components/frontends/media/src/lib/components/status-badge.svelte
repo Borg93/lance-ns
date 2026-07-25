@@ -64,7 +64,7 @@
 			{:else if !health}
 				<div class="text-muted-foreground">Loading…</div>
 			{:else}
-				<div class="space-y-2">
+				<div class="flex flex-col gap-2">
 					<div>
 						<div class="text-foreground mb-1 font-semibold">vLLM services</div>
 						<div class="flex items-center gap-2">

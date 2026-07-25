@@ -766,7 +766,7 @@
 							onclick={() => (showSettings = false)}
 						></button>
 						<div
-							class="border-border bg-popover text-popover-foreground absolute top-full left-0 z-20 mt-1 w-56 space-y-3 rounded-lg border p-3 text-xs shadow-md"
+							class="border-border bg-popover text-popover-foreground absolute top-full left-0 z-20 mt-1 flex w-56 flex-col gap-3 rounded-lg border p-3 text-xs shadow-md"
 						>
 							<label class="block">
 								<span class="text-muted-foreground mb-1 flex items-center justify-between">

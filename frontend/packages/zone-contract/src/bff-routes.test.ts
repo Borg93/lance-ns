@@ -81,6 +81,55 @@ describe('the media zone does not proxy the annotation write surface', () => {
 	});
 });
 
+describe('the chart hands a zone only the upstreams its routes use', () => {
+	// Env is the other half of the same mistake: the routes can be scoped correctly while the chart
+	// still injects every service URL into every zone. media and annotator were each handed
+	// VIEWER_API + SEARCH_API + ANNOTATOR_API regardless of what they called, so the annotator pod
+	// carried a search URL it has no route for.
+	const chart = readFileSync(`${FRONTEND_ROOT}/../chart/templates/frontends.yaml`, 'utf8');
+
+	/** The `*_API` names a zone's own BFF routes actually read out of $env. */
+	function upstreamsUsed(zone: string): Set<string> {
+		const out = execFileSync(
+			'sh',
+			['-c', `grep -rhoE 'env\\.[A-Z_]+_API' components/frontends/${zone}/src/routes || true`],
+			{ cwd: FRONTEND_ROOT, encoding: 'utf8' },
+		);
+		return new Set(
+			out
+				.split('\n')
+				.filter(Boolean)
+				.map((m) => m.replace('env.', '')),
+		);
+	}
+
+	it('media routes to the viewer, search and annotator services', () => {
+		expect([...upstreamsUsed('media')].sort()).toEqual([
+			'ANNOTATOR_API',
+			'SEARCH_API',
+			'VIEWER_API',
+		]);
+	});
+
+	it('annotator routes to the annotator service and the viewer — never search', () => {
+		const used = upstreamsUsed('annotator');
+		expect(used.has('ANNOTATOR_API')).toBe(true);
+		expect(used.has('SEARCH_API'), 'the annotator has no search route; drop SEARCH_API').toBe(
+			false,
+		);
+	});
+
+	it('SEARCH_API is gated to the media zone in the chart', () => {
+		// The env block must not hand it to every media-plane zone unconditionally.
+		const searchLine = chart.split('\n').findIndex((l) => l.includes('name: SEARCH_API'));
+		expect(searchLine).toBeGreaterThan(-1);
+		const guard = chart.split('\n')[searchLine - 1] ?? '';
+		expect(guard, 'SEARCH_API must sit behind an `eq .name "media"` guard').toContain(
+			'eq .name "media"',
+		);
+	});
+});
+
 describe('no zone declares an upstream it never routes to', () => {
 	it.each(zoneDirs())('%s', (zone) => {
 		const server = `components/frontends/${zone}/server.ts`;

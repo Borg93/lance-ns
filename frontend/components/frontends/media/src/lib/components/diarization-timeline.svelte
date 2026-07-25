@@ -65,6 +65,9 @@
 		return out;
 	});
 
+	// A CATEGORICAL data palette — one hue per speaker — not UI state, so the semantic-token rule
+	// (bg-primary / text-muted-foreground) does not apply: no token set can express "N distinguishable
+	// categories". These are the only raw palette values in the estate, and deliberately so.
 	const PALETTE = [
 		'bg-sky-500',
 		'bg-emerald-500',

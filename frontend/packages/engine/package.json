@@ -12,17 +12,22 @@
 	},
 	"scripts": {
 		"check": "bunx tsc --noEmit",
-		"test": "vitest run"
-	},
-	"devDependencies": {
-		"typescript": "^6.0.3",
-		"vitest": "^4.1.10"
+		"check:tsgo": "tsgo --noEmit -p tsconfig.json",
+		"test": "vitest run",
+		"lint": "oxlint --config ../../.oxlintrc.json .",
+		"fmt": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore . && prettier --write '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern",
+		"fmt:check": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore --check . && prettier --check '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
-		"apache-arrow": "^21.2.0",
-		"pixi.js": "^8.19.0",
 		"@techstark/opencv-js": "5.0.0-release.1",
+		"apache-arrow": "^21.2.0",
 		"flatbush": "^4.6.2",
+		"pixi.js": "^8.19.0",
 		"wavesurfer.js": "^7.12.11"
+	},
+	"devDependencies": {
+		"@lance/config": "workspace:*",
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.10"
 	}
 }

@@ -17,6 +17,14 @@
 		"admin": {
 			"development": { "local": { "port": 5175 } },
 			"routing": [{ "paths": ["/admin", "/admin/:path*"] }]
+		},
+		"media": {
+			"development": { "local": { "port": 5173 } },
+			"routing": [{ "paths": ["/media", "/media/:path*"] }]
+		},
+		"annotator": {
+			"development": { "local": { "port": 5177 } },
+			"routing": [{ "paths": ["/annotator", "/annotator/:path*"] }]
 		}
 	}
 }

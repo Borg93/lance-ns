@@ -4,21 +4,22 @@
 	"type": "module",
 	"workspaces": [
 		"packages/*",
-		"components/frontends/*"
+		"components/frontends/*",
+		"eslint-rules"
 	],
 	"scripts": {
 		"build": "turbo run build",
 		"check": "turbo run check",
 		"check:tsgo": "turbo run check:tsgo",
 		"dev": "turbo run dev",
-		"test": "turbo run test && vitest run eslint-rules",
+		"test": "turbo run test",
 		"test:e2e": "turbo run test:e2e",
 		"gen:types": "bun run gen:types:lineage && bun run gen:types:catalog",
 		"gen:types:lineage": "openapi-typescript ../docs/lineage-openapi.json -o packages/api/src/generated/lineage.ts",
 		"gen:types:catalog": "openapi-typescript ../docs/catalog-openapi.json -o packages/api/src/generated/catalog.ts",
-		"lint": "eslint components/frontends/home components/frontends/data components/frontends/lineage components/frontends/models components/frontends/admin components/frontends/media components/frontends/annotator packages/api packages/rask-ui packages/media-api packages/engine packages/labeling packages/ui",
-		"fmt": "prettier --write '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,components/frontends/media,components/frontends/annotator,packages/api,packages/rask-ui,packages/media-api,packages/config,packages/engine,packages/labeling,packages/ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore",
-		"fmt:check": "prettier --check '{components/frontends/home,components/frontends/data,components/frontends/lineage,components/frontends/models,components/frontends/admin,components/frontends/media,components/frontends/annotator,packages/api,packages/rask-ui,packages/media-api,packages/config,packages/engine,packages/labeling,packages/ui}/**/*.{ts,js,svelte,css,html,json,md}' --ignore-path .gitignore --ignore-path .prettierignore"
+		"lint": "turbo run lint",
+		"fmt": "turbo run fmt",
+		"fmt:check": "turbo run fmt:check"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.1.0",
@@ -28,6 +29,8 @@
 		"eslint-plugin-svelte": "^3.22.0",
 		"globals": "^17.7.0",
 		"openapi-typescript": "^7.13.0",
+		"oxfmt": "^0.60.0",
+		"oxlint": "^1.75.0",
 		"prettier": "^3.9.6",
 		"prettier-plugin-svelte": "^4.1.1",
 		"prettier-plugin-tailwindcss": "^0.8.1",

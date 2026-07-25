@@ -5,5 +5,9 @@
 	"type": "module",
 	"files": [
 		"tsconfig.base.json"
-	]
+	],
+	"exports": {
+		"./tsconfig.base.json": "./tsconfig.base.json",
+		"./package.json": "./package.json"
+	}
 }

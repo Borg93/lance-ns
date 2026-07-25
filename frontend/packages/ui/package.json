@@ -25,10 +25,10 @@
 		}
 	},
 	"scripts": {
-		"check": "bunx svelte-check --tsconfig ./tsconfig.json"
-	},
-	"peerDependencies": {
-		"svelte": "^5.0.0"
+		"check": "bunx svelte-check --tsconfig ./tsconfig.json",
+		"lint": "oxlint --config ../../.oxlintrc.json . && eslint '**/*.svelte' '**/*.svelte.ts' --no-error-on-unmatched-pattern",
+		"fmt": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore . && prettier --write '**/*.svelte' '**/*.svelte.ts' '**/*.{css,md,json,html}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern",
+		"fmt:check": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore --check . && prettier --check '**/*.svelte' '**/*.svelte.ts' '**/*.{css,md,json,html}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
 		"@lucide/svelte": "^1.26.0",
@@ -38,7 +38,11 @@
 		"tailwind-variants": "^3.2.2"
 	},
 	"devDependencies": {
-		"typescript": "^6.0.3",
-		"svelte-check": "^4.7.3"
+		"@lance/config": "workspace:*",
+		"svelte-check": "^4.7.3",
+		"typescript": "^6.0.3"
+	},
+	"peerDependencies": {
+		"svelte": "^5.0.0"
 	}
 }

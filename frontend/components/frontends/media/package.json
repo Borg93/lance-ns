@@ -1,10 +1,11 @@
 {
-	"name": "@lance-media/media",
+	"name": "media",
 	"version": "0.1.0",
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"dev": "vite dev --port 5173 --host 127.0.0.1",
+		"prepare": "svelte-kit sync",
+		"dev": "vite dev",
 		"build": "vite build",
 		"preview": "vite preview --port 4173 --host 127.0.0.1",
 		"start": "bun ./build/index.js",
@@ -13,12 +14,14 @@
 		"test": "vitest run",
 		"test:e2e": "playwright test",
 		"test:e2e:live": "node e2e/annotator.e2e.mjs && node e2e/temporal.e2e.mjs && node e2e/read-plane.e2e.mjs",
-		"prepare": "svelte-kit sync"
+		"lint": "oxlint --config ../../../.oxlintrc.json . && eslint '**/*.svelte' '**/*.svelte.ts' --no-error-on-unmatched-pattern",
+		"fmt": "oxfmt --config ../../../.oxfmtrc.json --ignore-path ../../../.oxfmtignore . && prettier --write '**/*.svelte' '**/*.svelte.ts' '**/*.{css,md,json,html}' --ignore-path ../../../.gitignore --ignore-path ../../../.prettierignore --no-error-on-unmatched-pattern",
+		"fmt:check": "oxfmt --config ../../../.oxfmtrc.json --ignore-path ../../../.oxfmtignore --check . && prettier --check '**/*.svelte' '**/*.svelte.ts' '**/*.{css,md,json,html}' --ignore-path ../../../.gitignore --ignore-path ../../../.prettierignore --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
-		"@lance/media-api": "workspace:*",
 		"@lance/engine": "workspace:*",
 		"@lance/labeling": "workspace:*",
+		"@lance/media-api": "workspace:*",
 		"@lance/ui": "workspace:*",
 		"@lucide/svelte": "^1.26.0",
 		"@rask/api": "workspace:*",

@@ -2,8 +2,8 @@
 	"name": "@rask/api",
 	"version": "0.1.0",
 	"private": true,
-	"type": "module",
 	"license": "Apache-2.0",
+	"type": "module",
 	"exports": {
 		".": {
 			"types": "./src/index.ts",
@@ -12,6 +12,10 @@
 		"./client": {
 			"types": "./src/client.ts",
 			"default": "./src/client.ts"
+		},
+		"./observability": {
+			"types": "./src/observability.ts",
+			"default": "./src/observability.ts"
 		},
 		"./lineage": {
 			"types": "./src/lineage/index.ts",
@@ -37,7 +41,10 @@
 	"scripts": {
 		"check": "tsgo --noEmit -p tsconfig.json",
 		"check:tsgo": "tsgo --noEmit -p tsconfig.json",
-		"test": "vitest run"
+		"test": "vitest run",
+		"lint": "oxlint --config ../../.oxlintrc.json .",
+		"fmt": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore . && prettier --write '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern",
+		"fmt:check": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore --check . && prettier --check '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
 		"valibot": "^1.4.2"

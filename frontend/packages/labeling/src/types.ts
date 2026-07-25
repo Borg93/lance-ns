@@ -37,10 +37,13 @@
  *   Drives: manual set/verdict, interactive assist (SAM click / INSID3 on the page).
  */
 export type ChunkSelection =
-	{ level: 'chunks'; keys: string[] } | { level: 'scope'; where: string } | { level: 'corpus' };
+	| { level: 'chunks'; keys: string[] }
+	| { level: 'scope'; where: string }
+	| { level: 'corpus' };
 
 export type AnnoSelection =
-	{ level: 'one'; index: number } | { level: 'picked'; indices: number[] };
+	| { level: 'one'; index: number }
+	| { level: 'picked'; indices: number[] };
 
 export type Selection = ChunkSelection | AnnoSelection;
 

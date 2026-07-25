@@ -1,0 +1,28 @@
+{
+	"$schema": "./node_modules/oxlint/configuration_schema.json",
+	"plugins": [
+		"typescript"
+	],
+	"categories": {
+		"correctness": "error"
+	},
+	"rules": {
+		"typescript/no-explicit-any": "warn",
+		"no-unused-vars": [
+			"error",
+			{
+				"argsIgnorePattern": "^_",
+				"varsIgnorePattern": "^_",
+				"caughtErrorsIgnorePattern": "^_"
+			}
+		]
+	},
+	"ignorePatterns": [
+		"**/*.svelte",
+		"**/.svelte-kit/**",
+		"**/build/**",
+		"**/dist/**",
+		"**/*.generated.ts",
+		"packages/api/src/generated/**"
+	]
+}

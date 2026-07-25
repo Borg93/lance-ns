@@ -21,8 +21,9 @@ const gitignorePath = path.resolve(import.meta.dirname, '.gitignore');
 
 export default defineConfig(
 	includeIgnoreFile(gitignorePath),
-	// eslint + prettier are the ONLY linters now (the @lance/ui + config packages that oxlint/oxfmt
-	// owned were retired with apps/web). The `lint` script scopes eslint to the zones + @rask/{ui,api}.
+	// ESLint's scope is .svelte and *.svelte.ts ONLY — oxlint owns every other .ts/.js/.mjs file
+	// (frontend/TOOLING.md explains why the split exists and what would collapse it). Each package's
+	// `lint` script passes those globs, so this config never has to enumerate packages.
 	{
 		ignores: [
 			'**/.svelte-kit/',

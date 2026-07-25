@@ -43,18 +43,17 @@
 			"cache": false,
 			"outputs": []
 		},
+		"lint": {},
+		"fmt": {
+			"cache": false
+		},
+		"fmt:check": {},
 		"dev": {
 			"dependsOn": [
 				"^build"
 			],
 			"cache": false,
 			"persistent": true
-		},
-		"//#lint": {
-			"cache": false
-		},
-		"//#fmt:check": {
-			"cache": false
 		}
 	}
 }

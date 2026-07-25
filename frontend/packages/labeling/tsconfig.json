@@ -1,5 +1,7 @@
 {
-	"extends": "../config/tsconfig.base.json",
-	"compilerOptions": { "noEmit": true },
+	"extends": "@lance/config/tsconfig.base.json",
+	"compilerOptions": {
+		"noEmit": true
+	},
 	"include": ["src"]
 }

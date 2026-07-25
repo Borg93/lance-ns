@@ -793,7 +793,9 @@ export type VoiceSimilarResponse = v.InferOutput<typeof VoiceSimilarResponseSche
 
 /** Query-by-example anchor: a document plus exactly one locator. */
 export type VoiceAnchor = { docId: string } & (
-	{ turnId: number } | { speaker: string } | { t: number }
+	| { turnId: number }
+	| { speaker: string }
+	| { t: number }
 );
 
 export async function voiceSimilar(

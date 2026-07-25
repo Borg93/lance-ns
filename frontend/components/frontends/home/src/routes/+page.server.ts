@@ -39,11 +39,13 @@ export const load: PageServerLoad = async ({ parent, fetch }) => {
 			const res = await fetch('/capi/v1/projects');
 			if (res.ok) {
 				const roleOf = new Map(me.projects.map((p) => [p.project, p.role]));
-				const projects = parse(EstateProjectsSchema, await res.json()).map((p): GalleryProject => ({
-					project: p.project,
-					role: roleOf.get(p.project) ?? null,
-					warehouses: p.warehouses.length,
-				}));
+				const projects = parse(EstateProjectsSchema, await res.json()).map(
+					(p): GalleryProject => ({
+						project: p.project,
+						role: roleOf.get(p.project) ?? null,
+						warehouses: p.warehouses.length,
+					}),
+				);
 				return { signedIn: true, estateAdmin: true, projects };
 			}
 		} catch {

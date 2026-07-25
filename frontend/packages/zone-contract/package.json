@@ -1,37 +1,18 @@
 {
-	"name": "@lance/media-api",
+	"name": "@rask/zone-contract",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
-	"exports": {
-		".": {
-			"types": "./src/api.ts",
-			"default": "./src/api.ts"
-		},
-		"./descriptor": {
-			"types": "./src/descriptor.ts",
-			"default": "./src/descriptor.ts"
-		},
-		"./base": {
-			"types": "./src/base.ts",
-			"default": "./src/base.ts"
-		}
-	},
 	"scripts": {
-		"check": "bunx tsc --noEmit",
 		"check:tsgo": "tsgo --noEmit -p tsconfig.json",
 		"test": "vitest run",
 		"lint": "oxlint --config ../../.oxlintrc.json .",
 		"fmt": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore . && prettier --write '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern",
 		"fmt:check": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore --check . && prettier --check '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern"
 	},
-	"dependencies": {
-		"apache-arrow": "^21.2.0",
-		"valibot": "^1.4.2"
-	},
 	"devDependencies": {
 		"@lance/config": "workspace:*",
-		"typescript": "^6.0.3",
+		"@types/node": "^26.1.1",
 		"vitest": "^4.1.10"
 	}
 }

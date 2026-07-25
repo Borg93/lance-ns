@@ -415,7 +415,7 @@ ci: ## Run the Python CI gate (ruff + ty + openapi drift + unit/integration test
 charts: ## Run the chart CI gate (helm lint/render invariants + prod-render-check + alert-rules-check) via Dagger
 	@dagger call charts
 
-frontend: ## Run the frontend CI gate (svelte-check + bun unit tests + eslint + prettier) hermetically via Dagger
+frontend: ## Run the frontend CI gate (svelte-check + tsgo + bun unit tests + oxlint/eslint + oxfmt/prettier) hermetically via Dagger
 	@dagger call frontend
 
 clean: ## helm uninstall the release (keep the cluster)

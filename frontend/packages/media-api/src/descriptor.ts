@@ -173,14 +173,27 @@ export type Row = v.InferOutput<typeof RowSchema> & Record<string, unknown>;
  *  keeps the type open so a dataset can declare a vector space under ANY key
  *  (e.g. `audio`) and have it flow through as a mode without a type edit. */
 export type SearchMode =
-	'fts' | 'semantic' | 'visual' | 'scene' | 'scene_fts' | 'hybrid' | 'all' | (string & {});
+	| 'fts'
+	| 'semantic'
+	| 'visual'
+	| 'scene'
+	| 'scene_fts'
+	| 'hybrid'
+	| 'all'
+	| (string & {});
 
 /** Generic column categories, derived from the LANCE/Arrow type (never a corpus
  *  role): an embedding is any fixed-size-list<float>, so text / pixel / audio /
  *  any-future embedding are ONE category. Drives type-appropriate UI (filters,
  *  search) without naming what a column means. */
 export type ColumnCategory =
-	'embedding' | 'blob' | 'numerical' | 'categorical' | 'temporal' | 'text' | 'other';
+	| 'embedding'
+	| 'blob'
+	| 'numerical'
+	| 'categorical'
+	| 'temporal'
+	| 'text'
+	| 'other';
 
 // `half_?float` catches both pyarrow's `halffloat` (float16) and a `half_float`
 // spelling; the `\b` keeps `int`/`float` from matching inside longer words.

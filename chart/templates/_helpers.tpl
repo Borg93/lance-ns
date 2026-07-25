@@ -27,7 +27,16 @@ later (InvalidImageName), bricking the pod with no obvious signal. */}}
 via --build-arg APP=<zone>; `make frontend-images`). Call: include "lance.frontendImage" (list $root "data"). */}}
 {{- define "lance.frontendImage" -}}
 {{- $root := index . 0 -}}{{- $name := index . 1 -}}
-{{- printf "lance-%s:%s" $name (required "frontend.image.tag must be set (a release tag in prod; `dev` locally)" $root.Values.frontend.image.tag) -}}
+{{- /* A zone boundary costs a full document load, and the only thing it buys is INDEPENDENT DEPLOY —
+       which a single shared tag silently cancels: every zone ships together, so the zones are pure cost.
+       Per-zone `tag` in frontend.apps wins; frontend.image.tag remains the default so a whole-estate
+       release stays one value, and a single zone can be rolled forward or back on its own. */ -}}
+{{- $app := "" -}}
+{{- range $root.Values.frontend.apps }}{{- if eq .name $name }}{{- $app = . }}{{- end }}{{- end }}
+{{- $tag := "" -}}
+{{- if $app }}{{- $tag = $app.tag | default $root.Values.frontend.image.tag -}}
+{{- else }}{{- $tag = $root.Values.frontend.image.tag -}}{{- end }}
+{{- printf "lance-%s:%s" $name (required "frontend.image.tag must be set (a release tag in prod; `dev` locally), or a per-zone `tag` on the frontend.apps entry" $tag) -}}
 {{- end -}}
 
 {{/* The SHARED env every micro-frontend zone gets — the cross-cutting "auth/secret similar in every MFE"

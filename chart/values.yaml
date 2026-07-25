@@ -547,7 +547,10 @@ frontend:
   enabled: true
   replicas: 1
   image:
-    tag: dev # shared tag; the image per zone is lance-<name>:<tag>
+    # The DEFAULT tag. A zone may override it with `tag:` on its frontend.apps entry below — that is
+    # what makes the zone split mean anything: independent deploy is the only thing a zone boundary
+    # buys, and one shared tag across every zone cancels it. Image per zone is lance-<name>:<tag>.
+    tag: dev
   service:
     port: 3000
   # The bare FGA subject the zones' BFF names when reading lineage as a SERVICE (no user session) — must be

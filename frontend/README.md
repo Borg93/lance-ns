@@ -52,10 +52,17 @@ frontend/
     engine/         # @repo/engine — the Pixi canvas engine, tools and layer store
     labeling/       # @repo/labeling — annotation history, tag writer, job clients
     config/         # @repo/config — the shared tsconfig base
-    zone-contract/  # @repo/zone-contract — the zone manifest: the invariant tests that keep
-                    #   microfrontends.json, each svelte.config.js base, each vite.config.ts port and
-                    #   chart/values.yaml agreeing, plus the local composition proxy driven by that
-                    #   same file (`bun run dev` → one origin on :5200, like the cluster Ingress)
+    zone-contract/  # @repo/zone-contract — everything about the zone SPLIT that no type or build can
+                    #   check, and the things that kept silently drifting when nobody did:
+                    #     · the manifest agrees — microfrontends.json, each svelte.config.js base, each
+                    #       vite.config.ts port, chart/values.yaml, and the package name turbo routes by
+                    #     · one config per tool, at the root — no per-package .oxlintrc/.oxfmtrc leftover
+                    #     · nothing outside the frontend names a retired package or zone (the dockerfile,
+                    #       chart, CI workflow, dagger module, verification scripts)
+                    #     · every BFF route has a caller — a route with no caller is a hole to a backend
+                    #     · budget.json — the per-zone gzipped client-bundle ceiling
+                    #   plus the local composition proxy driven by the same routing config
+                    #   (`bun run dev` → one origin on :5200, like the cluster Ingress)
 ```
 
 Note the two API packages are different layers, not duplicates: `@repo/api` is the **BFF/auth seam**

@@ -1,0 +1,21 @@
+{
+	"//": "Per-zone client-bundle ceilings in gzipped KB, over every .js/.css under .svelte-kit/output/client. A zone boundary is a full document load, so the bundle behind it is the whole cost of crossing one — and with the zones deployable on their own tags nobody watches all four at once. Raise a number ONLY with the reason in the commit message; that edit is the review.",
+	"zones": {
+		"home": {
+			"gzipKB": 190,
+			"note": "The landing + the OIDC round-trip. Should stay the smallest thing in the estate; if it grows, something that belongs in a domain zone has leaked into the shell."
+		},
+		"lakehouse": {
+			"gzipKB": 620,
+			"note": "Four areas (catalog, lineage, models, admin) in one router. Carries @xyflow/svelte for the lineage graph and layerchart for the model experiments."
+		},
+		"media": {
+			"gzipKB": 1120,
+			"note": "embedding-atlas + d3 + elkjs for the atlas/tree/graph surfaces."
+		},
+		"annotator": {
+			"gzipKB": 4800,
+			"note": "Pixi + the vendored OpenCV wasm. This number is the entire reason the annotator is a zone of its own rather than an area of media: the split keeps it out of a searcher's bundle. If it ever approaches media's, the split has stopped paying for itself."
+		}
+	}
+}

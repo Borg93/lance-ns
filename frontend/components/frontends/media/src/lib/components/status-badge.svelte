@@ -42,9 +42,9 @@
 <Popover.Root>
 	<Popover.Trigger
 		class={cn(
-			buttonVariants({ variant: 'ghost', size: 'sm' }),
-			'text-muted-foreground w-full justify-start',
-		)}
+	buttonVariants({ variant: 'ghost', size: 'sm' }),
+	'text-muted-foreground w-full justify-start',
+)}
 		title="Service status"
 	>
 		<span class="size-2 rounded-full {tone}"></span>

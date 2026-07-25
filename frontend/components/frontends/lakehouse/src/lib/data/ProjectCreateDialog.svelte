@@ -139,15 +139,15 @@
 	<Dialog.Content>
 		<Dialog.Title>New project</Dialog.Title>
 		<Dialog.Description>
-			Provisioning the first warehouse under a new project name creates the project and makes you
-			its admin; the optional serving warehouse hosts the gold tier in its own bucket.
+			Provisioning the first warehouse under a new project name creates the project and makes you its
+			admin; the optional serving warehouse hosts the gold tier in its own bucket.
 		</Dialog.Description>
 		<form
 			class="form"
 			onsubmit={(e) => {
-				e.preventDefault();
-				create();
-			}}
+	e.preventDefault();
+	create();
+}}
 		>
 			<label
 				>project name

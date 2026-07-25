@@ -15,8 +15,8 @@
 		"check:tsgo": "tsgo --noEmit -p tsconfig.json",
 		"test": "vitest run",
 		"lint": "oxlint .",
-		"fmt": "oxfmt .",
-		"fmt:check": "oxfmt --check ."
+		"fmt": "rsvelte-fmt .",
+		"fmt:check": "rsvelte-fmt --check ."
 	},
 	"dependencies": {
 		"@techstark/opencv-js": "5.0.0-release.1",

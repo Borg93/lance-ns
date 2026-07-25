@@ -157,9 +157,7 @@
 	<header>
 		<Network size={15} />
 		<h3>Relationship graph</h3>
-		<span class="sub mono"
-			>one hop of live tuples around the seed · click a neighbor to re-seed</span
-		>
+		<span class="sub mono">one hop of live tuples around the seed · click a neighbor to re-seed</span>
 		{#if truncated}
 			<span class="trunc mono" title="More tuples exist than one page — the hop is truncated">
 				truncated at {PAGE}/side

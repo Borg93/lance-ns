@@ -450,8 +450,8 @@
 	// Space tabs come from the descriptor's declared atlas spaces (DRY the
 	// segmented toggle). The first declared space stays selectable; the rest are
 	// gated until /status reports their projection built.
-	const spaceTabs = $derived.by(
-		(): { value: AtlasSpace; label: string; disabled: boolean; title: string }[] =>
+	const spaceTabs: { value: AtlasSpace; label: string; disabled: boolean; title: string }[] =
+		$derived(
 			view.atlasSpaces.map((s, i) => {
 				const built = builtSpaces[s.name] ?? false;
 				const disabled = i > 0 && !built;
@@ -465,7 +465,7 @@
 						: `${label} embedding map`,
 				};
 			}),
-	);
+		);
 
 	// ── selection helpers (data-space) ────────────────────────────────────────
 	/** The identity key path for point `i`, in descriptor key order: the doc key
@@ -737,11 +737,11 @@
              persisted value on remount). -->
 				<Select
 					bind:value={
-						() => crossFilter.colorBy,
-						(v) => {
-							if (colorValues.has(v)) crossFilter.colorBy = v;
-						}
-					}
+	() => crossFilter.colorBy,
+	(v) => {
+		if (colorValues.has(v)) crossFilter.colorBy = v;
+	}
+}
 					options={colorOptions}
 					ariaLabel="Colour points by"
 				/>
@@ -794,8 +794,8 @@
 									class="accent-primary w-full"
 								/>
 								<span class="text-muted-foreground/70 mt-0.5 block text-[0.7rem]">
-									How visible excluded points are — search-filtered or not in the lasso/cluster
-									selection (left = hidden).
+									How visible excluded points are — search-filtered or not in the lasso/cluster selection
+									(left = hidden).
 								</span>
 							</label>
 						</div>

@@ -85,9 +85,9 @@
 		<form
 			class="picker"
 			onsubmit={(e) => {
-				e.preventDefault();
-				load();
-			}}
+	e.preventDefault();
+	load();
+}}
 		>
 			<input
 				class="mono"

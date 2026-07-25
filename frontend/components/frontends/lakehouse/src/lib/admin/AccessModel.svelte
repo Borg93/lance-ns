@@ -49,9 +49,9 @@
 	<div class="note" role="note">
 		<FileCode2 size={15} />
 		<span>
-			<strong>Model changes are code migrations.</strong> This view is read-only — the model lives in
-			the repo (model.fga, kept in sync with its JSON twins) and changes ship through review + deploy,
-			never through a UI write. Grant within the model on the Tuples tab.
+			<strong>Model changes are code migrations.</strong> This view is read-only — the model lives in the
+			repo (model.fga, kept in sync with its JSON twins) and changes ship through review + deploy, never
+			through a UI write. Grant within the model on the Tuples tab.
 		</span>
 	</div>
 

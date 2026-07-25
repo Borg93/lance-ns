@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Alignment } from '@repo/media-api';
 	import { queryTerms } from '$lib/utils';
+	import { on } from 'svelte/events';
 
 	type Props = {
 		alignments: Alignment[];
@@ -106,13 +107,13 @@
 		// requestAnimationFrame(tick) loop — up to 3 windowed highlighters share
 		// one media element, so the RAF loops were 3 idle 60fps spinners on a
 		// paused video for zero benefit over these two listeners.
-		el.addEventListener('seeked', refresh);
-		el.addEventListener('timeupdate', refresh);
+		const offSeeked = on(el, 'seeked', refresh);
+		const offTimeUpdate = on(el, 'timeupdate', refresh);
 		refresh();
 
 		return () => {
-			el.removeEventListener('seeked', refresh);
-			el.removeEventListener('timeupdate', refresh);
+			offSeeked();
+			offTimeUpdate();
 			prevWord?.classList.remove('cursor-word');
 			prevSent?.classList.remove('cursor-sentence');
 		};
@@ -131,20 +132,20 @@
 			data-end={a.end}
 			class="hover:bg-muted/60 cursor-pointer rounded-sm transition-colors"
 			onclick={() => {
-				if (media) {
-					media.currentTime = a.start;
-					media.play().catch(() => {});
-				}
-			}}
+	if (media) {
+		media.currentTime = a.start;
+		media.play().catch(() => {});
+	}
+}}
 			onkeydown={(e) => {
-				if (e.key === 'Enter' || e.key === ' ') {
-					e.preventDefault();
-					if (media) {
-						media.currentTime = a.start;
-						media.play().catch(() => {});
-					}
-				}
-			}}
+	if (e.key === 'Enter' || e.key === ' ') {
+		e.preventDefault();
+		if (media) {
+			media.currentTime = a.start;
+			media.play().catch(() => {});
+		}
+	}
+}}
 			role="button"
 			tabindex="0"
 		>

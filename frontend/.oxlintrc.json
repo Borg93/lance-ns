@@ -1,8 +1,8 @@
 {
 	"$schema": "./node_modules/oxlint/configuration_schema.json",
-	"plugins": [
-		"typescript"
-	],
+	"plugins": ["typescript"],
+	"jsPlugins": ["@rsvelte/oxlint-plugin"],
+	"extends": ["./node_modules/@rsvelte/oxlint-plugin/recommended.json"],
 	"categories": {
 		"correctness": "error"
 	},
@@ -15,11 +15,64 @@
 				"varsIgnorePattern": "^_",
 				"caughtErrorsIgnorePattern": "^_"
 			}
-		]
+		],
+
+		// The two Svelte rules the retired ESLint config enforced as errors.
+		"svelte/require-each-key": "error",
+		"svelte/no-reactive-reassign": "error",
+
+		// OFF, with the reason. rsvelte's recommended set is generated from the live rule catalog, so it
+		// is the right thing to extend — but it is written for a components-own-their-CSS codebase, and
+		// a handful of its rules are actively wrong here. Each is named rather than dodged by extending
+		// a smaller preset, so a release that fixes one is a visible edit.
+
+		// Reports every Tailwind utility (193 hits): it looks for a matching selector in the component's
+		// own <style> block, and a utility class has none BY DESIGN. Cannot be true in this codebase.
+		"svelte/no-unused-class-name": "off",
+		// 389 hits, all advising "select by ID instead of class" — the opposite of a utility-CSS
+		// convention, and it would make every rule unshareable.
+		"svelte/consistent-selector-style": "off",
+		// Flags exactly the links the ESTATE requires: a cross-zone <a> must NOT carry this zone's base
+		// (it targets another app) and carries data-sveltekit-reload instead. It also flags query-only
+		// goto('?…'), which has no base to carry. The real hazard — a cross-zone link that soft-navigates
+		// — is gated from the other side by @repo/zone-contract's cross-zone-reload test.
+		"svelte/no-navigation-without-base": "off",
+		// Every hit is a RUNTIME-COMPUTED geometry value: treemap rects, a resizable split's percentages,
+		// a progress bar's width, graph node transforms. A utility class cannot express a number that is
+		// only known at runtime.
+		"svelte/no-inline-styles": "off",
+		"svelte/require-optimized-style-attribute": "off",
+		// Prefers `{const …}`, a syntax newer than the `{@const …}` this repo's Svelte compiles.
+		"svelte/no-at-const-tags": "off",
+		// Wants the <script> lang attribute omitted; every component here is lang="ts".
+		"svelte/block-lang": "off",
+		// Same false positive as no-navigation-without-base, for goto('?…').
+		"svelte/no-goto-without-base": "off",
+		// Carried over from the ESLint config these rules replaced — same rules, same reasons.
+		"svelte/prefer-svelte-reactivity": "off",
+		"svelte/no-navigation-without-resolve": "off",
+
+		// A readability rule about `new Array(x)` being ambiguous between length and sole element.
+		// Every use here is a PRE-SIZED buffer in a Pixi render path (`new Array(numRows)`), where the
+		// suggested `Array.from({length: n})` both allocates and fills. The ambiguity the rule is about
+		// does not arise when the argument is plainly a count.
+		"unicorn/no-new-array": "off"
 	},
+	"overrides": [
+		{
+			"files": ["**/*.svelte"],
+			"rules": {
+				// oxlint's .svelte support reads the <script> block and NOT the markup, so a variable
+				// assigned only by `bind:this={el}` looks unassigned. This is not a rule we can keep on
+				// the component surface until oxlint parses markup — it is wrong on every canvas ref.
+				"no-unassigned-vars": "off"
+			}
+		}
+	],
 	"ignorePatterns": [
-		"**/*.svelte",
 		"**/.svelte-kit/**",
+		// rsvelte-check writes generated TSX here; it is build output, not source.
+		"**/.svelte-check/**",
 		"**/build/**",
 		"**/dist/**",
 		"**/*.generated.ts",

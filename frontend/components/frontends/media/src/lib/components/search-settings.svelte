@@ -163,8 +163,8 @@
 						/>
 					</Field>
 					<span class="text-muted-foreground text-xs">
-						"Find this voice" normally hides matches from the anchor's own video. Applies
-						immediately to an active voice search.
+						"Find this voice" normally hides matches from the anchor's own video. Applies immediately to
+						an active voice search.
 					</span>
 				</div>
 			{/if}

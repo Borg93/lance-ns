@@ -37,9 +37,7 @@
 			<span class="pins">
 				{#each inputs as i (i.name)}
 					<span class="pin mono">
-						{i.name}{#if i.version}<span class="ver">@{i.version}</span>{:else}<span class="latest"
-								>@latest</span
-							>{/if}
+						{i.name}{#if i.version}<span class="ver">@{i.version}</span>{:else}<span class="latest">@latest</span>{/if}
 					</span>
 				{/each}
 			</span>

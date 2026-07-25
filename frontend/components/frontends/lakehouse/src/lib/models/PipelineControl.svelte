@@ -81,8 +81,8 @@
 	<section>
 		<h2>Produce</h2>
 		<p class="mut">
-			Fire the cascade head — seeds <span class="mono">raw_events</span> and emits its arrival
-			event, which drives raw → bronze → silver → gold. The run's lineage appears on the
+			Fire the cascade head — seeds <span class="mono">raw_events</span> and emits its arrival event,
+			which drives raw → bronze → silver → gold. The run's lineage appears on the
 			<a href="/lineage" data-sveltekit-reload>Lineage</a> view.
 		</p>
 		<button class="btn primary" disabled={busy} onclick={produce}>
@@ -100,9 +100,9 @@
 		<form
 			class="col"
 			onsubmit={(e) => {
-				e.preventDefault();
-				submitTrain();
-			}}
+	e.preventDefault();
+	submitTrain();
+}}
 		>
 			<input
 				class="mono"
@@ -130,8 +130,8 @@
 		<ShieldAlert size={14} />
 		<p class="mut">
 			Both triggers are guarded by OpenFGA — only a signed-in user who holds
-			<span class="mono">can_administer</span> on the project may fire them. Service-to-service callers
-			use the shared app-token; the web tier never holds it.
+			<span class="mono">can_administer</span> on the project may fire them. Service-to-service callers use
+			the shared app-token; the web tier never holds it.
 		</p>
 	</section>
 </div>

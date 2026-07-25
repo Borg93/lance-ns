@@ -39,7 +39,7 @@
 		if (pill.kind === 'topic') spec = { ...spec, topic: undefined };
 		else if (pill.kind === 'where') spec = { ...spec, where: undefined };
 		else if (pill.kind === 'filter') {
-			const rest = { ...(spec.filters ?? {}) };
+			const rest = { ...spec.filters };
 			delete rest[pill.field];
 			spec = { ...spec, filters: Object.keys(rest).length > 0 ? rest : undefined };
 		}

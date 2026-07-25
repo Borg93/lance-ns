@@ -54,9 +54,7 @@
 							title={controller.isHidden(g.name) ? 'Show' : 'Hide'}
 							onclick={() => controller.toggleGroupVisible(g.name)}
 						>
-							{#if controller.isHidden(g.name)}<EyeOff class="size-3.5" />{:else}<Eye
-									class="size-3.5"
-								/>{/if}
+							{#if controller.isHidden(g.name)}<EyeOff class="size-3.5" />{:else}<Eye class="size-3.5" />{/if}
 						</Button>
 						<input
 							type="color"
@@ -67,9 +65,9 @@
 						/>
 						<span
 							class={cn(
-								'flex-1 truncate text-xs',
-								controller.isHidden(g.name) && 'text-muted-foreground line-through',
-							)}
+	'flex-1 truncate text-xs',
+	controller.isHidden(g.name) && 'text-muted-foreground line-through',
+)}
 							title={g.name}
 						>
 							{g.name || '∅'}

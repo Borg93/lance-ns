@@ -22,11 +22,9 @@ and collected no independent-deploy payoff. They are areas of `lakehouse` now.
 frontend/
   package.json      # workspace root — bun workspaces; scripts ONLY delegate to turbo
   turbo.json        # build/check/check:tsgo/test/test:e2e/lint/fmt task graph (^build ordering, cached)
-  TOOLING.md        # which of oxlint/oxfmt/eslint/prettier owns what, and why it is not just two tools
-  .oxlintrc.json    # oxlint — .ts/.js/.mjs
-  .oxfmtrc.json     # oxfmt — .ts/.js/.mjs
-  eslint.config.js  # ESLint — .svelte + *.svelte.ts only
-  eslint-rules/     # the local cross-zone-reload rule (a cross-zone <a> MUST hard-navigate)
+  TOOLING.md        # the toolchain: ONE linter, ONE formatter, and the rules that are off with reasons
+  .oxlintrc.json    # oxlint — every extension, .svelte included (via @rsvelte/oxlint-plugin)
+  .oxfmtrc.json     # rsvelte-fmt + oxfmt — every extension
   components/frontends/
     home/           # catch-all zone (base '/'); owns the OIDC /auth/{login,callback,logout} routes
     lakehouse/      # /lakehouse — the governed estate, four AREAS in one router:
@@ -60,6 +58,8 @@ frontend/
                     #   check, and the things that kept silently drifting when nobody did:
                     #     · the manifest agrees — microfrontends.json, each svelte.config.js base, each
                     #       vite.config.ts port, chart/values.yaml, and the package name turbo routes by
+                    #     · a cross-zone <a> hard-navigates (was an ESLint rule; now runs on Svelte's
+                    #       own compiler, over every component in every zone)
                     #     · one config per tool, at the root — no per-package .oxlintrc/.oxfmtrc leftover
                     #     · nothing outside the frontend names a retired package or zone (the dockerfile,
                     #       chart, CI workflow, dagger module, verification scripts)
@@ -78,8 +78,9 @@ Commands (root): `bun install` · `bun run dev` (all four zones **plus the compo
 estate is one origin at <http://localhost:5200> exactly as it is behind the Ingress — `bun run dev:zones`
 for the raw per-port servers) · `bun run build` · `bun run check` · `bun run lint` · `bun run fmt:check`
 (CI-exact; `bun run fmt` rewrites) · `bun run test:e2e` · `bun run gen:types` (regenerates the OpenAPI
-types from `../docs/*-openapi.json`). Lint and format are split across two toolchains —
-**oxlint + oxfmt own `.ts`/`.js`, ESLint + Prettier own `.svelte`** — see [TOOLING.md](TOOLING.md).
+types from `../docs/*-openapi.json`). Lint and format are **one tool each, over every extension**: `oxlint` (with
+`@rsvelte/oxlint-plugin` for `.svelte`) and `rsvelte-fmt` (which delegates everything that is not
+`.svelte` to oxfmt, off the same config) — see [TOOLING.md](TOOLING.md).
 Each zone image builds from the parametrized
 `.docker/frontend.dockerfile` (`--build-arg APP=<zone>` → `lance-<zone>:dev`); runtime contract
 `bun ./build/index.js`, uid 1000. `make frontend-images` / `make frontend-load` build + side-load them all.

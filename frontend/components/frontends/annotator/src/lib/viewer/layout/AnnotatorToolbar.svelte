@@ -125,16 +125,16 @@
 		variant={controller.canSave ? 'default' : 'ghost'}
 		size="icon-sm"
 		title={controller.saveError ??
-			(controller.dirty ? 'Save to Lance (Ctrl+S)' : 'No unsaved edits')}
+	(controller.dirty ? 'Save to Lance (Ctrl+S)' : 'No unsaved edits')}
 		disabled={!controller.canSave}
 		onclick={() => controller.save()}
 	>
 		<Save
 			class={cn(
-				'size-4',
-				controller.saving && 'animate-pulse',
-				controller.saveError && 'text-destructive',
-			)}
+	'size-4',
+	controller.saving && 'animate-pulse',
+	controller.saveError && 'text-destructive',
+)}
 		/>
 	</Button>
 

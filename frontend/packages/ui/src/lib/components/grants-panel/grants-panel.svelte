@@ -16,7 +16,8 @@
 	export type GrantsKind = 'table' | 'namespace';
 	/** Mirrors the zones' status-aware ApiResult (http.ts): 0 = fetch-level failure/offline. */
 	export type GrantsResult<T> =
-		{ ok: true; data: T } | { ok: false; status: number; detail: string };
+		| { ok: true; data: T }
+		| { ok: false; status: number; detail: string };
 	export type GrantsAccessList = { grants: { relation: string; users: string[] }[] };
 	/** The zone-owned catalog seam: review + #68 check + #72 grant/revoke, all owner-gated SERVER-side. */
 	export type GrantsClient = {
@@ -248,11 +249,7 @@
 				{#if simError}
 					<p class="mut">{simError}</p>
 				{:else if simVerdictShown}
-					<p
-						class="verdict"
-						class:allow={simVerdictShown.allowed}
-						class:deny={!simVerdictShown.allowed}
-					>
+					<p class="verdict" class:allow={simVerdictShown.allowed} class:deny={!simVerdictShown.allowed}>
 						<span class="mono">{simVerdictShown.user}</span>
 						{simVerdictShown.allowed ? 'can' : 'cannot'}
 						<span class="mono">{simVerdictShown.relation}</span> on this {kind}.

@@ -186,17 +186,14 @@
 			</div>
 		</div>
 		<p class="text-muted-foreground">
-			Each clip scores <code class="text-primary">sum of 1/(60 + rank)</code> over the lists it appears
-			in:
+			Each clip scores <code class="text-primary">sum of 1/(60 + rank)</code> over the lists it appears in:
 		</p>
 		<div
 			class="border-border bg-muted text-foreground rounded-md border p-1.5 font-mono text-[0.7rem]"
 		>
-			A = 1/62 + 1/61 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded-md px-1"
-				>in both → wins</span
+			A = 1/62 + 1/61 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded-md px-1">in both → wins</span
 			><br />
-			C = 1/61 + 1/62 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded-md px-1"
-				>in both → wins</span
+			C = 1/61 + 1/62 ≈ 0.0326&ensp;<span class="bg-highlight/30 rounded-md px-1">in both → wins</span
 			><br />
 			B = 1/63 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;≈ 0.0159 (one list)<br />
 			D = 1/63 &ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;&ensp;≈ 0.0159 (one list)
@@ -215,8 +212,8 @@
 		<div class="text-foreground font-semibold">Balance slider vs RRF — the key difference</div>
 		<p class="text-muted-foreground">
 			The Balance slider is a <strong class="text-foreground">2-way blend</strong> of the actual
-			scores; it only exists for Hybrid (keyword ↔ meaning). It cannot describe 3 legs, so the
-			moment you add an image, fusion falls back to equal-weight RRF and the slider is
+			scores; it only exists for Hybrid (keyword ↔ meaning). It cannot describe 3 legs, so the moment
+			you add an image, fusion falls back to equal-weight RRF and the slider is
 			<strong class="text-foreground">ignored</strong>.
 		</p>
 		<div class="grid grid-cols-2 gap-2 text-[0.7rem]">
@@ -240,8 +237,7 @@
 		<div class="text-foreground font-semibold">Rerank (optional)</div>
 		<ul class="text-muted-foreground list-disc space-y-0.5 pl-4">
 			<li>
-				Takes only the <strong class="text-foreground">top K</strong> (default 20) of the already-fused
-				list.
+				Takes only the <strong class="text-foreground">top K</strong> (default 20) of the already-fused list.
 			</li>
 			<li>
 				A cross-encoder re-reads each of those transcripts against your combined text (<code
@@ -250,8 +246,8 @@
 			</li>
 			<li>Everything below K keeps its first-stage order — no second search is run.</li>
 			<li>
-				<strong class="text-foreground">Text-only:</strong> it never looks at the image or the vectors.
-				For image-only search there is no query text, so rerank is a no-op.
+				<strong class="text-foreground">Text-only:</strong> it never looks at the image or the vectors. For
+				image-only search there is no query text, so rerank is a no-op.
 			</li>
 		</ul>
 	</div>

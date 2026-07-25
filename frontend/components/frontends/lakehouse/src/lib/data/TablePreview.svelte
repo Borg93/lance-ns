@@ -56,8 +56,10 @@
 				const arrow = tableFromIPC(new Uint8Array(res.data));
 				fields = arrow.schema.fields.map((f): Field => ({ name: f.name, type: String(f.type) }));
 				const children = arrow.schema.fields.map((f) => arrow.getChild(f.name));
-				rows = Array.from({ length: arrow.numRows }, (_, i): Row =>
-					Object.fromEntries(arrow.schema.fields.map((f, j) => [f.name, children[j]?.get(i)])),
+				rows = Array.from(
+					{ length: arrow.numRows },
+					(_, i): Row =>
+						Object.fromEntries(arrow.schema.fields.map((f, j) => [f.name, children[j]?.get(i)])),
 				);
 				lastStatus = 200;
 			} catch (err) {
@@ -146,12 +148,14 @@
 	let pagination = $state<PaginationState>({ pageIndex: 0, pageSize: 10 });
 
 	const columns = $derived(
-		fields.map((f): ColumnDef<Row> => ({
-			id: f.name,
-			accessorFn: (r) => r[f.name],
-			header: () => renderSnippet(headerCell, f),
-			cell: ({ row }) => renderSnippet(valueCell, row.original[f.name]),
-		})),
+		fields.map(
+			(f): ColumnDef<Row> => ({
+				id: f.name,
+				accessorFn: (r) => r[f.name],
+				header: () => renderSnippet(headerCell, f),
+				cell: ({ row }) => renderSnippet(valueCell, row.original[f.name]),
+			}),
+		),
 	);
 
 	const grid = createSvelteTable({

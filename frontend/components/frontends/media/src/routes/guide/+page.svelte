@@ -220,30 +220,32 @@
 	];
 
 	// Decision guide: situation → which search (fact-checked; "all" = up to 4 legs).
+	// The answer column is `use`, not `then`: a plain object with a `then` property is a THENABLE,
+	// and awaiting anything holding one silently calls it (unicorn/no-thenable).
 	const DECISION = [
 		{
 			when: 'You can quote the exact words or a name that was said',
-			then: 'Keyword — type the phrase (Phrase for exact order, Fuzzy for typos). Turn on Rerank to float the closest wording up.',
+			use: 'Keyword — type the phrase (Phrase for exact order, Fuzzy for typos). Turn on Rerank to float the closest wording up.',
 		},
 		{
 			when: 'You only remember the gist, not the words',
-			then: 'Vector — describe the idea in your own words; it matches meaning, so paraphrases and synonyms still land.',
+			use: 'Vector — describe the idea in your own words; it matches meaning, so paraphrases and synonyms still land.',
 		},
 		{
 			when: 'You remember what it LOOKED like, not what was said',
-			then: "Scene — describe the picture (podium, placard, snowy street). It searches the AI's caption of each frame, not the pixels or the speech.",
+			use: "Scene — describe the picture (podium, placard, snowy street). It searches the AI's caption of each frame, not the pixels or the speech.",
 		},
 		{
 			when: 'You have a screenshot / photo from the clip',
-			then: 'Image — attach it to find visual look-alikes. Look-alike only, not face / identity; add words if you also recall what was said.',
+			use: 'Image — attach it to find visual look-alikes. Look-alike only, not face / identity; add words if you also recall what was said.',
 		},
 		{
 			when: 'You want exact words AND meaning',
-			then: 'Hybrid — runs Keyword + Vector together; nudge the Balance slider toward keyword (precise) or meaning (looser).',
+			use: 'Hybrid — runs Keyword + Vector together; nudge the Balance slider toward keyword (precise) or meaning (looser).',
 		},
 		{
 			when: "You're not sure which clue is strongest",
-			then: 'Attach an image and add text → all-angles mode: up to four legs (Keyword, Vector, Scene, Image) vote equally; the dial is ignored.',
+			use: 'Attach an image and add text → all-angles mode: up to four legs (Keyword, Vector, Scene, Image) vote equally; the dial is ignored.',
 		},
 	];
 
@@ -708,9 +710,9 @@
 					type="button"
 					onclick={() => (tab = 'search')}
 					class={'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ' +
-						(tab === 'search'
-							? 'border-primary text-foreground'
-							: 'text-muted-foreground hover:text-foreground border-transparent')}
+	(tab === 'search'
+		? 'border-primary text-foreground'
+		: 'text-muted-foreground hover:text-foreground border-transparent')}
 				>
 					<Search class="size-4" /> Search
 				</button>
@@ -718,9 +720,9 @@
 					type="button"
 					onclick={() => (tab = 'atlas')}
 					class={'flex items-center gap-1.5 border-b-2 px-3 py-2 text-sm font-medium transition-colors ' +
-						(tab === 'atlas'
-							? 'border-primary text-foreground'
-							: 'text-muted-foreground hover:text-foreground border-transparent')}
+	(tab === 'atlas'
+		? 'border-primary text-foreground'
+		: 'text-muted-foreground hover:text-foreground border-transparent')}
 				>
 					<MapIcon class="size-4" /> Atlas
 				</button>
@@ -746,9 +748,8 @@
 				<p class="text-muted-foreground mb-4 text-sm leading-relaxed">
 					The one question to ask before searching. Every chunk has two sides — the words that were
 					<strong class="text-foreground">said</strong> (the transcript) and the moment that was
-					<strong class="text-foreground">shown</strong> (the frame + its Swedish caption). Each signal
-					reads one side, so figure out which side your memory lives on and the right tool almost picks
-					itself.
+					<strong class="text-foreground">shown</strong> (the frame + its Swedish caption). Each signal reads
+					one side, so figure out which side your memory lives on and the right tool almost picks itself.
 				</p>
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div use:reveal class="reveal rounded-lg border border-sky-400/40 bg-sky-400/5 p-3">
@@ -757,8 +758,8 @@
 							What someone spoke. Read by <span class="font-medium text-sky-500 dark:text-sky-300"
 								>Keyword</span
 							>
-							(exact words) and <span class="text-primary font-medium">Vector</span> (the meaning, even
-							in other words). Neither looks at the picture.
+							(exact words) and <span class="text-primary font-medium">Vector</span> (the meaning, even in other
+							words). Neither looks at the picture.
 						</p>
 					</div>
 					<div
@@ -776,8 +777,8 @@
 					</div>
 				</div>
 				<p class="text-muted-foreground mt-3 text-sm leading-relaxed">
-					Not sure which world? Attach an image and add words — that opens the all-angles mode,
-					which votes across both worlds at once (the image is one vote, never the boss). And note: <strong
+					Not sure which world? Attach an image and add words — that opens the all-angles mode, which
+					votes across both worlds at once (the image is one vote, never the boss). And note: <strong
 						class="text-foreground">Rerank</strong
 					>
 					only re-reads the <em>said</em> side, and <strong class="text-foreground">Filters</strong>
@@ -787,34 +788,32 @@
 
 			<!-- B · what an embedding is -->
 			<section use:reveal class="reveal mb-10">
-				<h2 class="text-foreground mb-1 text-lg font-semibold">
-					What "meaning search" actually is
-				</h2>
+				<h2 class="text-foreground mb-1 text-lg font-semibold">What "meaning search" actually is</h2>
 				<p class="text-muted-foreground mb-3 text-sm leading-relaxed">
-					Picture a vast map where every idea gets a pin, and similar meanings land near each other
-					— "the minister stepped down" sits a short walk from "the minister resigned", even with no
-					shared word. An
-					<strong class="text-foreground">embedding</strong> is just that pin. Vector search drops your
-					query on the same map and hands back the nearest chunks — so wording barely matters.
+					Picture a vast map where every idea gets a pin, and similar meanings land near each other —
+					"the minister stepped down" sits a short walk from "the minister resigned", even with no shared
+					word. An
+					<strong class="text-foreground">embedding</strong> is just that pin. Vector search drops your query
+					on the same map and hands back the nearest chunks — so wording barely matters.
 				</p>
 				<div class="border-border bg-muted rounded-lg border p-3 text-xs leading-relaxed">
 					<ul class="text-muted-foreground space-y-1.5">
 						<li>
-							<strong class="text-foreground">Embedding = a map pin for meaning.</strong> Close = similar;
-							far = unrelated. That distance is the search.
+							<strong class="text-foreground">Embedding = a map pin for meaning.</strong> Close = similar; far
+							= unrelated. That distance is the search.
 						</li>
 						<li>
-							<strong class="text-foreground">"Cosine" = pointing the same direction.</strong> Two ideas
-							headed the same way are a match — length / loudness doesn't matter.
+							<strong class="text-foreground">"Cosine" = pointing the same direction.</strong> Two ideas headed
+							the same way are a match — length / loudness doesn't matter.
 						</li>
 						<li>
 							<strong class="text-foreground">One shared map for text AND captions.</strong> Transcript-meanings
-							and caption-meanings live in the same space, so typed words can find a frame's caption —
-							that's the trick behind Scene.
+							and caption-meanings live in the same space, so typed words can find a frame's caption — that's
+							the trick behind Scene.
 						</li>
 						<li>
-							<strong class="text-foreground">Meaning, not letters.</strong> Vector shrugs off spelling
-							but can drift on names / codes / quotes — that's where Keyword (or Filters) earns its keep.
+							<strong class="text-foreground">Meaning, not letters.</strong> Vector shrugs off spelling but can
+							drift on names / codes / quotes — that's where Keyword (or Filters) earns its keep.
 						</li>
 					</ul>
 				</div>
@@ -828,27 +827,27 @@
 				<p class="text-muted-foreground mb-3 text-sm leading-relaxed">
 					No single signal sees the whole moment — Keyword and Vector only hear the words; Scene and
 					Image only see the picture. So the app asks several witnesses at once — a stenographer, a
-					paraphraser, a set photographer — and trusts the clips they <em>agree</em> on. Agreement across
-					independent signals is the strongest hint a clip is really relevant.
+					paraphraser, a set photographer — and trusts the clips they <em>agree</em> on. Agreement across independent
+					signals is the strongest hint a clip is really relevant.
 				</p>
 				<div class="border-border bg-muted rounded-lg border p-3 text-xs leading-relaxed">
 					<ul class="text-muted-foreground space-y-1.5">
 						<li>
 							<strong class="text-foreground">Wide net first, tighten later.</strong> In the fused
-							<code class="font-mono">all</code> mode each leg over-fetches ~3× more candidates than you
-							asked for (recall — don't miss it), then fusion + Rerank squeeze to the best few (precision).
+							<code class="font-mono">all</code> mode each leg over-fetches ~3× more candidates than you asked
+							for (recall — don't miss it), then fusion + Rerank squeeze to the best few (precision).
 						</li>
 						<li>
-							<strong class="text-foreground">Agreement is the relevance signal.</strong> Appearing once
-							is a maybe; ranking high on three lists is a strong yes.
+							<strong class="text-foreground">Agreement is the relevance signal.</strong> Appearing once is a
+							maybe; ranking high on three lists is a strong yes.
 						</li>
 						<li>
-							<strong class="text-foreground">Votes, not vetoes.</strong> In image-plus-text search every
-							leg is one equal vote (RRF); a missing leg just abstains and the rest decide.
+							<strong class="text-foreground">Votes, not vetoes.</strong> In image-plus-text search every leg
+							is one equal vote (RRF); a missing leg just abstains and the rest decide.
 						</li>
 						<li>
-							<strong class="text-foreground">Catches synonyms AND silence.</strong> Vector saves you
-							when the words differ; Scene saves you when the thing on screen was never spoken.
+							<strong class="text-foreground">Catches synonyms AND silence.</strong> Vector saves you when the
+							words differ; Scene saves you when the thing on screen was never spoken.
 						</li>
 					</ul>
 				</div>
@@ -863,16 +862,15 @@
 					<strong class="text-foreground"
 						>Multiple independent passes, merged by rank — never a prefilter.</strong
 					>
-					The moment you attach an image <em>and</em> have text, the Keyword/Vector/Hybrid dial stops
-					mattering: the tool runs up to four searches side by side, each scanning the whole library on
-					its own, then merges their rankings.
+					The moment you attach an image <em>and</em> have text, the Keyword/Vector/Hybrid dial stops mattering:
+					the tool runs up to four searches side by side, each scanning the whole library on its own, then
+					merges their rankings.
 				</p>
 
 				<!-- parallel-lanes diagram -->
 				<div class="bg-card border-border rounded-xl border p-4">
 					<div class="text-muted-foreground mb-2 text-center text-xs">
-						every pass starts from the <strong class="text-foreground">same full library</strong> — all
-						at once
+						every pass starts from the <strong class="text-foreground">same full library</strong> — all at once
 					</div>
 					<div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
 						{#each LANES as lane, i (lane.name)}
@@ -911,9 +909,9 @@
 							✓ What actually happens
 						</div>
 						<p class="text-muted-foreground">
-							Four searchlights sweep the same full library at once; their rankings are pooled. A
-							chunk the image never matched can still rank #1 on the strength of its transcript
-							alone — the image is a
+							Four searchlights sweep the same full library at once; their rankings are pooled. A chunk the
+							image never matched can still rank #1 on the strength of its transcript alone — the image is
+							a
 							<strong class="text-foreground">voice in the vote</strong>, not a gate.
 						</p>
 					</div>
@@ -923,8 +921,7 @@
 					>
 						<div class="text-destructive mb-1 font-semibold line-through">✗ Not this</div>
 						<p class="text-muted-foreground">
-							The image runs first, grabs a shortlist of look-alike clips, and the text then
-							searches
+							The image runs first, grabs a shortlist of look-alike clips, and the text then searches
 							<em>only inside</em> that shortlist.
 							<strong class="text-foreground">No such funnel exists.</strong>
 							(Only the <em>Filters</em> panel narrows first — see below.)
@@ -942,14 +939,13 @@
 					</div>
 					<p class="text-muted-foreground">
 						Four passes fire at once. <strong class="text-foreground">Keyword</strong> ranks a
-						labour-market briefing #1; <strong class="text-foreground">Vector</strong> surfaces a
-						clip about "sysselsättning" (no exact word) at #2;
+						labour-market briefing #1; <strong class="text-foreground">Vector</strong> surfaces a clip
+						about "sysselsättning" (no exact word) at #2;
 						<strong class="text-foreground">Image</strong>
 						ranks an outdoor winter stakeout by frame-similarity;
-						<strong class="text-foreground">Scene</strong> lifts a frame captioned "person på snöig gata".
-						A clip that lands #3 / #5 / #3 / #2 across all four lists beats the briefing that was #1 in
-						only one — agreement wins. The photo never walled off a subset that "arbete" then searched
-						within.
+						<strong class="text-foreground">Scene</strong> lifts a frame captioned "person på snöig gata". A
+						clip that lands #3 / #5 / #3 / #2 across all four lists beats the briefing that was #1 in only one
+						— agreement wins. The photo never walled off a subset that "arbete" then searched within.
 					</p>
 				</div>
 			</section>
@@ -960,9 +956,9 @@
 					In what order does it happen? (and what's prioritised)
 				</h2>
 				<p class="text-muted-foreground mb-4 text-sm leading-relaxed">
-					The search legs have <strong class="text-foreground">no priority over each other</strong> —
-					they're equal-weight and run at the same time. So "image + Hybrid (FTS + Vector)" doesn't rank
-					one before another; the only real ordering is these pipeline stages:
+					The search legs have <strong class="text-foreground">no priority over each other</strong> — they're
+					equal-weight and run at the same time. So "image + Hybrid (FTS + Vector)" doesn't rank one before
+					another; the only real ordering is these pipeline stages:
 				</p>
 				<ol class="space-y-3">
 					<li use:reveal class="reveal flex gap-3">
@@ -982,8 +978,7 @@
 								they search (toggle off → after); the
 								<strong class="text-foreground">frame legs</strong>
 								(Image, Scene) always apply it
-								<em>after</em> ranking. Either way it's the only narrowing step. No filters set → the
-								whole library.
+								<em>after</em> ranking. Either way it's the only narrowing step. No filters set → the whole library.
 							</p>
 						</div>
 					</li>
@@ -1010,14 +1005,12 @@
 							>3</span
 						>
 						<div>
-							<div class="text-foreground text-sm font-medium">
-								Fuse by rank — equal weight (RRF)
-							</div>
+							<div class="text-foreground text-sm font-medium">Fuse by rank — equal weight (RRF)</div>
 							<p class="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-								Each leg's ranked list contributes <code class="font-mono">1/(60 + rank)</code> per
-								chunk; a chunk high in <em>more</em> lists wins. Every leg counts the same. (Hybrid
-								<em>without</em> an image may instead use the Balance slider — a 2-way blend of raw scores;
-								adding an image always reverts to equal-weight RRF.)
+								Each leg's ranked list contributes <code class="font-mono">1/(60 + rank)</code> per chunk; a
+								chunk high in <em>more</em> lists wins. Every leg counts the same. (Hybrid
+								<em>without</em> an image may instead use the Balance slider — a 2-way blend of raw scores; adding
+								an image always reverts to equal-weight RRF.)
 							</p>
 						</div>
 					</li>
@@ -1031,9 +1024,8 @@
 								Rerank the head <span class="text-muted-foreground font-normal">(optional)</span>
 							</div>
 							<p class="text-muted-foreground mt-0.5 text-xs leading-relaxed">
-								A text-only cross-encoder re-scores just the top <em>K</em> of the fused list,
-								reading each chunk's transcript (the <code class="font-mono">text</code> column) against
-								your text — see below.
+								A text-only cross-encoder re-scores just the top <em>K</em> of the fused list, reading each
+								chunk's transcript (the <code class="font-mono">text</code> column) against your text — see below.
 							</p>
 						</div>
 					</li>
@@ -1057,8 +1049,8 @@
 				<h2 class="text-foreground mb-1 text-lg font-semibold">The 4 judges</h2>
 				<p class="text-muted-foreground mb-4 text-sm leading-relaxed">
 					A search asks up to four independent judges to rank the chunks. Each runs as its
-					<em>own pass</em> over its <em>own</em> space and hands back its <em>own</em> ranked list —
-					they never compare scores with each other.
+					<em>own pass</em> over its <em>own</em> space and hands back its <em>own</em> ranked list — they
+					never compare scores with each other.
 				</p>
 				<div class="grid gap-3 sm:grid-cols-2">
 					{#each JUDGES as j, i (j.mode)}
@@ -1069,9 +1061,7 @@
 							<div class="flex items-center gap-2">
 								<span class="text-base leading-none">{j.icon}</span>
 								<span class="text-foreground font-medium">{j.name}</span>
-								<code
-									class="bg-card text-primary ml-auto rounded-md px-1.5 py-0.5 font-mono text-xs"
-								>
+								<code class="bg-card text-primary ml-auto rounded-md px-1.5 py-0.5 font-mono text-xs">
 									mode: {j.mode}
 								</code>
 							</div>
@@ -1132,9 +1122,7 @@
 								<span class="text-foreground font-medium">{s.name}</span>
 							</div>
 							<div class="mb-2">
-								<code class="bg-card text-primary rounded-md px-1.5 py-0.5 font-mono text-xs"
-									>{s.q}</code
-								>
+								<code class="bg-card text-primary rounded-md px-1.5 py-0.5 font-mono text-xs">{s.q}</code>
 							</div>
 							<p class="text-muted-foreground">
 								<span class="font-medium text-emerald-600 dark:text-emerald-300">Finds:</span>
@@ -1166,7 +1154,7 @@
 							class="reveal grid grid-cols-[1fr_1.4fr] last:[&>div]:border-b-0"
 						>
 							<div class="border-border text-foreground border-b p-2 font-medium">{r.when}</div>
-							<div class="border-border text-muted-foreground border-b border-l p-2">{r.then}</div>
+							<div class="border-border text-muted-foreground border-b border-l p-2">{r.use}</div>
 						</div>
 					{/each}
 				</div>
@@ -1184,8 +1172,7 @@
 					{#each MODES as m, i (m.mode)}
 						<div
 							use:reveal={{ delay: i * 60 }}
-							class="reveal text-muted-foreground grid grid-cols-[1fr_auto_1.6fr] last:[&>div]:border-b-0 {m.mode ===
-							'Image + text'
+							class="reveal text-muted-foreground grid grid-cols-[1fr_auto_1.6fr] last:[&>div]:border-b-0 {m.mode === 'Image + text'
 								? 'bg-highlight/10'
 								: ''}"
 						>
@@ -1194,8 +1181,7 @@
 								{m.passes}
 							</div>
 							<div class="border-border border-b border-l p-2">
-								{m.detail}{#if m.fuse !== '—'}&nbsp;· <span class="text-foreground">{m.fuse}</span
-									>{/if}
+								{m.detail}{#if m.fuse !== '—'}&nbsp;· <span class="text-foreground">{m.fuse}</span>{/if}
 							</div>
 						</div>
 					{/each}
@@ -1204,10 +1190,9 @@
 					use:reveal
 					class="reveal text-muted-foreground mt-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm leading-relaxed"
 				>
-					⚠️ <strong class="text-foreground">Attaching an image overrides the dial.</strong> Image +
-					text always becomes the 4-way <code class="font-mono">all</code> mode regardless of whether
-					you picked Keyword, Vector, or Hybrid. Image alone stays single-pass Image; text alone obeys
-					the dial.
+					⚠️ <strong class="text-foreground">Attaching an image overrides the dial.</strong> Image + text
+					always becomes the 4-way <code class="font-mono">all</code> mode regardless of whether you picked
+					Keyword, Vector, or Hybrid. Image alone stays single-pass Image; text alone obeys the dial.
 				</div>
 			</section>
 
@@ -1217,14 +1202,14 @@
 					Scenario matrix: exactly what runs, and when
 				</h2>
 				<p class="text-muted-foreground mb-3 text-sm leading-relaxed">
-					Two levers decide everything. <strong class="text-foreground">(1)</strong> the dial
-					(Keyword / Vector / Scene / Hybrid) only matters <em>when there's no image</em>.
-					<strong class="text-foreground">(2)</strong> attaching an image is the master switch —
-					image + any text becomes the 4-way <code class="font-mono">all</code> (dial &amp; slider
-					ignored); image alone becomes
+					Two levers decide everything. <strong class="text-foreground">(1)</strong> the dial (Keyword /
+					Vector / Scene / Hybrid) only matters <em>when there's no image</em>.
+					<strong class="text-foreground">(2)</strong> attaching an image is the master switch — image +
+					any text becomes the 4-way <code class="font-mono">all</code> (dial &amp; slider ignored);
+					image alone becomes
 					<code class="font-mono">visual</code>. Inside any multi-pass mode
-					<strong class="text-foreground">no leg is prioritised</strong> — fusion is equal-weight RRF
-					(Hybrid may instead use the Balance slider).
+					<strong class="text-foreground">no leg is prioritised</strong> — fusion is equal-weight RRF (Hybrid
+					may instead use the Balance slider).
 				</p>
 
 				<!-- interactive explorer: toggle and watch the passes light up / collapse -->
@@ -1263,17 +1248,14 @@
 					<div class="mt-3 flex flex-wrap items-center gap-2 text-xs">
 						<span class="text-muted-foreground">→ runs</span>
 						{#if demoMode}
-							<code
-								class="bg-primary/15 text-primary rounded-md px-2 py-0.5 font-mono font-semibold"
+							<code class="bg-primary/15 text-primary rounded-md px-2 py-0.5 font-mono font-semibold"
 								>{demoMode}</code
 							>
 							<span class="text-muted-foreground"
 								>{demoLegs.length} pass{demoLegs.length > 1 ? 'es' : ''}</span
 							>
 						{:else}
-							<span class="text-muted-foreground italic"
-								>nothing — type text or attach an image</span
-							>
+							<span class="text-muted-foreground italic">nothing — type text or attach an image</span>
 						{/if}
 					</div>
 
@@ -1317,16 +1299,13 @@
 
 					<p class="text-muted-foreground mt-3 text-xs leading-relaxed">
 						{#if hasImage && hasText}
-							Image + text → the dial is <strong class="text-foreground">ignored</strong> and all
-							four passes vote equally. Even with Dial = Vector, your text <em>still</em> runs the Keyword/BM25
-							leg — the image just adds a fourth voice (never a gate).
+							Image + text → the dial is <strong class="text-foreground">ignored</strong> and all four
+							passes vote equally. Even with Dial = Vector, your text <em>still</em> runs the Keyword/BM25 leg
+							— the image just adds a fourth voice (never a gate).
 						{:else if hasImage}
-							Image alone → a single <code class="font-mono">visual</code> pass; Rerank is a no-op without
-							text.
+							Image alone → a single <code class="font-mono">visual</code> pass; Rerank is a no-op without text.
 						{:else if demoMode}
-							No image → your dial picks the mode. Toggle <strong class="text-foreground"
-								>🖼️ Image</strong
-							>
+							No image → your dial picks the mode. Toggle <strong class="text-foreground">🖼️ Image</strong>
 							and watch it collapse to the 4-way <code class="font-mono">all</code>.
 						{:else}
 							Add some text or an image to begin.
@@ -1352,8 +1331,7 @@
 						<tbody>
 							{#each SCENARIOS as s (s.give)}
 								<tr class="text-muted-foreground {s.highlight ? 'bg-highlight/10' : ''}">
-									<td
-										class="border-border text-foreground border-b p-2 font-medium whitespace-nowrap"
+									<td class="border-border text-foreground border-b p-2 font-medium whitespace-nowrap"
 										>{s.give}</td
 									>
 									<td class="border-border border-b border-l p-2"
@@ -1372,19 +1350,19 @@
 					use:reveal
 					class="reveal text-muted-foreground mt-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3 text-sm leading-relaxed"
 				>
-					<strong class="text-foreground">What adding an image does:</strong> Keyword, Vector,
-					Scene, <em>or</em>
-					Hybrid all collapse to the same 4-way <code class="font-mono">all</code> the moment you
-					attach one. So
+					<strong class="text-foreground">What adding an image does:</strong> Keyword, Vector, Scene,
+					<em>or</em>
+					Hybrid all collapse to the same 4-way <code class="font-mono">all</code> the moment you attach
+					one. So
 					<strong class="text-foreground"
 						>Vector + image is not "just the meaning &amp; image legs"</strong
 					>
 					—
 					<code class="font-mono">all</code> runs <em>four equal legs</em>, so your text
 					<em>also</em>
-					drives a literal Keyword/BM25 leg and a Scene/caption leg. The dial you picked and the Balance
-					slider stop mattering; the image is simply added as a fourth equal voice (never a gate). Image
-					with no text stays a single <code class="font-mono">visual</code> pass.
+					drives a literal Keyword/BM25 leg and a Scene/caption leg. The dial you picked and the Balance slider
+					stop mattering; the image is simply added as a fourth equal voice (never a gate). Image with no text
+					stays a single <code class="font-mono">visual</code> pass.
 				</div>
 			</section>
 
@@ -1402,13 +1380,12 @@
 				>
 					<span class="font-medium text-emerald-600 dark:text-emerald-300">✓ Verified live</span>
 					against the running backend: Keyword, Vector, Hybrid, rerank, the Balance slider, Image (a posted
-					frame self-matched at&nbsp;#1) and <code class="font-mono">all</code> all return real
-					results; a name filter returned
+					frame self-matched at&nbsp;#1) and <code class="font-mono">all</code> all return real results;
+					a name filter returned
 					<strong class="text-foreground">15</strong> hits with prefilter vs
 					<strong class="text-foreground">0</strong>
-					with postfilter; fuzziness&nbsp;2 recovered a typo that fuzziness&nbsp;0 missed. The chunk IDs
-					and cosines in the examples below are illustrative — the <em>mechanics</em> they show are what's
-					verified.
+					with postfilter; fuzziness&nbsp;2 recovered a typo that fuzziness&nbsp;0 missed. The chunk IDs and
+					cosines in the examples below are illustrative — the <em>mechanics</em> they show are what's verified.
 				</div>
 				<div class="mb-3 flex flex-wrap gap-1.5">
 					{#each WORKED as w, i (w.key)}
@@ -1497,21 +1474,15 @@
 						<span>▼</span><span>▼ embed</span><span>▼ embed</span>
 					</div>
 					<div class="grid w-full grid-cols-3 gap-2">
-						<div
-							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs"
-						>
+						<div class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs">
 							FTS leg
 							<div class="text-muted-foreground">BM25 on text</div>
 						</div>
-						<div
-							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs"
-						>
+						<div class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs">
 							Text-vector leg
 							<div class="text-muted-foreground">text_embedding</div>
 						</div>
-						<div
-							class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs"
-						>
+						<div class="bg-background border-border rounded-md border px-2 py-1.5 text-center text-xs">
 							Frame-vector leg
 							<div class="text-muted-foreground">frame_embedding</div>
 						</div>
@@ -1527,17 +1498,14 @@
 					<div
 						class="border-primary/50 bg-primary/10 text-foreground w-full rounded-lg border px-4 py-2.5 text-center text-sm font-medium"
 					>
-						Fuse into one ranking — <span class="font-mono">RRF</span> (default) or Balance slider (hybrid
-						only)
+						Fuse into one ranking — <span class="font-mono">RRF</span> (default) or Balance slider (hybrid only)
 					</div>
 
 					<div class="flow-line"><span class="flow-dot" style="animation-delay:.3s"></span></div>
 
-					<div
-						class="bg-muted border-border w-full rounded-md border px-4 py-2 text-center text-sm"
-					>
-						Rerank top <em>K</em> <span class="text-muted-foreground">(optional)</span> — re-read each
-						transcript vs your text
+					<div class="bg-muted border-border w-full rounded-md border px-4 py-2 text-center text-sm">
+						Rerank top <em>K</em> <span class="text-muted-foreground">(optional)</span> — re-read each transcript
+						vs your text
 					</div>
 
 					<div class="flow-line"><span class="flow-dot" style="animation-delay:.6s"></span></div>
@@ -1556,18 +1524,16 @@
 					How the lists merge: RRF (worked example)
 				</h2>
 				<p class="text-muted-foreground mb-3 text-sm leading-relaxed">
-					Think of every active signal as a judge handing in a ranked shortlist. The clip that lands
-					high on the
-					<strong class="text-foreground">most</strong> shortlists wins — even if it's nobody's outright
-					#1. Here it is with two judges on 5 clips (A–E), each returning a ranked list:
+					Think of every active signal as a judge handing in a ranked shortlist. The clip that lands high
+					on the
+					<strong class="text-foreground">most</strong> shortlists wins — even if it's nobody's outright #1.
+					Here it is with two judges on 5 clips (A–E), each returning a ranked list:
 				</p>
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div use:reveal class="reveal bg-muted border-border rounded-lg border p-3 text-xs">
 						<div class="text-foreground mb-1 font-medium">⌨️ Keyword</div>
 						<div class="text-muted-foreground">
-							{#each keywordRanked as c, i (c)}<span class="text-foreground font-mono"
-									>{i + 1} = {c}</span
-								>{#if i < keywordRanked.length - 1}&ensp;·&ensp;{/if}{/each}
+							{#each keywordRanked as c, i (c)}<span class="text-foreground font-mono">{i + 1} = {c}</span>{#if i < keywordRanked.length - 1}&ensp;·&ensp;{/if}{/each}
 						</div>
 					</div>
 					<div
@@ -1576,9 +1542,7 @@
 					>
 						<div class="text-foreground mb-1 font-medium">💬 Meaning</div>
 						<div class="text-muted-foreground">
-							{#each meaningRanked as c, i (c)}<span class="text-foreground font-mono"
-									>{i + 1} = {c}</span
-								>{#if i < meaningRanked.length - 1}&ensp;·&ensp;{/if}{/each}
+							{#each meaningRanked as c, i (c)}<span class="text-foreground font-mono">{i + 1} = {c}</span>{#if i < meaningRanked.length - 1}&ensp;·&ensp;{/if}{/each}
 						</div>
 					</div>
 				</div>
@@ -1613,8 +1577,8 @@
 					{/each}
 				</div>
 				<p class="text-muted-foreground mt-3 text-sm leading-relaxed">
-					Clips that appear in <strong class="text-foreground">more lists</strong> rise to the top.
-					RRF needs no tuning and works the same for
+					Clips that appear in <strong class="text-foreground">more lists</strong> rise to the top. RRF
+					needs no tuning and works the same for
 					<strong class="text-foreground">2, 3, or 4 lists</strong>
 					— you just add another <code class="font-mono">1/(60 + rank)</code> term. The multi-judge
 					<code class="font-mono">all</code> mode <em>always</em> uses equal-weight RRF.
@@ -1627,20 +1591,21 @@
 					<div class="text-foreground mb-1 font-medium">
 						How the merge actually works (and why any number of legs is fine)
 					</div>
-					The legs run<strong class="text-foreground">independently</strong> — none feeds its hits
-					to another (the image's results are <em>not</em> handed to the Vector leg). Each returns
-					its <em>own</em> ranked list over the whole library. RRF then pours all the lists into
+					The legs run<strong class="text-foreground">independently</strong> — none feeds its hits to
+					another (the image's results are <em>not</em> handed to the Vector leg). Each returns its
+					<em>own</em>
+					ranked list over the whole library. RRF then pours all the lists into
 					<strong class="text-foreground">one pot keyed by chunk</strong>: a chunk's score is the
 					<strong class="text-foreground">sum</strong>
 					of
-					<code class="font-mono">1/(60 + rank)</code> from <em>every</em> list it appears in
-					(absent from a list → adds 0). So it's a
+					<code class="font-mono">1/(60 + rank)</code> from <em>every</em> list it appears in (absent
+					from a list → adds 0). So it's a
 					<strong class="text-foreground">union with added scores</strong>
 					— not a chain, and not a plain concatenation. Because it's just a sum, it extends to
 					<strong class="text-foreground">any number of lists</strong>
-					(2 for Hybrid, up to 4 for <code class="font-mono">all</code>) — you add one more term per
-					leg. A chunk only one leg found still shows up (it just scores low); a chunk several legs
-					rank highly wins.
+					(2 for Hybrid, up to 4 for <code class="font-mono">all</code>) — you add one more term per leg.
+					A chunk only one leg found still shows up (it just scores low); a chunk several legs rank
+					highly wins.
 				</div>
 			</section>
 
@@ -1651,8 +1616,8 @@
 				</h2>
 				<p class="text-muted-foreground mb-3 text-sm leading-relaxed">
 					The Balance slider is a <strong class="text-foreground">2-way blend</strong> of the actual
-					scores; it only exists for Hybrid (keyword ↔ meaning). It cannot describe 3 legs, so the
-					moment you add an image, fusion falls back to equal-weight RRF and the slider is
+					scores; it only exists for Hybrid (keyword ↔ meaning). It cannot describe 3 legs, so the moment
+					you add an image, fusion falls back to equal-weight RRF and the slider is
 					<strong class="text-foreground">ignored</strong>.
 				</p>
 				<div
@@ -1660,15 +1625,14 @@
 					class="reveal bg-muted border-border mb-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">For instance:</span> searching
-					<code class="bg-card text-primary rounded-md px-1 font-mono">elcertifikat</code> → slide
-					toward
+					<code class="bg-card text-primary rounded-md px-1 font-mono">elcertifikat</code> → slide toward
 					<strong class="text-foreground">Keyword</strong> for that exact word; searching
 					<code class="bg-card text-primary rounded-md px-1 font-mono"
 						>vad regeringen gör åt höga elpriser</code
 					>
 					→ slide toward <strong class="text-foreground">Vector</strong> to catch a clip that says
-					"stötta hushållen med elkostnaderna". The slider only re-weights the two <em>text</em> passes
-					— a weighted blend of their scores, not rank-voting — and does nothing for Scene or Image.
+					"stötta hushållen med elkostnaderna". The slider only re-weights the two <em>text</em> passes — a
+					weighted blend of their scores, not rank-voting — and does nothing for Scene or Image.
 				</div>
 				<div class="grid gap-3 sm:grid-cols-2">
 					<div use:reveal class="reveal bg-muted border-border rounded-lg border p-3 text-xs">
@@ -1686,9 +1650,7 @@
 							Default everywhere; always for multi-leg "all".
 						</div>
 						<div class="text-foreground mt-2 font-mono">Σ 1/(60 + rank)</div>
-						<div class="text-muted-foreground mt-0.5">
-							Uses ranks only. Equal weight, no tuning.
-						</div>
+						<div class="text-muted-foreground mt-0.5">Uses ranks only. Equal weight, no tuning.</div>
 					</div>
 				</div>
 			</section>
@@ -1715,8 +1677,8 @@
 					<div class="text-muted-foreground grid grid-cols-[7.5rem_1fr]">
 						<div class="border-border text-foreground border-b p-2 font-medium">Scores against</div>
 						<div class="border-border border-b border-l p-2">
-							your <code class="font-mono">Keyword + Meaning</code> text joined (<code
-								class="font-mono">q + q_vec</code
+							your <code class="font-mono">Keyword + Meaning</code> text joined (<code class="font-mono"
+								>q + q_vec</code
 							>).
 						</div>
 					</div>
@@ -1741,31 +1703,28 @@
 					class="reveal bg-muted border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">Before → after</span>, query
-					<code class="bg-card text-primary rounded-md px-1 font-mono">höjda räntor</code>: the
-					fused top-3 might be ① a "minister vid podium" clip that drifted in on Vector, ② a
-					stakeout that says "räntan" once, ③ the clip that actually says "vi måste hantera de höjda
-					räntorna". The cross-encoder reads only each transcript and reorders to
-					<strong class="text-foreground">③ ① ②</strong> — promoting the clip whose spoken words really
-					match.
+					<code class="bg-card text-primary rounded-md px-1 font-mono">höjda räntor</code>: the fused
+					top-3 might be ① a "minister vid podium" clip that drifted in on Vector, ② a stakeout that says
+					"räntan" once, ③ the clip that actually says "vi måste hantera de höjda räntorna". The
+					cross-encoder reads only each transcript and reorders to
+					<strong class="text-foreground">③ ① ②</strong> — promoting the clip whose spoken words really match.
 				</div>
 			</section>
 
 			<!-- 10 · the one real prefilter: Filters -->
 			<section use:reveal class="reveal border-border bg-muted mb-10 rounded-lg border p-4">
-				<h2 class="text-foreground mb-2 text-lg font-semibold">
-					The one real "narrow-first": Filters
-				</h2>
+				<h2 class="text-foreground mb-2 text-lg font-semibold">The one real "narrow-first": Filters</h2>
 				<p class="text-muted-foreground text-sm leading-relaxed">
 					The <strong class="text-foreground">Filters</strong> panel (language, name, referenskod,
-					extraid, raw SQL) is the only thing that narrows the library — and it has nothing to do
-					with the image. A filter becomes a <code class="font-mono">WHERE</code> clause. For the
+					extraid, raw SQL) is the only thing that narrows the library — and it has nothing to do with
+					the image. A filter becomes a <code class="font-mono">WHERE</code> clause. For the
 					<strong class="text-foreground">transcript legs</strong> (Keyword, Vector, Hybrid),
 					<em>prefilter</em>
 					narrows the corpus before they search (off → after); the
 					<strong class="text-foreground">frame legs</strong>
 					(Image, Scene) always filter after ranking. So
-					<strong class="text-foreground">Filter = a fence around the whole library</strong>; an
-					attached image = just one more voice in the merge.
+					<strong class="text-foreground">Filter = a fence around the whole library</strong>; an attached
+					image = just one more voice in the merge.
 				</p>
 
 				<div use:reveal class="reveal border-border mt-3 overflow-hidden rounded-lg border text-xs">
@@ -1808,9 +1767,8 @@
 				</div>
 				<p use:reveal class="reveal text-muted-foreground mt-2 text-xs leading-relaxed">
 					All conditions are <strong class="text-foreground">ANDed</strong> together and target the
-					<code class="font-mono">chunks</code> table's metadata — <em>not</em> frame attributes —
-					so even Image and Scene results are filtered by <em>their chunk's</em> language / name / ref
-					/ id.
+					<code class="font-mono">chunks</code> table's metadata — <em>not</em> frame attributes — so
+					even Image and Scene results are filtered by <em>their chunk's</em> language / name / ref / id.
 				</p>
 
 				<div
@@ -1818,28 +1776,24 @@
 					class="reveal bg-card border-border mt-3 rounded-lg border p-3 text-xs leading-relaxed"
 				>
 					<span class="text-foreground font-medium">For instance:</span> search
-					<code class="bg-muted text-primary rounded-md px-1 font-mono">nya regler</code> with a
-					filter
+					<code class="bg-muted text-primary rounded-md px-1 font-mono">nya regler</code> with a filter
 					<code class="bg-muted rounded-md px-1 font-mono">namn = "Andersson"</code> and N = 10.
-					<strong class="text-foreground">Prefilter (on):</strong> every leg that runs (here Keyword
-					+ Vector) searches <em>only</em> Andersson's chunks → a full 10 ranked Andersson hits.
+					<strong class="text-foreground">Prefilter (on):</strong> every leg that runs (here Keyword +
+					Vector) searches <em>only</em> Andersson's chunks → a full 10 ranked Andersson hits.
 					<strong class="text-foreground">Postfilter (off):</strong> each leg first finds its top 10
 					across
-					<em>all</em> ministers, then drops the non-Andersson ones — if only 3 were Andersson, you see
-					3. A tight postfilter can come up short.
+					<em>all</em> ministers, then drops the non-Andersson ones — if only 3 were Andersson, you see 3.
+					A tight postfilter can come up short.
 				</div>
 			</section>
 
 			<!-- E · reading & troubleshooting results -->
 			<section use:reveal class="reveal mb-10">
-				<h2 class="text-foreground mb-1 text-lg font-semibold">
-					Reading &amp; fixing your results
-				</h2>
+				<h2 class="text-foreground mb-1 text-lg font-semibold">Reading &amp; fixing your results</h2>
 				<p class="text-muted-foreground mb-4 text-sm leading-relaxed">
-					Every hit won a popularity contest among the signals you turned on. Read a surprising
-					result by asking "which side did it win on?", and fix a bad list by changing <em
-						>who votes</em
-					>, not by staring harder. Mental dial:
+					Every hit won a popularity contest among the signals you turned on. Read a surprising result by
+					asking "which side did it win on?", and fix a bad list by changing <em>who votes</em>, not by
+					staring harder. Mental dial:
 					<strong class="text-foreground">recall vs precision</strong> — widen when you're missing things,
 					tighten when the top is junk.
 				</p>
@@ -1858,9 +1812,7 @@
 
 			<!-- F · how information flows -->
 			<section use:reveal class="reveal mb-10">
-				<h2 class="text-foreground mb-1 text-lg font-semibold">
-					Under the hood: how a query travels
-				</h2>
+				<h2 class="text-foreground mb-1 text-lg font-semibold">Under the hood: how a query travels</h2>
 				<p class="text-muted-foreground mb-4 text-sm leading-relaxed">
 					What actually happens between hitting Enter and seeing results.
 				</p>
@@ -1889,9 +1841,9 @@
 							<code class="font-mono">chunks</code> holds the transcript side;
 							<code class="font-mono">chunk_frames</code>
 							holds one row per video frame (its caption + image vector). They're linked by
-							<code class="font-mono">(doc_id, speech_id, chunk_id)</code>. Image / Scene search the
-							frames table, then join back — which is why every result is a <em>chunk</em>, even
-							when the match was visual.
+							<code class="font-mono">(doc_id, speech_id, chunk_id)</code>. Image / Scene search the frames
+							table, then join back — which is why every result is a <em>chunk</em>, even when the match
+							was visual.
 						</p>
 					</div>
 					<div
@@ -1900,9 +1852,9 @@
 					>
 						<div class="text-foreground font-medium">One shared embedding space</div>
 						<p class="text-muted-foreground mt-1">
-							Transcript and caption vectors live in the <em>same</em> space, so a single query-text vector
-							can be compared to both (Vector → transcripts, Scene → captions). Your image vector lives
-							with the frame vectors (Image). Same map, different pins.
+							Transcript and caption vectors live in the <em>same</em> space, so a single query-text vector can
+							be compared to both (Vector → transcripts, Scene → captions). Your image vector lives with the
+							frame vectors (Image). Same map, different pins.
 						</p>
 					</div>
 					<div
@@ -1912,16 +1864,14 @@
 						<div class="text-foreground font-medium">Where the work happens</div>
 						<p class="text-muted-foreground mt-1">
 							The <strong class="text-foreground">frontend</strong> (this UI) talks to the
-							<strong class="text-foreground">backend</strong>, which talks to two separate model
-							servers — one for
+							<strong class="text-foreground">backend</strong>, which talks to two separate model servers —
+							one for
 							<strong class="text-foreground">embeddings</strong>, one for
-							<strong class="text-foreground">reranking</strong> — and reads the LanceDB tables on
-							disk. If the embedding server is down a vector search fails fast with a clear error;
-							if an embedding column was never built, that leg returns nothing in a fused search and
-							the others carry on (a single Vector or Hybrid search instead shows a clear "not
-							built" message). The
-							<strong class="text-foreground">Services</strong> badge in the sidebar shows their live
-							status.
+							<strong class="text-foreground">reranking</strong> — and reads the LanceDB tables on disk. If
+							the embedding server is down a vector search fails fast with a clear error; if an embedding
+							column was never built, that leg returns nothing in a fused search and the others carry on (a
+							single Vector or Hybrid search instead shows a clear "not built" message). The
+							<strong class="text-foreground">Services</strong> badge in the sidebar shows their live status.
 						</p>
 					</div>
 				</div>
@@ -1955,8 +1905,7 @@
 			<section use:reveal class="reveal mb-10">
 				<h2 class="text-foreground mb-1 text-lg font-semibold">Glossary — the words you'll see</h2>
 				<p class="text-muted-foreground mb-4 text-sm leading-relaxed">
-					Each term in one line. None of them are magic — each is a librarian with one specific
-					talent.
+					Each term in one line. None of them are magic — each is a librarian with one specific talent.
 				</p>
 				<dl class="border-border divide-border divide-y overflow-hidden rounded-lg border text-xs">
 					{#each GLOSSARY as g, i (g.term)}
@@ -1982,8 +1931,7 @@
 		{:else}
 			<!-- ░░ ATLAS ░░ -->
 			<p use:reveal class="reveal text-muted-foreground mb-6 text-sm leading-relaxed">
-				The Atlas is a <strong class="text-foreground">2-D map of every chunk</strong>, laid out by
-				the
+				The Atlas is a <strong class="text-foreground">2-D map of every chunk</strong>, laid out by the
 				<em>meaning of its transcript text</em> — an EVōC projection of the same text embeddings the Meaning
 				judge uses. It's a bird's-eye view of the whole corpus.
 			</p>
@@ -1995,9 +1943,8 @@
 				>
 					<div class="text-foreground font-medium">What it shows</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
-						Each dot is one chunk. Chunks with similar wording sit close together; colour encodes
-						the EVōC cluster they fall into. Dense regions are recurring themes across press
-						conferences.
+						Each dot is one chunk. Chunks with similar wording sit close together; colour encodes the EVōC
+						cluster they fall into. Dense regions are recurring themes across press conferences.
 					</p>
 				</div>
 				<div
@@ -2006,9 +1953,8 @@
 				>
 					<div class="text-foreground font-medium">How to read it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
-						Distance ≈ semantic similarity. Two clips far apart talk about different things even if
-						they share a word; two clips close together are about the same thing even in different
-						words.
+						Distance ≈ semantic similarity. Two clips far apart talk about different things even if they
+						share a word; two clips close together are about the same thing even in different words.
 					</p>
 				</div>
 				<div
@@ -2017,9 +1963,8 @@
 				>
 					<div class="text-foreground font-medium">How to use it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
-						Pan and zoom, hover a point for its transcript, or lasso a region to cross-filter the
-						linked charts and table. Great for discovering clusters you'd never have searched for by
-						keyword.
+						Pan and zoom, hover a point for its transcript, or lasso a region to cross-filter the linked
+						charts and table. Great for discovering clusters you'd never have searched for by keyword.
 					</p>
 				</div>
 				<div
@@ -2029,8 +1974,7 @@
 					<div class="text-foreground font-medium">Build / rebuild it</div>
 					<p class="text-muted-foreground mt-1 text-xs leading-relaxed">
 						The projection is computed offline. Run
-						<code class="bg-card rounded-md px-1 py-0.5 font-mono text-xs">ratch feature atlas</code
-						>
+						<code class="bg-card rounded-md px-1 py-0.5 font-mono text-xs">ratch feature atlas</code>
 						to (re)generate it; the tab shows a prompt until it exists.
 					</p>
 				</div>
@@ -2040,9 +1984,9 @@
 				use:reveal
 				class="reveal border-border bg-card text-muted-foreground mt-4 rounded-lg border p-3 text-sm leading-relaxed"
 			>
-				The Atlas maps <strong class="text-foreground">transcript meaning only</strong> — not the video
-				frames or captions. It complements Search: Search answers "where is X?", the Atlas answers "what's
-				in here, and how does it group?"
+				The Atlas maps <strong class="text-foreground">transcript meaning only</strong> — not the video frames
+				or captions. It complements Search: Search answers "where is X?", the Atlas answers "what's in here,
+				and how does it group?"
 			</div>
 
 			<a

@@ -62,7 +62,7 @@
 	 *  span. `extra` (a browsed Document) supplies the display fields — its title
 	 *  and metadata ride along untouched so the card/player still show them. */
 	function playerRow(docId: string, start: number, end: number, extra?: Hit): Hit {
-		const row: Hit = { ...(extra ?? {}), _score: 0, alignments: [] };
+		const row: Hit = { ...extra, _score: 0, alignments: [] };
 		for (const k of ds.keyFields) {
 			if (!(k in row)) row[k] = k === ds.docKeyField ? docId : 0;
 		}
@@ -886,10 +886,7 @@
 												{/if}
 											</span>
 											{#if autoLabelMsg}
-												<span
-													class="text-muted-foreground ml-auto font-mono text-xs"
-													title="batch job"
-												>
+												<span class="text-muted-foreground ml-auto font-mono text-xs" title="batch job">
 													{autoLabelMsg}
 												</span>
 											{/if}
@@ -999,9 +996,9 @@
 											{#each docs as doc (ds.docId(doc))}
 												<tr
 													class={'border-border/60 hover:bg-muted/60 cursor-pointer border-b ' +
-														(activeDocId === ds.docId(doc)
-															? 'bg-primary/15 font-medium [box-shadow:inset_3px_0_0_0_var(--color-primary)]'
-															: '')}
+	(activeDocId === ds.docId(doc)
+		? 'bg-primary/15 font-medium [box-shadow:inset_3px_0_0_0_var(--color-primary)]'
+		: '')}
 													onclick={() => openDoc(doc)}
 												>
 													{#each docCols as c (c.key)}
@@ -1013,8 +1010,8 @@
 																	alt=""
 																	class="bg-muted h-9 w-16 rounded-md object-cover"
 																	onerror={(e) =>
-																		((e.currentTarget as HTMLImageElement).style.visibility =
-																			'hidden')}
+	((e.currentTarget as HTMLImageElement).style.visibility =
+		'hidden')}
 																/>
 															</td>
 														{:else}

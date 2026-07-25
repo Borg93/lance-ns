@@ -2,6 +2,7 @@ node_modules
 .turbo
 components/frontends/*/build
 components/frontends/*/.svelte-kit
+.svelte-check
 components/frontends/*/test-results
 packages/*/dist
 storybook-static/

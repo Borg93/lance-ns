@@ -78,9 +78,7 @@
 				</div>
 			</div>
 		{:else}
-			<div class="text-muted-foreground grid h-full place-items-center text-sm">
-				Loading dataset…
-			</div>
+			<div class="text-muted-foreground grid h-full place-items-center text-sm">Loading dataset…</div>
 		{/if}
 	</div>
 </AppShell>

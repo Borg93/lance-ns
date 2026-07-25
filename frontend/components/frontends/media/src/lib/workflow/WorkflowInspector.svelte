@@ -222,12 +222,12 @@
 							class="border-border bg-background text-foreground hover:bg-muted inline-flex items-center justify-center gap-1.5 rounded-md border px-2 py-1.5 text-xs font-medium transition-colors disabled:opacity-50"
 							disabled={hits.length === 0 || selectedColumns.length === 0}
 							onclick={() =>
-								exportHits(
-									graph.tags.withTags(hits),
-									cfg.exportFormat,
-									new Date(),
-									cfg.exportColumns,
-								)}
+	exportHits(
+		graph.tags.withTags(hits),
+		cfg.exportFormat,
+		new Date(),
+		cfg.exportColumns,
+	)}
 						>
 							<Download class="size-3.5" />
 							Download {hits.length} hit{hits.length === 1 ? '' : 's'} as {cfg.exportFormat.toUpperCase()}
@@ -246,8 +246,9 @@
 					<p class="text-muted-foreground text-xs">
 						{#if kind === 'export' && rt.status === 'idle'}
 							Press Run to feed results. Selected columns{selectedColumns.includes('tags')
-								? ' (including tags)'
-								: ''} will export.
+				? ' (including tags)'
+				: ''}
+							will export.
 						{:else if rt.status === 'idle'}
 							Not run yet — press Run.
 						{:else}

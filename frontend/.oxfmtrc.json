@@ -6,6 +6,7 @@
 	"trailingComma": "all",
 	"ignorePatterns": [
 		"**/.svelte-kit/**",
+		"**/.svelte-check/**",
 		"**/build/**",
 		"**/dist/**",
 		"**/*.generated.ts",

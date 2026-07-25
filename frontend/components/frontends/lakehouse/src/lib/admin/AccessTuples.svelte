@@ -262,9 +262,9 @@
 	<form
 		class="filters"
 		onsubmit={(e) => {
-			e.preventDefault();
-			load();
-		}}
+	e.preventDefault();
+	load();
+}}
 	>
 		<input
 			class="mono"
@@ -320,8 +320,8 @@
 			{#if tuples !== null}
 				<span class="count mono"
 					>{tuples.length} tuple{tuples.length === 1 ? '' : 's'}{continuation
-						? ' · more exist'
-						: ''}</span
+			? ' · more exist'
+			: ''}</span
 				>
 			{/if}
 		</div>
@@ -346,9 +346,9 @@
 		<form
 			class="grant-form"
 			onsubmit={(e) => {
-				e.preventDefault();
-				grant();
-			}}
+	e.preventDefault();
+	grant();
+}}
 		>
 			<input
 				class="mono"
@@ -387,8 +387,8 @@
 <AlertDialog.Root
 	open={revokeTarget !== null}
 	onOpenChange={(open) => {
-		if (!open) revokeTarget = null;
-	}}
+	if (!open) revokeTarget = null;
+}}
 >
 	<AlertDialog.Content>
 		<AlertDialog.Title>Revoke this tuple</AlertDialog.Title>

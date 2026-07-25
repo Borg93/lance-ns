@@ -14,9 +14,7 @@
 		<header class="flex flex-col gap-1">
 			<h1 class="text-3xl font-semibold">lance</h1>
 			<p class="text-muted-foreground">
-				Governed Lance lakehouse — {data.estateAdmin
-					? 'every project in the estate'
-					: 'your projects'}.
+				Governed Lance lakehouse — {data.estateAdmin ? 'every project in the estate' : 'your projects'}.
 			</p>
 		</header>
 

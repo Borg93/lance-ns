@@ -11,8 +11,8 @@
 		"check:tsgo": "tsgo --noEmit -p tsconfig.json",
 		"test": "vitest run",
 		"lint": "oxlint .",
-		"fmt": "oxfmt .",
-		"fmt:check": "oxfmt --check ."
+		"fmt": "rsvelte-fmt .",
+		"fmt:check": "rsvelte-fmt --check ."
 	},
 	"dependencies": {
 		"@repo/media-api": "workspace:*",

@@ -156,9 +156,9 @@
 				<div class="ml-auto w-56">
 					<Select
 						options={datasets.map((d) => ({
-							value: d.id,
-							label: d.docs != null ? `${d.id} (${d.docs} docs)` : d.id,
-						}))}
+	value: d.id,
+	label: d.docs != null ? `${d.id} (${d.docs} docs)` : d.id,
+}))}
 						bind:value={datasetChoice}
 						ariaLabel="Dataset"
 					/>

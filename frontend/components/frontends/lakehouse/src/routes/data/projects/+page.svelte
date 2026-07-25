@@ -35,20 +35,24 @@
 		const roleOf = new Map((meRes?.projects ?? []).map((p) => [p.project, p.role]));
 		if (estate.ok) {
 			estateWide = true;
-			rows = estate.data.map((p: ProjectSummary): Row => ({
-				project: p.project,
-				role: roleOf.get(p.project) ?? null,
-				warehouses: p.warehouses.length,
-			}));
+			rows = estate.data.map(
+				(p: ProjectSummary): Row => ({
+					project: p.project,
+					role: roleOf.get(p.project) ?? null,
+					warehouses: p.warehouses.length,
+				}),
+			);
 			lastStatus = 200;
 		} else if (estate.status === 403 && meRes) {
 			// Not an estate observer — the caller's OWN memberships are the honest gallery.
 			estateWide = false;
-			rows = meRes.projects.map((p): Row => ({
-				project: p.project,
-				role: p.role,
-				warehouses: null,
-			}));
+			rows = meRes.projects.map(
+				(p): Row => ({
+					project: p.project,
+					role: p.role,
+					warehouses: null,
+				}),
+			);
 			lastStatus = 200;
 		} else {
 			lastStatus = estate.status;

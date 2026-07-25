@@ -89,9 +89,8 @@
 						{#each detail.warehouses as w (w.id)}
 							<tr>
 								<td>
-									<a
-										class="mono whlink"
-										href={`${base}/data/warehouses/${encodeURIComponent(w.id)}`}>{w.id}</a
+									<a class="mono whlink" href={`${base}/data/warehouses/${encodeURIComponent(w.id)}`}
+										>{w.id}</a
 									>
 								</td>
 								<td class="mono">{w.bucket}</td>

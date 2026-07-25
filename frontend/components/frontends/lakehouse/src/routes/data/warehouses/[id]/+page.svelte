@@ -122,9 +122,8 @@
 		<section>
 			<h2>Namespaces</h2>
 			<p class="mut">
-				Derived from the table registry by the <span class="mono"
-					>&lt;project&gt;-&lt;stage&gt;</span
-				> naming convention — the registry has no bindings read API.
+				Derived from the table registry by the <span class="mono">&lt;project&gt;-&lt;stage&gt;</span> naming
+				convention — the registry has no bindings read API.
 			</p>
 			{#if tables === null}
 				<p class="mut">Table registry unavailable right now — namespaces can't be derived.</p>

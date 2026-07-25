@@ -74,7 +74,7 @@
 		status: string | null;
 		admins: string[];
 	};
-	const rows = $derived.by((): Row[] =>
+	const rows: Row[] = $derived(
 		(projects ?? []).flatMap((p): Row[] =>
 			p.warehouses.length === 0
 				? [{ project: p.project, warehouse: null, bucket: null, status: null, admins: p.admins }]
@@ -172,13 +172,13 @@
 </script>
 
 {#snippet warehouseCell(row: Row)}
-	{#if row.warehouse}<span class="mono">{row.warehouse}</span>{:else}<span class="mut"
-			>(no warehouses)</span
-		>{/if}
+	{#if row.warehouse}<span class="mono">{row.warehouse}</span>{:else}<span class="mut">(no
+	warehouses)</span>{/if}
 {/snippet}
 {#snippet statusCell(row: Row)}
-	{#if row.status}<span class="mono" class:warn={row.status !== 'active'}>{row.status}</span
-		>{:else}<span class="mut">—</span>{/if}
+	{#if row.status}<span class="mono" class:warn={row.status !== 'active'}
+	  >{row.status}</span
+	>{:else}<span class="mut">—</span>{/if}
 {/snippet}
 {#snippet adminsCell(row: Row)}
 	{#if row.admins.length === 0}
@@ -233,8 +233,8 @@
 <Sheet.Root
 	open={drawerRow !== null}
 	onOpenChange={(o) => {
-		if (!o) drawerRow = null;
-	}}
+	if (!o) drawerRow = null;
+}}
 >
 	<Sheet.Content side="right">
 		{#if drawerRow}
@@ -245,8 +245,8 @@
 						: `Project ${drawerRow.project}`}
 				</Sheet.Title>
 				<Sheet.Description>
-					One tenant row off the registry + FGA — the project, its storage binding, and who
-					administers it.
+					One tenant row off the registry + FGA — the project, its storage binding, and who administers
+					it.
 				</Sheet.Description>
 			</Sheet.Header>
 			<div class="drawer-body">

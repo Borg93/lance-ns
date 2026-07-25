@@ -69,8 +69,10 @@ jobs:
       # Turborepo workspace bun gates — svelte-check, TypeScript 7 (tsgo), unit tests, lint and fmt:check
       # fan out over the packages/* AND components/frontends/* (the 4 micro-frontend zones) workspace. All
       # five are PACKAGE tasks now, so turbo parallelises and caches them instead of running lint/fmt once
-      # repo-wide over a hand-maintained path list; oxlint + oxfmt own .ts/.js and eslint + prettier own
-      # .svelte (see frontend/TOOLING.md). Run hermetically in the pinned oven/bun image via the Dagger
+      # repo-wide over a hand-maintained path list. ONE linter and ONE formatter cover every extension:
+      # oxlint (with @rsvelte/oxlint-plugin for .svelte) and rsvelte-fmt (which delegates everything that
+      # is not .svelte to oxfmt) — see frontend/TOOLING.md. ESLint and Prettier are no longer installed.
+      # Run hermetically in the pinned oven/bun image via the Dagger
       # module (.dagger/frontend.go). `dagger call frontend` == `make frontend`.
       - name: Frontend bun gate — svelte-check + tsgo + unit + lint + fmt (Dagger)
         env:

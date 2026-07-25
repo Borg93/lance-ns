@@ -119,7 +119,7 @@
 
 	// Once the title is known, drop the channel chip that merely repeats it (for
 	// this corpus the title IS a channel), so it shows once as the header.
-	const chips = $derived.by(() =>
+	const chips = $derived(
 		snip && snipFor === index ? channelChips.filter((c) => c.value !== snip!.title) : channelChips,
 	);
 </script>

@@ -18,6 +18,7 @@
 	import TranscriptWindow from './transcript-window.svelte';
 	import ChunkTimeline from './chunk-timeline.svelte';
 	import DiarizationTimeline from './diarization-timeline.svelte';
+	import { on } from 'svelte/events';
 
 	type Props = {
 		hit: Hit | null;
@@ -223,9 +224,9 @@
 		const onChange = () => {
 			isFullscreen = document.fullscreenElement === fsWrap;
 		};
-		document.addEventListener('fullscreenchange', onChange);
+		const offFullscreen = on(document, 'fullscreenchange', onChange);
 		return () => {
-			document.removeEventListener('fullscreenchange', onChange);
+			offFullscreen();
 		};
 	});
 
@@ -292,19 +293,21 @@
 			mediaError = err ? (codes[err.code] ?? 'unknown') : 'unknown';
 		};
 
+		// `on()` returns its own unsubscribe, so the teardown cannot drift out of sync with the
+		// registration the way a hand-paired add/removeEventListener can (and `{ once: true }` handlers
+		// were being removed by hand even after they had already fired).
+		const offs: (() => void)[] = [];
 		if (el.readyState >= 1 /* HAVE_METADATA */) {
 			seek();
 		} else {
-			el.addEventListener('loadedmetadata', seek, { once: true });
-			el.addEventListener('canplay', seek, { once: true });
+			offs.push(on(el, 'loadedmetadata', seek, { once: true }));
+			offs.push(on(el, 'canplay', seek, { once: true }));
 		}
-		el.addEventListener('error', onError);
+		offs.push(on(el, 'error', onError));
 
 		return () => {
 			cancelled = true;
-			el.removeEventListener('loadedmetadata', seek);
-			el.removeEventListener('canplay', seek);
-			el.removeEventListener('error', onError);
+			for (const off of offs) off();
 			el.pause();
 		};
 	});
@@ -338,8 +341,8 @@
 		<div
 			bind:this={fsWrap}
 			class={isFullscreen
-				? 'relative flex min-h-0 flex-col bg-black'
-				: 'border-border bg-card relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-sm'}
+	? 'relative flex min-h-0 flex-col bg-black'
+	: 'border-border bg-card relative flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border shadow-sm'}
 		>
 			{#if isFullscreen}
 				{@render fsToggle(
@@ -359,8 +362,8 @@
 				preload="metadata"
 				src={mediaUrl(hit)}
 				class={isFullscreen
-					? 'min-h-0 w-full flex-1 bg-black object-contain'
-					: 'aspect-video max-h-[45vh] w-full shrink-0 bg-black object-contain'}
+	? 'min-h-0 w-full flex-1 bg-black object-contain'
+	: 'aspect-video max-h-[45vh] w-full shrink-0 bg-black object-contain'}
 			>
 				<track kind="captions" />
 			</video>
@@ -412,10 +415,10 @@
            on the bridge bar, which is hidden in fullscreen). -->
 			<div
 				class={isFullscreen
-					? 'absolute inset-x-0 bottom-20 mx-auto max-h-[32%] w-[min(92%,60rem)] overflow-y-auto rounded-xl bg-black/55 px-6 py-4 text-lg leading-8 text-white backdrop-blur-sm'
-					: tab === 'speakers'
-						? 'flex min-h-[10rem] flex-1 flex-col overflow-hidden'
-						: 'min-h-[8rem] flex-1 overflow-y-auto text-sm leading-7'}
+	? 'absolute inset-x-0 bottom-20 mx-auto max-h-[32%] w-[min(92%,60rem)] overflow-y-auto rounded-xl bg-black/55 px-6 py-4 text-lg leading-8 text-white backdrop-blur-sm'
+	: tab === 'speakers'
+		? 'flex min-h-[10rem] flex-1 flex-col overflow-hidden'
+		: 'min-h-[8rem] flex-1 overflow-y-auto text-sm leading-7'}
 			>
 				{#if !isFullscreen && tab === 'speakers'}
 					{#if diarTurns.length > 0}
@@ -449,9 +452,7 @@
 							</div>
 						</div>
 					{:else}
-						<div class="text-muted-foreground p-3 text-xs">
-							Diarization not built for this video.
-						</div>
+						<div class="text-muted-foreground p-3 text-xs">Diarization not built for this video.</div>
 					{/if}
 				{:else}
 					<TranscriptWindow
@@ -483,9 +484,7 @@
 				>
 					<ChevronRight class="size-3.5 transition-transform {showMeta ? 'rotate-90' : ''}" />
 					<span class="font-medium">Metadata</span>
-					<span class="text-muted-foreground/70 ml-auto text-[0.7rem]"
-						>{metaRows.length} fields</span
-					>
+					<span class="text-muted-foreground/70 ml-auto text-[0.7rem]">{metaRows.length} fields</span>
 				</button>
 				{#if showMeta}
 					<dl class="border-border grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 border-t px-3 py-2">

@@ -105,6 +105,9 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 	// upward, so those files silently overrode the root config for that zone the moment oxlint and
 	// oxfmt were switched on — media got 80-column double-quoted output and a different plugin set,
 	// and nothing reported it. A per-package config must be a deliberate act, not a leftover.
+	// The prettier / eslint entries stay in this list AFTER both tools were removed: the failure mode
+	// is a file reappearing (a generator, a copied package, an editor plugin) and configuring a tool
+	// nothing runs, which reads as coverage that does not exist.
 	it.each([
 		'.oxlintrc.json',
 		'.oxfmtrc.json',
@@ -123,20 +126,26 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 		expect(strays).toEqual([]);
 	});
 
-	// Prettier resolves its CONFIG upward (it finds the root package.json's "prettier" block) but its
-	// IGNORE FILE only from the working directory — and every package runs it from its own directory.
-	// So a root .prettierignore protects nothing, which is exactly how `.svelte-kit/generated/root.svelte`
-	// walked into `fmt:check` and failed the build on a file SvelteKit writes. The ignore is therefore
-	// the glob itself: prettier is pointed at `src/`, where every hand-written component lives, and can
-	// never reach build output no matter which directory it is invoked from.
-	it.each(workspacePackages())('%s scopes prettier to src/, not the package root', (pkg) => {
+	// Two tools, two commands, everywhere. rsvelte-fmt formats `.svelte` in process and delegates every
+	// other extension to oxfmt, and oxlint hosts the Svelte rules through @rsvelte/oxlint-plugin — so a
+	// package that still spawns eslint or prettier is running a toolchain that is no longer installed,
+	// and `--no-error-on-unmatched-pattern` would make that look like a pass.
+	const EXPECTED: Record<string, string> = {
+		lint: 'oxlint .',
+		fmt: 'rsvelte-fmt .',
+		'fmt:check': 'rsvelte-fmt --check .',
+	};
+	it.each(workspacePackages())('%s runs the one lint and format command', (pkg) => {
 		const { scripts = {} } = JSON.parse(
 			readFileSync(resolve(FRONTEND_ROOT, pkg, 'package.json'), 'utf8'),
 		) as { scripts?: Record<string, string> };
+		for (const [task, expected] of Object.entries(EXPECTED)) {
+			if (!(task in scripts)) continue;
+			expect(scripts[task], `${pkg} ${task}`).toBe(expected);
+		}
 		for (const [task, script] of Object.entries(scripts)) {
-			if (!script.includes('prettier')) continue;
-			expect(script, `${pkg} ${task}: prettier must be scoped to 'src/**/*.svelte'`).toContain(
-				"'src/**/*.svelte'",
+			expect(script, `${pkg} ${task} still invokes a removed tool`).not.toMatch(
+				/\b(eslint|prettier)\b/,
 			);
 		}
 	});

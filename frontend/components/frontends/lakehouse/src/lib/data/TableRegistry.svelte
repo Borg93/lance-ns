@@ -106,11 +106,13 @@
 	// ── the DataTable (goal cond 4) ──
 	type Row = { id: string; namespace: string; stage: StageInfo | null };
 	const rows = $derived.by((): Row[] => {
-		const all = (tables ?? []).map((id): Row => ({
-			id,
-			namespace: namespaceOfTable(id),
-			stage: stageOfTable(id),
-		}));
+		const all = (tables ?? []).map(
+			(id): Row => ({
+				id,
+				namespace: namespaceOfTable(id),
+				stage: stageOfTable(id),
+			}),
+		);
 		return stageFilter ? all.filter((r) => r.stage?.stage === stageFilter) : all;
 	});
 
@@ -226,9 +228,9 @@
 		<form
 			class="declare"
 			onsubmit={(e) => {
-				e.preventDefault();
-				runDeclare();
-			}}
+	e.preventDefault();
+	runDeclare();
+}}
 		>
 			<input class="mono" bind:value={declNs} placeholder="namespace" aria-label="Namespace" />
 			<input class="mono" bind:value={declName} placeholder="table name" aria-label="Table name" />
@@ -267,12 +269,12 @@
 				ariaLabel="Stage filter"
 				placeholder="any stage"
 				options={[
-					{ value: '', label: 'any stage' },
-					{ value: 'raw', label: 'raw' },
-					{ value: 'bronze', label: 'bronze' },
-					{ value: 'silver', label: 'silver' },
-					{ value: 'gold', label: 'gold' },
-				]}
+	{ value: '', label: 'any stage' },
+	{ value: 'raw', label: 'raw' },
+	{ value: 'bronze', label: 'bronze' },
+	{ value: 'silver', label: 'silver' },
+	{ value: 'gold', label: 'gold' },
+]}
 			/>
 		</div>
 		<DataTable
@@ -295,9 +297,7 @@
 			<dd class="mono">{drawerRow.id}</dd>
 			<dt>namespace</dt>
 			<dd>
-				<a
-					class="mono jump"
-					href={`${base}/data/namespaces/${encodeURIComponent(drawerRow.namespace)}`}
+				<a class="mono jump" href={`${base}/data/namespaces/${encodeURIComponent(drawerRow.namespace)}`}
 					>{drawerRow.namespace}</a
 				>
 			</dd>
@@ -309,8 +309,7 @@
 			</dd>
 		</dl>
 		<div class="jumps">
-			<a class="btn" href={`${base}/data/tables/${encodeURIComponent(drawerRow.id)}`}>Open detail</a
-			>
+			<a class="btn" href={`${base}/data/tables/${encodeURIComponent(drawerRow.id)}`}>Open detail</a>
 			<a class="btn" href={`${base}/data/tables/${encodeURIComponent(drawerRow.id)}?tab=access`}
 				>Access tab</a
 			>

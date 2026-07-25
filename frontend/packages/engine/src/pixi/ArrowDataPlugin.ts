@@ -480,7 +480,10 @@ export class ArrowDataPlugin {
 			// Pixi-native visibility — no row iteration needed
 			gc.visible = !this.hiddenGroups.has(groupName);
 
-			// Clear old Graphics from this container
+			// Clear old Graphics from this container. The spread is a SNAPSHOT and is load-bearing:
+			// `destroy()` removes the child from `gc.children` mid-iteration, so iterating the live
+			// array would skip every other child (oxlint's no-useless-spread cannot see that).
+			// oxlint-disable-next-line unicorn/no-useless-spread
 			for (const child of [...gc.children]) {
 				child.destroy();
 			}

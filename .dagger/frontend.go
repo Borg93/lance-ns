@@ -9,7 +9,7 @@ import (
 // bunImage is the frontend toolchain's base image — the exact digest-pinned tag from
 // .docker/frontend.dockerfile (oven/bun:1.3.14-slim), so the Dagger run matches the shipped zone images
 // rather than trusting the CI setup-bun action's unpinned 'latest'. Bun is the whole toolchain here: turbo,
-// oxlint, oxfmt, eslint and prettier all arrive as frontend/ root devDependencies via
+// oxlint and rsvelte-fmt both arrive as frontend/ root devDependencies via
 // `bun install --frozen-lockfile` — no globally installed tool, no second package manager.
 const bunImage = "oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04"
 

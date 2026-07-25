@@ -102,9 +102,9 @@
 				class="{FIELD_CLASS} w-16"
 				value={cfg.n}
 				oninput={(e) =>
-					graph.setConfig(id, {
-						n: Math.max(MIN_N, Math.min(MAX_N, Number(e.currentTarget.value) || DEFAULT_N)),
-					})}
+	graph.setConfig(id, {
+		n: Math.max(MIN_N, Math.min(MAX_N, Number(e.currentTarget.value) || DEFAULT_N)),
+	})}
 			/>
 			<label class="nodrag text-muted-foreground ml-auto flex items-center gap-1.5 text-[0.7rem]">
 				<input type="checkbox" bind:checked={cfg.rerank} />
@@ -128,10 +128,10 @@
 				placeholder="off"
 				value={cfg.minScore ?? ''}
 				oninput={(e) => {
-					const raw = e.currentTarget.value.trim();
-					const num = Number(raw);
-					graph.setConfig(id, { minScore: raw === '' || Number.isNaN(num) ? null : num });
-				}}
+	const raw = e.currentTarget.value.trim();
+	const num = Number(raw);
+	graph.setConfig(id, { minScore: raw === '' || Number.isNaN(num) ? null : num });
+}}
 			/>
 		</div>
 
@@ -177,8 +177,8 @@
 					{#if rt.count === 0 && (rt.scopedDocs || rt.scopedChunks)}
 						<div class="mt-1 text-amber-500">
 							Nothing matched inside the {rt.scopedChunks
-								? `${rt.scopedChunks} chunks`
-								: `${rt.scopedDocs} videos`}
+				? `${rt.scopedChunks} chunks`
+				: `${rt.scopedDocs} videos`}
 							— delete the incoming refine edge to search all.
 						</div>
 					{/if}
@@ -187,8 +187,8 @@
 				{/if}
 				{#if rt.droppedInputs > 0}
 					<div class="mt-1 text-amber-500">
-						{rt.droppedInputs} extra input{rt.droppedInputs > 1 ? 's' : ''} ignored — a Search uses one
-						query + one image. Use a Combine node to merge result sets.
+						{rt.droppedInputs} extra input{rt.droppedInputs > 1 ? 's' : ''} ignored — a Search uses one query
+						+ one image. Use a Combine node to merge result sets.
 					</div>
 				{/if}
 			</div>

@@ -2,10 +2,10 @@
 	"name": "@repo/config",
 	"version": "0.0.0",
 	"private": true,
-	"type": "module",
 	"files": [
 		"tsconfig.base.json"
 	],
+	"type": "module",
 	"exports": {
 		"./tsconfig.base.json": "./tsconfig.base.json",
 		"./package.json": "./package.json"

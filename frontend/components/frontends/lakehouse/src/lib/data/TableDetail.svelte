@@ -1055,8 +1055,7 @@
 												aria-label="backfill {f.name} where"
 												onkeydown={(e) => e.key === 'Enter' && runBackfill()}
 											/>
-											<button class="btn ghost" disabled={colBusy} onclick={runBackfill}>run</button
-											>
+											<button class="btn ghost" disabled={colBusy} onclick={runBackfill}>run</button>
 											<button class="btn ghost" onclick={() => (backfilling = null)}>×</button>
 										{:else}
 											<button
@@ -1065,9 +1064,9 @@
 												aria-label="rename {f.name}"
 												disabled={colBusy}
 												onclick={() => {
-													renaming = f.name;
-													renameTo = '';
-												}}>✎</button
+	renaming = f.name;
+	renameTo = '';
+}}>✎</button
 											>
 											<button
 												class="chip-x"
@@ -1075,9 +1074,9 @@
 												aria-label="re-type {f.name}"
 												disabled={colBusy}
 												onclick={() => {
-													retyping = f.name;
-													retypeTo = '';
-												}}>⇄</button
+	retyping = f.name;
+	retypeTo = '';
+}}>⇄</button
 											>
 											<button
 												class="chip-x"
@@ -1085,9 +1084,9 @@
 												aria-label="backfill {f.name}"
 												disabled={colBusy}
 												onclick={() => {
-													backfilling = f.name;
-													backfillWhere = '';
-												}}>⤵</button
+	backfilling = f.name;
+	backfillWhere = '';
+}}>⤵</button
 											>
 											<button
 												class="chip-x"
@@ -1107,9 +1106,9 @@
 				<form
 					class="row addcol"
 					onsubmit={(e) => {
-						e.preventDefault();
-						runAddColumn();
-					}}
+	e.preventDefault();
+	runAddColumn();
+}}
 				>
 					<input
 						class="mono"
@@ -1149,11 +1148,9 @@
 					<button class="btn" disabled={insertBusy || !insertJson.trim()} onclick={runInsert}>
 						{insertBusy ? '…' : 'Insert'}
 					</button>
-					{#if insertMsg}<span
-							class="ins-msg"
-							class:okmsg={insertMsg.ok}
-							class:error={!insertMsg.ok}>{insertMsg.text}</span
-						>{/if}
+					{#if insertMsg}<span class="ins-msg" class:okmsg={insertMsg.ok} class:error={!insertMsg.ok}
+					  >{insertMsg.text}</span
+					>{/if}
 				</div>
 			</section>
 
@@ -1194,8 +1191,8 @@
 				</button>
 				{#if rowSetPartial}
 					<p class="mut" role="status">
-						A SET pair is only half-filled — complete (or clear) both its column and expression;
-						partial pairs are never silently dropped.
+						A SET pair is only half-filled — complete (or clear) both its column and expression; partial
+						pairs are never silently dropped.
 					</p>
 				{/if}
 				<div class="ins-row">
@@ -1225,8 +1222,8 @@
 						</button>
 					{/if}
 					{#if rowMsg}<span class="ins-msg" class:okmsg={rowMsg.ok} class:error={!rowMsg.ok}
-							>{rowMsg.text}</span
-						>{/if}
+					  >{rowMsg.text}</span
+					>{/if}
 				</div>
 			</section>
 
@@ -1273,10 +1270,7 @@
 						{#each indexes as ix (ix.index_name)}
 							<span class="chip mono"
 								>{ix.index_name}<span class="mut">
-									· {(ix.columns ?? []).join(', ')}{ix.index_type
-										? ` · ${ix.index_type}`
-										: ''}</span
-								>
+									· {(ix.columns ?? []).join(', ')}{ix.index_type ? ` · ${ix.index_type}` : ''}</span>
 								<button
 									class="chip-x"
 									title="drop index"
@@ -1292,9 +1286,9 @@
 				<form
 					class="row"
 					onsubmit={(e) => {
-						e.preventDefault();
-						runCreateIndex();
-					}}
+	e.preventDefault();
+	runCreateIndex();
+}}
 				>
 					<input
 						class="mono"
@@ -1306,19 +1300,19 @@
 						bind:value={ixType}
 						ariaLabel="Index type"
 						options={[
-							...SCALAR_TYPES.map((t) => ({ value: t, label: `scalar · ${t}` })),
-							...VECTOR_TYPES.map((t) => ({ value: t, label: `vector · ${t}` })),
-						]}
+	...SCALAR_TYPES.map((t) => ({ value: t, label: `scalar · ${t}` })),
+	...VECTOR_TYPES.map((t) => ({ value: t, label: `vector · ${t}` })),
+]}
 					/>
 					{#if !ixScalar}
 						<Select
 							bind:value={ixDistance}
 							ariaLabel="Distance type"
 							options={[
-								{ value: 'cosine', label: 'cosine' },
-								{ value: 'l2', label: 'l2' },
-								{ value: 'dot', label: 'dot' },
-							]}
+	{ value: 'cosine', label: 'cosine' },
+	{ value: 'l2', label: 'l2' },
+	{ value: 'dot', label: 'dot' },
+]}
 						/>
 					{/if}
 					<button class="btn" type="submit" disabled={ixBusy || !ixColumn.trim()}>
@@ -1334,8 +1328,8 @@
 					<p class="mut">No version history available.</p>
 				{:else}
 					<p class="mut">
-						{versions.length} version{versions.length === 1 ? '' : 's'} — most recent first, one Lance
-						manifest per commit:
+						{versions.length} version{versions.length === 1 ? '' : 's'} — most recent first, one Lance manifest
+						per commit:
 					</p>
 					<table>
 						<thead><tr><th>version</th><th>committed</th><th>manifest</th><th></th></tr></thead>
@@ -1354,16 +1348,14 @@
 											>
 												{restoreBusy ? '…' : 'confirm restore'}
 											</button>
-											<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}>
-												cancel
-											</button>
+											<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}> cancel </button>
 										{:else}
 											<button
 												class="btn tiny ghost"
 												onclick={() => {
-													restoreConfirm = v.version ?? null;
-													restoreError = null;
-												}}
+	restoreConfirm = v.version ?? null;
+	restoreError = null;
+}}
 											>
 												restore
 											</button>
@@ -1397,9 +1389,9 @@
 				<form
 					class="row addcol"
 					onsubmit={(e) => {
-						e.preventDefault();
-						runCreateBranch();
-					}}
+	e.preventDefault();
+	runCreateBranch();
+}}
 				>
 					<input
 						class="mono"
@@ -1413,8 +1405,7 @@
 						placeholder="from version (latest)"
 						options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
 					/>
-					<button class="btn" type="submit" disabled={refBusy || !newBranch.trim()}
-						>Create branch</button
+					<button class="btn" type="submit" disabled={refBusy || !newBranch.trim()}>Create branch</button
 					>
 				</form>
 
@@ -1432,14 +1423,12 @@
 											ariaLabel="move {name} to version"
 											placeholder="version"
 											options={versions.map((v) => ({
-												value: String(v.version),
-												label: `v${v.version}`,
-											}))}
+	value: String(v.version),
+	label: `v${v.version}`,
+}))}
 										/>
 									</span>
-									<button class="chip-x" disabled={refBusy || !moveTo} onclick={runMoveTag}
-										>save</button
-									>
+									<button class="chip-x" disabled={refBusy || !moveTo} onclick={runMoveTag}>save</button>
 									<button class="chip-x" onclick={() => (movingTag = null)}>×</button>
 								</span>
 							{:else}
@@ -1451,9 +1440,9 @@
 										aria-label="move tag {name}"
 										disabled={refBusy}
 										onclick={() => {
-											movingTag = name;
-											moveTo = '';
-										}}>↪</button
+	movingTag = name;
+	moveTo = '';
+}}>↪</button
 									>
 									<button
 										class="chip-x"
@@ -1540,23 +1529,15 @@
 					</div>
 				{:else if policyUnavailable}
 					<p class="mut">
-						Policy unavailable right now — not shown to avoid an overwriting edit against a stale
-						read.
+						Policy unavailable right now — not shown to avoid an overwriting edit against a stale read.
 					</p>
 				{:else if policy}
 					<div class="refs">
-						{#if policy.retention_days}<span class="chip mono"
-								>retention {policy.retention_days}d</span
-							>{/if}
-						{#if policy.retain_versions}<span class="chip mono"
-								>keep last {policy.retain_versions}</span
-							>{/if}
-						{#if policy.compact_interval_hours}<span class="chip mono"
-								>every {policy.compact_interval_hours}h</span
-							>{/if}
-						{#if policy.target_rows_per_fragment}<span class="chip mono"
-								>target {policy.target_rows_per_fragment} rows/frag</span
-							>{/if}
+						{#if policy.retention_days}<span class="chip mono">retention {policy.retention_days}d</span>{/if}
+						{#if policy.retain_versions}<span class="chip mono">keep last {policy.retain_versions}</span>{/if}
+						{#if policy.compact_interval_hours}<span class="chip mono">every {policy.compact_interval_hours}h</span>{/if}
+						{#if policy.target_rows_per_fragment}<span class="chip mono">target {policy.target_rows_per_fragment}
+						rows/frag</span>{/if}
 						{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
 						<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
 						<button class="btn ghost danger" disabled={busy} onclick={removePolicy}>
@@ -1564,8 +1545,7 @@
 						</button>
 					</div>
 					<p class="mut">
-						Enforced by the compaction sweep; tag-pinned versions (e.g. blessed) are never cleaned
-						up.
+						Enforced by the compaction sweep; tag-pinned versions (e.g. blessed) are never cleaned up.
 					</p>
 				{:else}
 					<p class="mut">
@@ -1604,11 +1584,10 @@
 					{#if gcPreview}
 						<p class="mut">
 							{gcPreview.eligible_versions.length} version{gcPreview.eligible_versions.length === 1
-								? ''
-								: 's'} reclaimable
-							{#if gcPreview.eligible_versions.length}(v{gcPreview.eligible_versions.join(
-									', v',
-								)}){/if}
+				? ''
+				: 's'}
+							reclaimable
+							{#if gcPreview.eligible_versions.length}(v{gcPreview.eligible_versions.join(', v')}){/if}
 							· {gcPreview.total_versions} total, current v{gcPreview.current_version}.
 							{#if Object.keys(gcPreview.protected_tags).length}
 								Protected by tags: {Object.entries(gcPreview.protected_tags)
@@ -1622,9 +1601,7 @@
 									<span class="mut"
 										>Permanently reclaim {gcPreview.eligible_versions.length} version(s)?</span
 									>
-									<button class="btn danger" disabled={gcBusy} onclick={runGc}
-										>Confirm reclaim</button
-									>
+									<button class="btn danger" disabled={gcBusy} onclick={runGc}>Confirm reclaim</button>
 									<button class="btn ghost" onclick={() => (gcConfirm = false)}>Cancel</button>
 								</div>
 							{:else}
@@ -1653,9 +1630,9 @@
 				<form
 					class="row"
 					onsubmit={(e) => {
-						e.preventDefault();
-						runRenameTable();
-					}}
+	e.preventDefault();
+	runRenameTable();
+}}
 				>
 					<input
 						class="mono"
@@ -1696,11 +1673,11 @@
 		</AlertDialog.Title>
 		<AlertDialog.Description>
 			{#if dangerAction === 'deregister'}
-				This detaches <span class="mono">{table}</span> from the catalog (owner-gated: can_deregister).
-				The data stays on storage, but the catalog forgets the id and its grants are revoked.
+				This detaches <span class="mono">{table}</span> from the catalog (owner-gated: can_deregister). The
+				data stays on storage, but the catalog forgets the id and its grants are revoked.
 			{:else}
-				This permanently drops <span class="mono">{table}</span> and its data (owner-gated: can_drop).
-				Every version, tag and branch is deleted; its grants are revoked.
+				This permanently drops <span class="mono">{table}</span> and its data (owner-gated: can_drop). Every
+				version, tag and branch is deleted; its grants are revoked.
 			{/if}
 		</AlertDialog.Description>
 		<div class="dialog-actions">

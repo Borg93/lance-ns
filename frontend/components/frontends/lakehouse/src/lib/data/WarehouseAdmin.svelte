@@ -247,9 +247,9 @@
 		class="btn ghost"
 		disabled={busy}
 		onclick={(e) => {
-			e.stopPropagation();
-			toggleActive(w);
-		}}
+	e.stopPropagation();
+	toggleActive(w);
+}}
 	>
 		{statusOf(w) === 'active' ? 'deactivate' : 'activate'}
 	</button>
@@ -296,9 +296,9 @@
 			<form
 				class="row"
 				onsubmit={(e) => {
-					e.preventDefault();
-					provision();
-				}}
+	e.preventDefault();
+	provision();
+}}
 			>
 				<input
 					class="mono"
@@ -328,9 +328,9 @@
 			<form
 				class="row"
 				onsubmit={(e) => {
-					e.preventDefault();
-					bind();
-				}}
+	e.preventDefault();
+	bind();
+}}
 			>
 				<Select
 					bind:value={bindDraft.warehouse}
@@ -353,8 +353,7 @@
 				</button>
 			</form>
 			<p class="mut">
-				Binding routes a top-level namespace's tables to the warehouse's bucket (immutable once
-				set).
+				Binding routes a top-level namespace's tables to the warehouse's bucket (immutable once set).
 			</p>
 		</section>
 	{/if}
@@ -381,8 +380,7 @@
 			<dd class="mono">{drawerRow.root_uri}</dd>
 			<dt>status</dt>
 			<dd>
-				<span class="chip mono" class:off={statusOf(drawerRow) !== 'active'}
-					>{statusOf(drawerRow)}</span
+				<span class="chip mono" class:off={statusOf(drawerRow) !== 'active'}>{statusOf(drawerRow)}</span
 				>
 			</dd>
 			<dt>class</dt>

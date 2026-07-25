@@ -142,13 +142,13 @@
 						{unit}
 						{controller}
 						onload={(n) => {
-							status = `${n} annotations from Lance`;
-							loadFailed = false;
-						}}
+	status = `${n} annotations from Lance`;
+	loadFailed = false;
+}}
 						onerror={(message) => {
-							status = `load failed — ${message}`;
-							loadFailed = true;
-						}}
+	status = `load failed — ${message}`;
+	loadFailed = true;
+}}
 					/>
 					{#if spatial && controller.canDraw}
 						<AiAssistBar {controller} />

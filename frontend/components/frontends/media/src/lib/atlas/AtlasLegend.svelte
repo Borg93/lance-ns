@@ -180,8 +180,7 @@
 					<span class="text-foreground truncate" class:uppercase={legendMode === 'language'}
 						>{c.label}</span
 					>
-					<span class="text-muted-foreground ml-auto shrink-0 font-mono"
-						>{c.count.toLocaleString()}</span
+					<span class="text-muted-foreground ml-auto shrink-0 font-mono">{c.count.toLocaleString()}</span
 					>
 				</button>
 				<button

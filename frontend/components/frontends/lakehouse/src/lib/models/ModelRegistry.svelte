@@ -126,8 +126,7 @@
 		<div class="empty">
 			<ShieldAlert size={16} />
 			<p>
-				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view the model
-				registry.
+				This stack is governed — <a href={loginHref} data-sveltekit-reload>sign in</a> to view the model registry.
 			</p>
 		</div>
 	{:else if offline}
@@ -171,9 +170,9 @@
 									class="promote"
 									disabled={promoting}
 									onclick={(e) => {
-										e.stopPropagation();
-										promote(m.model, latest);
-									}}
+	e.stopPropagation();
+	promote(m.model, latest);
+}}
 								>
 									<Award size={13} /> bless v{latest}
 								</button>

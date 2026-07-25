@@ -51,15 +51,15 @@
 <div class="check">
 	<p class="lead">
 		Does <span class="mono">user</span> hold <span class="mono">relation</span> on
-		<span class="mono">object</span>? One live Check against the running OpenFGA store — direct
-		tuples and everything the model derives.
+		<span class="mono">object</span>? One live Check against the running OpenFGA store — direct tuples
+		and everything the model derives.
 	</p>
 	<form
 		class="form"
 		onsubmit={(e) => {
-			e.preventDefault();
-			run();
-		}}
+	e.preventDefault();
+	run();
+}}
 	>
 		<input
 			class="mono"

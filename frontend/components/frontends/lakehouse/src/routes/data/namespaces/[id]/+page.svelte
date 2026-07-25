@@ -292,8 +292,8 @@
 			<section>
 				<h2>Maintenance policy</h2>
 				<p class="mut">
-					A namespace policy governs every dataset under <span class="mono">{ns}</span> unless a table
-					policy overrides it; tag-pinned versions (e.g. blessed) are never cleaned up.
+					A namespace policy governs every dataset under <span class="mono">{ns}</span> unless a table policy
+					overrides it; tag-pinned versions (e.g. blessed) are never cleaned up.
 				</p>
 				{#if editingPolicy}
 					<div class="policy-edit">
@@ -347,23 +347,15 @@
 					<p class="mut">{policyDenied}</p>
 				{:else if policyPart === 'unavailable'}
 					<p class="mut">
-						Policy unavailable right now — not shown to avoid an overwriting edit against a stale
-						read.
+						Policy unavailable right now — not shown to avoid an overwriting edit against a stale read.
 					</p>
 				{:else if policy}
 					<div class="refs">
-						{#if policy.retention_days}<span class="chip mono"
-								>retention {policy.retention_days}d</span
-							>{/if}
-						{#if policy.retain_versions}<span class="chip mono"
-								>keep last {policy.retain_versions}</span
-							>{/if}
-						{#if policy.compact_interval_hours}<span class="chip mono"
-								>every {policy.compact_interval_hours}h</span
-							>{/if}
-						{#if policy.target_rows_per_fragment}<span class="chip mono"
-								>target {policy.target_rows_per_fragment} rows/frag</span
-							>{/if}
+						{#if policy.retention_days}<span class="chip mono">retention {policy.retention_days}d</span>{/if}
+						{#if policy.retain_versions}<span class="chip mono">keep last {policy.retain_versions}</span>{/if}
+						{#if policy.compact_interval_hours}<span class="chip mono">every {policy.compact_interval_hours}h</span>{/if}
+						{#if policy.target_rows_per_fragment}<span class="chip mono">target {policy.target_rows_per_fragment}
+						rows/frag</span>{/if}
 						{#if !policy.compact_enabled}<span class="chip off mono">maintenance off</span>{/if}
 						<button class="btn ghost" onclick={startPolicyEdit}>Edit</button>
 						<button class="btn ghost danger" disabled={busy} onclick={removePolicy}>

@@ -221,9 +221,9 @@
 		aria-label={`Drop namespace ${row.ns}`}
 		disabled={busy}
 		onclick={(e) => {
-			e.stopPropagation();
-			openDrop(row.ns);
-		}}
+	e.stopPropagation();
+	openDrop(row.ns);
+}}
 	>
 		<Trash2 size={12} /> drop
 	</button>
@@ -232,8 +232,7 @@
 <div class="page">
 	<header>
 		<h1>Namespaces</h1>
-		<span class="sub mono">grouped from the catalog registry · &lt;namespace&gt;$&lt;table&gt;</span
-		>
+		<span class="sub mono">grouped from the catalog registry · &lt;namespace&gt;$&lt;table&gt;</span>
 		<a
 			class="new"
 			href={`${base}/data/warehouses`}

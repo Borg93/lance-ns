@@ -8,7 +8,7 @@
 	// stale consumers (no delivery in 10 min), and +N message deltas between manual refreshes. Strictly a
 	// viewer — no mutation affordances by design.
 	import { Layers, RefreshCw, ShieldAlert, TriangleAlert } from '@lucide/svelte';
-	import { parse } from '@rask/api';
+	import { parse } from '@repo/api';
 	import { page } from '$app/state';
 	import { JetStreamOverviewSchema, type JetStreamOverview } from './jetstream';
 	import { requestJSON } from '$lib/http';

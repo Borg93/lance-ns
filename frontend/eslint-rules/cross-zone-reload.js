@@ -3,7 +3,7 @@
 // client-router nav to another zone's path targets a route THIS app doesn't own
 // → 404. Note `lakehouse` is ONE zone covering the catalog/lineage/models/admin
 // areas: a link between those areas is same-zone and must NOT hard-navigate. Cross-zone <a>s must therefore set `data-sveltekit-reload` to force a full
-// document navigation. The shared shell (`@rask/ui/shell`) does this dynamically;
+// document navigation. The shared shell (`@repo/ui/shell`) does this dynamically;
 // this rule guards the hand-written links in app pages so the convention can't
 // silently drift. Same-zone links use `{base}/…` (a `{base}` expression, never a
 // literal `/<domain>`), so they read as an opaque placeholder here and are ignored.

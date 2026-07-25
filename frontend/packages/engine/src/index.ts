@@ -4,7 +4,7 @@
  * Framework-agnostic annotation + rendering engine: PixiJS (WebGPU/WebGL) rendering,
  * Apache Arrow data layer, interaction/tools/editors, geometry, mask ops, and the
  * annotation schema. Imports ZERO Svelte / `$app` — consumed by the thin Svelte
- * binding and the app — graduated to the standalone @lance/engine package.
+ * binding and the app — graduated to the standalone @repo/engine package.
  */
 
 // ── Rendering (PixiJS plugins + context types) ──

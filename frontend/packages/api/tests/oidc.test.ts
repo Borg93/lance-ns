@@ -1,5 +1,5 @@
 /**
- * Unit tests for the security-critical OIDC logic — runs under vitest (in the @rask/api package). Bun/Node ship
+ * Unit tests for the security-critical OIDC logic — runs under vitest (in the @repo/api package). Bun/Node ship
  * Web Crypto + a Jest-like runner). The network glue + SvelteKit routes are type-checked by svelte-check
  * and verified end-to-end against a live Dex; here we pin the pure pieces that are easy to get subtly wrong.
  */

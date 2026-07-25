@@ -1,4 +1,4 @@
-# @rask/zone-contract
+# @repo/zone-contract
 
 The zone manifest is declared in **four** places that must agree, none of which the type system or a
 build can relate to each other:

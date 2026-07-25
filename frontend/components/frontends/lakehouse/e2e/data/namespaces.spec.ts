@@ -83,7 +83,7 @@ test('drop confirms via the AlertDialog, posts the cascade behavior, and the row
 	await page.goto('/lakehouse/data/namespaces');
 	await expect(page.locator('a.ns-name', { hasText: 'bronze' })).toBeVisible();
 	await page.getByRole('button', { name: 'Drop namespace bronze', exact: true }).click();
-	// The confirm is the portalled @rask/ui AlertDialog — drive it by role, not the trigger row.
+	// The confirm is the portalled @repo/ui AlertDialog — drive it by role, not the trigger row.
 	const dialog = page.getByRole('alertdialog');
 	await expect(dialog).toContainText('Drop namespace bronze');
 	await dialog.getByRole('checkbox').check(); // Cascade — bronze holds a table, Restrict would refuse
@@ -141,7 +141,7 @@ test('a 403 drop surfaces the forbidden state and keeps the namespace listed', a
 
 test('the shared sidebar marks the Namespaces leaf active', async ({ page }) => {
 	await page.goto('/lakehouse/data/namespaces');
-	// The AppShell sidebar (shared @rask/ui) reflects the current route via data-active.
+	// The AppShell sidebar (shared @repo/ui) reflects the current route via data-active.
 	await expect(
 		page.locator('[data-active="true"]').filter({ hasText: 'Namespaces' }),
 	).toBeVisible();

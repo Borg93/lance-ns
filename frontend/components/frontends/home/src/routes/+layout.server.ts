@@ -1,7 +1,7 @@
 import { env } from '$env/dynamic/private';
 import type { LayoutServerLoad } from './$types';
-import { zoneLayoutLoad } from '@rask/api/bff';
-import { fetchMe } from '@rask/api';
+import { zoneLayoutLoad } from '@repo/api/bff';
+import { fetchMe } from '@repo/api';
 
 const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
 

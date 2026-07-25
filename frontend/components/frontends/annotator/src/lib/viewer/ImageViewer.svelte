@@ -1,7 +1,7 @@
 <script lang="ts">
 	// Image/document viewer — the ra-anno PixiJS engine over a page image. WORKING.
-	import { loadAnnotations } from '@lance/labeling/annotations-client';
-	import type { PixiContext } from '@lance/engine';
+	import { loadAnnotations } from '@repo/labeling/annotations-client';
+	import type { PixiContext } from '@repo/engine';
 	import PixiCanvas from './PixiCanvas.svelte';
 	import type { ViewerProps } from './types';
 

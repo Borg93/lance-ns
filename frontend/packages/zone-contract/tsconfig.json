@@ -1,5 +1,5 @@
 {
-	"extends": "@lance/config/tsconfig.base.json",
+	"extends": "@repo/config/tsconfig.base.json",
 	"compilerOptions": {
 		"noEmit": true,
 		"types": ["bun"]

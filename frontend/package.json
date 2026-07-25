@@ -42,7 +42,6 @@
 		"vitest": "^4.1.10"
 	},
 	"prettier": {
-		"//": "Applies to .svelte ONLY \u2014 oxfmt owns .ts/.js/.css/.md/.json/.html/.yaml. Values mirror .oxfmtrc.json so a <script> block formats the same as a standalone module.",
 		"plugins": [
 			"prettier-plugin-svelte",
 			"prettier-plugin-tailwindcss"

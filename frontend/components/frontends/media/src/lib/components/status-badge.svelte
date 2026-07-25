@@ -3,10 +3,10 @@
 	// Styled on the estate design system (button variants + the success/warning/
 	// destructive status tokens) so it reads as part of the shared sidebar rather
 	// than a zone-private widget.
-	import { getHealth, type Health } from '@lance/media-api';
+	import { getHealth, type Health } from '@repo/media-api';
 	import { Popover } from 'bits-ui';
 	import { Activity } from '@lucide/svelte';
-	import { Button, buttonVariants, cn } from '@rask/ui';
+	import { Button, buttonVariants, cn } from '@repo/ui';
 
 	let health = $state<Health | null>(null);
 	let lastError = $state<string | null>(null);

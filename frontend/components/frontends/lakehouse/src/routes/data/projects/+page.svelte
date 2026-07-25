@@ -7,7 +7,7 @@
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchProjects, type ProjectSummary } from '$lib/data/catalog';
-	import type { Me } from '@rask/api';
+	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import ProjectCreateDialog from '$lib/data/ProjectCreateDialog.svelte';
 

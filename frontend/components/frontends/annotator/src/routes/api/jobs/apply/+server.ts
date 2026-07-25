@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Explicit POST route: submit a batch labeling job (producer × selection scope) — the
 // annotator's bulk `apply()`. Enumerated write — bearer-forwarding, fail-closed without

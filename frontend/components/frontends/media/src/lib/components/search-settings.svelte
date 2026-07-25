@@ -2,16 +2,13 @@
 	import { Popover } from 'bits-ui';
 	import { Settings2 } from '@lucide/svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
-	import { buttonVariants } from '@rask/ui';
-	import { Select } from '@rask/ui/select';
-	import {
-		Field,
-		Switch,
-		Slider,
-		RadioGroup,
-		type SelectOption,
-		type RadioOption,
-	} from '@lance/ui';
+	import { buttonVariants } from '@repo/ui';
+	import { Select } from '@repo/ui/select';
+	import { Field } from '@repo/ui/field';
+	import { RadioGroup, type RadioOption } from '@repo/ui/radio-group';
+	import { type SelectOption } from '@repo/ui/select';
+	import { Slider } from '@repo/ui/slider';
+	import { Switch } from '@repo/ui/switch';
 
 	/**
 	 * The single "config" surface for a search. All values are bindable and owned

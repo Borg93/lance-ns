@@ -5,7 +5,7 @@
  * results back through the narrow `RunDeps` seam; it never touches the class.
  */
 import type { Edge, Node } from '@xyflow/svelte';
-import { relevanceOf, search, type Hit, type SearchSpec } from '@lance/media-api';
+import { relevanceOf, search, type Hit, type SearchSpec } from '@repo/media-api';
 import { hitKey } from '$lib/utils';
 import { chunkScopeClause, dedupeHits, videoScopeClause } from './scope';
 import {

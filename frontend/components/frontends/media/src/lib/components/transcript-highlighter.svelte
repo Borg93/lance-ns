@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Alignment } from '@lance/media-api';
+	import type { Alignment } from '@repo/media-api';
 	import { queryTerms } from '$lib/utils';
 
 	type Props = {

@@ -9,7 +9,7 @@
 	 * handlers through, so the component stays dumb + testable.
 	 */
 	import { Eye, EyeOff } from '@lucide/svelte';
-	import { Button } from '@rask/ui';
+	import { Button } from '@repo/ui';
 	import type { ClusterLegendRow, CategoryLegendRow } from './atlas-legend';
 	import type { ColorBy } from './cross-filter.svelte';
 

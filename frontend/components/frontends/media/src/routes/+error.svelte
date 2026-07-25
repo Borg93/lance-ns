@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
-	import { AppError } from '@rask/ui/shell';
+	import { AppError } from '@repo/ui/shell';
 </script>
 
 <!-- The same branded degrade as every other zone (resilient-page principle): a failed route here must

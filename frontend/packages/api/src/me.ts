@@ -1,4 +1,4 @@
-// @rask/api/me — the frozen `GET /v1/me` identity contract + the shared BFF-side fetch helper.
+// @repo/api/me — the frozen `GET /v1/me` identity contract + the shared BFF-side fetch helper.
 //
 // The catalog serves `/v1/me` for any VERIFIED bearer: `{ sub, name, email, estate_admin, projects }`
 // (estate_admin = can_observe_events on the FGA root object; projects via the #51 list wrappers, each

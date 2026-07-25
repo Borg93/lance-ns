@@ -92,7 +92,7 @@ test('a grant POSTs the exact {user, relation} body to the NAMESPACE access rout
 	await page.getByRole('button', { name: 'Access review' }).click();
 	await expect(page.locator('table.acl')).toContainText('can_delete');
 	await page.getByPlaceholder('user (e.g. alice), or role:… / team:…#member').last().fill('bob');
-	// The manage form's rung picker is the @rask/ui Select (bits-ui) — open by aria-label, click option.
+	// The manage form's rung picker is the @repo/ui Select (bits-ui) — open by aria-label, click option.
 	await page.getByLabel('Grant rung').click();
 	await page.getByRole('option', { name: 'reader', exact: true }).click();
 	await page.getByRole('button', { name: 'Grant', exact: true }).click();

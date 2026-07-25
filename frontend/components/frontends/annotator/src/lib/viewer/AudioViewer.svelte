@@ -1,15 +1,15 @@
 <script lang="ts">
 	// Audio viewer — a THIN wrapper over the engine's WaveSurface. All wavesurfer +
-	// region↔row logic lives in `@lance/engine` (framework-agnostic, reusable); this file
+	// region↔row logic lives in `@repo/engine` (framework-agnostic, reusable); this file
 	// only mounts it, bridges gestures to the annotator facade via the data-only
 	// (temporal) seam, and reconciles regions from the controller's rows. The waveform
 	// is the one Canvas2D lane we allow; segments (t_start/t_end) share the SAME
 	// annotations table + Save path as spatial shapes.
 	import { untrack } from 'svelte';
-	import { loadAnnotations } from '@lance/labeling/annotations-client';
+	import { loadAnnotations } from '@repo/labeling/annotations-client';
 	import { Pause, Play } from '@lucide/svelte';
-	import { WaveSurface, type TemporalSegment } from '@lance/engine';
-	import { Button } from '@rask/ui/button';
+	import { WaveSurface, type TemporalSegment } from '@repo/engine';
+	import { Button } from '@repo/ui/button';
 	import type { ViewerProps } from './types';
 
 	let { unit, onload, onerror, controller }: ViewerProps = $props();

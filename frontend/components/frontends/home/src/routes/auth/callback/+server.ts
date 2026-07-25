@@ -14,8 +14,8 @@ import {
 	discover,
 	encodeSession,
 	exchangeCode,
-} from '@rask/api/oidc';
-import { makeOidcConfig } from '@rask/api/bff';
+} from '@repo/api/oidc';
+import { makeOidcConfig } from '@repo/api/bff';
 
 export const GET: RequestHandler = async ({ url, cookies, fetch }) => {
 	const cfg = makeOidcConfig(env);

@@ -4,7 +4,7 @@
  * path "/" signs the user out of every path-routed zone at once.
  */
 import { redirect, type RequestHandler } from '@sveltejs/kit';
-import { SESSION_COOKIE } from '@rask/api/oidc';
+import { SESSION_COOKIE } from '@repo/api/oidc';
 
 const signOut: RequestHandler = ({ cookies }) => {
 	cookies.delete(SESSION_COOKIE, { path: '/' });

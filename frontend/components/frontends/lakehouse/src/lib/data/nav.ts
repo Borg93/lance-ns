@@ -1,5 +1,5 @@
 import { Boxes, Database, FolderKanban, Warehouse } from '@lucide/svelte';
-import { seg, type ZoneNav } from '@rask/ui/shell';
+import { seg, type ZoneNav } from '@repo/ui/shell';
 
 // The data area's sidebar routes inside the lakehouse zone (the shared shell renders exactly what a zone passes — the
 // cross-zone list lives in the top navbar). Hrefs are absolute domain paths: the zone is served

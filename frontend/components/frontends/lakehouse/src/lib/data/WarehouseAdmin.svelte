@@ -17,8 +17,8 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import { Select } from '@rask/ui/select';
+	} from '@repo/ui/data-table';
+	import { Select } from '@repo/ui/select';
 	import { RefreshCw, ShieldAlert, Warehouse as WarehouseIcon } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';

@@ -5,9 +5,9 @@
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
-	import { AppShell, ForbiddenPage } from '@rask/ui/shell';
+	import { AppShell, ForbiddenPage } from '@repo/ui/shell';
 	import { onMount, type Snippet } from 'svelte';
-	import type { Me } from '@rask/api';
+	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import { areaOf, lakehouseNav } from '$lib/nav';
 	import type { LayoutData } from './$types';

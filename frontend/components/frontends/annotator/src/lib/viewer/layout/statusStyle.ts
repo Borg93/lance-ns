@@ -1,4 +1,4 @@
-import type { BadgeVariant } from '@rask/ui/badge';
+import type { BadgeVariant } from '@repo/ui/badge';
 
 /** Shared status → style map for the review surfaces (list, table, detail). Kept tiny and in
  *  one place so the dot and the badge never disagree, and expressed in the estate's SEMANTIC
@@ -19,7 +19,7 @@ export function statusDot(status: string): string {
 	}
 }
 
-/** The @rask/ui Badge variant for a status — the same badge vocabulary the data and admin
+/** The @repo/ui Badge variant for a status — the same badge vocabulary the data and admin
  *  zones use, so a status chip here reads as the same object it does over there. */
 export function statusVariant(status: string): BadgeVariant {
 	switch (status) {

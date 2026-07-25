@@ -1,5 +1,5 @@
 {
-	"name": "@rask/eslint-rules",
+	"name": "@repo/eslint-rules",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",

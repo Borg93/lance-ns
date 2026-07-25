@@ -6,21 +6,21 @@
 	import { ArrowLeft, Columns3, Network } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
-	import { enter } from '@rask/ui/motion';
-	import { GrantsPanel, type GrantsClient } from '@rask/ui/grants-panel';
+	import { enter } from '@repo/ui/motion';
+	import { GrantsPanel, type GrantsClient } from '@repo/ui/grants-panel';
 	import DatasetProvenance from '$lib/lineage/DatasetProvenance.svelte';
 	import GovernancePanel from '$lib/lineage/GovernancePanel.svelte';
 	import ReadersPanel from '$lib/ReadersPanel.svelte';
 	import RunInputs from '$lib/lineage/RunInputs.svelte';
 	import { fetchDownstream, fetchProducers, fetchUpstream } from '$lib/api';
 	import { checkAccess, fetchAccess, grantAccess, revokeAccess } from '$lib/lineage/catalog';
-	import type { DatasetRef, ProducerInfo } from '@rask/api/lineage';
+	import type { DatasetRef, ProducerInfo } from '@repo/api/lineage';
 
 	const POLL_MS = 5000;
 
 	const name = $derived(decodeURIComponent(page.params.name ?? ''));
 
-	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
+	// The zone-owned catalog seam the shared @repo/ui GrantsPanel calls (the lib never owns an API client).
 	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
 
 	// All three reads are keyed by the dataset they were fetched FOR (latest-wins by derivation —

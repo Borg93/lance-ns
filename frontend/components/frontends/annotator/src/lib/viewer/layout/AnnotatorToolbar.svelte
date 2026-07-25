@@ -13,8 +13,8 @@
 		Redo2,
 		Save,
 	} from '@lucide/svelte';
-	import { Button } from '@rask/ui/button';
-	import { cn } from '@rask/ui/utils';
+	import { Button } from '@repo/ui/button';
+	import { cn } from '@repo/ui/utils';
 	import { TOOL_DEFS } from '../tool-defs';
 	import type { AnnotatorController } from '../annotator.svelte';
 

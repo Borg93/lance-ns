@@ -1,6 +1,6 @@
 <script lang="ts">
-	import { activeView, type SearchSpec } from '@lance/media-api';
-	import { Badge, Button } from '@rask/ui';
+	import { activeView, type SearchSpec } from '@repo/media-api';
+	import { Badge, Button } from '@repo/ui';
 	import { X } from '@lucide/svelte';
 
 	type Props = {

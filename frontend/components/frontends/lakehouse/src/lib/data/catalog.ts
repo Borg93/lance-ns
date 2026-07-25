@@ -2,9 +2,9 @@
 // Types are generated from docs/catalog-openapi.json (`bun run gen:types:catalog`) — never hand-mirrored.
 // The describe route serializes with response_model_exclude_none, so its null fields arrive absent —
 // read optional fields with `?? null` rather than trusting the generated required-nullable shape.
-import { parse } from '@rask/api';
+import { parse } from '@repo/api';
 import * as v from 'valibot';
-import type { components } from '@rask/api/generated/catalog';
+import type { components } from '@repo/api/generated/catalog';
 import { type ApiResult, requestBinary as requestBin, requestJSON as request } from '$lib/http';
 
 export type ModelSummary = components['schemas']['ModelSummary'];
@@ -367,7 +367,7 @@ export const bindWarehouseNamespace = (id: string, namespace: string) =>
 
 // The lance-namespace table-lifecycle wire contracts (#85). All-optional where the spec says so — the
 // catalog serializes with response_model_exclude_none, so null fields arrive absent. Parsed (not cast)
-// at the boundary per the @rask/api parse-don't-validate rule: a schema drift throws to the caller
+// at the boundary per the @repo/api parse-don't-validate rule: a schema drift throws to the caller
 // instead of lying downstream.
 const TableLifecycleResponseSchema = v.object({
 	context: v.optional(v.record(v.string(), v.string())),
@@ -510,7 +510,7 @@ export const backfillColumn = async (
 };
 
 // The lance-namespace DropNamespaceResponse wire contract (all fields optional — the catalog serializes
-// with response_model_exclude_none). Parsed (not cast) at the boundary per the @rask/api
+// with response_model_exclude_none). Parsed (not cast) at the boundary per the @repo/api
 // parse-don't-validate rule: a schema drift throws to the caller instead of lying downstream.
 const DropNamespaceResponseSchema = v.object({
 	context: v.optional(v.record(v.string(), v.string())),

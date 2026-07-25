@@ -49,7 +49,7 @@ const PORT = Number(args.port ?? 3000);
 
 // ─── The adapter-bun build's request handler ───────────────────────────────
 // (The old AUTH_GATE cookie-presence gate is gone: the build runs the real
-// @rask/api/bff makeSessionHandle via hooks.server.ts — the login gate + session
+// @repo/api/bff makeSessionHandle via hooks.server.ts — the login gate + session
 // hydration are the app's own, identical to the estate zones.)
 // Generated into ./build at build time; a dynamic import by absolute path keeps
 // this file type-checkable/lintable without the build artifact present.

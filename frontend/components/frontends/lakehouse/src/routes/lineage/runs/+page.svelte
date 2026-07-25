@@ -1,5 +1,5 @@
 <script lang="ts">
-	// `/lineage/runs` — the durable run-status board on the shared @rask/ui DataTable
+	// `/lineage/runs` — the durable run-status board on the shared @repo/ui DataTable
 	// (Marquez-parity list view): each run's folded current state, sortable/filterable, newest
 	// first. Clicking a row opens the run's drill-in below the table (error, outputs, and the
 	// reproducibility pins — the per-run /inputs read stays off the polled board, N+1 guard).
@@ -17,14 +17,14 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
+	} from '@repo/ui/data-table';
 	import { RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
-	import { enter } from '@rask/ui/motion';
+	import { enter } from '@repo/ui/motion';
 	import { listRuns } from '$lib/api';
 	import RunInputs from '$lib/lineage/RunInputs.svelte';
-	import type { RunStatus } from '@rask/api/lineage';
+	import type { RunStatus } from '@repo/api/lineage';
 
 	const POLL_MS = 5000;
 

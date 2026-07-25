@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Explicit POST route: the knowledge-graph Cypher console (`{ query, limit }`). A
 // user-authored query is the closest thing the read plane has to a write surface, so it

@@ -18,7 +18,7 @@
 	import { hierarchy as d3hierarchy } from 'd3-hierarchy';
 	import { scaleOrdinal } from 'd3-scale';
 	import { schemeTableau10 } from 'd3-scale-chromatic';
-	import type { TopicNode } from '@lance/media-api';
+	import type { TopicNode } from '@repo/media-api';
 
 	let {
 		data,

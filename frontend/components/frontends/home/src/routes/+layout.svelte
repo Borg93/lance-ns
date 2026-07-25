@@ -4,7 +4,7 @@
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
-	import { AppShell } from '@rask/ui/shell';
+	import { AppShell } from '@repo/ui/shell';
 	import type { Snippet } from 'svelte';
 	import { HOME_ZONE_NAV } from '$lib/nav';
 	import type { LayoutData } from './$types';

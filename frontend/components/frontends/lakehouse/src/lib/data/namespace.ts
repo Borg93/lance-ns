@@ -7,9 +7,9 @@
 // because the catalog serializes them with response_model_exclude_none (absent-not-null fields —
 // same rationale as catalog.ts's DropNamespaceResponseSchema): a wire drift throws to the caller
 // instead of lying downstream.
-import { parse } from '@rask/api';
+import { parse } from '@repo/api';
 import * as v from 'valibot';
-import type { components } from '@rask/api/generated/catalog';
+import type { components } from '@repo/api/generated/catalog';
 import { type ApiResult, requestJSON as request } from '$lib/http';
 
 export type AccessList = components['schemas']['AccessListResponse'];
@@ -63,7 +63,7 @@ export const fetchNamespaceAccessGraph = (namespace: string) =>
 	requestJSON<AccessGraph>(`v1/namespace/${enc(namespace)}/access/graph`, { method: 'POST' });
 
 // The PolicyResponse wire contract (#50) — serialized with response_model_exclude_none, so the
-// nullable bounds arrive absent, not null. Parsed (not cast) at the boundary per the @rask/api
+// nullable bounds arrive absent, not null. Parsed (not cast) at the boundary per the @repo/api
 // parse-don't-validate rule: a schema drift throws to the caller instead of lying downstream.
 const PolicyResponseSchema = v.object({
 	kind: v.string(),

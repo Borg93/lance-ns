@@ -6,10 +6,10 @@
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
-	import { Select } from '@rask/ui/select';
+	import { Select } from '@repo/ui/select';
 	import ColumnLineage from '$lib/lineage/ColumnLineage.svelte';
 	import { listDatasets } from '$lib/api';
-	import type { DatasetSummary } from '@rask/api/lineage';
+	import type { DatasetSummary } from '@repo/api/lineage';
 
 	const POLL_MS = 15_000; // the catalog options list only — the canvas has its own poll
 

@@ -7,13 +7,13 @@
 	// frame, and each new shape is pinned to that moment (controller.timeCursor →
 	// t_start/t_end). One annotations table + Save path with images + audio segments.
 	import { onDestroy } from 'svelte';
-	import { loadAnnotations } from '@lance/labeling/annotations-client';
+	import { loadAnnotations } from '@repo/labeling/annotations-client';
 	import { Pause, Play } from '@lucide/svelte';
-	import type { PixiContext } from '@lance/engine';
-	import { Button } from '@rask/ui/button';
-	// @rask/ui has no slider yet, so the seek bar keeps the @lance/ui primitive — it is already
+	import type { PixiContext } from '@repo/engine';
+	import { Button } from '@repo/ui/button';
+	// @repo/ui has no slider yet, so the seek bar keeps the @repo/ui primitive — it is already
 	// token-styled, so it themes with the rest of the transport.
-	import { Slider } from '@lance/ui';
+	import { Slider } from '@repo/ui/slider';
 	import PixiCanvas from './PixiCanvas.svelte';
 	import type { ViewerProps } from './types';
 

@@ -1,5 +1,5 @@
 <script lang="ts">
-	// `/tables` — the catalog table registry (#52) on the shared @rask/ui DataTable (goal cond 4):
+	// `/tables` — the catalog table registry (#52) on the shared @repo/ui DataTable (goal cond 4):
 	// sortable columns, a text search, and a medallion STAGE filter (goal cond 3 — the stage is
 	// derived from the namespace segment, shown as a tier badge per row). Same stack-mode states as
 	// before: governed without a session ⇒ sign-in, unreachable ⇒ retrying, open ⇒ data or the
@@ -18,8 +18,8 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import { Select } from '@rask/ui/select';
+	} from '@repo/ui/data-table';
+	import { Select } from '@repo/ui/select';
 	import { Plus, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';

@@ -22,7 +22,7 @@
 		Users,
 		Warehouse as WarehouseIcon,
 	} from '@lucide/svelte';
-	import { pop } from '@rask/ui/motion';
+	import { pop } from '@repo/ui/motion';
 
 	let { data }: NodeProps<AccessNodeType> = $props();
 

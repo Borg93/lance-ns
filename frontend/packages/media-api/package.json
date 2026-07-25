@@ -1,5 +1,5 @@
 {
-	"name": "@lance/media-api",
+	"name": "@repo/media-api",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -30,7 +30,7 @@
 		"valibot": "^1.4.2"
 	},
 	"devDependencies": {
-		"@lance/config": "workspace:*",
+		"@repo/config": "workspace:*",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.10"
 	}

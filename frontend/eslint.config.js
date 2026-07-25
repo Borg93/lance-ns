@@ -9,7 +9,7 @@ import homeSvelteConfig from './components/frontends/home/svelte.config.js';
 import lakehouseSvelteConfig from './components/frontends/lakehouse/svelte.config.js';
 import mediaSvelteConfig from './components/frontends/media/svelte.config.js';
 import annotatorSvelteConfig from './components/frontends/annotator/svelte.config.js';
-import uiSvelteConfig from './packages/rask-ui/svelte.config.js';
+import uiSvelteConfig from './packages/ui/svelte.config.js';
 // Local cross-zone-reload rule lives in its own module so its zone-matching logic is
 // unit-tested (eslint-rules/cross-zone-reload.test.js).
 import { raLocal } from './eslint-rules/cross-zone-reload.js';
@@ -45,7 +45,7 @@ export default defineConfig(
 			'no-undef': 'off',
 			'@typescript-eslint/no-explicit-any': 'warn',
 			// `interface Locals extends AuthLocals {}` (each zone's app.d.ts augments App.Locals from the
-			// shared @rask/api seam) is the idiomatic SvelteKit pattern — allow a single-extends empty interface.
+			// shared @repo/api seam) is the idiomatic SvelteKit pattern — allow a single-extends empty interface.
 			'@typescript-eslint/no-empty-object-type': ['error', { allowInterfaces: 'with-single-extends' }],
 			'@typescript-eslint/no-unused-vars': [
 				'error',
@@ -86,7 +86,7 @@ export default defineConfig(
 		},
 	})),
 	{
-		files: ['packages/rask-ui/**/*.svelte', 'packages/rask-ui/**/*.svelte.ts'],
+		files: ['packages/ui/**/*.svelte', 'packages/ui/**/*.svelte.ts'],
 		languageOptions: {
 			parserOptions: {
 				projectService: true,
@@ -97,7 +97,7 @@ export default defineConfig(
 		},
 	},
 	{
-		// @lance/ui (the lance-media component lib) has no svelte.config.js — plain
+		// @repo/ui (the lance-media component lib) has no svelte.config.js — plain
 		// Svelte 5 + lang="ts" components, so the TS parser mapping alone suffices.
 		files: ['packages/ui/**/*.svelte', 'packages/ui/**/*.svelte.ts'],
 		languageOptions: {

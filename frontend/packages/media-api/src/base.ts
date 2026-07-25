@@ -11,7 +11,7 @@
 
 let apiBase = '';
 
-/** Set the base path prefixed to every `/api/*` URL this package (and @lance/labeling)
+/** Set the base path prefixed to every `/api/*` URL this package (and @repo/labeling)
  *  builds — the zone's SvelteKit `base`. Idempotent; trailing slash is normalized. */
 export function setApiBase(b: string): void {
 	apiBase = b.replace(/\/$/, '');

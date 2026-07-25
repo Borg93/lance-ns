@@ -1,14 +1,14 @@
 <script lang="ts">
-	// Chrome on the estate design system: @rask/ui Button + Select (the same primitives
-	// the data/admin zones use). Input stays on @lance/ui — @rask/ui does not export one.
-	import { Button } from '@rask/ui';
-	import { Select } from '@rask/ui/select';
-	import { Input } from '@lance/ui';
-	import type { SelectOption } from '@lance/ui';
+	// Chrome on the estate design system: @repo/ui Button + Select (the same primitives
+	// the data/admin zones use). Input stays on @repo/ui — @repo/ui does not export one.
+	import { Button } from '@repo/ui';
+	import { Select } from '@repo/ui/select';
+	import { Input } from '@repo/ui/input';
+	import type { SelectOption } from '@repo/ui/select';
 	import FilterPopover from './filter-popover.svelte';
 	import HelpPopover from './help-popover.svelte';
 	import SearchSettings from './search-settings.svelte';
-	import { activeView, type SearchSpec, type SearchMode } from '@lance/media-api';
+	import { activeView, type SearchSpec, type SearchMode } from '@repo/media-api';
 	import { untrack } from 'svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
 	import { AudioLines, Loader2, Paperclip, Search, X, ImagePlus } from '@lucide/svelte';

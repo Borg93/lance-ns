@@ -3,7 +3,7 @@
 	// and blessed versions, a per-model metrics comparison, and the candidate→blessed promote action.
 	// Data comes through the /capi BFF (catalog is OIDC-only — see routes/capi/[...path]/+server.ts):
 	// signed-out on a governed stack ⇒ 401 ⇒ the sign-in state below, never a broken table.
-	import { Chip } from '@rask/ui/chip';
+	import { Chip } from '@repo/ui/chip';
 	import { Award, RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import {

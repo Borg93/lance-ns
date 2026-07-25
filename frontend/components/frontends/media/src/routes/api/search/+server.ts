@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Same-origin proxy to the SEARCH service. GET is the text search; POST is the SAME
 // query surface with an image attached (multipart query-by-example) — a read spelled

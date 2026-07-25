@@ -1,5 +1,5 @@
 import { FolderKanban } from '@lucide/svelte';
-import { exact, type ZoneNav } from '@rask/ui/shell';
+import { exact, type ZoneNav } from '@repo/ui/shell';
 
 // The home zone's OWN sidebar routes — the landing IS the project gallery, so one leaf. Home owns
 // the origin root ('/'), matched exactly (every other path belongs to another zone).

@@ -1,5 +1,5 @@
 <script lang="ts">
-	// `/lineage/jobs` — the governed compute identities on the shared @rask/ui DataTable
+	// `/lineage/jobs` — the governed compute identities on the shared @repo/ui DataTable
 	// (Marquez-parity list view). A job is listed only if the caller may see every dataset it
 	// wrote. Row-click → the per-job detail page (`/jobs/<namespace>/<name>`, a rest route).
 	import {
@@ -16,12 +16,12 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
+	} from '@repo/ui/data-table';
 	import { RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { listJobs } from '$lib/api';
-	import type { JobSummary } from '@rask/api/lineage';
+	import type { JobSummary } from '@repo/api/lineage';
 
 	const POLL_MS = 5000;
 

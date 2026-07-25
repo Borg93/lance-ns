@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Same-origin read proxy to the ANNOTATOR service's batch-jobs domain (status polling).
 // GET-only — the submit POST is the dedicated /api/jobs/apply route beside this one.

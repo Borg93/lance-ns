@@ -6,9 +6,9 @@
 	import { onDestroy, onMount } from 'svelte';
 	import { FlaskConical, MousePointerClick, Sparkles } from '@lucide/svelte';
 	import { base } from '$app/paths';
-	import { Badge } from '@rask/ui/badge';
-	import { Button } from '@rask/ui/button';
-	import { cn } from '@rask/ui/utils';
+	import { Badge } from '@repo/ui/badge';
+	import { Button } from '@repo/ui/button';
+	import { cn } from '@repo/ui/utils';
 	import TextInput from '$lib/ui/TextInput.svelte';
 	import type { AnnotatorController } from '../annotator.svelte';
 

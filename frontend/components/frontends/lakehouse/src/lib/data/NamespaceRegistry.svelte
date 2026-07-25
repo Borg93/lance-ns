@@ -1,11 +1,11 @@
 <script lang="ts">
-	// `/namespaces` — the catalog's namespaces on the shared @rask/ui DataTable (goal cond 4):
+	// `/namespaces` — the catalog's namespaces on the shared @repo/ui DataTable (goal cond 4):
 	// one sortable/searchable row per namespace (derived from the table registry's
 	// `<namespace>$<table>` ids — there is no root-namespace list endpoint), with the medallion
 	// tier badge (goal cond 3) and the #85 drop action preserved (AlertDialog confirm; Restrict by
 	// default, Cascade opt-in). Creation deliberately has NO surface here — the governed path is
 	// the warehouse-bind flow (/warehouses), which the "New namespace" affordance points at.
-	import { AlertDialog } from '@rask/ui/alert-dialog';
+	import { AlertDialog } from '@repo/ui/alert-dialog';
 	import {
 		createSvelteTable,
 		DataTable,
@@ -20,7 +20,7 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
+	} from '@repo/ui/data-table';
 	import { Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';

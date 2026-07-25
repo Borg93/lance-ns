@@ -3,7 +3,7 @@
 	// authorization model is code (3 synced model files, migrated through the repo), so the UI shows
 	// it verbatim with its live authorization_model_id and offers no edit affordance whatsoever.
 	import { FileCode2, RefreshCw, ShieldAlert } from '@lucide/svelte';
-	import { parse } from '@rask/api';
+	import { parse } from '@repo/api';
 	import { page } from '$app/state';
 	import { AccessModelSchema, fetchAccessModel, type AccessModel } from './access';
 

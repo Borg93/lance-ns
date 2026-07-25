@@ -1,5 +1,5 @@
 import { Activity, Boxes, Columns3, Cpu, Network } from '@lucide/svelte';
-import { exact, seg, type ZoneNav } from '@rask/ui/shell';
+import { exact, seg, type ZoneNav } from '@repo/ui/shell';
 
 // The lineage area's sidebar routes inside the lakehouse zone (Marquez-parity IA): the four first-class views —
 // Datasets / Jobs / Runs / Columns — plus the DAG explorer at the zone root. Hrefs are absolute

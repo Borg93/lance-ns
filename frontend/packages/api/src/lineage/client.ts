@@ -1,4 +1,4 @@
-// @rask/api/lineage — the typed browser client for the lineage plane, served through a zone's own
+// @repo/api/lineage — the typed browser client for the lineage plane, served through a zone's own
 // same-origin `/api/*` BFF proxy.
 //
 // The admin, data and lineage zones each carried a byte-identical (admin/data) or near-identical

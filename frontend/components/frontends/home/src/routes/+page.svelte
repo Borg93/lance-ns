@@ -1,7 +1,7 @@
 <script lang="ts">
-	import { Badge } from '@rask/ui/badge';
-	import { Button } from '@rask/ui/button';
-	import { Card } from '@rask/ui/card';
+	import { Badge } from '@repo/ui/badge';
+	import { Button } from '@repo/ui/button';
+	import { Card } from '@repo/ui/card';
 	import type { PageData } from './$types';
 
 	let { data }: { data: PageData } = $props();

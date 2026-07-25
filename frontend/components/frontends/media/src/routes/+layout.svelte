@@ -6,8 +6,8 @@
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
-	import { AppShell } from '@rask/ui/shell';
-	import type { Me } from '@rask/api';
+	import { AppShell } from '@repo/ui/shell';
+	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import { MEDIA_ZONE_NAV } from '$lib/nav';
 	import { descriptor } from '$lib/descriptor-store.svelte';

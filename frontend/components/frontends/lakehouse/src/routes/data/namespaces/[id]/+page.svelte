@@ -5,7 +5,7 @@
 	// table count from the registry the /namespaces page already derives from), the kind-generalized
 	// GrantsPanel, and a maintenance-policy card mirroring the table policy form. Same stack-mode
 	// states as the registry — governed without a session ⇒ sign-in, unreachable ⇒ retrying.
-	import { GrantsPanel, type GrantsClient } from '@rask/ui/grants-panel';
+	import { GrantsPanel, type GrantsClient } from '@repo/ui/grants-panel';
 	import { Boxes, Network, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
@@ -34,7 +34,7 @@
 	let tab = $state('overview');
 	const stageInfo = $derived(stageOf(ns));
 
-	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
+	// The zone-owned catalog seam the shared @repo/ui GrantsPanel calls (the lib never owns an API client).
 	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).

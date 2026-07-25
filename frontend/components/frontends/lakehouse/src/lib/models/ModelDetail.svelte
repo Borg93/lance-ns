@@ -15,7 +15,7 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
+	} from '@repo/ui/data-table';
 	import type { ModelArtifact, ModelDescribe } from './catalog';
 	import TrainingCurves from './TrainingCurves.svelte';
 

@@ -33,30 +33,35 @@ frontend/
                     #                         (estate-admin gated, fail-closed, in the root layout)
     media/          # /media — semantic search, the embedding atlas, the derivation workflow
     annotator/      # /annotator — the Pixi labeling canvas (split for bundle isolation, not domain)
-  packages/
-    rask-ui/        # @rask/ui — shared shadcn-svelte design system on bits-ui 2 (AppShell + nav-config)
-    api/            # @rask/api — the cross-cutting seam, by subpath:
+  packages/           # ALL under one vendor-neutral scope: `rask` and `lance` are both temporary names
+                    #   (rask becomes compute), and @repo/* is turborepo's own convention, so nothing
+                    #   here has to be renamed again when they change.
+    ui/             # @repo/ui — THE design system: shadcn-svelte on bits-ui 2, AppShell + nav-config.
+                    #   The second UI package (@lance/ui) is folded in; every component it exported that
+                    #   anything imported now lives here, and four components that existed but were
+                    #   missing from the exports map are reachable at last (that gap is what kept the
+                    #   second package alive).
+    api/            # @repo/api — the cross-cutting seam, by subpath:
                     #     .                  gateway rewrite · valibot parse · the frozen /v1/me contract
                     #     /client            the browser-side BFF client, bound per zone in $lib/http
                     #     /lineage           lineage domain types + the typed lineage-plane client
                     #     /generated/*       the OpenAPI output (bun run gen:types) — never hand-edited
                     #     /oidc /bff         server-only: PKCE + sealed session, and the zone wiring
                     #                        factories (hooks, layout load, catalog/lineage/viewer proxies)
-    ui/             # @lance/ui — the pre-merge media design system; folding into @rask/ui
-    media-api/      # @lance/media-api — the media-plane client (descriptor/DatasetView, Arrow envelopes)
-    engine/         # @lance/engine — the Pixi canvas engine, tools and layer store
-    labeling/       # @lance/labeling — annotation history, tag writer, job clients
-    config/         # @lance/config — the shared tsconfig base
-    zone-contract/  # @rask/zone-contract — the zone manifest: the invariant tests that keep
+    media-api/      # @repo/media-api — the media-plane client (descriptor/DatasetView, Arrow envelopes)
+    engine/         # @repo/engine — the Pixi canvas engine, tools and layer store
+    labeling/       # @repo/labeling — annotation history, tag writer, job clients
+    config/         # @repo/config — the shared tsconfig base
+    zone-contract/  # @repo/zone-contract — the zone manifest: the invariant tests that keep
                     #   microfrontends.json, each svelte.config.js base, each vite.config.ts port and
                     #   chart/values.yaml agreeing, plus the local composition proxy driven by that
                     #   same file (`bun run dev` → one origin on :5200, like the cluster Ingress)
 ```
 
-Note the two API packages are different layers, not duplicates: `@rask/api` is the **BFF/auth seam**
-every zone's server wiring goes through, while `@lance/media-api` is the **typed client for the media
-services** (viewer/search/annotator). It was previously named `@lance/api` in a `media-api/` directory,
-which read as if it were the generic one.
+Note the two API packages are different layers, not duplicates: `@repo/api` is the **BFF/auth seam**
+every zone's server wiring goes through, while `@repo/media-api` is the **typed client for the media
+services** (viewer/search/annotator). One is how a zone's server talks to the estate; the other is how
+the browser talks to the media plane.
 
 Commands (root): `bun install` · `bun run dev` (all four zones **plus the composition proxy**, so the
 estate is one origin at <http://localhost:5200> exactly as it is behind the Ingress — `bun run dev:zones`
@@ -71,9 +76,9 @@ Each zone image builds from the parametrized
 Adding a zone = `components/frontends/<name>` (its own `svelte.config.js` with `paths.base`, and a
 package **named for the directory** — turbo resolves routing keys against package names) + the chart's
 `frontend.apps` list + the Ingress route + an entry in `components/frontends/home/microfrontends.json`
-with a unique dev port. `@rask/zone-contract`'s tests fail if any of those four disagree.
+with a unique dev port. `@repo/zone-contract`'s tests fail if any of those four disagree.
 Its `hooks.server.ts`, `+layout.server.ts` and BFF catch-all routes are one line each — the factories in
-`@rask/api/bff` (`makeZoneHooks`, `zoneLayoutLoad`, `makeCatalogProxy`, `makeLineageProxy`,
-`makeViewerProxy`); its `src/lib/http.ts` binds `@rask/api/client` to the zone's base path. Remote
+`@repo/api/bff` (`makeZoneHooks`, `zoneLayoutLoad`, `makeCatalogProxy`, `makeLineageProxy`,
+`makeViewerProxy`); its `src/lib/http.ts` binds `@repo/api/client` to the zone's base path. Remote
 functions (`query`/`query.live`) are enabled per zone (`kit.experimental.remoteFunctions` +
-`compilerOptions.experimental.async`); shared UI lives in `@rask/ui`.
+`compilerOptions.experimental.async`); shared UI lives in `@repo/ui`.

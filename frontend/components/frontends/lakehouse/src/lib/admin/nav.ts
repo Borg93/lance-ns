@@ -1,5 +1,5 @@
 import { Building2, Inbox, Layers, Radio, ScrollText, ShieldCheck } from '@lucide/svelte';
-import { seg, type ZoneNav } from '@rask/ui/shell';
+import { seg, type ZoneNav } from '@repo/ui/shell';
 
 // The admin area's sidebar routes inside the lakehouse zone. Access is the estate access-review surface (playground +
 // grants) — it also has its own top-navbar entry, mirrored here so the sidebar is complete.

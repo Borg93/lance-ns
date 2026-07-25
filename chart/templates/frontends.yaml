@@ -55,7 +55,7 @@ spec:
             # only resolve for browsers. The BROWSER-facing authorize URL and the iss expectation keep the
             # public OIDC_ISSUER; the BFF rewrites the discovered (public) endpoints onto this base.
             # (The old AUTH_GATE cookie-presence env is gone: the media/annotator zones now run the real
-            # @rask/api/bff makeSessionHandle like every other zone — one gate, derived from this config.)
+            # @repo/api/bff makeSessionHandle like every other zone — one gate, derived from this config.)
             - { name: OIDC_INTERNAL_ISSUER, value: "http://{{ include "lance.fullname" $root }}-dex:5556/dex" }
             {{- end }}
             {{- if and $root.Values.media.enabled (or (eq .name "media") (eq .name "annotator")) }}

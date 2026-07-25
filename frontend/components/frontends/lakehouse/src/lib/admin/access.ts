@@ -5,7 +5,7 @@ import { requestJSON } from '$lib/http';
 // Wire contracts + client for the FGA workbench (`/admin/access`) — the catalog's estate-admin-gated
 // /v1/access API, reached through this zone's narrow /capi pass-through (session bearer-forwarded,
 // never a service token). The shapes are the frozen /v1/access contract, parsed (never cast) at the
-// browser boundary per the @rask/api parse-don't-validate rule — like jetstream.ts, hand-written
+// browser boundary per the @repo/api parse-don't-validate rule — like jetstream.ts, hand-written
 // against the contract because the catalog OpenAPI dump has not yet caught up; swap to the generated
 // types once `bun run gen:types:catalog` carries them.
 

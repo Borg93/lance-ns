@@ -1,11 +1,11 @@
 <script lang="ts">
 	// Searchable annotation list — the review queue. Predictions first, highest
 	// uncertainty first (the active-learning order), then click to select on canvas.
-	// The filter is @rask/ui's DataTableTextFilter — the same search-icon + input pairing the
-	// data/admin list toolbars use (and the only route to @rask/ui's own Input, which the
+	// The filter is @repo/ui's DataTableTextFilter — the same search-icon + input pairing the
+	// data/admin list toolbars use (and the only route to @repo/ui's own Input, which the
 	// package does not export directly).
-	import { DataTableTextFilter } from '@rask/ui/data-table';
-	import { cn } from '@rask/ui/utils';
+	import { DataTableTextFilter } from '@repo/ui/data-table';
+	import { cn } from '@repo/ui/utils';
 	import { statusDot } from './statusStyle';
 	import type { AnnotatorController } from '../annotator.svelte';
 

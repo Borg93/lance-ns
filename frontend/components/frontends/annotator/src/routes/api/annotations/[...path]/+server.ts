@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Same-origin proxy to the ANNOTATOR service for one unit's annotations. GET returns
 // Arrow IPC + the X-Annotations-Version header (the optimistic-concurrency handshake),

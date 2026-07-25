@@ -13,9 +13,9 @@
 </script>
 
 <script lang="ts">
-	import { enter } from '@rask/ui/motion';
+	import { enter } from '@repo/ui/motion';
 	import { Network, ShieldAlert } from '@lucide/svelte';
-	import { parse } from '@rask/api';
+	import { parse } from '@repo/api';
 	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';
 	import {

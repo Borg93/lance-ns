@@ -2,11 +2,11 @@
 	// Full columns/sort table of the unit's annotations — the review queue as a
 	// spreadsheet (ported from the pre-monorepo AnnotationTable, commit 6afcbc7, which
 	// the apps/media move dropped). Reads the controller's rows (no own fetch); click a
-	// row to select it on the canvas; click a header to sort. Built from @rask/ui's Table
+	// row to select it on the canvas; click a header to sort. Built from @repo/ui's Table
 	// parts + SortHeader, so it IS the same table object the data/admin registries render.
-	import * as Table from '@rask/ui/table';
-	import { SortHeader } from '@rask/ui/sort-header';
-	import { cn } from '@rask/ui/utils';
+	import * as Table from '@repo/ui/table';
+	import { SortHeader } from '@repo/ui/sort-header';
+	import { cn } from '@repo/ui/utils';
 	import { statusDot } from './statusStyle';
 	import type { AnnotatorController } from '../annotator.svelte';
 

@@ -1,5 +1,5 @@
 import { fetchEstateGraph, fetchEvents, fetchRuns } from '$lib/api';
-import type { EventRecord, GraphEdge, GraphNode, RunStatus } from '@rask/api/lineage';
+import type { EventRecord, GraphEdge, GraphNode, RunStatus } from '@repo/api/lineage';
 
 /** Hard cap on the nodes the DAG explorer renders — a DENSITY limit now, not a request budget:
  * the estate arrives in one bulk `/graph` read (per-node version/failed rollups included), so the

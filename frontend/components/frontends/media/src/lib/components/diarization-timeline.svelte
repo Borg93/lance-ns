@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { DiarTurn } from '@lance/media-api';
+	import type { DiarTurn } from '@repo/media-api';
 	import { fmtTime } from '$lib/utils';
 	import { AudioLines } from '@lucide/svelte';
 

@@ -24,7 +24,7 @@
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
 	import { Boxes, Database, Layers, Gem } from '@lucide/svelte';
-	import { pulse, pop } from '@rask/ui/motion';
+	import { pulse, pop } from '@repo/ui/motion';
 
 	let { data }: NodeProps<MedallionNodeType> = $props();
 

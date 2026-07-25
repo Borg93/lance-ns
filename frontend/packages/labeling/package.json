@@ -1,5 +1,5 @@
 {
-	"name": "@lance/labeling",
+	"name": "@repo/labeling",
 	"version": "0.0.0",
 	"private": true,
 	"type": "module",
@@ -15,11 +15,11 @@
 		"fmt:check": "oxfmt --check ."
 	},
 	"dependencies": {
-		"@lance/media-api": "workspace:*",
+		"@repo/media-api": "workspace:*",
 		"apache-arrow": "^21.2.0"
 	},
 	"devDependencies": {
-		"@lance/config": "workspace:*",
+		"@repo/config": "workspace:*",
 		"typescript": "^6.0.3",
 		"vitest": "^4.1.10"
 	}

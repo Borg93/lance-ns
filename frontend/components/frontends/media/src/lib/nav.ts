@@ -1,5 +1,5 @@
 import { BookOpen, FolderTree, Map, Search, Share2, SquarePen, Workflow } from '@lucide/svelte';
-import { exact, seg, type ZoneNav } from '@rask/ui/shell';
+import { exact, seg, type ZoneNav } from '@repo/ui/shell';
 
 // The media zone's OWN sidebar routes (the shared shell renders exactly what a zone passes — the
 // cross-zone list lives in the top navbar). Hrefs are absolute domain paths: the zone is served

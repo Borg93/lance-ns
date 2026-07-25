@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { makeBackendProxy } from '@rask/api/bff';
+import { makeBackendProxy } from '@repo/api/bff';
 
 // The FGA workbench's check probe: POST /v1/access/check → a live OpenFGA Check verdict on any
 // (user, relation, object) triple. Estate-admin gated BY THE CATALOG (probing the graph == disclosing

@@ -15,7 +15,7 @@
 <script lang="ts">
 	import { Handle, Position } from '@xyflow/svelte';
 	import { Cpu } from '@lucide/svelte';
-	import { pop } from '@rask/ui/motion';
+	import { pop } from '@repo/ui/motion';
 
 	let { data }: NodeProps<JobNodeType> = $props();
 

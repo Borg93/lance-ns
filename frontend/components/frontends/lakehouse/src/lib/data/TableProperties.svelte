@@ -3,7 +3,7 @@
 	// (schema_metadata/update replaces it), so we edit a full local copy and PUT it; per-column metadata is
 	// MERGED per key (update_field_metadata), a `null` value deleting a key. Both are writer-gated at the
 	// catalog and reach it only through the session-only /capi columns BFF (the signed-in user's bearer).
-	import { Select } from '@rask/ui/select';
+	import { Select } from '@repo/ui/select';
 	import { untrack } from 'svelte';
 	import { setFieldMetadata, setTableProperties, type CatalogResult } from './catalog';
 

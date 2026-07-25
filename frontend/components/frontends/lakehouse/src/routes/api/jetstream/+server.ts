@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { json } from '@sveltejs/kit';
-import { parse } from '@rask/api';
+import { parse } from '@repo/api';
 import { RawJszSchema, type JetStreamOverview } from '$lib/admin/jetstream';
 import type { RequestHandler } from './$types';
 

@@ -1,6 +1,6 @@
 import { test, expect, type Route, type Page } from '@playwright/test';
 
-// Responsive contract for the SHARED @rask/ui shell (#105). It lives in the data zone because a
+// Responsive contract for the SHARED @repo/ui shell (#105). It lives in the data zone because a
 // spec needs *some* zone to render the shell in, but it imports nothing zone-specific and asserts
 // nothing about the data zone's own content — every assertion is about chrome that every
 // microfrontend inherits from `AppShell`:

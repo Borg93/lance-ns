@@ -12,14 +12,14 @@
 #
 # Two bun-1.3 + svelte-adapter-bun gotchas this encodes (same as the old web.dockerfile):
 #  1. the adapter externalizes @sveltejs/kit (+ the svelte runtime) → the runtime ships node_modules
-#     (build/ is NOT standalone). @rask/ui + @rask/api are BUNDLED into the zone's build/, so packages/
+#     (build/ is NOT standalone). @repo/ui + @repo/api are BUNDLED into the zone's build/, so packages/
 #     is not needed at runtime — only the store + the app's own symlinked node_modules.
 #  2. bun 1.3 isolated linker: real packages live in node_modules/.bun/<pkg>; each workspace member's
 #     node_modules holds symlinks INTO that store. The final image copies the store (root node_modules)
 #     AND the app (with its symlinked node_modules) at the path the relative symlinks expect, then runs
 #     from the app dir.
 
-# ---- builder: bun install (workspace) + prebuild @rask/ui + bun build the zone --------------------
+# ---- builder: bun install (workspace) + prebuild @repo/ui + bun build the zone --------------------
 FROM oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS builder
 
 ARG APP=home
@@ -37,11 +37,11 @@ COPY frontend/components/frontends components/frontends
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
 
-# Pre-build @rask/ui (svelte-package → dist/) so its dist exports resolve during the zone build; then
-# build the requested zone (vite bundles the app + @rask/ui + @rask/api into build/).
+# Pre-build @repo/ui (svelte-package → dist/) so its dist exports resolve during the zone build; then
+# build the requested zone (vite bundles the app + @repo/ui + @repo/api into build/).
 # hadolint ignore=DL3059
 RUN --mount=type=cache,target=/root/.bun/install/cache \
-    bun run --cwd packages/rask-ui build \
+    bun run --cwd packages/ui build \
     && bun run --cwd components/frontends/${APP} build
 
 # ---- runtime: minimal Bun runtime serving the adapter-bun server ---------------------------------

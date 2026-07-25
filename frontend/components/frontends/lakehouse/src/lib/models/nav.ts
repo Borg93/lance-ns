@@ -1,5 +1,5 @@
 import { FlaskConical, Package, Workflow } from '@lucide/svelte';
-import { exact, seg, type ZoneNav } from '@rask/ui/shell';
+import { exact, seg, type ZoneNav } from '@repo/ui/shell';
 
 // The models area's sidebar routes inside the lakehouse zone. Registry sits at the zone root, so it matches `exact`
 // (a `seg` there would light it up on every sibling sub-route); the sub-pages use `seg`.

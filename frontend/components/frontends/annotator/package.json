@@ -15,13 +15,12 @@
 		"fmt:check": "oxfmt --check . && prettier --check '**/*.svelte' --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
-		"@lance/engine": "workspace:*",
-		"@lance/labeling": "workspace:*",
-		"@lance/media-api": "workspace:*",
-		"@lance/ui": "workspace:*",
 		"@lucide/svelte": "^1.26.0",
-		"@rask/api": "workspace:*",
-		"@rask/ui": "workspace:*",
+		"@repo/api": "workspace:*",
+		"@repo/engine": "workspace:*",
+		"@repo/labeling": "workspace:*",
+		"@repo/media-api": "workspace:*",
+		"@repo/ui": "workspace:*",
 		"apache-arrow": "^21.2.0",
 		"mode-watcher": "^1.1.0",
 		"pixi.js": "^8.19.0",
@@ -29,8 +28,8 @@
 		"svelte-sonner": "^1.1.1"
 	},
 	"devDependencies": {
-		"@lance/config": "workspace:*",
 		"@playwright/test": "^1.62.0",
+		"@repo/config": "workspace:*",
 		"@sveltejs/kit": "^2.70.1",
 		"@sveltejs/vite-plugin-svelte": "^7.2.0",
 		"@tailwindcss/vite": "^4.3.3",

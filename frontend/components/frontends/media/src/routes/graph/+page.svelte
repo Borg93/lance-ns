@@ -22,9 +22,10 @@
 		type Simulation,
 		type SimulationNodeDatum,
 	} from 'd3-force';
-	import { Button } from '@rask/ui';
-	import { Select } from '@rask/ui/select';
-	import { Input, type SelectOption } from '@lance/ui';
+	import { Button } from '@repo/ui';
+	import { Select } from '@repo/ui/select';
+	import { Input } from '@repo/ui/input';
+	import { type SelectOption } from '@repo/ui/select';
 	import { HelpCircle } from '@lucide/svelte';
 	import GpuGraph from '$lib/graph/gpu-graph.svelte';
 	import GraphBreadcrumb from '$lib/graph/graph-breadcrumb.svelte';
@@ -39,7 +40,7 @@
 		type GraphEntityResponse,
 		type GraphMatch,
 		type GraphCypherResponse,
-	} from '@lance/media-api';
+	} from '@repo/media-api';
 
 	type View = 'graph' | 'table' | 'json';
 	type SimNode = SimulationNodeDatum & { id: string; idx: number };

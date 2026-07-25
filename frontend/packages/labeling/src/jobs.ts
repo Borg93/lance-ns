@@ -7,7 +7,7 @@
  * the read-plane trigger and the annotator's batch `apply()` route through here, so
  * there's ONE submit path. See labeling/types.ts + docs/ACTIVE_LABELING.md.
  */
-import { apiUrl } from '@lance/media-api/base';
+import { apiUrl } from '@repo/media-api/base';
 
 import type { ChunkSelection, Op } from './types';
 

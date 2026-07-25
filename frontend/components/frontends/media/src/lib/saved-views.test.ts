@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { SearchSpec } from '@lance/media-api';
+import type { SearchSpec } from '@repo/media-api';
 import { removeView, stripEphemeral, upsertView, viewsForDataset } from '$lib/saved-views';
 
 describe('stripEphemeral', () => {

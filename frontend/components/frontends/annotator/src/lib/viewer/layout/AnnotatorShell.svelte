@@ -7,8 +7,8 @@
 	import type { MediaUnit } from '$lib/viewer/types';
 	import { AnnotatorController } from '$lib/viewer/annotator.svelte';
 	import { reviewSelection } from '$lib/labeling/review-selection.svelte';
-	import ResizableSplit from '@lance/ui/resizable-split.svelte';
-	import { Badge } from '@rask/ui/badge';
+	import { ResizableSplit } from '@repo/ui/resizable-split';
+	import { Badge } from '@repo/ui/badge';
 	import AnnotatorToolbar from './AnnotatorToolbar.svelte';
 	import AnnotationSidebar from './AnnotationSidebar.svelte';
 	import ZoomControls from './ZoomControls.svelte';

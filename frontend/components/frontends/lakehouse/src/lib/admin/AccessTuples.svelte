@@ -17,11 +17,11 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import { AlertDialog } from '@rask/ui/alert-dialog';
-	import { Dialog } from '@rask/ui/dialog';
+	} from '@repo/ui/data-table';
+	import { AlertDialog } from '@repo/ui/alert-dialog';
+	import { Dialog } from '@repo/ui/dialog';
 	import { Plus, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
-	import { parse } from '@rask/api';
+	import { parse } from '@repo/api';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { deleteTuple, fetchTuples, type Tuple, TuplesPageSchema, writeTuple } from './access';

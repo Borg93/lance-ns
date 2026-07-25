@@ -1,4 +1,4 @@
-// @rask/api/observability — per-zone error attribution.
+// @repo/api/observability — per-zone error attribution.
 //
 // A page composed from independently deployed zones fails PER ZONE, and a generic error report cannot
 // say WHICH zone broke: every zone serves from the same origin, so "the page 500'd" is all a plain

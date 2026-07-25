@@ -2,10 +2,10 @@
 	import { browser } from '$app/environment';
 	import { onMount, setContext } from 'svelte';
 	import { Application } from 'pixi.js';
-	import { ArrowDataPlugin } from '@lance/engine';
-	import { ImagePlugin } from '@lance/engine';
-	import { InteractionManager } from '@lance/engine';
-	import type { PixiContext } from '@lance/engine';
+	import { ArrowDataPlugin } from '@repo/engine';
+	import { ImagePlugin } from '@repo/engine';
+	import { InteractionManager } from '@repo/engine';
+	import type { PixiContext } from '@repo/engine';
 	import type { Snippet } from 'svelte';
 
 	let {

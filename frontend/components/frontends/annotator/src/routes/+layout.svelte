@@ -5,8 +5,8 @@
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
-	import { TopNavbar } from '@rask/ui/shell';
-	import type { Me } from '@rask/api';
+	import { TopNavbar } from '@repo/ui/shell';
+	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import type { LayoutData } from './$types';
 

@@ -1,7 +1,7 @@
 import { error } from '@sveltejs/kit';
 import { getRequestEvent, query } from '$app/server';
 import { env } from '$env/dynamic/private';
-import { parse } from '@rask/api';
+import { parse } from '@repo/api';
 import { EventsPageSchema, type ControlEvent } from '$lib/admin/control';
 
 const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';

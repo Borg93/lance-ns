@@ -18,10 +18,10 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import { Select } from '@rask/ui/select';
-	import * as Sheet from '@rask/ui/sheet';
-	import { formatAbsolute, formatTimestamp } from '@rask/ui/utils';
+	} from '@repo/ui/data-table';
+	import { Select } from '@repo/ui/select';
+	import * as Sheet from '@repo/ui/sheet';
+	import { formatAbsolute, formatTimestamp } from '@repo/ui/utils';
 	import { ExternalLink, Filter, RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';
@@ -96,7 +96,7 @@
 	}
 	// GreptimeDB's `timestamp` column arrives as a raw NANOSECOND epoch integer, which `new Date()`
 	// cannot parse — the old local `when()` fell through to printing `1753387234123456789` at the
-	// operator. The shared @rask/ui formatter reads the unit off the magnitude and returns both
+	// operator. The shared @repo/ui formatter reads the unit off the magnitude and returns both
 	// forms: the row shows the distance and hangs the exact stamp in its tooltip.
 
 	// ── the DataTable (goal cond 4): sortable columns + a client-side text search over the

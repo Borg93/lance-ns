@@ -53,10 +53,17 @@ test('the navbar carries the three domain triggers and no governance column for 
 	await expect(panel.getByText('Catalog', { exact: true })).toBeVisible();
 	await expect(panel.getByText('Governance', { exact: true })).toHaveCount(0);
 	await expect(panel.getByText('Operations', { exact: true })).toHaveCount(0);
-	await expect(panel.locator('a[href^="/admin"]')).toHaveCount(0);
-	// Every panel row leaves the home zone's route manifest, so it must hard-navigate.
-	await expect(panel.getByRole('link', { name: /^Registry/ })).toHaveAttribute('href', '/models');
-	await expect(panel.locator('a[href="/models"]')).toHaveAttribute('data-sveltekit-reload', '');
+	await expect(panel.locator('a[href^="/lakehouse/admin"]')).toHaveCount(0);
+	// Every panel row leaves the home zone's route manifest, so it must hard-navigate. From HOME that
+	// is still true of every row, including the lakehouse ones — home is its own zone.
+	await expect(panel.getByRole('link', { name: /^Registry/ })).toHaveAttribute(
+		'href',
+		'/lakehouse/models',
+	);
+	await expect(panel.locator('a[href="/lakehouse/models"]')).toHaveAttribute(
+		'data-sveltekit-reload',
+		'',
+	);
 });
 
 test('the landing shows the gallery empty state and NO auth control when auth is off', async ({

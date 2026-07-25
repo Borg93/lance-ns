@@ -7,10 +7,10 @@
 	// the four triggers share one open/close behaviour and one surface treatment.
 	import { Bookmark, Check, X } from '@lucide/svelte';
 	import { Popover } from 'bits-ui';
-	import { activeView, type SearchSpec } from '@lance/media-api';
+	import { activeView, type SearchSpec } from '@repo/media-api';
 	import { savedViews } from '$lib/saved-views.svelte';
-	import { Badge, Button, buttonVariants } from '@rask/ui';
-	import { Input } from '@lance/ui';
+	import { Badge, Button, buttonVariants } from '@repo/ui';
+	import { Input } from '@repo/ui/input';
 
 	let { spec, onapply }: { spec: SearchSpec; onapply: (s: SearchSpec) => void } = $props();
 

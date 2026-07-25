@@ -1,7 +1,7 @@
 import * as v from 'valibot';
 
 // JetStream visibility wire contracts (read-only, #20-adjacent ops surface). Two boundaries, both parsed
-// (never cast) per the @rask/api parse-don't-validate rule:
+// (never cast) per the @repo/api parse-don't-validate rule:
 //  1. the RAW NATS `/jsz?streams=true&consumers=true&config=true` monitor payload, fetched SERVER-SIDE by
 //     the /api/jetstream BFF (the monitor port is unauthenticated by design — the BFF adminGate is the only
 //     gate, so the raw shape must never reach the browser);

@@ -13,10 +13,10 @@
 		listDocuments,
 		type Document,
 		type DocumentsResponse,
-	} from '@lance/media-api';
-	import { setActiveView, type DatasetView } from '@lance/media-api/descriptor';
-	import { Button } from '@rask/ui/button';
-	import { Select } from '@rask/ui/select';
+	} from '@repo/media-api';
+	import { setActiveView, type DatasetView } from '@repo/media-api/descriptor';
+	import { Button } from '@repo/ui/button';
+	import { Select } from '@repo/ui/select';
 	import DocTile from './DocTile.svelte';
 	import ChunkPicker from './ChunkPicker.svelte';
 

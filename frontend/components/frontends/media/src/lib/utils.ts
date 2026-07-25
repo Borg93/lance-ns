@@ -1,13 +1,13 @@
-import { activeView, type Row } from '@lance/media-api/descriptor';
+import { activeView, type Row } from '@repo/media-api/descriptor';
 
 /** shadcn-svelte's standard `cn` helper: clsx for conditionals, twMerge for conflicts. */
-export { cn } from '@lance/ui/utils';
+export { cn } from '@repo/ui/utils';
 export type {
 	WithElementRef,
 	WithoutChild,
 	WithoutChildren,
 	WithoutChildrenOrChild,
-} from '@lance/ui/utils';
+} from '@repo/ui/utils';
 
 // Type helpers expected by shadcn-svelte v1.2+ generated components (shared
 // with the sibling apps so UI primitives stay copy-paste compatible).

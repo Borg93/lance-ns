@@ -10,11 +10,11 @@
 		getDocTranscript,
 		getDiarization,
 		mediaUrl,
-	} from '@lance/media-api';
+	} from '@repo/media-api';
 	import { voiceSearch } from '$lib/voice-search.svelte';
 	import { fmtTime, hitKey } from '$lib/utils';
 	import { ChevronRight, Maximize2, Minimize2 } from '@lucide/svelte';
-	import { Button } from '@rask/ui';
+	import { Button } from '@repo/ui';
 	import TranscriptWindow from './transcript-window.svelte';
 	import ChunkTimeline from './chunk-timeline.svelte';
 	import DiarizationTimeline from './diarization-timeline.svelte';

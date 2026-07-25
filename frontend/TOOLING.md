@@ -33,7 +33,7 @@ invoked the oxc tools — and the moment oxlint and oxfmt were switched on they 
 *nearest config wins*. That zone got 80-column double-quoted output against the root's 100-column
 tabbed style, a different plugin set (`typescript` + `oxc`), `suspicious: warn`, and two rules
 disabled. Nothing reported it; `svelte.config.js` just quietly reformatted. Both files are deleted,
-and `@rask/zone-contract` now fails if a per-package `.oxlintrc.json`, `.oxfmtrc.json`, `.prettierrc`
+and `@repo/zone-contract` now fails if a per-package `.oxlintrc.json`, `.oxfmtrc.json`, `.prettierrc`
 or `eslint.config.js` reappears. A per-package config has to be a deliberate act, not a leftover.
 
 ## Why ESLint and Prettier are still here
@@ -84,7 +84,7 @@ It is the intended exit from this file. Tested against **this repo**, at `fmt@0.
                        )}
   ```
 
-- **`@rsvelte/oxlint-plugin` works.** Enabled on `packages/rask-ui` and `components/frontends/data` it
+- **`@rsvelte/oxlint-plugin` works.** Enabled on `packages/ui` and `components/frontends/data` it
   produced real diagnostics (`svelte/no-unused-class-name`, a11y, compiler validator) inside the
   single oxlint pass. Documented alpha limits: scriptless components are skipped entirely, markup
   positions are approximate (reported at the top of `<script>`, true location in the message text),
@@ -92,7 +92,7 @@ It is the intended exit from this file. Tested against **this repo**, at `fmt@0.
 
 - **`@rsvelte/svelte-check` is the one that would unblock TypeScript 7** — it takes `--tsgo`. But it
   **breaks on this codebase, fail-open**: it emits invalid TSX for
-  `packages/rask-ui/src/lib/components/data-table/data-table.svelte`, and the resulting syntax error
+  `packages/ui/src/lib/components/data-table/data-table.svelte`, and the resulting syntax error
   makes TypeScript *suppress all semantic diagnostics program-wide*. Its own output says so:
   *"TypeScript suppressed all semantic (type) diagnostics program-wide … real type errors elsewhere
   may be hidden."* A type gate that silently stops checking is the worst possible outcome; upstream
@@ -116,8 +116,8 @@ So TypeScript 7 cannot be the `typescript` dependency while `svelte-check` is in
 
 - `typescript@6.0.3` — resolved by `svelte-check`, which owns `.svelte`.
 - `@typescript/native-preview` (`tsgo` — the TS 7 engine under a second package name so both install)
-  — the `check:tsgo` task, over every package whose sources are pure TypeScript: `@rask/api`,
-  `@lance/engine`, `@lance/labeling`, `@lance/media-api`, `@rask/zone-contract`, plus media's core.
+  — the `check:tsgo` task, over every package whose sources are pure TypeScript: `@repo/api`,
+  `@repo/engine`, `@repo/labeling`, `@repo/media-api`, `@repo/zone-contract`, plus media's core.
 
 `tsgo` cannot resolve `*.svelte` imports either, so it could not own the component surface even if
 `svelte-check` were gone. **Every line of TypeScript that TypeScript 7 can check, it checks.** The

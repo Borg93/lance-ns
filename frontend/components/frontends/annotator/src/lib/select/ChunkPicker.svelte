@@ -6,9 +6,9 @@
 	// chunk has no extracted frame yet.
 	import { onMount } from 'svelte';
 	import { ArrowLeft, ListChecks, Pencil } from '@lucide/svelte';
-	import { getDocTranscript, type DocTranscriptChunk, type Document } from '@lance/media-api';
-	import type { DatasetView } from '@lance/media-api/descriptor';
-	import { Button } from '@rask/ui/button';
+	import { getDocTranscript, type DocTranscriptChunk, type Document } from '@repo/media-api';
+	import type { DatasetView } from '@repo/media-api/descriptor';
+	import { Button } from '@repo/ui/button';
 
 	let {
 		view,
@@ -77,7 +77,7 @@
 			{#each chunks as chunk, i (keyOf(chunk))}
 				{@const time = view.time(chunk)}
 				<li>
-					<!-- Card geometry lifted from @rask/ui's Card (rounded-lg, border, bg-card,
+					<!-- Card geometry lifted from @repo/ui's Card (rounded-lg, border, bg-card,
 					     shadow-sm) so a chunk row and a data-zone card are the same object. -->
 					<button
 						type="button"

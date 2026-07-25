@@ -20,12 +20,12 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import * as Sheet from '@rask/ui/sheet';
+	} from '@repo/ui/data-table';
+	import * as Sheet from '@repo/ui/sheet';
 	import { ExternalLink, RefreshCw, RotateCcw, ShieldAlert, Inbox } from '@lucide/svelte';
 	import { page } from '$app/state';
 	import { fetchDlq, replayDlq } from '$lib/api';
-	import type { DlqBacklog, DlqEvent } from '@rask/api/lineage';
+	import type { DlqBacklog, DlqEvent } from '@repo/api/lineage';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);

@@ -1,5 +1,5 @@
 <script lang="ts">
-	// `/tenants` — the estate's tenants on the shared @rask/ui DataTable (goal cond 4): one
+	// `/tenants` — the estate's tenants on the shared @repo/ui DataTable (goal cond 4): one
 	// sortable/searchable row per warehouse with its owning project + the project's effective FGA
 	// admins (estate-admin gated BY THE CATALOG — the BFF only bearer-forwards). Read-only
 	// observability: creation stays implicit via the warehouse-bind flow.
@@ -17,10 +17,10 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import * as Sheet from '@rask/ui/sheet';
+	} from '@repo/ui/data-table';
+	import * as Sheet from '@repo/ui/sheet';
 	import { Building2, ExternalLink, RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
-	import { parse } from '@rask/api';
+	import { parse } from '@repo/api';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { ProjectsResponseSchema, type Project } from './tenants';

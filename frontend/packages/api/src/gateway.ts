@@ -1,4 +1,4 @@
-// @rask/api/gateway — route SSR `/api/*` fetches to the in-cluster gateway.
+// @repo/api/gateway — route SSR `/api/*` fetches to the in-cluster gateway.
 //
 // Under `svelte-adapter-bun` (prod), a server-side fetch of a RELATIVE `/api/*`
 // URL resolves against the *incoming request's* origin — the EXTERNAL ingress
@@ -9,13 +9,13 @@
 // Client-side fetches are never touched (the browser's relative `/api` is
 // same-origin and correct).
 //
-// Env-free ON PURPOSE: @rask/api is also imported in client bundles, so it must
+// Env-free ON PURPOSE: @repo/api is also imported in client bundles, so it must
 // not import `$env/*/private`. The gateway URL is passed in from each app's
 // (server-only) `hooks.server.ts`. Single-sourcing the rewrite here means every
-// app — and every future @rask/api endpoint — inherits it with no per-call wiring.
+// app — and every future @repo/api endpoint — inherits it with no per-call wiring.
 
 /** The subset of SvelteKit's `handleFetch` input this factory reads. Kept
- *  structural so @rask/api stays dependency-light (no `@sveltejs/kit` import);
+ *  structural so @repo/api stays dependency-light (no `@sveltejs/kit` import);
  *  the result is assignable to `HandleFetch`, which apps annotate it with. */
 interface HandleFetchArgs {
 	event: { url: URL };

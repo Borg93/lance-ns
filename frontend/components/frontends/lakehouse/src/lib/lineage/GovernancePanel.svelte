@@ -10,7 +10,7 @@
 		removeDatasetTag,
 		setDatasetDescription,
 	} from '$lib/api';
-	import type { DatasetGovernance } from '@rask/api/lineage';
+	import type { DatasetGovernance } from '@repo/api/lineage';
 
 	let { dataset }: { dataset: string } = $props();
 

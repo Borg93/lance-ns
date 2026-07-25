@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { makeCatalogProxy } from '@rask/api/bff';
+import { makeCatalogProxy } from '@repo/api/bff';
 
 // The bare table LIST (`GET /capi/v1/table` → catalog `GET /v1/table`), also the entry-point picker
 // the access workbench offers. This static branch (`capi/v1/table/[id]/…`) shadows the `capi/[...path]`

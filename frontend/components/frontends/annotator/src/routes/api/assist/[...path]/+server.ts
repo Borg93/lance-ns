@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Explicit POST route: interactive AI-assist over one unit (GroundingDINO text / SAM
 // region → predicted shapes). Enumerated write-plane surface — bearer-forwarding,

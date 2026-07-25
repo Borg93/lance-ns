@@ -1,9 +1,9 @@
 import * as v from 'valibot';
 
-import type { components } from '@rask/api/generated/catalog';
+import type { components } from '@repo/api/generated/catalog';
 
 // Wire contract for the catalog's first-class projects API (endpoints/projects.py): a BARE ARRAY of
-// project summaries — parsed, not cast, at the browser boundary (the @rask/api parse-don't-validate rule).
+// project summaries — parsed, not cast, at the browser boundary (the @repo/api parse-don't-validate rule).
 // The static shapes come from the generated docs/catalog-openapi.json types (`bun run gen:types:catalog`)
 // — never hand-mirrored — so a backend rename/removal stops compiling here instead of lying downstream.
 

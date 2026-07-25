@@ -1,5 +1,5 @@
 import { base } from '$app/paths';
-import type { ZoneNav } from '@rask/ui/shell';
+import type { ZoneNav } from '@repo/ui/shell';
 import { DATA_ZONE_NAV } from '$lib/data/nav';
 import { LINEAGE_ZONE_NAV } from '$lib/lineage/nav';
 import { MODELS_ZONE_NAV } from '$lib/models/nav';

@@ -4,9 +4,9 @@
 	// round-trip through the /capi detail BFF aggregate; policy writes go through their own narrow
 	// session-only routes. A dataset the catalog does not register (e.g. a storage-managed medallion
 	// zone) renders the honest not-in-catalog state instead of a broken page.
-	import { AlertDialog } from '@rask/ui/alert-dialog';
-	import { GrantsPanel, type GrantsClient } from '@rask/ui/grants-panel';
-	import { Select } from '@rask/ui/select';
+	import { AlertDialog } from '@repo/ui/alert-dialog';
+	import { GrantsPanel, type GrantsClient } from '@repo/ui/grants-panel';
+	import { Select } from '@repo/ui/select';
 	import { Database, RefreshCw, ShieldAlert, Trash2 } from '@lucide/svelte';
 	import { tableFromJSON, tableToIPC } from 'apache-arrow';
 	import { goto } from '$app/navigation';
@@ -71,7 +71,7 @@
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
-	// The zone-owned catalog seam the shared @rask/ui GrantsPanel calls (the lib never owns an API client).
+	// The zone-owned catalog seam the shared @repo/ui GrantsPanel calls (the lib never owns an API client).
 	const grantsClient: GrantsClient = { fetchAccess, checkAccess, grantAccess, revokeAccess };
 
 	let detail = $state<TableDetail | null>(null);

@@ -25,9 +25,9 @@
 	import { Radio, Boxes, Cpu } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/lineage/FlowAutoFit.svelte';
 	import { LineageState } from '$lib/lineage/store.svelte';
-	import { countUp, stagger } from '@rask/ui/motion';
-	import { useColorMode } from '@rask/ui/color-mode';
-	import { LAYER, type GraphEdge } from '@rask/api/lineage';
+	import { countUp, stagger } from '@repo/ui/motion';
+	import { useColorMode } from '@repo/ui/color-mode';
+	import { LAYER, type GraphEdge } from '@repo/api/lineage';
 
 	const POLL_MS = 5000;
 

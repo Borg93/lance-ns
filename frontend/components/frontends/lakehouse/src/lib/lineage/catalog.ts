@@ -2,7 +2,7 @@
 // Types are generated from docs/catalog-openapi.json (`bun run gen:types:catalog`) — never hand-mirrored.
 // The describe route serializes with response_model_exclude_none, so its null fields arrive absent —
 // read optional fields with `?? null` rather than trusting the generated required-nullable shape.
-import type { components } from '@rask/api/generated/catalog';
+import type { components } from '@repo/api/generated/catalog';
 import { type ApiResult, requestJSON as request } from '$lib/http';
 
 export type ModelSummary = components['schemas']['ModelSummary'];

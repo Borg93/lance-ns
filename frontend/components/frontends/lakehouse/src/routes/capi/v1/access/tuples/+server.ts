@@ -1,6 +1,6 @@
 import { env } from '$env/dynamic/private';
 import { json } from '@sveltejs/kit';
-import { makeCatalogProxy } from '@rask/api/bff';
+import { makeCatalogProxy } from '@repo/api/bff';
 import type { RequestHandler } from './$types';
 
 const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';

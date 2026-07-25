@@ -1,10 +1,10 @@
 import { base } from '$app/paths';
-import { createBffClient } from '@rask/api/client';
+import { createBffClient } from '@repo/api/client';
 
-// This zone's binding of the shared browser-side BFF client (@rask/api/client): the ONLY per-zone
+// This zone's binding of the shared browser-side BFF client (@repo/api/client): the ONLY per-zone
 // variable is the SvelteKit base path this zone is served under, so the helpers are single-sourced and
 // bound here once. Re-exported by name so call sites keep importing `$lib/http`.
-export { FETCH_TIMEOUT_MS, timeoutSignal, type ApiResult } from '@rask/api/client';
+export { FETCH_TIMEOUT_MS, timeoutSignal, type ApiResult } from '@repo/api/client';
 
 export const bff = createBffClient(base);
 export const { bffPath, getJSON, requestJSON, requestBinary, fetchMeViaBff } = bff;

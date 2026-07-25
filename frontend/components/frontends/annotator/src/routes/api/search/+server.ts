@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { KEEP_API_PREFIX, makeBackendProxy } from '@rask/api/bff';
+import { KEEP_API_PREFIX, makeBackendProxy } from '@repo/api/bff';
 
 // Same-origin read proxy to the SEARCH service — the /api/search leg of the old zone
 // map, kept so a read-plane deep-link resolved inside this zone still answers. GET-only

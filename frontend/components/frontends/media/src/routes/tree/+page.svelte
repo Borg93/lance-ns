@@ -13,10 +13,10 @@
 	 * filter on `/api/search`.
 	 */
 	import { browser } from '$app/environment';
-	import { getTopics, type TopicNode } from '@lance/media-api';
+	import { getTopics, type TopicNode } from '@repo/media-api';
 	import TopicTreemap from '$lib/components/topic-treemap.svelte';
 	import TopicResultsPanel from '$lib/components/topic-results-panel.svelte';
-	import ResizableSplit from '@lance/ui/resizable-split.svelte';
+	import { ResizableSplit } from '@repo/ui/resizable-split';
 
 	type Phase = 'loading' | 'ready' | 'unavailable' | 'error';
 

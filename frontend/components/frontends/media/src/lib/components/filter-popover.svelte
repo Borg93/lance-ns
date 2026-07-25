@@ -1,9 +1,10 @@
 <script lang="ts">
-	import { Button, Badge, buttonVariants } from '@rask/ui';
-	import { Select } from '@rask/ui/select';
-	import { Input, type SelectOption } from '@lance/ui';
+	import { Button, Badge, buttonVariants } from '@repo/ui';
+	import { Select } from '@repo/ui/select';
+	import { Input } from '@repo/ui/input';
+	import { type SelectOption } from '@repo/ui/select';
 	import { Popover } from 'bits-ui';
-	import { activeView, listColumns, type SearchSpec, type ColumnInfo } from '@lance/media-api';
+	import { activeView, listColumns, type SearchSpec, type ColumnInfo } from '@repo/media-api';
 	import { Filter, X, Eye, EyeOff, Plus } from '@lucide/svelte';
 
 	type Props = {

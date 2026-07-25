@@ -19,13 +19,13 @@
 import { SvelteMap, SvelteSet } from 'svelte/reactivity';
 import { toast } from 'svelte-sonner';
 import type { Table } from 'apache-arrow';
-import type { CommitShape, GeometryUpdate, PixiContext, Tool } from '@lance/engine';
-import { LayerStore, buildBatchTable } from '@lance/engine';
-import type { LabelDelta, LabelOp, LabelOutcome, Selection } from '@lance/labeling/types';
-import { isChunkSelection } from '@lance/labeling/types';
-import { PRODUCERS } from '@lance/labeling/producers';
-import { submitBatchJob } from '@lance/labeling/jobs';
-import { rowSignature } from '@lance/labeling/history';
+import type { CommitShape, GeometryUpdate, PixiContext, Tool } from '@repo/engine';
+import { LayerStore, buildBatchTable } from '@repo/engine';
+import type { LabelDelta, LabelOp, LabelOutcome, Selection } from '@repo/labeling/types';
+import { isChunkSelection } from '@repo/labeling/types';
+import { PRODUCERS } from '@repo/labeling/producers';
+import { submitBatchJob } from '@repo/labeling/jobs';
+import { rowSignature } from '@repo/labeling/history';
 import {
 	AnnotationsHttpError,
 	type InsertRow,
@@ -36,12 +36,12 @@ import {
 	payloadIsEmpty,
 	postSave,
 	requestAssist,
-} from '@lance/labeling/annotations-client';
+} from '@repo/labeling/annotations-client';
 import { type AnnoRow, effectiveField, projectRows, rawField } from './annotation-rows';
 
 // Re-exported so the layout components keep their existing import site.
 export type { AnnoRow } from './annotation-rows';
-export type { InsertRow } from '@lance/labeling/annotations-client';
+export type { InsertRow } from '@repo/labeling/annotations-client';
 
 export type Mode = 'view' | 'edit';
 

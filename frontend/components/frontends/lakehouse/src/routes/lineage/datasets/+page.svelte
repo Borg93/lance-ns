@@ -1,5 +1,5 @@
 <script lang="ts">
-	// `/lineage/datasets` — the governed lineage catalog on the shared @rask/ui DataTable
+	// `/lineage/datasets` — the governed lineage catalog on the shared @repo/ui DataTable
 	// (Marquez-parity list view): sortable columns, a text filter, a namespace filter, and the
 	// governed server-side SearchBar (name / namespace / tag / COLUMN hits with why-chips).
 	// Row-click → the per-dataset detail page.
@@ -17,15 +17,15 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import { Select } from '@rask/ui/select';
-	import { SearchBar } from '@rask/ui/search-bar';
+	} from '@repo/ui/data-table';
+	import { Select } from '@repo/ui/select';
+	import { SearchBar } from '@repo/ui/search-bar';
 	import { RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
 	import { page } from '$app/state';
 	import { fetchSearch, listDatasets } from '$lib/api';
-	import type { DatasetSummary } from '@rask/api/lineage';
+	import type { DatasetSummary } from '@repo/api/lineage';
 
 	const POLL_MS = 5000;
 

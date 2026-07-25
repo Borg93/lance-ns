@@ -199,7 +199,7 @@ test('tag-a-version form posts {tag, version} through the BFF (#64)', async ({ p
 	await page.goto('/lakehouse/data/tables/db1%24t');
 	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
 	await section.getByPlaceholder('tag name (e.g. blessed)').fill('release-1');
-	// the version picker is the @rask/ui Select (bits-ui) — open it, then click the option
+	// the version picker is the @repo/ui Select (bits-ui) — open it, then click the option
 	await section.getByLabel('Version to tag').click();
 	await page.getByRole('option', { name: 'v3', exact: true }).click();
 	await section.getByRole('button', { name: 'Tag version' }).click();
@@ -321,7 +321,7 @@ test('re-type-column via the row ⇄ posts an alter path→data_type (#74 tail)'
 	await page.goto('/lakehouse/data/tables/db1%24t');
 	const section = page.locator('section', { hasText: 'Schema' }).first();
 	await section.getByRole('button', { name: 're-type id' }).click();
-	// the target type is the @rask/ui Select (bits-ui) — open it, pick float32
+	// the target type is the @repo/ui Select (bits-ui) — open it, pick float32
 	await section.getByLabel('re-type id to').click();
 	await page.getByRole('option', { name: 'float32', exact: true }).click();
 	await section.getByRole('button', { name: 'save' }).click();
@@ -453,7 +453,7 @@ test('danger-zone drop confirms via the AlertDialog, closes it, and the registry
 	await page.goto('/lakehouse/data/tables/db1%24t');
 	const danger = page.locator('section.dangerzone');
 	await danger.getByRole('button', { name: 'Drop table' }).click();
-	// The confirm is the portalled @rask/ui AlertDialog — drive it by role, not the trigger section.
+	// The confirm is the portalled @repo/ui AlertDialog — drive it by role, not the trigger section.
 	const dialog = page.getByRole('alertdialog');
 	await expect(dialog).toContainText('Drop table db1$t');
 	await dialog.getByRole('button', { name: 'Drop', exact: true }).click();

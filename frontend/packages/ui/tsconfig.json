@@ -1,7 +1,17 @@
 {
-	"extends": "@lance/config/tsconfig.base.json",
 	"compilerOptions": {
-		"noEmit": true
+		"target": "ES2022",
+		"module": "ESNext",
+		"moduleResolution": "bundler",
+		"strict": true,
+		"noUncheckedIndexedAccess": true,
+		"noEmit": true,
+		"skipLibCheck": true,
+		"isolatedModules": true,
+		"resolveJsonModule": true,
+		"esModuleInterop": true,
+		"verbatimModuleSyntax": true,
+		"types": ["svelte"]
 	},
-	"include": ["src"]
+	"include": ["src/**/*.ts", "src/**/*.svelte"]
 }

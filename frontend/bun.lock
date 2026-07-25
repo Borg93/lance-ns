@@ -28,13 +28,12 @@
       "name": "annotator",
       "version": "0.0.1",
       "dependencies": {
-        "@lance/engine": "workspace:*",
-        "@lance/labeling": "workspace:*",
-        "@lance/media-api": "workspace:*",
-        "@lance/ui": "workspace:*",
         "@lucide/svelte": "^1.26.0",
-        "@rask/api": "workspace:*",
-        "@rask/ui": "workspace:*",
+        "@repo/api": "workspace:*",
+        "@repo/engine": "workspace:*",
+        "@repo/labeling": "workspace:*",
+        "@repo/media-api": "workspace:*",
+        "@repo/ui": "workspace:*",
         "apache-arrow": "^21.2.0",
         "mode-watcher": "^1.1.0",
         "pixi.js": "^8.19.0",
@@ -42,8 +41,8 @@
         "svelte-sonner": "^1.1.1",
       },
       "devDependencies": {
-        "@lance/config": "workspace:*",
         "@playwright/test": "^1.62.0",
+        "@repo/config": "workspace:*",
         "@sveltejs/kit": "^2.70.1",
         "@sveltejs/vite-plugin-svelte": "^7.2.0",
         "@tailwindcss/vite": "^4.3.3",
@@ -71,8 +70,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@lucide/svelte": "^1.26.0",
-        "@rask/api": "workspace:*",
-        "@rask/ui": "workspace:*",
+        "@repo/api": "workspace:*",
+        "@repo/ui": "workspace:*",
         "@sveltejs/kit": "^2.70.1",
         "@tailwindcss/vite": "^4.3.3",
         "mode-watcher": "^1.1.0",
@@ -96,8 +95,8 @@
       "version": "0.0.0",
       "dependencies": {
         "@lucide/svelte": "^1.26.0",
-        "@rask/api": "workspace:*",
-        "@rask/ui": "workspace:*",
+        "@repo/api": "workspace:*",
+        "@repo/ui": "workspace:*",
         "@sveltejs/kit": "^2.70.1",
         "@tailwindcss/vite": "^4.3.3",
         "@xyflow/svelte": "^1.6.2",
@@ -126,13 +125,12 @@
       "name": "media",
       "version": "0.1.0",
       "dependencies": {
-        "@lance/engine": "workspace:*",
-        "@lance/labeling": "workspace:*",
-        "@lance/media-api": "workspace:*",
-        "@lance/ui": "workspace:*",
         "@lucide/svelte": "^1.26.0",
-        "@rask/api": "workspace:*",
-        "@rask/ui": "workspace:*",
+        "@repo/api": "workspace:*",
+        "@repo/engine": "workspace:*",
+        "@repo/labeling": "workspace:*",
+        "@repo/media-api": "workspace:*",
+        "@repo/ui": "workspace:*",
         "@xyflow/svelte": "^1.6.2",
         "@xyflow/system": "^0.0.79",
         "bits-ui": "^2.18.1",
@@ -151,8 +149,8 @@
         "valibot": "^1.4.2",
       },
       "devDependencies": {
-        "@lance/config": "workspace:*",
         "@playwright/test": "^1.62.0",
+        "@repo/config": "workspace:*",
         "@sveltejs/kit": "^2.70.1",
         "@sveltejs/vite-plugin-svelte": "^7.2.0",
         "@tailwindcss/vite": "^4.3.3",
@@ -177,14 +175,14 @@
       },
     },
     "eslint-rules": {
-      "name": "@rask/eslint-rules",
+      "name": "@repo/eslint-rules",
       "version": "0.0.0",
       "devDependencies": {
         "vitest": "^4.1.10",
       },
     },
     "packages/api": {
-      "name": "@rask/api",
+      "name": "@repo/api",
       "version": "0.1.0",
       "dependencies": {
         "valibot": "^1.4.2",
@@ -196,11 +194,11 @@
       },
     },
     "packages/config": {
-      "name": "@lance/config",
+      "name": "@repo/config",
       "version": "0.0.0",
     },
     "packages/engine": {
-      "name": "@lance/engine",
+      "name": "@repo/engine",
       "version": "0.0.0",
       "dependencies": {
         "@techstark/opencv-js": "5.0.0-release.1",
@@ -210,39 +208,39 @@
         "wavesurfer.js": "^7.12.11",
       },
       "devDependencies": {
-        "@lance/config": "workspace:*",
+        "@repo/config": "workspace:*",
         "typescript": "^6.0.3",
         "vitest": "^4.1.10",
       },
     },
     "packages/labeling": {
-      "name": "@lance/labeling",
+      "name": "@repo/labeling",
       "version": "0.0.0",
       "dependencies": {
-        "@lance/media-api": "workspace:*",
+        "@repo/media-api": "workspace:*",
         "apache-arrow": "^21.2.0",
       },
       "devDependencies": {
-        "@lance/config": "workspace:*",
+        "@repo/config": "workspace:*",
         "typescript": "^6.0.3",
         "vitest": "^4.1.10",
       },
     },
     "packages/media-api": {
-      "name": "@lance/media-api",
+      "name": "@repo/media-api",
       "version": "0.0.0",
       "dependencies": {
         "apache-arrow": "^21.2.0",
         "valibot": "^1.4.2",
       },
       "devDependencies": {
-        "@lance/config": "workspace:*",
+        "@repo/config": "workspace:*",
         "typescript": "^6.0.3",
         "vitest": "^4.1.10",
       },
     },
-    "packages/rask-ui": {
-      "name": "@rask/ui",
+    "packages/ui": {
+      "name": "@repo/ui",
       "version": "0.1.0",
       "dependencies": {
         "@lucide/svelte": "^1.26.0",
@@ -268,30 +266,11 @@
         "svelte": "^5.0.0",
       },
     },
-    "packages/ui": {
-      "name": "@lance/ui",
-      "version": "0.0.0",
-      "dependencies": {
-        "@lucide/svelte": "^1.26.0",
-        "bits-ui": "^2.18.1",
-        "clsx": "^2.1.1",
-        "tailwind-merge": "^3.6.0",
-        "tailwind-variants": "^3.2.2",
-      },
-      "devDependencies": {
-        "@lance/config": "workspace:*",
-        "svelte-check": "^4.7.3",
-        "typescript": "^6.0.3",
-      },
-      "peerDependencies": {
-        "svelte": "^5.0.0",
-      },
-    },
     "packages/zone-contract": {
-      "name": "@rask/zone-contract",
+      "name": "@repo/zone-contract",
       "version": "0.0.0",
       "devDependencies": {
-        "@lance/config": "workspace:*",
+        "@repo/config": "workspace:*",
         "@types/bun": "^1.3.14",
         "@types/node": "^26.1.1",
         "vitest": "^4.1.10",
@@ -414,16 +393,6 @@
 
     "@jridgewell/trace-mapping": ["@jridgewell/trace-mapping@0.3.31", "", { "dependencies": { "@jridgewell/resolve-uri": "^3.1.0", "@jridgewell/sourcemap-codec": "^1.4.14" } }, "sha512-zzNR+SdQSDJzc8joaeP8QQoCQr8NuYx2dIIytl1QeBEZHJ9uW6hebsrYgbz8hJwUQao3TWCMtmfV8Nu1twOLAw=="],
 
-    "@lance/config": ["@lance/config@workspace:packages/config"],
-
-    "@lance/engine": ["@lance/engine@workspace:packages/engine"],
-
-    "@lance/labeling": ["@lance/labeling@workspace:packages/labeling"],
-
-    "@lance/media-api": ["@lance/media-api@workspace:packages/media-api"],
-
-    "@lance/ui": ["@lance/ui@workspace:packages/ui"],
-
     "@layerstack/svelte-actions": ["@layerstack/svelte-actions@1.0.1-next.18", "", { "dependencies": { "@floating-ui/dom": "^1.7.0", "@layerstack/utils": "2.0.0-next.18", "d3-scale": "^4.0.2" } }, "sha512-gxPzCnJ1c9LTfWtRqLUzefCx+k59ZpxDUQ2XB+LokveZQPe7IDSOwHaBOEMlaGoGrtwc3Ft8dSZq+2WT2o9u/g=="],
 
     "@layerstack/svelte-state": ["@layerstack/svelte-state@0.1.0-next.23", "", { "dependencies": { "@layerstack/utils": "2.0.0-next.18" } }, "sha512-7O4umv+gXwFfs3/vjzFWYHNXGwYnnjBapWJ5Y+9u99F4eVk6rh4ocNwqkqQNkpMZ5tUJBlRTWjPE1So6+hEzIg=="],
@@ -522,19 +491,27 @@
 
     "@polka/url": ["@polka/url@1.0.0-next.29", "", {}, "sha512-wwQAWhWSuHaag8c4q/KN/vCoeOJYshAIvMQwD4GpSb3OiZklFfvAgmj0VCBBImRpuF/aFgIRzllXlVX93Jevww=="],
 
-    "@rask/api": ["@rask/api@workspace:packages/api"],
-
-    "@rask/eslint-rules": ["@rask/eslint-rules@workspace:eslint-rules"],
-
-    "@rask/ui": ["@rask/ui@workspace:packages/rask-ui"],
-
-    "@rask/zone-contract": ["@rask/zone-contract@workspace:packages/zone-contract"],
-
     "@redocly/ajv": ["@redocly/ajv@8.11.2", "", { "dependencies": { "fast-deep-equal": "^3.1.1", "json-schema-traverse": "^1.0.0", "require-from-string": "^2.0.2", "uri-js-replace": "^1.0.1" } }, "sha512-io1JpnwtIcvojV7QKDUSIuMN/ikdOUd1ReEnUnMKGfDVridQZ31J0MmIuqwuRjWDZfmvr+Q0MqCcfHM2gTivOg=="],
 
     "@redocly/config": ["@redocly/config@0.22.0", "", {}, "sha512-gAy93Ddo01Z3bHuVdPWfCwzgfaYgMdaZPcfL7JZ7hWJoK9V0lXDbigTWkhiPFAaLWzbOJ+kbUQG1+XwIm0KRGQ=="],
 
     "@redocly/openapi-core": ["@redocly/openapi-core@1.34.17", "", { "dependencies": { "@redocly/ajv": "8.11.2", "@redocly/config": "0.22.0", "colorette": "1.4.0", "https-proxy-agent": "7.0.6", "js-levenshtein": "1.1.6", "js-yaml": "4.2.0", "minimatch": "5.1.9", "pluralize": "8.0.0", "yaml-ast-parser": "0.0.43" } }, "sha512-wsV2keCt6B806XpSdezbWZ9aFJYf14YVh+XQf0ESt7M90yqVuxH9//PxvtC70sgj9OCkRM3nRaLfu4MsGQZRig=="],
+
+    "@repo/api": ["@repo/api@workspace:packages/api"],
+
+    "@repo/config": ["@repo/config@workspace:packages/config"],
+
+    "@repo/engine": ["@repo/engine@workspace:packages/engine"],
+
+    "@repo/eslint-rules": ["@repo/eslint-rules@workspace:eslint-rules"],
+
+    "@repo/labeling": ["@repo/labeling@workspace:packages/labeling"],
+
+    "@repo/media-api": ["@repo/media-api@workspace:packages/media-api"],
+
+    "@repo/ui": ["@repo/ui@workspace:packages/ui"],
+
+    "@repo/zone-contract": ["@repo/zone-contract@workspace:packages/zone-contract"],
 
     "@rolldown/binding-android-arm64": ["@rolldown/binding-android-arm64@1.1.5", "", { "os": "android", "cpu": "arm64" }, "sha512-lZg8fqIv2v7FF237bwMgzGZEJvGL79/s5knJ/i6FmsGF4XXlzccZ4jb+TrFIxtSSxFtIpdsgrPZeMk1I9AFcyQ=="],
 

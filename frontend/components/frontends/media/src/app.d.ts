@@ -1,5 +1,5 @@
 // See https://svelte.dev/docs/kit/types#app.d.ts
-import type { AuthLocals } from '@rask/api/bff';
+import type { AuthLocals } from '@repo/api/bff';
 
 declare global {
 	namespace App {

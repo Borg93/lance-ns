@@ -16,7 +16,7 @@ import {
 	Pentagon,
 	Square,
 } from '@lucide/svelte';
-import type { Tool } from '@lance/engine';
+import type { Tool } from '@repo/engine';
 
 export interface ToolDef {
 	tool: Tool;

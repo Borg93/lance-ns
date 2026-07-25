@@ -46,24 +46,31 @@ async function login(context, user, startPath) {
 }
 
 // 1. alice signs in on the DATA zone.
-console.log('→ alice signs in on /data');
+console.log('→ alice signs in on /lakehouse/data');
 const aliceCtx = await (await chromium.launch({ args: ARGS })).newContext();
-const alice = await login(aliceCtx, 'alice@example.com', '/data');
-ok(alice.url().startsWith(`${ORIGIN}/data`), `landed back on /data (${alice.url()})`);
-ok(/alice/i.test(await navUserText(alice)), 'nav-user shows alice on /data');
+const alice = await login(aliceCtx, 'alice@example.com', '/lakehouse/data');
+ok(
+	alice.url().startsWith(`${ORIGIN}/lakehouse/data`),
+	`landed back on /lakehouse/data (${alice.url()})`,
+);
+ok(/alice/i.test(await navUserText(alice)), 'nav-user shows alice on /lakehouse/data');
 
-// 2. CROSS-ZONE: the SAME context lands signed-in on the ADMIN zone (one origin, one path-"/" cookie) —
+// 2. CROSS-ZONE: the SAME context lands signed-in on the MEDIA zone (one origin, one path-"/" cookie) —
 //    the crux of the migration. No re-auth.
-console.log('→ same session on /admin (cross-zone cookie)');
-const aliceAdmin = await aliceCtx.newPage();
-await aliceAdmin.goto(`${ORIGIN}/admin/audit`, { waitUntil: 'domcontentloaded' });
-ok(/alice/i.test(await navUserText(aliceAdmin)), 'still signed in as alice on /admin — cross-zone cookie');
+//    Media, NOT /lakehouse/admin: the catalog, lineage, models and admin areas merged into the one
+//    lakehouse zone, so a hop between them is a soft navigation inside a single app and proves nothing
+//    about a cookie crossing a zone. This step has to target a genuinely separate deployment or it
+//    silently stops testing what it exists for.
+console.log('→ same session on /media (cross-zone cookie)');
+const aliceMedia = await aliceCtx.newPage();
+await aliceMedia.goto(`${ORIGIN}/media`, { waitUntil: 'domcontentloaded' });
+ok(/alice/i.test(await navUserText(aliceMedia)), 'still signed in as alice on /media — cross-zone cookie');
 
-// 3. alice (project-admin) opens the governed produce door via the models-zone BFF (her bearer is
+// 3. alice (project-admin) opens the governed produce door via the lakehouse BFF (her bearer is
 //    forwarded → lance-ray authorizes) → 2xx success banner.
 console.log('→ alice runs the cascade (governed 2xx)');
 const alicePipe = await aliceCtx.newPage();
-await alicePipe.goto(`${ORIGIN}/models/pipeline`, { waitUntil: 'domcontentloaded' });
+await alicePipe.goto(`${ORIGIN}/lakehouse/models/pipeline`, { waitUntil: 'domcontentloaded' });
 await alicePipe.waitForLoadState('networkidle');
 await alicePipe.getByRole('button', { name: 'Run cascade' }).click();
 await alicePipe.waitForTimeout(2500);
@@ -75,7 +82,7 @@ ok(/run|published|token|ok/i.test(aliceBanner) && !/project-admin|denied|403/i.t
 //    not a blanket allow).
 console.log('→ bob is denied on the same door (403)');
 const bobCtx = await (await chromium.launch({ args: ARGS })).newContext();
-const bobPipe = await login(bobCtx, 'bob@example.com', '/models/pipeline');
+const bobPipe = await login(bobCtx, 'bob@example.com', '/lakehouse/models/pipeline');
 await bobPipe.waitForLoadState('networkidle');
 await bobPipe.getByRole('button', { name: 'Run cascade' }).click();
 await bobPipe.waitForTimeout(2500);

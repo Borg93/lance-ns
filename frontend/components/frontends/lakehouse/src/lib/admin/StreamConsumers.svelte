@@ -1,5 +1,5 @@
 <script lang="ts">
-	// One stream card's consumer rows on the shared @rask/ui DataTable (goal cond 4): sortable
+	// One stream card's consumer rows on the shared @repo/ui DataTable (goal cond 4): sortable
 	// columns, the same diagnostic hooks as before — pending/ack-pending pressure, redelivered as
 	// the wedge signal (warn tone), and the >10-min stale chip judged against the MONITOR's clock
 	// (`now`), never the browser's.
@@ -15,8 +15,8 @@
 		type ColumnDef,
 		type PaginationState,
 		type SortingState,
-	} from '@rask/ui/data-table';
-	import * as Sheet from '@rask/ui/sheet';
+	} from '@repo/ui/data-table';
+	import * as Sheet from '@repo/ui/sheet';
 	import { ExternalLink } from '@lucide/svelte';
 	import { base } from '$app/paths';
 	import type { JetStreamConsumer } from './jetstream';

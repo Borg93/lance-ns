@@ -1,5 +1,5 @@
 {
-	"//": "Shared TypeScript base for every app/package (@lance/config). Matches lance-ns's @lance/config. Apps extend this + their .svelte-kit/tsconfig.json.",
+	"//": "Shared TypeScript base for every app/package (@repo/config). Matches lance-ns's @repo/config. Apps extend this + their .svelte-kit/tsconfig.json.",
 	"compilerOptions": {
 		"allowJs": true,
 		"checkJs": true,

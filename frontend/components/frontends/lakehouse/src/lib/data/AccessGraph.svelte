@@ -3,7 +3,7 @@
 	// visual upgrade of the #68 who-can-do-what form. One hop: the focus object, every subject directly
 	// granted a rung (edges subject→object labelled owner/writer/reader/validator), and the parent/project
 	// container edge. Click a subject to prefill the grant form; grant/revoke re-fetches so the graph
-	// reflects the change. SvelteFlow (reusing the LineageExplorer pattern) + @rask/ui Select + GSAP.
+	// reflects the change. SvelteFlow (reusing the LineageExplorer pattern) + @repo/ui Select + GSAP.
 	import AccessNode, { type AccessNodeType } from '$lib/data/AccessNode.svelte';
 	import type { NodeTypes } from '@xyflow/svelte';
 
@@ -12,8 +12,8 @@
 </script>
 
 <script lang="ts">
-	import { Select } from '@rask/ui/select';
-	import { enter } from '@rask/ui/motion';
+	import { Select } from '@repo/ui/select';
+	import { enter } from '@repo/ui/motion';
 	import { Network, ShieldAlert } from '@lucide/svelte';
 	import { Background, BackgroundVariant, Controls, type Edge, SvelteFlow } from '@xyflow/svelte';
 	import '@xyflow/svelte/dist/style.css';

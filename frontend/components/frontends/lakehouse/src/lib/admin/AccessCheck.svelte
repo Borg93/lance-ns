@@ -3,7 +3,7 @@
 	// POST /v1/access/check. The verdict renders BIG, alongside the exact triple the catalog echoes
 	// back (`checked`) so what was evaluated is never inferred from local form state.
 	import { CircleCheck, CircleX, ShieldAlert } from '@lucide/svelte';
-	import { parse } from '@rask/api';
+	import { parse } from '@repo/api';
 	import { page } from '$app/state';
 	import { checkAccess, CheckVerdictSchema, type CheckVerdict } from './access';
 

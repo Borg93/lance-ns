@@ -16,9 +16,9 @@
 		type VoiceHit,
 		type VoiceQueryInfo,
 		type VoiceSimilarResponse,
-	} from '@lance/media-api';
+	} from '@repo/media-api';
 	import { voiceSearch } from '$lib/voice-search.svelte';
-	import { submitBatchJob } from '@lance/labeling/jobs';
+	import { submitBatchJob } from '@repo/labeling/jobs';
 	import { fmtTime, hitKey, queryTerms, makeHighlighter } from '$lib/utils';
 	import SearchBar from '$lib/components/search-bar.svelte';
 	import SavedViews from '$lib/components/saved-views.svelte';
@@ -29,12 +29,12 @@
 	import { loadCols, persistCols, loadTablePrefs, persistTablePrefs } from '$lib/table-columns';
 	import DocTile from '$lib/components/doc-tile.svelte';
 	import PlayerPane from '$lib/components/player-pane.svelte';
-	import ResizableSplit from '@lance/ui/resizable-split.svelte';
+	import { ResizableSplit } from '@repo/ui/resizable-split';
 	import AtlasMap from '$lib/atlas/AtlasMap.svelte';
 	import { crossFilter } from '$lib/atlas/cross-filter.svelte';
-	import { getAtlasChunks } from '@lance/media-api';
-	import { Button, Badge } from '@rask/ui';
-	import { Switch } from '@lance/ui';
+	import { getAtlasChunks } from '@repo/media-api';
+	import { Button, Badge } from '@repo/ui';
+	import { Switch } from '@repo/ui/switch';
 	import {
 		LayoutGrid,
 		List as ListIcon,

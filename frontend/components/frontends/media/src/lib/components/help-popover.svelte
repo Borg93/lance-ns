@@ -4,7 +4,7 @@
 	// Guide page (linked at the bottom), so this stays compact.
 	import { Popover } from 'bits-ui';
 	import { HelpCircle, ArrowRight, Image as ImageIcon } from '@lucide/svelte';
-	import { buttonVariants } from '@rask/ui';
+	import { buttonVariants } from '@repo/ui';
 	import { base } from '$app/paths';
 
 	type Example = { label: string; example: string; explain: string };

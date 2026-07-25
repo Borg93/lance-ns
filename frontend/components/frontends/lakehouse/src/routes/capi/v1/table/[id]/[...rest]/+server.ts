@@ -1,5 +1,5 @@
 import { env } from '$env/dynamic/private';
-import { makeBackendProxy } from '@rask/api/bff';
+import { makeBackendProxy } from '@repo/api/bff';
 
 // GET subpaths under a table id (detail, versions, …): the static capi/v1/table/[id]/ branch
 // shadows the capi/[...path] catch-all for its whole subtree and SvelteKit does not backtrack

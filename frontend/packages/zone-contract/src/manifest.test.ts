@@ -1,10 +1,11 @@
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
 	chartApps,
 	devScript,
 	FRONTEND_ROOT,
+	REPO_ROOT,
 	packageName,
 	routingConfig,
 	svelteBase,
@@ -109,5 +110,31 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 			}
 		}
 		expect(strays).toEqual([]);
+	});
+});
+
+describe('nothing outside the frontend still points at a moved path', () => {
+	// The renames kept breaking things OUTSIDE the source tree: .docker/frontend.dockerfile pre-built
+	// `packages/rask-ui`, chart/templates named `@rask/api`, and scripts/verify_cross_zone_oidc.*
+	// navigated to `/data` and `/models/pipeline`. None of it is type-checked, none of it is linted,
+	// and all of it is on the deploy path — the dockerfile one would have failed every zone image
+	// build. A rename is not done until this passes.
+	const DEAD = ['@rask/', '@lance/', 'packages/rask-ui', 'components/frontends/data'];
+	const SEARCHED = [
+		'.docker/frontend.dockerfile',
+		'chart/templates/frontends.yaml',
+		'chart/templates/ingress.yaml',
+		'chart/values.yaml',
+		'scripts/verify_cross_zone_oidc.sh',
+		'scripts/verify_cross_zone_oidc.mjs',
+		'.github/workflows/ci.yml',
+		'.dagger/frontend.go',
+	];
+
+	it.each(SEARCHED)('%s names no retired package or zone', (rel) => {
+		const path = resolve(REPO_ROOT, rel);
+		if (!existsSync(path)) return; // the file moving is a separate, visible change
+		const src = readFileSync(path, 'utf8');
+		expect(DEAD.filter((d) => src.includes(d))).toEqual([]);
 	});
 });

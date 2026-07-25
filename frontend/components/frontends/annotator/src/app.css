@@ -1,7 +1,7 @@
 /* ────────────────────────────────────────────────────────────────────
  * The annotator zone's stylesheet — the ESTATE design system, nothing zone-private.
  *
- * Palette, radius scale and type scale all come from @rask/ui/styles/tokens.css: the
+ * Palette, radius scale and type scale all come from @repo/ui/styles/tokens.css: the
  * exact import data/admin/models/lineage use. So `bg-card`, `text-muted-foreground`,
  * `border-border` and `rounded-lg` resolve to the same values here as everywhere else,
  * in light and dark alike, and the annotator stops reading as a different product.
@@ -16,17 +16,15 @@
 
 @import 'tailwindcss';
 @import 'tw-animate-css';
-@import '@rask/ui/styles/tokens.css';
+@import '@repo/ui/styles/tokens.css';
 
 /* Tailwind 4 + Vite auto-discovery isn't reliable for .svelte under Bun; point it at the
- * source roots explicitly (paths relative to this file). @lance/ui is source-linked (the
- * canvas-side primitives this zone still uses); @rask/ui ships built, and Tailwind 4
+ * source roots explicitly (paths relative to this file). @repo/ui ships built, and Tailwind 4
  * skips node_modules unless told otherwise. */
 @source './lib';
 @source './routes';
 @source './app.html';
-@source '../../../packages/ui/src';
-@source '../../../../packages/rask-ui/dist';
+@source '../../../../packages/ui/dist';
 
 @layer base {
 	html,

@@ -1,9 +1,9 @@
 import * as v from 'valibot';
 
-import type { components } from '@rask/api/generated/catalog';
+import type { components } from '@repo/api/generated/catalog';
 
 // The control-plane change-event wire contract (services/catalog endpoints/events.py) — parsed (not cast)
-// at the BFF boundary so a drift from the backend throws here rather than lying downstream (the @rask/api
+// at the BFF boundary so a drift from the backend throws here rather than lying downstream (the @repo/api
 // parse-don't-validate rule). The shapes are pinned to the generated docs/catalog-openapi.json types
 // (`bun run gen:types:catalog`) — never hand-mirrored: `satisfies` keeps each schema's keys in lockstep
 // with the spec, so a renamed/removed/added wire field stops compiling here. `action`/`object_type`

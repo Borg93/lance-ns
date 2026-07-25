@@ -1,7 +1,7 @@
 <script lang="ts">
 	// The table-detail PREVIEW tab (goal cond 5): the first N rows through the explicit POST BFF
 	// route onto the catalog's /query (Arrow-IPC file), parsed browser-side with apache-arrow and
-	// rendered as a typed grid on the shared @rask/ui DataTable. Blob cells render an honest
+	// rendered as a typed grid on the shared @repo/ui DataTable. Blob cells render an honest
 	// "<blob NNkB>" chip (never megabytes of base64 soup); vector/list cells truncate with their
 	// length stated. Empty, denied, signed-out, offline and parse-drift states are all explicit.
 	import {
@@ -12,7 +12,7 @@
 		renderSnippet,
 		type ColumnDef,
 		type PaginationState,
-	} from '@rask/ui/data-table';
+	} from '@repo/ui/data-table';
 	import { RefreshCw, ShieldAlert } from '@lucide/svelte';
 	import { untrack } from 'svelte';
 	import { page } from '$app/state';

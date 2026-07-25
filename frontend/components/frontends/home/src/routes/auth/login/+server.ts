@@ -14,8 +14,8 @@ import {
 	discover,
 	pkceChallenge,
 	randomToken,
-} from '@rask/api/oidc';
-import { makeOidcConfig } from '@rask/api/bff';
+} from '@repo/api/oidc';
+import { makeOidcConfig } from '@repo/api/bff';
 
 const TEMP_COOKIE_MAX_AGE = 600; // 10 min — long enough to complete the round-trip to Dex.
 

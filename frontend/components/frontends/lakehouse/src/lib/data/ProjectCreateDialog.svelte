@@ -12,7 +12,7 @@
 	// every later project-scoped op run on the creator's OWN project rung, and the admin field below is
 	// for granting a SECOND admin (or handing the tenant to someone else) — never the only thing
 	// standing between the new project and being ungovernable.
-	import { Dialog } from '@rask/ui/dialog';
+	import { Dialog } from '@repo/ui/dialog';
 	import { toast } from 'svelte-sonner';
 	import { createWarehouse, writeAccessTuple } from './catalog';
 

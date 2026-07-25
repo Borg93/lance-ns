@@ -2,7 +2,7 @@
 	/** Workflow page — node-based editor (left) + a persistent Inspector (right).
 	 *  Self-contained; fills the layout's content slot. The whole app is
 	 *  client-only (ssr=false), so Svelte Flow needs no browser guard. */
-	import ResizableSplit from '@lance/ui/resizable-split.svelte';
+	import { ResizableSplit } from '@repo/ui/resizable-split';
 	import WorkflowCanvas from '$lib/workflow/WorkflowCanvas.svelte';
 	import WorkflowInspector from '$lib/workflow/WorkflowInspector.svelte';
 	import CommandMenu from '$lib/workflow/CommandMenu.svelte';

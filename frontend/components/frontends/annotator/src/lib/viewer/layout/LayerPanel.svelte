@@ -2,9 +2,9 @@
 	// Layers section (lives inside the sidebar). Group-by column + per-group
 	// visibility + color, bound to the facade's LayerStore. (Ported from ra-anno.)
 	import { Eye, EyeOff, ChevronDown, ChevronRight, Layers } from '@lucide/svelte';
-	import { Button } from '@rask/ui/button';
-	import { Select } from '@rask/ui/select';
-	import { cn } from '@rask/ui/utils';
+	import { Button } from '@repo/ui/button';
+	import { Select } from '@repo/ui/select';
+	import { cn } from '@repo/ui/utils';
 	import type { AnnotatorController } from '../annotator.svelte';
 
 	let { controller }: { controller: AnnotatorController } = $props();

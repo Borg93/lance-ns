@@ -4,14 +4,14 @@
 	 *  the node itself shows a summary and a one-click Download. */
 	import { Handle, Position, type NodeProps } from '@xyflow/svelte';
 	import { Download, Tags } from '@lucide/svelte';
-	import { activeView } from '@lance/media-api';
+	import { activeView } from '@repo/media-api';
 	import { graph } from '$lib/workflow/graph.svelte';
 	import { exportColumns, exportHits } from '$lib/workflow/export';
 	import {
 		saveTagsAsAnnotations,
 		tagBatchFromTaggedHits,
 		tagRemovesFromEntries,
-	} from '@lance/labeling/tag-writer';
+	} from '@repo/labeling/tag-writer';
 	import NodeShell from './NodeShell.svelte';
 
 	let { id, selected }: NodeProps = $props();

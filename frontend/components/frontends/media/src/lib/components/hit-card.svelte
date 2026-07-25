@@ -1,14 +1,14 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { base } from '$app/paths';
-	import { type Hit, thumbnailUrl, chunkFrameUrl, isVoiceHit, voiceBandOf } from '@lance/media-api';
-	import { activeView } from '@lance/media-api/descriptor';
+	import { type Hit, thumbnailUrl, chunkFrameUrl, isVoiceHit, voiceBandOf } from '@repo/media-api';
+	import { activeView } from '@repo/media-api/descriptor';
 	import { features } from '$lib/feature-flags.svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
 	import { audioPreview } from '$lib/audio-preview.svelte';
 	import { fmtTime, queryTerms, makeHighlighter, cn, hitKey } from '$lib/utils';
 	import { AudioLines, Play, Pause } from '@lucide/svelte';
-	import { Badge } from '@rask/ui';
+	import { Badge } from '@repo/ui';
 
 	type Props = {
 		hit: Hit;

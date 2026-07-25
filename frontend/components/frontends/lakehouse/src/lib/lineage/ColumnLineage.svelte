@@ -12,10 +12,10 @@
 	import '@xyflow/svelte/dist/style.css';
 	import { Columns3, ShieldAlert } from '@lucide/svelte';
 	import FlowAutoFit from '$lib/lineage/FlowAutoFit.svelte';
-	import { enter } from '@rask/ui/motion';
-	import { useColorMode } from '@rask/ui/color-mode';
+	import { enter } from '@repo/ui/motion';
+	import { useColorMode } from '@repo/ui/color-mode';
 	import { ColumnLineageState } from '$lib/lineage/columns.svelte';
-	import type { ColumnEdge, ColumnRef } from '@rask/api/lineage';
+	import type { ColumnEdge, ColumnRef } from '@repo/api/lineage';
 
 	const POLL_MS = 5000;
 

@@ -8,10 +8,12 @@ auth/BFF seam, the lineage and media clients — lives in a workspace package.
 
 ```
 frontend/
-  package.json      # workspace root — bun workspaces, turbo pipeline;
-                    #   //#lint and //#fmt:check ROOT tasks run eslint / prettier once repo-wide
-  turbo.json        # build/check/test/test:e2e task graph (^build ordering, cached)
-  eslint.config.js  # the single flat ESLint config (the sole linter)
+  package.json      # workspace root — bun workspaces; scripts ONLY delegate to turbo
+  turbo.json        # build/check/check:tsgo/test/test:e2e/lint/fmt task graph (^build ordering, cached)
+  TOOLING.md        # which of oxlint/oxfmt/eslint/prettier owns what, and why it is not just two tools
+  .oxlintrc.json    # oxlint — .ts/.js/.mjs
+  .oxfmtrc.json     # oxfmt — .ts/.js/.mjs
+  eslint.config.js  # ESLint — .svelte + *.svelte.ts only
   eslint-rules/     # the local cross-zone-reload rule (a cross-zone <a> MUST hard-navigate)
   components/frontends/
     home/           # catch-all zone (base '/'); owns the OIDC /auth/{login,callback,logout} routes

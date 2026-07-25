@@ -3,6 +3,8 @@
 // driven hermetically. Runs as a second Playwright `webServer`; the dev server's CATALOG_API points here.
 // Test-control endpoints (`__mock/*`) let a spec seed events, simulate a governance mutation, toggle 403.
 
+import { MOCK_CATALOG_PORT } from '../ports';
+
 type ControlEvent = {
 	event_id: string;
 	occurred_at: string;
@@ -20,8 +22,7 @@ const json = (data: unknown, status = 200): Response =>
 	new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 
 Bun.serve({
-	// 5297 — the free slot between the zone e2e dev-server ports (models owns 5296; see playwright.config.ts).
-	port: 5297,
+	port: MOCK_CATALOG_PORT,
 	async fetch(req: Request): Promise<Response> {
 		const url = new URL(req.url);
 

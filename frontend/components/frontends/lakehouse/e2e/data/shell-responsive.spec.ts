@@ -1,4 +1,5 @@
 import { test, expect, type Route, type Page } from '@playwright/test';
+import { AUTH_OFF } from '../ports';
 
 // Responsive contract for the SHARED @repo/ui shell (#105). It lives in the data zone because a
 // spec needs *some* zone to render the shell in, but it imports nothing zone-specific and asserts
@@ -58,7 +59,7 @@ test.beforeEach(async ({ page }) => {
  * host would measure a narrower bar than any real deployment ever shows.
  */
 function projectUrl(baseURL: string | undefined, path: string): string {
-	const url = new URL(path, baseURL ?? 'http://localhost:5294');
+	const url = new URL(path, baseURL ?? AUTH_OFF);
 	url.hostname = `acmecorp.${url.hostname}`;
 	return url.href;
 }

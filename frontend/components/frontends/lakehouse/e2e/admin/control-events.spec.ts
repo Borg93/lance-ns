@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { mockMe, signIn } from './session';
+import { MOCK_CATALOG } from '../ports';
 
 // The live control-plane activity feed (query.live). The generator polls the mock catalog (mock-catalog.ts,
 // the second webServer) server-side, so we drive it by POSTing to the mock's __mock/* control endpoints —
@@ -10,7 +11,7 @@ import { mockMe, signIn } from './session';
 // not run in parallel — else the 403 test's `mode:forbidden` leaks into the OK tests (fullyParallel is on).
 test.describe.configure({ mode: 'serial' });
 
-const MOCK = 'http://localhost:5297';
+const MOCK = MOCK_CATALOG;
 const control = (path: string, body?: unknown) =>
 	fetch(`${MOCK}/__mock/${path}`, {
 		method: 'POST',

@@ -1,4 +1,5 @@
 import type { BrowserContext, Page } from '@playwright/test';
+import { AUTH_ON } from '../ports';
 
 // Sign the e2e browser context in. The admin dev server runs auth-ON (OIDC env in playwright.config.ts),
 // and the login-first gate now redirects a signed-out page navigation to /auth/login — owned by the home
@@ -43,7 +44,7 @@ export async function mockMe(page: Page, me: unknown = ME_ADMIN) {
 	);
 }
 
-export async function signIn(context: BrowserContext, origin = 'http://localhost:5295') {
+export async function signIn(context: BrowserContext, origin = AUTH_ON) {
 	const value = Buffer.from(JSON.stringify(SESSION), 'utf8')
 		.toString('base64')
 		.replace(/\+/g, '-')

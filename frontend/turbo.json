@@ -1,48 +1,35 @@
 {
 	"$schema": "https://turborepo.com/schema.json",
 	"ui": "tui",
-	"globalPassThroughEnv": [
-		"CI",
-		"PLAYWRIGHT_BROWSERS_PATH",
-		"PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"
-	],
+	"globalPassThroughEnv": ["CI", "PLAYWRIGHT_BROWSERS_PATH", "PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD"],
 	"tasks": {
 		"build": {
-			"dependsOn": [
-				"^build"
-			],
-			"inputs": [
-				"$TURBO_DEFAULT$",
-				".env*"
-			],
-			"outputs": [
-				"build/**",
-				".svelte-kit/**",
-				"dist/**"
-			]
+			"dependsOn": ["^build"],
+			"inputs": ["$TURBO_DEFAULT$", ".env*"],
+			"outputs": ["build/**", ".svelte-kit/**", "dist/**"]
 		},
 		"check": {
-			"dependsOn": [
-				"^build"
-			],
+			"dependsOn": ["^build"],
 			"outputs": []
 		},
 		"check:tsgo": {
-			"dependsOn": [
-				"^build"
-			],
+			"dependsOn": ["^build"],
 			"outputs": []
 		},
 		"test": {
-			"dependsOn": [
-				"build"
-			],
+			"dependsOn": ["build"],
+			"outputs": []
+		},
+		// The bundle-budget gate WEIGHS the zones' client output, so it is the one test task whose input
+		// is another package's build. `test -> build` orders a package only against ITSELF, and no zone
+		// depends on @repo/zone-contract (it is a gate, not a runtime dep), so this raced the zone builds
+		// and measured a half-written output/client. manifest.test.ts fails if this list drifts.
+		"@repo/zone-contract#test": {
+			"dependsOn": ["home#build", "lakehouse#build", "media#build", "annotator#build"],
 			"outputs": []
 		},
 		"test:e2e": {
-			"dependsOn": [
-				"build"
-			],
+			"dependsOn": ["build"],
 			"cache": false,
 			"outputs": []
 		},
@@ -52,9 +39,7 @@
 		},
 		"fmt:check": {},
 		"dev": {
-			"dependsOn": [
-				"^build"
-			],
+			"dependsOn": ["^build"],
 			"cache": false,
 			"persistent": true
 		},

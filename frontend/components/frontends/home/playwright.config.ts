@@ -21,5 +21,14 @@ export default defineConfig({
 		reuseExistingServer: !process.env.CI,
 		timeout: 120_000,
 	},
-	projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+	projects: [
+		// Compiles the routes ONCE before the parallel suite — see e2e/warmup.setup.ts.
+		{ name: 'warmup', testMatch: /warmup\.setup\.ts/ },
+		{
+			name: 'chromium',
+			testMatch: /\.spec\.ts$/,
+			use: { ...devices['Desktop Chrome'] },
+			dependencies: ['warmup'],
+		},
+	],
 });

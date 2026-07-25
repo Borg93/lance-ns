@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { AUTH_OFF, AUTH_OFF_PORT, AUTH_ON, AUTH_ON_PORT, MOCK_CATALOG_PORT } from './e2e/ports';
 
 // Hermetic e2e for the whole lakehouse zone — all four areas (e2e/data, e2e/lineage, e2e/models,
 // e2e/admin), which used to be four separate zones each running their own dev server and browser.
@@ -13,11 +14,10 @@ import { defineConfig, devices } from '@playwright/test';
 // query.live poll. The other three areas run against an auth-OFF server, exactly as they did before
 // the merge — one zone cannot be auth-ON and auth-OFF at once, and that split predates this config.
 // Net it is still two dev servers where there used to be four.
-const AUTH_OFF = 'http://localhost:5294';
-const AUTH_ON = 'http://localhost:5295';
-/** The mock catalog. 5297, NOT 5296: a locally parallel run with `reuseExistingServer` must not
- *  silently "reuse" some other dev server as the catalog (audit finding, carried over). */
-const MOCK_CATALOG_PORT = 5297;
+// The ports live in e2e/ports.ts, imported by the mock catalog and the specs too — see the note
+// there. The mock catalog in particular needs a port NO other zone claims, because
+// `reuseExistingServer` is on locally: if something else is already listening, playwright ADOPTS it
+// as the catalog instead of starting the mock, and the admin suite silently drives a real server.
 
 export default defineConfig({
 	testDir: './e2e',
@@ -30,14 +30,14 @@ export default defineConfig({
 	webServer: [
 		{
 			// Dedicated e2e ports (not the 5174 microfrontends dev port) so a running composition can't clash.
-			command: 'bun run dev --port 5294 --strictPort',
-			port: 5294,
+			command: `bun run dev --port ${AUTH_OFF_PORT} --strictPort`,
+			port: AUTH_OFF_PORT,
 			reuseExistingServer: !process.env.CI,
 			timeout: 120_000,
 		},
 		{
-			command: 'bun run dev --port 5295 --strictPort',
-			port: 5295,
+			command: `bun run dev --port ${AUTH_ON_PORT} --strictPort`,
+			port: AUTH_ON_PORT,
 			reuseExistingServer: !process.env.CI,
 			timeout: 120_000,
 			env: {
@@ -58,7 +58,11 @@ export default defineConfig({
 		// Warmup compiles the heavy routes ONCE before the parallel suite: with fullyParallel on a big box
 		// (~32 workers) a cold Vite cache (e.g. right after a reformat) makes the whole first wave of tests
 		// starve behind the initial compile and time out at 30s in a bundle — flaky counts per run.
-		{ name: 'warmup', testMatch: /warmup\.setup\.ts/, use: { baseURL: AUTH_OFF } },
+		{
+			name: 'warmup',
+			testMatch: /e2e\/(data|lineage|models)\/warmup\.setup\.ts/,
+			use: { baseURL: AUTH_OFF },
+		},
 		{
 			name: 'chromium',
 			testIgnore: /e2e\/admin\//,
@@ -66,11 +70,19 @@ export default defineConfig({
 			dependencies: ['warmup'],
 		},
 		{
-			// The admin area against the auth-ON server. Its specs sign in per-test and that server is a
-			// separate compile, so it does not share the auth-OFF warmup.
+			// The admin area against the auth-ON server. That is a SECOND dev server and a second Vite
+			// compile, so it gets nothing from the auth-off warmup and needs its own — the admin routes
+			// are the heaviest in the zone (Svelte Flow) and the first spec to reach one on a cold cache
+			// times out at 30s every time.
+			name: 'warmup-admin',
+			testMatch: /e2e\/admin\/warmup\.setup\.ts/,
+			use: { ...devices['Desktop Chrome'], baseURL: AUTH_ON },
+		},
+		{
 			name: 'chromium-admin',
 			testMatch: /e2e\/admin\/.*\.spec\.ts/,
 			use: { ...devices['Desktop Chrome'], baseURL: AUTH_ON },
+			dependencies: ['warmup-admin'],
 		},
 	],
 });

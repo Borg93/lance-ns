@@ -20,6 +20,17 @@ const apps = chartApps();
 /** The catch-all zone: owns '/', so no base path and no routing entry of its own. */
 const CATCH_ALL = 'home';
 
+/** Every workspace package, as a frontend-root-relative directory. */
+function workspacePackages(): string[] {
+	return ['packages', 'components/frontends'].flatMap((dir) =>
+		readdirSync(resolve(FRONTEND_ROOT, dir), { withFileTypes: true })
+			.filter(
+				(e) => e.isDirectory() && existsSync(resolve(FRONTEND_ROOT, dir, e.name, 'package.json')),
+			)
+			.map((e) => `${dir}/${e.name}`),
+	);
+}
+
 describe('every zone directory is a declared application', () => {
 	it('has a zone to test', () => {
 		expect(zones.length).toBeGreaterThan(1);
@@ -110,6 +121,87 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 			}
 		}
 		expect(strays).toEqual([]);
+	});
+
+	// Prettier resolves its CONFIG upward (it finds the root package.json's "prettier" block) but its
+	// IGNORE FILE only from the working directory — and every package runs it from its own directory.
+	// So a root .prettierignore protects nothing, which is exactly how `.svelte-kit/generated/root.svelte`
+	// walked into `fmt:check` and failed the build on a file SvelteKit writes. The ignore is therefore
+	// the glob itself: prettier is pointed at `src/`, where every hand-written component lives, and can
+	// never reach build output no matter which directory it is invoked from.
+	it.each(workspacePackages())('%s scopes prettier to src/, not the package root', (pkg) => {
+		const { scripts = {} } = JSON.parse(
+			readFileSync(resolve(FRONTEND_ROOT, pkg, 'package.json'), 'utf8'),
+		) as { scripts?: Record<string, string> };
+		for (const [task, script] of Object.entries(scripts)) {
+			if (!script.includes('prettier')) continue;
+			expect(script, `${pkg} ${task}: prettier must be scoped to 'src/**/*.svelte'`).toContain(
+				"'src/**/*.svelte'",
+			);
+		}
+	});
+});
+
+/** A zone's e2e helper servers (mock backends) — the other place a port literal hides. */
+function e2eServers(zone: string): string[] {
+	const dir = resolve(FRONTEND_ROOT, `components/frontends/${zone}/e2e`);
+	if (!existsSync(dir)) return [];
+	return readdirSync(dir, { recursive: true, encoding: 'utf8' })
+		.filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts'))
+		.map((f) => `e2e/${f}`);
+}
+
+describe('no two zones bind the same port, in dev OR in e2e', () => {
+	// The dev ports are checked above against microfrontends.json. The E2E ports are not in any
+	// manifest, and playwright runs with `reuseExistingServer` locally — so a duplicate does not fail
+	// loudly with EADDRINUSE, it silently ADOPTS whatever is already listening. The lakehouse admin
+	// suite's mock catalog sat on 5297, which is the media zone's e2e server; a parallel local run
+	// pointed the admin tests at a real dev server and called it the mock.
+	const declared = zones.flatMap((zone) =>
+		['vite.config.ts', 'playwright.config.ts', ...e2eServers(zone)]
+			.map((f) => resolve(FRONTEND_ROOT, `components/frontends/${zone}`, f))
+			.filter((p) => existsSync(p))
+			.flatMap((p) => {
+				const src = readFileSync(p, 'utf8');
+				// Only a port a zone BINDS: `port: 5294` (vite `server.port`, playwright `webServer.port`)
+				// and `const MOCK_CATALOG_PORT = 5292`. Deliberately not any 4-digit literal — a proxy
+				// TARGET (`http://127.0.0.1:5177`, `http://localhost:8001`) is a zone pointing at something
+				// else, and two zones proxying the same backend is correct, not a collision.
+				const found = [...src.matchAll(/(?:\bport:\s*|PORT\s*=\s*)(\d{4})/g)];
+				return found.map((m) => ({ zone, port: Number(m[1]) }));
+			}),
+	);
+
+	it('finds the ports to compare', () => {
+		expect(declared.length).toBeGreaterThan(zones.length);
+	});
+
+	it.each([...new Set(declared.map((d) => d.port))])(
+		'%d is claimed by exactly one zone',
+		(port) => {
+			const claimants = [...new Set(declared.filter((d) => d.port === port).map((d) => d.zone))];
+			expect(claimants).toHaveLength(1);
+		},
+	);
+});
+
+describe('the budget gate is ordered after the builds it weighs', () => {
+	// budget.test.ts measures each zone's .svelte-kit/output/client. turbo's `test -> build` edge only
+	// orders a package against ITSELF, and no zone depends on @repo/zone-contract (it is a gate, not a
+	// runtime dep), so `turbo run test build` ran the two concurrently and the budget was measured off a
+	// half-written directory. The explicit per-zone edge fixes the order; this keeps it from drifting.
+	// turbo.json is JSONC — drop whole-line // comments before parsing (never a partial line, so a
+	// `//` inside a string value can't be clipped).
+	const turbo = JSON.parse(
+		readFileSync(resolve(FRONTEND_ROOT, 'turbo.json'), 'utf8')
+			.split('\n')
+			.filter((l) => !l.trimStart().startsWith('//'))
+			.join('\n'),
+	) as { tasks: Record<string, { dependsOn?: string[] }> };
+	const deps = turbo.tasks['@repo/zone-contract#test']?.dependsOn;
+
+	it('depends on every zone build, and only those', () => {
+		expect(deps?.slice().sort()).toEqual(zones.map((z) => `${z}#build`).sort());
 	});
 });
 

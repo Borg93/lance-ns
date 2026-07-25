@@ -8,7 +8,7 @@
 				}
 			}
 		},
-		"data": {
+		"lakehouse": {
 			"development": {
 				"local": {
 					"port": 5174
@@ -16,43 +16,7 @@
 			},
 			"routing": [
 				{
-					"paths": ["/data", "/data/:path*"]
-				}
-			]
-		},
-		"lineage": {
-			"development": {
-				"local": {
-					"port": 5178
-				}
-			},
-			"routing": [
-				{
-					"paths": ["/lineage", "/lineage/:path*"]
-				}
-			]
-		},
-		"models": {
-			"development": {
-				"local": {
-					"port": 5176
-				}
-			},
-			"routing": [
-				{
-					"paths": ["/models", "/models/:path*"]
-				}
-			]
-		},
-		"admin": {
-			"development": {
-				"local": {
-					"port": 5175
-				}
-			},
-			"routing": [
-				{
-					"paths": ["/admin", "/admin/:path*"]
+					"paths": ["/lakehouse", "/lakehouse/:path*"]
 				}
 			]
 		},

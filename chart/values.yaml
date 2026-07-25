@@ -554,13 +554,14 @@ frontend:
   # READER on the warehouse (seed_medallion_fga.sh) + allowlisted in LINEAGE_SERVICE_SUBJECTS. The same
   # identity the retired web pod used, so the seeded grants carry over unchanged.
   serviceIdentity: service-web
-  # The zones (mirror rask's frontend.apps). home = the catch-all "/"; each domain zone is pinned to /<name>.
+  # The zones. home = the catch-all "/"; every other zone is pinned to /<name>.
   apps:
     - { name: home, catchAll: true }
-    - { name: data, path: /data }
-    - { name: lineage, path: /lineage }
-    - { name: models, path: /models }
-    - { name: admin, path: /admin }
+    # The merged estate zone: catalog + lineage + models + admin were four separate zones on four
+    # Deployments, all reading the same catalog/lineage planes and all shipped from this one shared
+    # image tag — so they paid for four SSR servers and a full document reload between them while
+    # collecting none of the independent-deploy payoff. One zone, four areas under /lakehouse/<area>.
+    - { name: lakehouse, path: /lakehouse }
     # The lance-media zones (merged per docs/LANCE_NS_HANDOFF.md): full BFF zones like the rest — SSR on,
     # the shared session handle, and same-origin /<zone>/api/* proxy routes to the media Services
     # (VIEWER_API/SEARCH_API/ANNOTATOR_API env, rendered when media.enabled). Deploy together with

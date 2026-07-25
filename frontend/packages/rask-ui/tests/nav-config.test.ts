@@ -2,14 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { exact, norm, seg, topNav, under, zoneOf } from '../src/lib/shell/nav-config';
 
 // The top-navbar IA + the shared matchers every zone builds its ZoneNav sidebar config with.
-// The bar groups by DOMAIN, not by zone: Lakehouse gathers everything that describes or governs
-// the one estate (the catalog, the model registry, and — estate-admin only — governance and
-// operations), so the bar stays three words while the product grows. A new route becomes a row in
-// a panel column, never a new top-level entry; these tests pin that rule.
+// The bar groups by DOMAIN, not by zone, and since the merge the two are no longer the same thing:
+// Lakehouse and Lineage are two triggers over ONE zone (/lakehouse), while Media covers two. Lakehouse
+// gathers everything that describes or governs the estate (the catalog, the model registry, and —
+// estate-admin only — governance and operations), so the bar stays three words while the product
+// grows. A new route becomes a row in a panel column, never a new top-level entry.
 describe('topNav', () => {
 	it('exposes three domain triggers, in order, for a non-admin (fail-closed)', () => {
 		expect(topNav(false).map((e) => e.title)).toEqual(['Lakehouse', 'Lineage', 'Media']);
-		expect(topNav(false).map((e) => e.href)).toEqual(['/data', '/lineage', '/media']);
+		expect(topNav(false).map((e) => e.href)).toEqual([
+			'/lakehouse/data',
+			'/lakehouse/lineage',
+			'/media',
+		]);
 	});
 
 	it('keeps the same three triggers for an estate admin — admin earns COLUMNS, not an entry', () => {
@@ -32,28 +37,42 @@ describe('topNav', () => {
 		const governance = topNav(true)
 			.find((e) => e.title === 'Lakehouse')!
 			.groups!.find((g) => g.label === 'Governance')!;
-		expect(governance.items.find((i) => i.title === 'Access')?.href).toBe('/admin/access');
+		expect(governance.items.find((i) => i.title === 'Access')?.href).toBe(
+			'/lakehouse/admin/access',
+		);
 		// …and a non-admin gets no row carrying it at all, in any panel.
 		const nonAdminHrefs = topNav(false).flatMap((e) => [
 			...(e.items ?? []),
 			...(e.groups ?? []).flatMap((g) => g.items),
 		]);
-		expect(nonAdminHrefs.map((i) => i.href)).not.toContain('/admin/access');
+		expect(nonAdminHrefs.map((i) => i.href)).not.toContain('/lakehouse/admin/access');
 	});
 
-	it('active-match: Lakehouse lights across every subtree it covers, and only those', () => {
+	it('active-match: Lakehouse lights across every area it covers, EXCEPT lineage', () => {
+		// Lakehouse and Lineage now share the /lakehouse prefix, so the Lakehouse trigger has to
+		// subtract the lineage subtree or both entries light up together on every lineage route.
 		const lakehouse = topNav(true).find((e) => e.title === 'Lakehouse')!;
-		for (const p of ['/data', '/data/tables/db$t', '/models', '/models/pipeline', '/admin/audit']) {
+		for (const p of [
+			'/lakehouse/data',
+			'/lakehouse/data/tables/db$t',
+			'/lakehouse/models',
+			'/lakehouse/models/pipeline',
+			'/lakehouse/admin/audit',
+		]) {
 			expect(lakehouse.match(p)).toBe(true);
 		}
-		expect(lakehouse.match('/lineage')).toBe(false);
+		expect(lakehouse.match('/lakehouse/lineage')).toBe(false);
+		expect(lakehouse.match('/lakehouse/lineage/runs')).toBe(false);
 		expect(lakehouse.match('/')).toBe(false);
-		// A non-admin's trigger must NOT claim /admin — it carries no rows for it.
-		expect(
-			topNav(false)
-				.find((e) => e.title === 'Lakehouse')!
-				.match('/admin'),
-		).toBe(false);
+		expect(lakehouse.match('/media')).toBe(false);
+	});
+
+	it('active-match: Lineage claims its own area, and nothing else in the zone', () => {
+		const lineage = topNav(true).find((e) => e.title === 'Lineage')!;
+		expect(lineage.match('/lakehouse/lineage')).toBe(true);
+		expect(lineage.match('/lakehouse/lineage/runs')).toBe(true);
+		expect(lineage.match('/lakehouse/data/tables')).toBe(false);
+		expect(lineage.match('/lakehouse')).toBe(false);
 	});
 
 	it('active-match: Media covers the annotator zone too — Annotate is its panel row', () => {
@@ -94,30 +113,33 @@ describe('topNav', () => {
 
 describe('ZoneNav matchers', () => {
 	it('seg: matches the exact route and anything nested under it', () => {
-		const m = seg('/data/tables');
-		expect(m('/data/tables')).toBe(true);
-		expect(m('/data/tables/x')).toBe(true);
-		expect(m('/data/namespaces')).toBe(false);
+		const m = seg('/lakehouse/data/tables');
+		expect(m('/lakehouse/data/tables')).toBe(true);
+		expect(m('/lakehouse/data/tables/x')).toBe(true);
+		expect(m('/lakehouse/data/namespaces')).toBe(false);
 	});
 
 	it('exact: matches only its own path — the root-leaf (href == zone href) case', () => {
-		// Registry (=/models) sits at its zone root; `seg` would keep it lit on every sub-route.
-		const m = exact('/models');
-		expect(m('/models')).toBe(true);
-		expect(m('/models/pipeline')).toBe(false);
+		// Registry (=/lakehouse/models) sits at its AREA root; `seg` would keep it lit on every sub-route.
+		const m = exact('/lakehouse/models');
+		expect(m('/lakehouse/models')).toBe(true);
+		expect(m('/lakehouse/models/pipeline')).toBe(false);
 	});
 
 	it('norm + matchers tolerate the base-path trailing slash on a zone root', () => {
-		// A zone served under a base path reports its root as `/models/` (trailing slash).
-		expect(norm('/models/')).toBe('/models');
+		// A zone served under a base path reports its root as `/lakehouse/` (trailing slash).
+		expect(norm('/lakehouse/')).toBe('/lakehouse');
 		expect(norm('/')).toBe('/');
-		expect(exact('/models')('/models/')).toBe(true);
-		expect(under('/models')('/models/')).toBe(true);
+		expect(exact('/lakehouse')('/lakehouse/')).toBe(true);
+		expect(under('/lakehouse')('/lakehouse/')).toBe(true);
 	});
 
 	it('zoneOf: first path segment, with the home zone at the empty key', () => {
-		expect(zoneOf('/data/tables')).toBe('data');
-		expect(zoneOf('/admin')).toBe('admin');
+		// The whole estate is ONE zone now, so every lakehouse area shares a zone key — which is what
+		// makes a hop between them a soft nav rather than a full document load.
+		expect(zoneOf('/lakehouse/data/tables')).toBe('lakehouse');
+		expect(zoneOf('/lakehouse/admin')).toBe('lakehouse');
+		expect(zoneOf('/media/atlas')).toBe('media');
 		expect(zoneOf('/')).toBe('');
 		expect(zoneOf('')).toBe('');
 	});

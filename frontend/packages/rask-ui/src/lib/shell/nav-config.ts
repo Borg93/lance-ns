@@ -89,18 +89,18 @@ export type TopNavEntry = {
 const DATA_ITEMS: TopNavItem[] = [
 	{
 		title: 'Projects',
-		href: '/data/projects',
+		href: '/lakehouse/data/projects',
 		description: 'Tenants, their warehouses and their members.',
 	},
-	{ title: 'Tables', href: '/data/tables', description: 'The governed table registry.' },
+	{ title: 'Tables', href: '/lakehouse/data/tables', description: 'The governed table registry.' },
 	{
 		title: 'Namespaces',
-		href: '/data/namespaces',
+		href: '/lakehouse/data/namespaces',
 		description: 'Medallion namespaces and their maintenance policies.',
 	},
 	{
 		title: 'Warehouses',
-		href: '/data/warehouses',
+		href: '/lakehouse/data/warehouses',
 		description: 'Storage bindings — one bucket per project.',
 	},
 ];
@@ -108,25 +108,29 @@ const DATA_ITEMS: TopNavItem[] = [
 const LINEAGE_ITEMS: TopNavItem[] = [
 	{
 		title: 'Datasets',
-		href: '/lineage/datasets',
+		href: '/lakehouse/lineage/datasets',
 		description: 'Every dataset the cascade has read or written.',
 	},
 	{
 		title: 'Jobs',
-		href: '/lineage/jobs',
+		href: '/lakehouse/lineage/jobs',
 		description: 'The compute identities that produce them.',
 	},
 	{
 		title: 'Runs',
-		href: '/lineage/runs',
+		href: '/lakehouse/lineage/runs',
 		description: 'Individual executions, with state and errors.',
 	},
 	{
 		title: 'Columns',
-		href: '/lineage/columns',
+		href: '/lakehouse/lineage/columns',
 		description: 'Field-level lineage across the estate.',
 	},
-	{ title: 'Graph', href: '/lineage', description: 'The whole medallion DAG on one canvas.' },
+	{
+		title: 'Graph',
+		href: '/lakehouse/lineage',
+		description: 'The whole medallion DAG on one canvas.',
+	},
 ];
 
 const MEDIA_ITEMS: TopNavItem[] = [
@@ -138,13 +142,17 @@ const MEDIA_ITEMS: TopNavItem[] = [
 ];
 
 const MODEL_ITEMS: TopNavItem[] = [
-	{ title: 'Registry', href: '/models', description: 'Candidate → blessed, per model.' },
+	{ title: 'Registry', href: '/lakehouse/models', description: 'Candidate → blessed, per model.' },
 	{
 		title: 'Experiments',
-		href: '/models/experiments',
+		href: '/lakehouse/models/experiments',
 		description: 'Training runs and their metrics.',
 	},
-	{ title: 'Pipeline', href: '/models/pipeline', description: 'Train, validate, promote.' },
+	{
+		title: 'Pipeline',
+		href: '/lakehouse/models/pipeline',
+		description: 'Train, validate, promote.',
+	},
 ];
 
 /** Governance + operations over the SAME estate the catalog and registry describe — so these ride
@@ -152,27 +160,41 @@ const MODEL_ITEMS: TopNavItem[] = [
 const GOVERNANCE_ITEMS: TopNavItem[] = [
 	{
 		title: 'Access',
-		href: '/admin/access',
+		href: '/lakehouse/admin/access',
 		description: 'The FGA workbench: check, tuples, graph.',
 	},
 	{
 		title: 'Tenants',
-		href: '/admin/tenants',
+		href: '/lakehouse/admin/tenants',
 		description: 'Warehouses per project, and who administers them.',
 	},
-	{ title: 'Audit', href: '/admin/audit', description: 'The compliance trail — who did what.' },
+	{
+		title: 'Audit',
+		href: '/lakehouse/admin/audit',
+		description: 'The compliance trail — who did what.',
+	},
 ];
 
 const OPERATIONS_ITEMS: TopNavItem[] = [
-	{ title: 'Events', href: '/admin/events', description: 'The live control-event feed.' },
-	{ title: 'Streams', href: '/admin/streams', description: 'JetStream consumers and their lag.' },
-	{ title: 'DLQ', href: '/admin/dlq', description: 'Dead-lettered lineage runs, with replay.' },
+	{ title: 'Events', href: '/lakehouse/admin/events', description: 'The live control-event feed.' },
+	{
+		title: 'Streams',
+		href: '/lakehouse/admin/streams',
+		description: 'JetStream consumers and their lag.',
+	},
+	{
+		title: 'DLQ',
+		href: '/lakehouse/admin/dlq',
+		description: 'Dead-lettered lineage runs, with replay.',
+	},
 ];
 
 /**
- * The top-navbar IA: one entry per microfrontend zone (cohesion, low coupling — each zone is a
- * SEPARATE SvelteKit app under `/<domain>`; Home owns the origin root). The zones-in-sidebar list
- * this replaces is gone: the sidebar now renders only the CURRENT zone's own routes (`ZoneNav`).
+ * The top-navbar IA. There are four zones now — home, lakehouse, media, annotator — and the bar shows
+ * three entries over them, because Lakehouse and Lineage are two views of the ONE merged estate zone
+ * rather than two apps. That is the point of the merge: a hop from the catalog to the lineage graph, or
+ * to governance, is a soft navigation inside one router; only Media and Annotate still cross a zone
+ * boundary and hard-navigate. The sidebar renders the current AREA's routes (`ZoneNav`).
  *
  * A zone with sub-areas carries `items`, and the navbar renders it as a NavigationMenu trigger with
  * a panel — so the estate's shape is reachable from any zone in one hop instead of landing on a
@@ -204,12 +226,20 @@ export function topNav(estateAdmin: boolean): TopNavEntry[] {
 	return [
 		{
 			title: 'Lakehouse',
-			href: '/data',
-			// One trigger, so it stays active anywhere in the estate it covers.
-			match: under('/data', '/models', ...(estateAdmin ? ['/admin'] : [])),
+			href: '/lakehouse/data',
+			// The catalog, models and governance areas of the merged lakehouse zone — everything under
+			// /lakehouse EXCEPT the lineage area, which keeps its own trigger below. Without the
+			// exclusion both entries would light up together on every lineage route, since they now
+			// share a zone prefix.
+			match: (p) => under('/lakehouse')(p) && !under('/lakehouse/lineage')(p),
 			groups: lakehouse,
 		},
-		{ title: 'Lineage', href: '/lineage', match: under('/lineage'), items: LINEAGE_ITEMS },
+		{
+			title: 'Lineage',
+			href: '/lakehouse/lineage',
+			match: under('/lakehouse/lineage'),
+			items: LINEAGE_ITEMS,
+		},
 		{
 			title: 'Media',
 			href: '/media',

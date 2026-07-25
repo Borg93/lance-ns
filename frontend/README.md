@@ -1,10 +1,18 @@
 # frontend — Turborepo workspace (bun + SvelteKit micro-frontend zones, the rask shape)
 
-The frontend is decomposed into **seven independently-built SvelteKit zones** (the rask micro-frontend
+The frontend is decomposed into **four independently-built SvelteKit zones** (the rask micro-frontend
 shape), so the rask merge is a **directory graft**. Each zone is its own SvelteKit app + Bun SSR server
 (`svelte-adapter-bun`), served under a base path and composed by Ingress zone-routing in the cluster
-(the dev microfrontends proxy locally). Everything a zone does NOT own itself — the design system, the
+(the dev composition proxy locally). Everything a zone does NOT own itself — the design system, the
 auth/BFF seam, the lineage and media clients — lives in a workspace package.
+
+A zone boundary costs a full document load, so it has to buy something. These four each do: `home` is
+the landing and owns the OIDC round-trip (and stays separate for the rask compute merge); `lakehouse`
+is the governed estate; `annotator` is split from `media` **despite sharing its backend plane** purely
+to keep 17 MB of Pixi + OpenCV out of the bundle of someone who came to search. The catalog, lineage,
+models and admin areas used to be four more zones — one backend plane, one shared client, one nav
+panel, and one shared image tag between them — so they paid four SSR servers and a hard reload per hop
+and collected no independent-deploy payoff. They are areas of `lakehouse` now.
 
 ```
 frontend/
@@ -17,12 +25,14 @@ frontend/
   eslint-rules/     # the local cross-zone-reload rule (a cross-zone <a> MUST hard-navigate)
   components/frontends/
     home/           # catch-all zone (base '/'); owns the OIDC /auth/{login,callback,logout} routes
-    data/           # /data — namespaces, tables, warehouses
-    lineage/        # /lineage — the lineage graph explorer
-    models/         # /models — model registry, experiments, pipeline
-    admin/          # /admin — audit, DLQ, and the live control-plane activity feed (query.live)
+    lakehouse/      # /lakehouse — the governed estate, four AREAS in one router:
+                    #     /lakehouse/data     projects, tables, namespaces, warehouses
+                    #     /lakehouse/lineage  the lineage graph explorer
+                    #     /lakehouse/models   model registry, experiments, pipeline
+                    #     /lakehouse/admin    access, tenants, audit, events, streams, DLQ
+                    #                         (estate-admin gated, fail-closed, in the root layout)
     media/          # /media — semantic search, the embedding atlas, the derivation workflow
-    annotator/      # /annotator — the Pixi labeling canvas
+    annotator/      # /annotator — the Pixi labeling canvas (split for bundle isolation, not domain)
   packages/
     rask-ui/        # @rask/ui — shared shadcn-svelte design system on bits-ui 2 (AppShell + nav-config)
     api/            # @rask/api — the cross-cutting seam, by subpath:
@@ -48,7 +58,7 @@ every zone's server wiring goes through, while `@lance/media-api` is the **typed
 services** (viewer/search/annotator). It was previously named `@lance/api` in a `media-api/` directory,
 which read as if it were the generic one.
 
-Commands (root): `bun install` · `bun run dev` (all seven zones **plus the composition proxy**, so the
+Commands (root): `bun install` · `bun run dev` (all four zones **plus the composition proxy**, so the
 estate is one origin at <http://localhost:5200> exactly as it is behind the Ingress — `bun run dev:zones`
 for the raw per-port servers) · `bun run build` · `bun run check` · `bun run lint` · `bun run fmt:check`
 (CI-exact; `bun run fmt` rewrites) · `bun run test:e2e` · `bun run gen:types` (regenerates the OpenAPI

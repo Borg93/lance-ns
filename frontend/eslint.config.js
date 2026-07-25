@@ -6,10 +6,7 @@ import { defineConfig } from 'eslint/config';
 import globals from 'globals';
 import ts from 'typescript-eslint';
 import homeSvelteConfig from './components/frontends/home/svelte.config.js';
-import dataSvelteConfig from './components/frontends/data/svelte.config.js';
-import lineageSvelteConfig from './components/frontends/lineage/svelte.config.js';
-import modelsSvelteConfig from './components/frontends/models/svelte.config.js';
-import adminSvelteConfig from './components/frontends/admin/svelte.config.js';
+import lakehouseSvelteConfig from './components/frontends/lakehouse/svelte.config.js';
 import mediaSvelteConfig from './components/frontends/media/svelte.config.js';
 import annotatorSvelteConfig from './components/frontends/annotator/svelte.config.js';
 import uiSvelteConfig from './packages/rask-ui/svelte.config.js';
@@ -74,10 +71,7 @@ export default defineConfig(
 	},
 	...[
 		['home', homeSvelteConfig],
-		['data', dataSvelteConfig],
-		['lineage', lineageSvelteConfig],
-		['models', modelsSvelteConfig],
-		['admin', adminSvelteConfig],
+		['lakehouse', lakehouseSvelteConfig],
 		['media', mediaSvelteConfig],
 		['annotator', annotatorSvelteConfig],
 	].map(([zone, cfg]) => ({

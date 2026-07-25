@@ -1,12 +1,13 @@
 // --- Local ESLint rule: cross-zone <a> links must hard-navigate -------------
-// Each domain (`/<domain>`) is a SEPARATE SvelteKit microfrontend app. A soft
-// client-router nav to another domain's path targets a route THIS app doesn't own
-// → 404. Cross-zone <a>s must therefore set `data-sveltekit-reload` to force a full
+// Each zone (`/<zone>`) is a SEPARATE SvelteKit microfrontend app. A soft
+// client-router nav to another zone's path targets a route THIS app doesn't own
+// → 404. Note `lakehouse` is ONE zone covering the catalog/lineage/models/admin
+// areas: a link between those areas is same-zone and must NOT hard-navigate. Cross-zone <a>s must therefore set `data-sveltekit-reload` to force a full
 // document navigation. The shared shell (`@rask/ui/shell`) does this dynamically;
 // this rule guards the hand-written links in app pages so the convention can't
 // silently drift. Same-zone links use `{base}/…` (a `{base}` expression, never a
 // literal `/<domain>`), so they read as an opaque placeholder here and are ignored.
-const ZONES = ['data', 'lineage', 'models', 'admin', 'media', 'annotator'];
+const ZONES = ['lakehouse', 'media', 'annotator'];
 // A cross-zone path is domain-relative and single-segment-rooted: `/<domain>` or `/<domain>/…`.
 const ZONE_PATH = new RegExp(`^\\/(${ZONES.join('|')})(?:\\/|$)`);
 const EXPR = '￿'; // opaque-expression placeholder (can't contain a '/')

@@ -11,7 +11,7 @@
 		"build": "turbo run build",
 		"check": "turbo run check",
 		"check:tsgo": "turbo run check:tsgo",
-		"dev": "turbo run dev",
+		"dev": "turbo run dev dev:proxy",
 		"test": "turbo run test",
 		"test:e2e": "turbo run test:e2e",
 		"gen:types": "bun run gen:types:lineage && bun run gen:types:catalog",
@@ -19,7 +19,8 @@
 		"gen:types:catalog": "openapi-typescript ../docs/catalog-openapi.json -o packages/api/src/generated/catalog.ts",
 		"lint": "turbo run lint",
 		"fmt": "turbo run fmt",
-		"fmt:check": "turbo run fmt:check"
+		"fmt:check": "turbo run fmt:check",
+		"dev:zones": "turbo run dev"
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.1.0",

@@ -35,6 +35,10 @@ frontend/
     engine/         # @lance/engine — the Pixi canvas engine, tools and layer store
     labeling/       # @lance/labeling — annotation history, tag writer, job clients
     config/         # @lance/config — the shared tsconfig base
+    zone-contract/  # @rask/zone-contract — the zone manifest: the invariant tests that keep
+                    #   microfrontends.json, each svelte.config.js base, each vite.config.ts port and
+                    #   chart/values.yaml agreeing, plus the local composition proxy driven by that
+                    #   same file (`bun run dev` → one origin on :5200, like the cluster Ingress)
 ```
 
 Note the two API packages are different layers, not duplicates: `@rask/api` is the **BFF/auth seam**
@@ -42,14 +46,20 @@ every zone's server wiring goes through, while `@lance/media-api` is the **typed
 services** (viewer/search/annotator). It was previously named `@lance/api` in a `media-api/` directory,
 which read as if it were the generic one.
 
-Commands (root): `bun install` · `bun run build` · `bun run check` · `bun run lint` · `bun run fmt:check`
+Commands (root): `bun install` · `bun run dev` (all seven zones **plus the composition proxy**, so the
+estate is one origin at <http://localhost:5200> exactly as it is behind the Ingress — `bun run dev:zones`
+for the raw per-port servers) · `bun run build` · `bun run check` · `bun run lint` · `bun run fmt:check`
 (CI-exact; `bun run fmt` rewrites) · `bun run test:e2e` · `bun run gen:types` (regenerates the OpenAPI
-types from `../docs/*-openapi.json`). Each zone image builds from the parametrized
+types from `../docs/*-openapi.json`). Lint and format are split across two toolchains —
+**oxlint + oxfmt own `.ts`/`.js`, ESLint + Prettier own `.svelte`** — see [TOOLING.md](TOOLING.md).
+Each zone image builds from the parametrized
 `.docker/frontend.dockerfile` (`--build-arg APP=<zone>` → `lance-<zone>:dev`); runtime contract
 `bun ./build/index.js`, uid 1000. `make frontend-images` / `make frontend-load` build + side-load them all.
 
-Adding a zone = `components/frontends/<name>` (its own `svelte.config.js` with `paths.base`) + the chart's
-`frontend.apps` list + the Ingress route + an entry in `components/frontends/home/microfrontends.json`.
+Adding a zone = `components/frontends/<name>` (its own `svelte.config.js` with `paths.base`, and a
+package **named for the directory** — turbo resolves routing keys against package names) + the chart's
+`frontend.apps` list + the Ingress route + an entry in `components/frontends/home/microfrontends.json`
+with a unique dev port. `@rask/zone-contract`'s tests fail if any of those four disagree.
 Its `hooks.server.ts`, `+layout.server.ts` and BFF catch-all routes are one line each — the factories in
 `@rask/api/bff` (`makeZoneHooks`, `zoneLayoutLoad`, `makeCatalogProxy`, `makeLineageProxy`,
 `makeViewerProxy`); its `src/lib/http.ts` binds `@rask/api/client` to the zone's base path. Remote

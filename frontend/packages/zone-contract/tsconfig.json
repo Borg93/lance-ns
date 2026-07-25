@@ -2,7 +2,7 @@
 	"extends": "@lance/config/tsconfig.base.json",
 	"compilerOptions": {
 		"noEmit": true,
-		"types": ["node"]
+		"types": ["bun"]
 	},
 	"include": ["src"]
 }

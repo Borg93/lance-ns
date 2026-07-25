@@ -1,30 +1,84 @@
 {
 	"$schema": "https://turborepo.dev/microfrontends/schema.json",
 	"applications": {
-		"home": { "development": { "local": { "port": 5273 } } },
+		"home": {
+			"development": {
+				"local": {
+					"port": 5273
+				}
+			}
+		},
 		"data": {
-			"development": { "local": { "port": 5174 } },
-			"routing": [{ "paths": ["/data", "/data/:path*"] }]
+			"development": {
+				"local": {
+					"port": 5174
+				}
+			},
+			"routing": [
+				{
+					"paths": ["/data", "/data/:path*"]
+				}
+			]
 		},
 		"lineage": {
-			"development": { "local": { "port": 5178 } },
-			"routing": [{ "paths": ["/lineage", "/lineage/:path*"] }]
+			"development": {
+				"local": {
+					"port": 5178
+				}
+			},
+			"routing": [
+				{
+					"paths": ["/lineage", "/lineage/:path*"]
+				}
+			]
 		},
 		"models": {
-			"development": { "local": { "port": 5176 } },
-			"routing": [{ "paths": ["/models", "/models/:path*"] }]
+			"development": {
+				"local": {
+					"port": 5176
+				}
+			},
+			"routing": [
+				{
+					"paths": ["/models", "/models/:path*"]
+				}
+			]
 		},
 		"admin": {
-			"development": { "local": { "port": 5175 } },
-			"routing": [{ "paths": ["/admin", "/admin/:path*"] }]
+			"development": {
+				"local": {
+					"port": 5175
+				}
+			},
+			"routing": [
+				{
+					"paths": ["/admin", "/admin/:path*"]
+				}
+			]
 		},
 		"media": {
-			"development": { "local": { "port": 5173 } },
-			"routing": [{ "paths": ["/media", "/media/:path*"] }]
+			"development": {
+				"local": {
+					"port": 5173
+				}
+			},
+			"routing": [
+				{
+					"paths": ["/media", "/media/:path*"]
+				}
+			]
 		},
 		"annotator": {
-			"development": { "local": { "port": 5177 } },
-			"routing": [{ "paths": ["/annotator", "/annotator/:path*"] }]
+			"development": {
+				"local": {
+					"port": 5177
+				}
+			},
+			"routing": [
+				{
+					"paths": ["/annotator", "/annotator/:path*"]
+				}
+			]
 		}
 	}
 }

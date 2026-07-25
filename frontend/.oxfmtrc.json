@@ -1,6 +1,14 @@
 {
+	"$schema": "./node_modules/oxfmt/configuration_schema.json",
 	"printWidth": 100,
 	"useTabs": true,
 	"singleQuote": true,
-	"trailingComma": "all"
+	"trailingComma": "all",
+	"ignorePatterns": [
+		"**/.svelte-kit/**",
+		"**/build/**",
+		"**/dist/**",
+		"**/*.generated.ts",
+		"**/src/generated/**"
+	]
 }

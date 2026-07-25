@@ -39,7 +39,7 @@ export function zoneDirs(): string[] {
 /** The `paths.base` a zone serves under, from its svelte.config.js. `''` for the catch-all zone. */
 export function svelteBase(zone: string): string {
 	const src = read(`components/frontends/${zone}/svelte.config.js`);
-	return /paths:\s*\{[^}]*base:\s*'([^']*)'/.exec(src)?.[1] ?? '';
+	return /paths:\s*\{[^}]*base:\s*['"]([^'"]*)['"]/.exec(src)?.[1] ?? '';
 }
 
 /** The dev port a zone's vite.config.ts binds, and whether it binds it strictly. */

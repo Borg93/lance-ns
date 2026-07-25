@@ -1,5 +1,0 @@
-**/.svelte-kit/**
-**/build/**
-**/dist/**
-**/*.generated.ts
-packages/api/src/generated/**

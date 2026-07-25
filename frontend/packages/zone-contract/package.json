@@ -7,9 +7,9 @@
 		"dev:proxy": "bun src/proxy.ts",
 		"check:tsgo": "tsgo --noEmit -p tsconfig.json",
 		"test": "vitest run",
-		"lint": "oxlint --config ../../.oxlintrc.json .",
-		"fmt": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore . && prettier --write '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern",
-		"fmt:check": "oxfmt --config ../../.oxfmtrc.json --ignore-path ../../.oxfmtignore --check . && prettier --check '**/*.{md,json}' --ignore-path ../../.gitignore --ignore-path ../../.prettierignore --no-error-on-unmatched-pattern"
+		"lint": "oxlint .",
+		"fmt": "oxfmt .",
+		"fmt:check": "oxfmt --check ."
 	},
 	"devDependencies": {
 		"@lance/config": "workspace:*",

@@ -8,9 +8,9 @@
 	},
 	"scripts": {
 		"test": "vitest run",
-		"lint": "oxlint --config ../.oxlintrc.json .",
-		"fmt": "oxfmt --config ../.oxfmtrc.json --ignore-path ../.oxfmtignore .",
-		"fmt:check": "oxfmt --config ../.oxfmtrc.json --ignore-path ../.oxfmtignore --check ."
+		"lint": "oxlint .",
+		"fmt": "oxfmt .",
+		"fmt:check": "oxfmt --check ."
 	},
 	"devDependencies": {
 		"vitest": "^4.1.10"

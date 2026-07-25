@@ -1,7 +1,10 @@
+import { readdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
 	chartApps,
 	devScript,
+	FRONTEND_ROOT,
 	packageName,
 	routingConfig,
 	svelteBase,
@@ -81,5 +84,30 @@ describe('dev ports are unique, strict, and single-sourced', () => {
 	it.each(zones)('%s does not ALSO set a port in its dev script', (zone) => {
 		// Two places to change a port is how they drift; vite.config.ts is the single source.
 		expect(devScript(zone)).not.toMatch(/--port/);
+	});
+});
+
+describe('there is exactly one config per tool, at the workspace root', () => {
+	// media and annotator arrived from a standalone repo that already used the oxc toolchain, and
+	// carried their own .oxfmtrc.json / .oxlintrc.json in. Both tools resolve the NEAREST config
+	// upward, so those files silently overrode the root config for that zone the moment oxlint and
+	// oxfmt were switched on — media got 80-column double-quoted output and a different plugin set,
+	// and nothing reported it. A per-package config must be a deliberate act, not a leftover.
+	it.each([
+		'.oxlintrc.json',
+		'.oxfmtrc.json',
+		'.prettierrc',
+		'.prettierrc.json',
+		'eslint.config.js',
+	])('%s exists only at the frontend root', (name) => {
+		const strays: string[] = [];
+		for (const dir of ['packages', 'components/frontends']) {
+			for (const pkg of readdirSync(resolve(FRONTEND_ROOT, dir), { withFileTypes: true })) {
+				if (!pkg.isDirectory()) continue;
+				const found = readdirSync(resolve(FRONTEND_ROOT, dir, pkg.name));
+				if (found.includes(name)) strays.push(`${dir}/${pkg.name}/${name}`);
+			}
+		}
+		expect(strays).toEqual([]);
 	});
 });

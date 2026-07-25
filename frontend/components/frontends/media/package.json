@@ -14,9 +14,9 @@
 		"test": "vitest run",
 		"test:e2e": "playwright test",
 		"test:e2e:live": "node e2e/annotator.e2e.mjs && node e2e/temporal.e2e.mjs && node e2e/read-plane.e2e.mjs",
-		"lint": "oxlint --config ../../../.oxlintrc.json . && eslint '**/*.svelte' '**/*.svelte.ts' --no-error-on-unmatched-pattern",
-		"fmt": "oxfmt --config ../../../.oxfmtrc.json --ignore-path ../../../.oxfmtignore . && prettier --write '**/*.svelte' '**/*.svelte.ts' '**/*.{css,md,json,html}' --ignore-path ../../../.gitignore --ignore-path ../../../.prettierignore --no-error-on-unmatched-pattern",
-		"fmt:check": "oxfmt --config ../../../.oxfmtrc.json --ignore-path ../../../.oxfmtignore --check . && prettier --check '**/*.svelte' '**/*.svelte.ts' '**/*.{css,md,json,html}' --ignore-path ../../../.gitignore --ignore-path ../../../.prettierignore --no-error-on-unmatched-pattern"
+		"lint": "oxlint . && eslint '**/*.svelte' '**/*.svelte.ts' --no-error-on-unmatched-pattern",
+		"fmt": "oxfmt . && prettier --write '**/*.svelte' --no-error-on-unmatched-pattern",
+		"fmt:check": "oxfmt --check . && prettier --check '**/*.svelte' --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
 		"@lance/engine": "workspace:*",

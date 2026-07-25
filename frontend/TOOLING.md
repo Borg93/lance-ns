@@ -27,6 +27,14 @@ config upward from the working directory, so every package's scripts are byte-id
 No `--config ../../..`, no `--ignore-path`, no per-depth relative paths. Ignore globs live *inside*
 each config for the same reason.
 
+Prettier is the exception that proves it. Its *config* resolves upward like the others (the `prettier`
+block in the root `package.json`), but its *ignore file* is read from the working directory only — and
+every package invokes it from its own. A root `.prettierignore` therefore protected nothing, which is
+how `.svelte-kit/generated/root.svelte`, a file SvelteKit writes, ended up failing `fmt:check`. So the
+ignore is the glob: prettier is pointed at **`src/**/*.svelte`**, where every hand-written component
+lives, and cannot reach build output from any directory. The `.prettierignore` is deleted rather than
+left to look load-bearing, and `@repo/zone-contract` fails if a package widens the glob back.
+
 This is not theoretical hygiene. `components/frontends/media` shipped its own `.oxfmtrc.json` and
 `.oxlintrc.json`, inherited from the standalone lance-media repo. They sat dormant while nothing
 invoked the oxc tools — and the moment oxlint and oxfmt were switched on they silently won, because

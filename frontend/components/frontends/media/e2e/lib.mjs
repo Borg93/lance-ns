@@ -9,14 +9,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { chromium } from 'playwright-core';
 
-// The viewer-zone origin (dev proxy). It path-routes /api/* to the three
-// services AND /annotator to the annotator zone (:5176), so the suites drive the
-// full split composition through one origin — the real prod topology.
-export const BASE = process.env.E2E_BASE ?? 'http://127.0.0.1:5175';
-// API goes through the dev proxy (same origin the app uses) — under the split
-// deployment the proxy path-routes to viewer/search/annotator, so the suites
-// exercise the real zone composition, not one monolith port.
-export const API = process.env.E2E_API ?? 'http://127.0.0.1:5175';
+// The composition origin: @repo/zone-contract's dev proxy (`bun run dev` at the frontend
+// root), which path-routes every zone prefix off ONE origin exactly as the Ingress does — so
+// these suites drive the real split topology rather than a single zone's port.
+export const BASE = process.env.E2E_BASE ?? 'http://127.0.0.1:5200';
+// API goes through the same origin the app uses: /media/api/* is the media zone's own BFF,
+// which bearer-forwards to viewer/search/annotator.
+export const API = process.env.E2E_API ?? 'http://127.0.0.1:5200';
 export const KEY = process.env.E2E_KEY ?? 'fe00cd746463ad2c/0/19';
 export const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../../../..');
 

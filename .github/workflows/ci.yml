@@ -67,7 +67,7 @@ jobs:
           curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.21.7 BIN_DIR=/usr/local/bin sh
 
       # Turborepo workspace bun gates — svelte-check, TypeScript 7 (tsgo), unit tests, lint and fmt:check
-      # fan out over the packages/* AND components/frontends/* (the 7 micro-frontend zones) workspace. All
+      # fan out over the packages/* AND components/frontends/* (the 4 micro-frontend zones) workspace. All
       # five are PACKAGE tasks now, so turbo parallelises and caches them instead of running lint/fmt once
       # repo-wide over a hand-maintained path list; oxlint + oxfmt own .ts/.js and eslint + prettier own
       # .svelte (see frontend/TOOLING.md). Run hermetically in the pinned oven/bun image via the Dagger
@@ -92,9 +92,10 @@ jobs:
         working-directory: frontend
         run: bunx playwright install --with-deps chromium
 
-      # All 7 zones' e2e (home/data/lineage/models/admin/media/annotator), fanned by turbo. Run SERIALLY
-      # (--concurrency=1): each zone spins its own vite SSR dev server + a chromium instance, and 7
-      # concurrent first-compiles blow the per-server startup window on a 2-core runner.
+      # All 4 zones' e2e (home/lakehouse/media/annotator), fanned by turbo. Run SERIALLY
+      # (--concurrency=1): each zone spins its own vite SSR dev server + a chromium instance, and running
+      # every first-compile at once blows the per-server startup window on a 2-core runner. (lakehouse alone
+      # runs TWO dev servers — auth-off for three areas, auth-on for admin — each with its own warmup.)
       - name: Playwright e2e — all zones (hermetic — /api mocked in-page)
         working-directory: frontend
         run: bunx turbo run test:e2e --concurrency=1

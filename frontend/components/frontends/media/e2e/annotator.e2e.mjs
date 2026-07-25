@@ -8,7 +8,7 @@
  *     annotator :8103) with MEDIA_ASSIST_URL UNSET — the AI-assist checks rely on the
  *     deterministic in-repo mock (services/annotator/api/v1/endpoints/assist.py); a live
  *     model endpoint would be nondeterministic.
- *   - the dev proxy at :5175 (`bun run dev` in frontend/ — both zone apps)
+ *   - the dev proxy at :5200 (`bun run dev` in frontend/ — all four zones)
  *   - a chromium with WebGPU: default = the ms-playwright cache; override with E2E_CHROME.
  *   - the demo unit (E2E_KEY, default fe00cd746463ad2c/0/19) present in the dataset.
  *

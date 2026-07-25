@@ -15,8 +15,8 @@
 		"test:e2e": "playwright test",
 		"test:e2e:live": "node e2e/annotator.e2e.mjs && node e2e/temporal.e2e.mjs && node e2e/read-plane.e2e.mjs",
 		"lint": "oxlint . && eslint '**/*.svelte' '**/*.svelte.ts' --no-error-on-unmatched-pattern",
-		"fmt": "oxfmt . && prettier --write '**/*.svelte' --no-error-on-unmatched-pattern",
-		"fmt:check": "oxfmt --check . && prettier --check '**/*.svelte' --no-error-on-unmatched-pattern"
+		"fmt": "oxfmt . && prettier --write 'src/**/*.svelte' --no-error-on-unmatched-pattern",
+		"fmt:check": "oxfmt --check . && prettier --check 'src/**/*.svelte' --no-error-on-unmatched-pattern"
 	},
 	"dependencies": {
 		"@lucide/svelte": "^1.26.0",

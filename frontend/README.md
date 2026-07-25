@@ -8,8 +8,12 @@ auth/BFF seam, the lineage and media clients — lives in a workspace package.
 
 A zone boundary costs a full document load, so it has to buy something. These four each do: `home` is
 the landing and owns the OIDC round-trip (and stays separate for the rask compute merge); `lakehouse`
-is the governed estate; `annotator` is split from `media` **despite sharing its backend plane** purely
-to keep 17 MB of Pixi + OpenCV out of the bundle of someone who came to search. The catalog, lineage,
+is the governed estate; `annotator` is split from `media` to keep 17 MB of Pixi + OpenCV out of the
+bundle of someone who came to search. Their backends are **not** the same set and the chart no longer
+pretends they are — media reaches viewer, search and the annotator service (the workflow's tag write
+and batch submit); the annotator reaches viewer and the annotator service, and never search. Each pod
+gets exactly the upstreams its own BFF routes read, and `@repo/zone-contract` fails if that drifts.
+The catalog, lineage,
 models and admin areas used to be four more zones — one backend plane, one shared client, one nav
 panel, and one shared image tag between them — so they paid four SSR servers and a hard reload per hop
 and collected no independent-deploy payoff. They are areas of `lakehouse` now.

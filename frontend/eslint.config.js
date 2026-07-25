@@ -97,18 +97,6 @@ export default defineConfig(
 		},
 	},
 	{
-		// @repo/ui (the lance-media component lib) has no svelte.config.js — plain
-		// Svelte 5 + lang="ts" components, so the TS parser mapping alone suffices.
-		files: ['packages/ui/**/*.svelte', 'packages/ui/**/*.svelte.ts'],
-		languageOptions: {
-			parserOptions: {
-				projectService: true,
-				extraFileExtensions: ['.svelte'],
-				parser: ts.parser,
-			},
-		},
-	},
-	{
 		// GATE: cross-zone <a> links must hard-navigate.
 		files: ['components/frontends/**/*.svelte'],
 		plugins: { 'ra-local': raLocal },

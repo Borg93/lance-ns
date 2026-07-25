@@ -1,8 +1,5 @@
 node_modules
 .turbo
-apps/*/build
-apps/*/.svelte-kit
-apps/*/test-results
 components/frontends/*/build
 components/frontends/*/.svelte-kit
 components/frontends/*/test-results
@@ -10,4 +7,3 @@ packages/*/dist
 storybook-static/
 .svelte-kit
 test-results
-test-results/

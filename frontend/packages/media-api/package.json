@@ -22,11 +22,11 @@
 		"test": "vitest run"
 	},
 	"devDependencies": {
-		"typescript": "^5.7.0",
-		"vitest": "^2.1.0"
+		"typescript": "^6.0.3",
+		"vitest": "^4.1.10"
 	},
 	"dependencies": {
 		"valibot": "^1.4.2",
-		"apache-arrow": "^21.1.0"
+		"apache-arrow": "^21.2.0"
 	}
 }

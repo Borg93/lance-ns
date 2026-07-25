@@ -1,6 +1,7 @@
 {
 	"name": "lance-frontend",
 	"private": true,
+	"type": "module",
 	"workspaces": [
 		"packages/*",
 		"components/frontends/*"
@@ -21,20 +22,20 @@
 	},
 	"devDependencies": {
 		"@eslint/compat": "^2.1.0",
-		"@typescript/native-preview": "^7.0.0-dev.20260622.1",
-		"eslint": "^10.5.0",
+		"@typescript/native-preview": "^7.0.0-dev.20260707.2",
+		"eslint": "^10.8.0",
 		"eslint-config-prettier": "^10.1.8",
-		"eslint-plugin-svelte": "^3.19.0",
-		"globals": "^17.6.0",
+		"eslint-plugin-svelte": "^3.22.0",
+		"globals": "^17.7.0",
 		"openapi-typescript": "^7.13.0",
-		"prettier": "^3.8.4",
+		"prettier": "^3.9.6",
 		"prettier-plugin-svelte": "^4.1.1",
-		"prettier-plugin-tailwindcss": "^0.8.0",
-		"svelte-check": "^4.6.0",
+		"prettier-plugin-tailwindcss": "^0.8.1",
+		"svelte-check": "^4.7.3",
 		"turbo": "2.10.6",
 		"typescript": "^6.0.3",
-		"typescript-eslint": "^8.62.0",
-		"vitest": "^4.1.9"
+		"typescript-eslint": "^8.65.0",
+		"vitest": "^4.1.10"
 	},
 	"prettier": {
 		"overrides": [

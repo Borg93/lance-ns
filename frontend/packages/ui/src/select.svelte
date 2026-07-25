@@ -5,7 +5,7 @@
 <script lang="ts">
 	import { Select } from 'bits-ui';
 	import { cn } from './utils';
-	import { Check, ChevronDown } from 'lucide-svelte';
+	import { Check, ChevronDown } from '@lucide/svelte';
 
 	let {
 		value = $bindable(''),

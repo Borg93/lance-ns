@@ -24,11 +24,11 @@
 		"test": "vitest run"
 	},
 	"dependencies": {
-		"valibot": "^1.4.1"
+		"valibot": "^1.4.2"
 	},
 	"devDependencies": {
 		"@sveltejs/kit": "^2.70.1",
-		"@types/node": "^22.0.0",
-		"vitest": "^4.1.9"
+		"@types/node": "^26.1.1",
+		"vitest": "^4.1.10"
 	}
 }

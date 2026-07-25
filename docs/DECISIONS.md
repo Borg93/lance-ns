@@ -385,7 +385,7 @@ reconciliation problem for a capability the CLI already covers.
 
 ## /streams on a medallion-off governed stack answers 503 — fail-closed, correct (2026-07-23)
 
-**Decision.** The admin JetStream panel's BFF (`frontend/components/frontends/admin/src/routes/api/
+**Decision.** The admin JetStream panel's BFF (`frontend/components/frontends/lakehouse/src/routes/api/
 jetstream/+server.ts`) reuses the medallion produce door's side-effect-free `GET /authorize` as its
 admin gate. On a governed stack with `MEDALLION_API` unset (medallion disabled), the route answers
 **503 "jetstream admin authorization is unavailable"** rather than falling back to session-only auth.
@@ -471,7 +471,7 @@ observing the estate.
 **Decision.** The originally planned P3 — a hand-rolled catalog SSE endpoint
 (`GET /v1/events/stream`) — is **superseded, not deferred**: the console consumes the feed through
 SvelteKit's **`query.live`** remote function
-(`frontend/components/frontends/admin/src/lib/remote/admin.remote.ts`). The generator runs on the zone
+(`frontend/components/frontends/lakehouse/src/lib/admin/remote/admin.remote.ts`). The generator runs on the zone
 (Bun) server — it holds the cursor, a bounded recent window, and `event_id` dedup, polls the catalog
 `GET /v1/events` with the signed-in admin's bearer, and yields whenever the window changes — while the
 framework owns the browser↔zone stream and reconnect (backoff + `navigator.onLine`). The zone→catalog

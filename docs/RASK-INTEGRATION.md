@@ -64,7 +64,7 @@ secret).
 - `chart/templates/{age-postgres,rustfs,backup-pg,backup-snapshot}.yaml` → CNPG / rustfs-operator.
 - `frontend/` + the zone Deployments + `gateway.yaml` → rask's SvelteKit frontends + Traefik Ingress.
   **Grafted-shape (P5, 2026-07-22):** `frontend/` is now a Turborepo + bun workspace in rask's exact shape —
-  the 5 `components/frontends/<zone>` apps (home/data/lineage/models/admin) on the shared `@repo/ui` design
+  the 4 `components/frontends/<zone>` apps (home/lakehouse/media/annotator) on the shared `@repo/ui` design
   system + the `@repo/api` seam (the old single `apps/web` app + `@repo/ui` were retired in P5) — so folding
   in is a directory graft of the zones into `rask/components/frontends/`, not untangling a monolith.
 - `openbao` dev-mode + the dev `infra-credentials` static Secret → external-secrets from rask's Vault.

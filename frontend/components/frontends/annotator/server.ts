@@ -18,7 +18,6 @@ const args = Object.fromEntries(
 		.filter((x): x is [string, string] => x !== null),
 );
 const VIEWER = (args.viewer ?? 'http://127.0.0.1:8101').replace(/\/$/, '');
-const SEARCH = (args.search ?? 'http://127.0.0.1:8102').replace(/\/$/, '');
 const ANNOTATOR = (args.annotator ?? 'http://127.0.0.1:8103').replace(/\/$/, '');
 const PORT = Number(args.port ?? 5176);
 
@@ -33,7 +32,6 @@ function apiUpstream(pathname: string): string {
 		pathname.startsWith('/api/jobs')
 	)
 		return ANNOTATOR;
-	if (pathname.startsWith('/api/search')) return SEARCH;
 	return VIEWER;
 }
 

@@ -37,8 +37,10 @@ const ANNOTATE_ZONE = (args['annotate-zone'] ?? 'http://127.0.0.1:5176').replace
 /** Route an /api/* path to the service that owns that domain. */
 function apiUpstream(pathname: string): string {
 	if (
-		pathname.startsWith('/api/annotations') ||
-		pathname.startsWith('/api/assist') ||
+		// Only the two annotator endpoints this zone actually calls: the workflow's tag write and the
+		// batch-job submit. The full /api/annotations and /api/assist surfaces belong to the annotator
+		// zone — proxying them from a SEARCH zone with no caller is a write surface for nothing.
+		pathname.startsWith('/api/annotations/tags') ||
 		pathname.startsWith('/api/jobs')
 	)
 		return ANNOTATOR;
@@ -98,7 +100,7 @@ Bun.serve({
 });
 
 console.log(`→ frontend:  http://localhost:${PORT}  (svelte-adapter-bun)`);
-console.log(`  /api/annotations|assist|jobs → ${ANNOTATOR}`);
+console.log(`  /api/annotations/tags|jobs → ${ANNOTATOR}`);
 console.log(`  /api/search                  → ${SEARCH}`);
 console.log(`  /api/*                       → ${VIEWER}`);
 console.log(`  /annotator                   → ${ANNOTATE_ZONE}`);

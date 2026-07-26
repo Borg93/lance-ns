@@ -290,6 +290,9 @@ age:
   password: lance
   lineageDb: lineage
   openfgaDb: openfga
+  # The Dapr state store's database (see stateStore below). Dapr owns this schema outright — it creates
+  # and migrates its own tables — so it gets its own database rather than a table beside AGE's graph.
+  stateDb: daprstate
   port: 5432
   # Externalize: when set, lineage + the OpenFGA datastore connect to THIS host instead of the in-cluster
   # AGE — pair with age.enabled=false + a managed Postgres (set user/password/dbs to match). NOTE: the
@@ -814,6 +817,26 @@ media:
 encoders:
   embedUrl: "" # e.g. http://encoders.internal:8001 — enables semantic / visual / scene / hybrid / all
   rerankUrl: "" # e.g. http://encoders.internal:8002 — enables the rerank leg on any mode
+
+# --- Dapr state store — operational state (NOT analytical data) -----------------------------------
+# Backed by the already-deployed AGE Postgres, in its own database. This is what annotation task state
+# (#122), the notification inbox (#125) and Dapr workflow instances persist to; Lance keeps the
+# published, versioned, analytical data and nothing operational. See chart/templates/dapr-statestore.yaml
+# for why Postgres rather than Redis, and docs/DESIGN-interactive-state.md for why not Lance.
+stateStore:
+  enabled: true
+  name: lance-statestore
+  componentVersion: v1
+  # The Dapr secret store that resolves the connection string — OpenBao, not a k8s Secret. See
+  # services/common/secrets.py for why the store must be the sole source.
+  secretStore: lance-secrets
+  tableName: state
+  metadataTableName: dapr_metadata
+  # Only the services that own operational state may load it. An unscoped component is loadable by
+  # every app-id in the namespace, which would let any service write another's state.
+  scopes:
+    - annotator # #122 task/project state, and the actor per task
+    - catalog # workflow instances for the publish saga
 
 # --- Model runners (runners/ — the lance-audio fold) ----------------------------------------------
 # Only the CPU-viable subset ships: `assist` (GroundingDINO-tiny + SAM-ViT-base, CPU wheels, weights

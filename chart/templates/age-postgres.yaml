@@ -47,6 +47,16 @@ data:
     -- Keep the openfga db off AGE's ag_catalog search path (it has no AGE) so openfga migrations resolve
     -- objects in public, not a non-existent ag_catalog schema.
     ALTER DATABASE "{{ .Values.age.openfgaDb }}" SET search_path = public;
+  30-daprstate.sql: |
+    -- The Dapr state store's own database: operational state (annotation tasks, notification inboxes,
+    -- actor and workflow state) that Lance must not hold — a per-task state flip would be a dataset
+    -- version, so hundreds of manifests a minute and a history that is noise rather than provenance.
+    --
+    -- Its own database rather than a table in `lineage`: Dapr owns this schema completely (it creates and
+    -- migrates its own tables), and mixing that with AGE's graph would make a Dapr migration a risk to the
+    -- lineage store. Same isolation argument as openfga's.
+    CREATE DATABASE "{{ .Values.age.stateDb }}";
+    ALTER DATABASE "{{ .Values.age.stateDb }}" SET search_path = public;
 ---
 apiVersion: v1
 kind: Service

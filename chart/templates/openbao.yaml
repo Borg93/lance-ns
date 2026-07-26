@@ -143,7 +143,8 @@ spec:
             - -c
             - |
               until bao status >/dev/null 2>&1; do echo wait-openbao; sleep 3; done
-              bao kv put secret/lance rustfs-secret-key={{ .Values.rustfs.secretKey }} postgres-password={{ .Values.age.password }}
+              bao kv put secret/lance rustfs-secret-key={{ .Values.rustfs.secretKey }} postgres-password={{ .Values.age.password }} \
+                dapr-state-connection-string="postgres://{{ .Values.age.user }}:{{ .Values.age.password }}@{{ include "lance.ageConnectHost" . }}:{{ .Values.age.port }}/{{ .Values.age.stateDb }}?sslmode=disable"
               echo "seeded secret/lance into OpenBao"
 {{- end }}{{/* devMode seed */}}
 {{- end }}{{/* openbao.enabled */}}

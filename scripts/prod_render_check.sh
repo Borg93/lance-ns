@@ -29,7 +29,7 @@ grep -q -- "-openbao" "$OUT" || fail "prod NetworkPolicy set missing the openbao
 # NATS isolation (goal cond 8): the general intra-namespace ingress allow must EXCLUDE the nats pods —
 # without the exclusion the explicit nats rules are decorative (NetworkPolicies are additive). Then the
 # two explicit rules must render: 4222 (clients, port-scoped from any in-namespace pod — the daprd
-# sidecars live in nearly every app pod) and 8222 (monitor) from the web-admin zone pods. The windowed
+# sidecars live in nearly every app pod) and 8222 (monitor) from the web-lakehouse zone pods. The windowed
 # greps pin the from-selector + port to THEIR rule, not a stray match elsewhere.
 grep -qF "values: [openbao, age, rustfs, nats]" "$OUT" \
   || fail "the general intra-namespace ingress allow must exclude the nats pods (with openbao/age/rustfs)"
@@ -37,8 +37,8 @@ grep -q "name: lance-ns-nats-clients" "$OUT" || fail "prod NetworkPolicy set mis
 grep -A20 "name: lance-ns-nats-clients" "$OUT" | grep -q "port: 4222" \
   || fail "the nats-clients rule must target the 4222 client port"
 grep -q "name: lance-ns-nats-monitor" "$OUT" || fail "prod NetworkPolicy set missing the nats-monitor (8222) rule"
-grep -A20 "name: lance-ns-nats-monitor" "$OUT" | grep -q "app.kubernetes.io/component: web-admin" \
-  || fail "the nats-monitor rule must admit only the web-admin component pods"
+grep -A20 "name: lance-ns-nats-monitor" "$OUT" | grep -q "app.kubernetes.io/component: web-lakehouse" \
+  || fail "the nats-monitor rule must admit only the web-lakehouse component pods"
 grep -A20 "name: lance-ns-nats-monitor" "$OUT" | grep -q "port: 8222" \
   || fail "the nats-monitor rule must target the 8222 monitor port"
 
@@ -58,7 +58,7 @@ awk '/name: dapr-sentry$/{n=1} n&&/replicas:/{print; exit}' "$OUT" | grep -q "re
 # so the missing zone PDBs sailed through). NAMED asserts on the PDB documents themselves, not a count.
 pdb=$(grep -c "kind: PodDisruptionBudget" "$OUT" || true)
 pdb_names=$(awk '/^kind: PodDisruptionBudget$/{f=1} f&&/^  name: /{print $2; f=0}' "$OUT")
-for p in catalog lineage gateway openfga web-home web-data web-lineage web-models web-admin; do
+for p in catalog lineage gateway openfga web-home web-lakehouse web-media web-annotator; do
   grep -qx "lance-ns-$p" <<<"$pdb_names" \
     || fail "prod is missing the lance-ns-$p PodDisruptionBudget (got: $(tr '\n' ' ' <<<"$pdb_names"))"
 done

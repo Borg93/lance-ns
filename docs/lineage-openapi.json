@@ -207,7 +207,7 @@
       },
       "Dataset": {
         "additionalProperties": true,
-        "description": "An OpenLineage dataset (a Lance table / source); ``name`` is the catalog id.\n\n``facets`` carries the standard OpenLineage dataset facets; we read several:\n``version`` (which Lance version a run produced), ``dataSource`` (where the table\nphysically lives \u2014 the S3-compatible location), and ``tags`` (governance labels).",
+        "description": "An OpenLineage dataset (a Lance table / source); ``name`` is the catalog id.\n\n``facets`` carries the standard OpenLineage dataset facets; we read several:\n``version`` (which Lance version a run produced), ``dataSource`` (where the table\nphysically lives \u2014 the S3-compatible location), and ``tags`` (governance labels).\n\nThe spec splits dataset metadata across THREE slots, by the facet's base type: plain\n``DatasetFacet``s ride ``facets``, ``InputDatasetFacet``s ride ``inputFacets`` on an input, and\n``OutputDatasetFacet``s ride ``outputFacets`` on an output. Two facets we consume are not plain\n``DatasetFacet``s \u2014 ``OutputStatisticsOutputDatasetFacet`` is an output facet and\n``DataQualityAssertionsDatasetFacet`` is an input facet \u2014 so the official ``openlineage-python``\nclient (and therefore Spark/Airflow/dbt/Marquez producers, and our own ``lineage.seed``) serialises\nthem into the typed slots, NOT into ``facets``. Reading only ``facets`` silently dropped them from\nevery such producer; :meth:`facet` looks in all three.",
         "properties": {
           "facets": {
             "additionalProperties": true,

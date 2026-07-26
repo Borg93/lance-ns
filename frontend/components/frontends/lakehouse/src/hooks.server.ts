@@ -8,5 +8,5 @@ import { makeZoneServerErrorHandler } from '@repo/api/observability';
 export const { handle, handleFetch } = makeZoneHooks(env, { gateway: true });
 
 // Every unhandled SSR/endpoint error is stamped with THIS zone, so an alert names the zone that can fix
-// it instead of "the page" — seven zones share one origin, and nothing else can tell them apart.
-export const handleError = makeZoneServerErrorHandler('data');
+// it instead of "the page" — four zones share one origin, and nothing else can tell them apart.
+export const handleError = makeZoneServerErrorHandler('lakehouse');

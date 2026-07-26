@@ -1,7 +1,7 @@
 /**
  * The local composition edge: one origin, all zones — the dev-time stand-in for the cluster Ingress.
  *
- * Without it, `turbo run dev` gives you seven separate origins on seven ports, and every cross-zone
+ * Without it, `turbo run dev` gives you four separate origins on four ports, and every cross-zone
  * behaviour the estate depends on is unreproducible locally: the sealed session cookie is per-origin so
  * a login does not carry, `data-sveltekit-reload` hard navigations go to the wrong host, and the shared
  * `mode-watcher` theme key is scoped to whichever port you happened to be on. Those are exactly the

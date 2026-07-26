@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { ME_ADMIN, ME_MEMBER, mockMe, signIn } from './session';
+import { ME_ADMIN, ME_MEMBER, mockMe, signIn, TOKEN } from './session';
 
 /** Open a navbar panel and hand back its viewport.
  *
@@ -20,10 +20,15 @@ const openPanel = async (page: Page, name: string) => {
 	return panel;
 };
 
-// The admin zone's layout-level estate-admin door + the navbar IA it feeds. `/v1/me` is mocked at
-// the browser boundary (the layout fetches it through this zone's /capi/v1/me pass-through):
-// a bob-shaped identity (verified, NOT estate_admin) must see ForbiddenPage on EVERY admin route
-// and a navbar that never exposes an admin surface; an alice-shaped one gets them.
+// The admin area's estate-admin door — now TWO doors, and this pins both.
+//
+//  1. admin/+layout.server.ts throws 403 before a single admin component is rendered or sent. It reads
+//     /v1/me from the catalog with the session bearer, so it is driven here by WHICH TOKEN signIn mints
+//     (page.route cannot reach a server-side fetch — that is the point of it being server-side).
+//  2. the root +layout.svelte still refuses to render admin content client-side, driven by mockMe.
+//
+// A spec sets both, and they agree; a real non-admin would fail door 1 and never reach door 2. The
+// navbar IA is the third layer: an identity the doors refuse is never even shown the routes.
 //
 // Under the three-trigger IA (8a0fbbc) this zone has no top-level entry: its surfaces are the
 // Governance and Operations COLUMNS of the Lakehouse panel, appended only for an estate admin. So
@@ -31,13 +36,14 @@ const openPanel = async (page: Page, name: string) => {
 // columns do not render, and no /admin row is reachable" — and it is asserted with the panel OPEN,
 // which is the only place the difference is now observable.
 
-test.beforeEach(async ({ context }) => {
-	await signIn(context); // auth-ON server: the login-first gate redirects signed-out page loads
-});
+// No shared beforeEach sign-in: each test signs in AS the identity it is about, because the token is
+// what the server-side door reads.
 
 test('a non-estate-admin sees ForbiddenPage on every admin route + no admin nav entries', async ({
+	context,
 	page,
 }) => {
+	await signIn(context, { token: TOKEN.member });
 	await mockMe(page, ME_MEMBER);
 	for (const path of [
 		'/lakehouse/admin/tenants',
@@ -69,8 +75,10 @@ test('a non-estate-admin sees ForbiddenPage on every admin route + no admin nav 
 });
 
 test("an estate admin passes the door and gets Lakehouse's governance columns", async ({
+	context,
 	page,
 }) => {
+	await signIn(context, { token: TOKEN.admin });
 	await mockMe(page, ME_ADMIN);
 	await page.route('**/api/projects*', (route) =>
 		route.fulfill({ status: 200, contentType: 'application/json', body: '[]' }),
@@ -108,10 +116,30 @@ test("an estate admin passes the door and gets Lakehouse's governance columns", 
 	).toBeVisible();
 });
 
-test('an unresolvable identity (catalog outage) fails CLOSED, never open', async ({ page }) => {
+test('an unresolvable identity (catalog outage) fails CLOSED, never open', async ({
+	context,
+	page,
+}) => {
+	// Both doors see the outage: the server's /v1/me 502s (TOKEN.down) and the browser's does too.
+	// fetchMe returns null for ANY failure, and null is a denial — never a default-open.
+	await signIn(context, { token: TOKEN.down });
 	await page.route('**/capi/v1/me', (route) =>
 		route.fulfill({ status: 502, contentType: 'application/json', body: '{"detail":"down"}' }),
 	);
 	await page.goto('/lakehouse/admin/tenants');
 	await expect(page.getByText('Admin is estate-admin only')).toBeVisible();
+});
+
+test('the SERVER door refuses even when the browser claims to be an admin', async ({
+	context,
+	page,
+}) => {
+	// The reason door 1 exists. A member's session with a page.route that answers estate_admin=true —
+	// i.e. a browser lying about its own identity — must still get 403, because the door that decides
+	// never asked the browser.
+	await signIn(context, { token: TOKEN.member });
+	await mockMe(page, ME_ADMIN);
+	const res = await page.goto('/lakehouse/admin/tenants');
+	expect(res?.status()).toBe(403);
+	await expect(page.getByRole('heading', { name: 'Tenants' })).toHaveCount(0);
 });

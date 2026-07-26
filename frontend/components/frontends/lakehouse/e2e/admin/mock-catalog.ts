@@ -1,8 +1,14 @@
-// A tiny in-memory stand-in for the catalog's `GET /v1/events`, so the admin control-events feed — a
-// `query.live` remote function that polls CATALOG_API SERVER-SIDE (unreachable by page.route) — can be
-// driven hermetically. Runs as a second Playwright `webServer`; the dev server's CATALOG_API points here.
-// Test-control endpoints (`__mock/*`) let a spec seed events, simulate a governance mutation, toggle 403.
+// A tiny in-memory stand-in for the two catalog endpoints the admin area reaches SERVER-SIDE, where
+// page.route cannot reach: `GET /v1/events` (the control-events feed's query.live poll) and `GET /v1/me`
+// (the estate-admin door in admin/+layout.server.ts). Runs as a second Playwright `webServer`; the dev
+// server's CATALOG_API points here. Test-control endpoints (`__mock/*`) seed events, simulate a
+// governance mutation, toggle 403.
+//
+// /v1/me is keyed by the BEARER, never by mutable server state: the suite is fullyParallel, so a spec
+// that flipped a shared "current identity" would race every other spec's admin door. session.ts mints
+// the token per browser CONTEXT, so each test carries its own identity and nothing is shared.
 
+import { ME_ADMIN, ME_MEMBER, TOKEN } from './session';
 import { MOCK_CATALOG_PORT } from '../ports';
 
 type ControlEvent = {
@@ -18,6 +24,12 @@ type ControlEvent = {
 const events: ControlEvent[] = [];
 let mode: 'ok' | 'forbidden' = 'ok';
 
+/** The identity behind each e2e bearer. Unknown/absent token → 401, exactly like the real catalog. */
+const IDENTITIES: Record<string, unknown> = {
+	[TOKEN.admin]: ME_ADMIN,
+	[TOKEN.member]: ME_MEMBER,
+};
+
 const json = (data: unknown, status = 200): Response =>
 	new Response(JSON.stringify(data), { status, headers: { 'content-type': 'application/json' } });
 
@@ -25,6 +37,15 @@ Bun.serve({
 	port: MOCK_CATALOG_PORT,
 	async fetch(req: Request): Promise<Response> {
 		const url = new URL(req.url);
+
+		// The estate-admin door's identity lookup. `TOKEN.down` models a catalog outage, which must
+		// fail CLOSED at the door rather than default open.
+		if (url.pathname === '/v1/me') {
+			const bearer = (req.headers.get('authorization') ?? '').replace(/^Bearer /, '');
+			if (bearer === TOKEN.down) return json({ detail: 'catalog unavailable' }, 502);
+			const me = IDENTITIES[bearer];
+			return me ? json(me) : json({ detail: 'not authenticated' }, 401);
+		}
 
 		// The endpoint the query.live generator polls. since=N is a cursor == "events already seen"; we hand
 		// back everything after it + the new head (== count), matching ControlEventBuffer.since semantics.

@@ -6,11 +6,22 @@ import { AUTH_ON } from '../ports';
 // zone, so absent in this isolated server. The panel specs therefore run SIGNED-IN: the server has no
 // SESSION_SECRET, so the BFF accepts the documented dev-grade UNSEALED base64url session cookie, which we
 // mint here. The signed-out redirect contract itself is pinned by auth.spec.ts.
+/** The bearer each identity signs in with. The estate-admin door now runs SERVER-SIDE
+ *  (admin/+layout.server.ts → GET /v1/me on the mock catalog), which page.route cannot intercept — so
+ *  the identity has to ride in something the server sees. It rides in the token, which is what a bearer
+ *  is for, and that keeps it per browser CONTEXT: the suite is fullyParallel and a shared "current
+ *  identity" on the mock would race every spec's door. */
+export const TOKEN = {
+	admin: 'e2e-token:admin',
+	member: 'e2e-token:member',
+	/** Resolves to a 502 — the catalog-outage case, which must fail CLOSED. */
+	down: 'e2e-token:down',
+} as const;
+
 const SESSION = {
 	sub: 'user:e2e',
 	name: 'E2E Admin',
 	email: 'e2e@example.com',
-	accessToken: 'e2e-token',
 	expiresAt: 0, // no expiry claim → treated live
 };
 
@@ -44,8 +55,18 @@ export async function mockMe(page: Page, me: unknown = ME_ADMIN) {
 	);
 }
 
-export async function signIn(context: BrowserContext, origin = AUTH_ON) {
-	const value = Buffer.from(JSON.stringify(SESSION), 'utf8')
+/**
+ * Sign the e2e browser context in AS a given identity.
+ *
+ * `token` picks who the SERVER sees at the estate-admin door; `mockMe` picks who the BROWSER sees in
+ * the navbar. A spec testing the door must set both, and they must agree — the whole point of the
+ * server door is that the browser cannot talk it out of its answer.
+ */
+export async function signIn(
+	context: BrowserContext,
+	{ token = TOKEN.admin, origin = AUTH_ON }: { token?: string; origin?: string } = {},
+) {
+	const value = Buffer.from(JSON.stringify({ ...SESSION, accessToken: token }), 'utf8')
 		.toString('base64')
 		.replace(/\+/g, '-')
 		.replace(/\//g, '_')

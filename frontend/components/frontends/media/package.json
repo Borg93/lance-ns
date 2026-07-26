@@ -21,7 +21,6 @@
 	"dependencies": {
 		"@lucide/svelte": "^1.26.0",
 		"@repo/api": "workspace:*",
-		"@repo/engine": "workspace:*",
 		"@repo/labeling": "workspace:*",
 		"@repo/media-api": "workspace:*",
 		"@repo/ui": "workspace:*",

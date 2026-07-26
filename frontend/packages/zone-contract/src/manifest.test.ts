@@ -214,6 +214,32 @@ describe('the budget gate is ordered after the builds it weighs', () => {
 	});
 });
 
+describe('the zone image can actually install the workspace', () => {
+	// `bun install --frozen-lockfile` inside .docker/frontend.dockerfile fails with "Workspace not
+	// found" if a member of `workspaces` was never COPYed in — and nothing else catches it, because no
+	// CI leg builds the images. It already happened: `eslint-rules` was a workspace member the
+	// dockerfile never copied, so every zone image build had been broken since it was added, and it was
+	// only fixed as a side effect of deleting ESLint.
+	const dockerfile = readFileSync(resolve(REPO_ROOT, '.docker/frontend.dockerfile'), 'utf8');
+	const copied = [...dockerfile.matchAll(/^COPY\s+(.+)$/gm)].flatMap((m) =>
+		m[1]!.split(/\s+/).filter((t) => t.startsWith('frontend/')),
+	);
+	const { workspaces = [] } = JSON.parse(
+		readFileSync(resolve(FRONTEND_ROOT, 'package.json'), 'utf8'),
+	) as { workspaces?: string[] };
+
+	it('finds the COPY lines to check', () => {
+		expect(copied.length).toBeGreaterThan(2);
+		expect(workspaces.length).toBeGreaterThan(0);
+	});
+
+	it.each(workspaces)('the builder copies the %s workspace', (glob) => {
+		// `packages/*` is covered by `COPY frontend/packages`, `eslint-rules` would need its own line.
+		const root = `frontend/${glob.replace(/\/\*+$/, '')}`;
+		expect(copied, `.docker/frontend.dockerfile never COPYs ${root}`).toContain(root);
+	});
+});
+
 describe('nothing outside the frontend still points at a moved path', () => {
 	// The renames kept breaking things OUTSIDE the source tree: .docker/frontend.dockerfile pre-built
 	// `packages/rask-ui`, chart/templates named `@rask/api`, and scripts/verify_cross_zone_oidc.*

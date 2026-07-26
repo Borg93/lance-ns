@@ -4,11 +4,11 @@
 # workspace lives under frontend/. Mirrors rask/.docker/frontend.dockerfile.
 #
 # Parametrized over the zone via --build-arg APP=<dir under frontend/components/frontends>:
-#   docker build -f .docker/frontend.dockerfile --build-arg APP=data \
+#   docker build -f .docker/frontend.dockerfile --build-arg APP=lakehouse \
 #     --build-arg BUILD_DATE=$(date -u +%FT%TZ) --build-arg VCS_REF=$(git rev-parse HEAD) \
-#     --build-arg VERSION=$(git describe --always) -t lance-data:dev .
-# APP=home builds the catch-all (serves "/"); the others build the domain zones
-# (data/lineage/models/admin), each pinned to its base path /<zone> in svelte.config.js.
+#     --build-arg VERSION=$(git describe --always) -t lance-lakehouse:dev .
+# APP=home builds the catch-all (serves "/"); lakehouse, media and annotator are the domain zones,
+# each pinned to its base path /<zone> in svelte.config.js.
 #
 # Two bun-1.3 + svelte-adapter-bun gotchas this encodes (same as the old web.dockerfile):
 #  1. the adapter externalizes @sveltejs/kit (+ the svelte runtime) → the runtime ships node_modules
@@ -26,9 +26,12 @@ ARG APP=home
 WORKDIR /src
 
 # Every JS workspace member must be present or `bun install --frozen-lockfile` errors with "Workspace
-# not found". Copy the whole workspace (apps + packages + all zones) so a new member can't silently break
-# this build; .dockerignore strips node_modules/.svelte-kit/build. patchedDependencies (svelte-adapter-bun)
-# are resolved relative to the workspace root, so patches/ must be present for the frozen install.
+# not found" — and nothing else in the repo catches that, because no CI leg builds these images. It has
+# already happened once: `eslint-rules` was a workspace member that these COPY lines never included, so
+# every zone image build failed at the install step until that member was deleted for other reasons.
+# @repo/zone-contract now asserts each workspace glob is covered here. .dockerignore strips
+# node_modules/.svelte-kit/build. patchedDependencies (svelte-adapter-bun) are resolved relative to the
+# workspace root, so patches/ must be present for the frozen install.
 COPY frontend/package.json frontend/bun.lock frontend/turbo.json ./
 COPY frontend/patches patches
 COPY frontend/packages packages

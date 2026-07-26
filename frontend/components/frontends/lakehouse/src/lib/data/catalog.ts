@@ -212,6 +212,43 @@ export const restoreTableVersion = (table: string, version: number) =>
 		body: JSON.stringify({ version }),
 	});
 
+// #113 the commit log — `GET /v1/table/{id}/history?limit=N`, read out of the FORMAT (Lance's transaction
+// log joined to `versions()`). The row shape is field-driven, not fixed: `version` / `timestamp` /
+// `operation` always, then whichever of the transaction's own detail fields that operation carries
+// (`dataplane._TXN_DETAIL_FIELDS`), list-valued ones collapsed to a count. Measured against the real dir
+// backend: an `Overwrite` has NO `predicate` key at all (absent, not null), so this is a LOOSE object and
+// the renderer works off the keys present — a per-operation switch would mislabel the operations Lance
+// adds next. `additionalProperties: true` is all the generated types say, hence a hand-written schema.
+const HistoryRowSchema = v.looseObject({
+	version: v.number(),
+	// Naive, offset-less, in the catalog PROCESS's local zone (measured: `tzinfo: None`). Never hand it to
+	// `new Date()` — the browser would reinterpret it as local time. The `when` column uses the manifest's
+	// `timestamp_millis` instead; this string is only ever shown verbatim.
+	timestamp: v.optional(v.nullable(v.string())),
+	// Lance's own vocabulary (`Overwrite`/`Append`/`Delete`/`Update`/`Merge`/`Rewrite`/`CreateIndex`/
+	// `Restore`), NOT the catalog's (`create_table`/`insert`). `null` when the transaction file was
+	// unreadable — the version still belongs in the log.
+	operation: v.optional(v.nullable(v.string())),
+	schema_set: v.optional(v.boolean()),
+});
+const TableHistorySchema = v.looseObject({
+	table: v.optional(v.string()),
+	versions: v.array(HistoryRowSchema),
+});
+export type HistoryRow = v.InferOutput<typeof HistoryRowSchema>;
+export type TableHistory = v.InferOutput<typeof TableHistorySchema>;
+
+/** #113 the table's commit log, newest first. Reader-gated at the catalog (`can_get_metadata`); a GET, so
+ * it rides the existing `capi/v1/table/[id]/[...rest]` proxy with no route of its own. `limit` bounds the
+ * transaction reads, so it is a real page size, not a client-side slice. */
+export const fetchTableHistory = async (
+	table: string,
+	limit: number,
+): Promise<ApiResult<TableHistory>> => {
+	const res = await requestJSON<unknown>(`v1/table/${enc(table)}/history?limit=${limit}`);
+	return res.ok ? { ok: true, data: parse(TableHistorySchema, res.data) } : res;
+};
+
 /** #64 data-plane row insert — append Arrow-IPC rows (built in the browser via apache-arrow). Writer-gated
  * (can_write_data) at the catalog, session-only BFF. `mode=append` never rewrites existing versions. */
 export const insertRows = (table: string, arrow: Uint8Array) =>

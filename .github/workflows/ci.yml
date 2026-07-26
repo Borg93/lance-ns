@@ -4,6 +4,17 @@ on:
   push:
   pull_request:
 
+# Three pushes inside five minutes each start a full ~29-runner-minute workflow, so two of them were
+# already superseded before they finished (measured: runs at 13:43:33, 13:44:35 and 13:48:47 on
+# 2026-07-26 all overlapped). Superseded branch and PR runs are wasted work — cancel them.
+#
+# main is deliberately NOT cancelled. Per-commit green/red on main is the audit trail the whole
+# "evidence, not assertion" rule leans on; a cancelled run leaves a commit with no verdict. Runner
+# minutes are free on a public repo, the signal is not.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -109,6 +120,162 @@ jobs:
           name: playwright-report
           path: frontend/components/frontends/*/test-results/
           retention-days: 7
+
+  # The four micro-frontend zone images. Until now `.docker/frontend.dockerfile` was hand-run only, out
+  # of `make frontend-images`, so a break in it stayed invisible until somebody deployed by hand — and
+  # that has already happened once (the `eslint-rules` workspace member the COPY lines never included
+  # broke every zone build for as long as it existed). @repo/zone-contract regex-scrapes the COPY lines
+  # against `workspaces`, which catches exactly that one shape and nothing else: not a production `vite
+  # build` that fails where dev-mode svelte-check passes, not a broken runtime node_modules layout, not
+  # a yanked base-image digest. Only a real build catches those.
+  #
+  # Cost, measured on a 4 vCPU / 16 GB buildx builder (a public-repo ubuntu-latest runner) against a
+  # clean `git archive` checkout, all four zones sequential: 4m53s, of which ~29s per zone is a tarball
+  # export that `docker build` on the runner's own builder does not pay. The critical path of this
+  # workflow is `frontend` at 12m16s (8m11s of it the serial Playwright fan-out), so this job finishes
+  # inside the shadow of a job that was already there and adds ZERO wall clock.
+  #
+  # Every push, not just main: catching a broken dockerfile after it lands on main is the failure mode,
+  # not the fix. No paths filter and no `turbo --affected` gating either — `packages/ui` is a dependency
+  # of all four zones, so the common frontend change affects all four anyway, and a hand-written paths
+  # list would be a sixth hand-maintained statement about the monorepo's shape. This repo has been bitten
+  # three times by exactly that (Makefile ZONES listing seven dead zones, the dockerfile COPY lines,
+  # microfrontends.json keys vs package names) — @repo/zone-contract exists because of it.
+  #
+  # Same fork gate as the other jobs that build images from the checkout.
+  zone-images:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+    steps:
+      - uses: actions/checkout@v4
+
+      # The zone list is DERIVED, not restated here. A directory under components/frontends holding a
+      # package.json is what makes a zone a bun workspace member and a turbo package — the same rule
+      # @repo/zone-contract's zoneDirs() resolves by, and the reason it does not use bare isDirectory()
+      # (a deleted zone leaves gitignored build output behind). Two things follow: a newly added zone is
+      # covered with no edit here, and the smoke step FAILS if the Makefile's ZONES list has gone stale
+      # and never built an image for a zone that exists. That precise drift is the most recent thing to
+      # break `make images` in this repo — ZONES still listed the seven pre-merge zones, the loop died
+      # on the first one that no longer existed and never reached lakehouse.
+      #
+      # `if` rather than `[ … ] && printf`: GitHub runs `run:` blocks under `bash -e`, and an AND-list
+      # whose test fails on the LAST loop iteration makes the whole command substitution non-zero, which
+      # kills the assignment and the step with no diagnostic at all. Today that is invisible because
+      # `media` sorts last and has a package.json — a leftover husk directory sorting after it (exactly
+      # what a deleted zone leaves behind) would have silently broken this step. An `if` with no else
+      # always returns 0.
+      - name: Resolve the zone list
+        run: |
+          zones=$(cd frontend/components/frontends && for d in */; do
+                    if [ -f "${d}package.json" ]; then printf '%s ' "${d%/}"; fi
+                  done)
+          echo "ZONES=${zones% }" >> "$GITHUB_ENV"
+          echo "zones: ${zones% }"
+
+      # `make frontend-images` == this step, byte-for-byte — the same contract every other gate here
+      # holds (`dagger call ci` == `make ci`). It loops the four zones through the one parametrized
+      # dockerfile with the OCI provenance build-args, and exits on the first zone that fails.
+      #
+      # Deliberately NO cross-run layer cache (no `cache-from/to: type=gha`). The claim this gate makes
+      # is "the dockerfile still builds"; a cache hit means it replayed instead of building. Cold also
+      # exercises the pinned oven/bun digest and real `bun install --frozen-lockfile` resolution, both of
+      # which a warm cache hides. And `mode=max` on four 1.3 GB images would spend ~5 GB of a 10 GB
+      # repo-wide cache budget, evicting the setup-uv and setup-bun caches three other jobs depend on —
+      # slowing the rest of CI down to speed this up. The one cache that does matter is free: the
+      # `bun install` layer does not reference ${APP}, so zones 2..4 reuse it (61s for the first zone,
+      # 45s for each one after).
+      - name: Build all four zone images
+        run: make frontend-images
+
+      # Image size is not gated, just recorded — the annotator carries a deferred OpenCV bundle and the
+      # trend is worth having in the log. Named explicitly rather than grepped, so an unrelated
+      # `lance-*` image in the daemon cannot pad the report.
+      #
+      # `docker image ls`, NOT `docker image inspect --format '{{.Size}}'`. The two disagree by 4.6x
+      # depending on which image store the daemon runs: under the containerd store (`docker info` ->
+      # io.containerd.snapshotter.v1) inspect reports COMPRESSED content size, while `ls` reports the
+      # unpacked on-disk size; under the classic store both report unpacked. Measured on lance-home:dev
+      # here: inspect 283647617 bytes vs ls 1.32GB, same image id. GitHub runners default to the classic
+      # store, so inspect would have logged ~1.3GB in CI and 283MB on a developer box with containerd
+      # enabled, and the "trend" this step exists for would have been a comparison between two different
+      # quantities. `ls` reports the same number a human gets from `docker images`.
+      - name: Record image sizes
+        run: |
+          for z in $ZONES; do
+            docker image ls "lance-$z:dev" --format '{{.Repository}}:{{.Tag}} {{.Size}} (on disk)' || true
+          done
+
+      # Building is NOT enough, and this is the load-bearing half of the job. Proven by mutation:
+      # deleting the runtime `COPY --from=builder /src/node_modules` line still builds with exit 0, and
+      # the image it produces dies on start with
+      #   error: Cannot find module '@sveltejs/kit/internal' from '/app/.../build/server/index.js'
+      # which is gotcha 1 from the dockerfile's own header (adapter-bun externalizes @sveltejs/kit, so
+      # the runtime must ship node_modules at the depth the isolated-linker symlinks expect). A
+      # build-only gate is green on that image. So run each zone and make it serve a page.
+      #
+      # No backend is needed — all four zones SSR their landing page against nothing. The base path is
+      # read out of the zone's own svelte.config.js instead of being hardcoded, so this does not become
+      # yet another place that has to agree about zone layout: home's base is empty, the domain zones
+      # pin /<zone>. Redirects are followed because a zone root may hand off to its landing area.
+      #
+      # The pattern is anchored on `paths: {` to match @repo/zone-contract's zoneBase() resolver
+      # (manifest.ts:72, /paths:\s*\{[^}]*base:\s*['"]([^'"]*)['"]/) rather than being a second, looser
+      # opinion about the same file. It has to be anchored: an unanchored `base:` match picks up prose,
+      # and these configs are full of it — media's own header says "Zone base: this zone owns /media".
+      # Verified against a config carrying a `// base: '/DECOY'` comment above the real one — unanchored
+      # returns /DECOY, anchored returns /media. If a config is ever reformatted so `paths: { … base }`
+      # spans lines, sed (line-based, unlike the JS regex) resolves '' and the zone gets probed at '/',
+      # which is a 404 for a domain zone — a loud failure, not a silent pass.
+      - name: Smoke-run each zone image
+        run: |
+          set -uo pipefail
+          # GitHub runs `run:` blocks under `bash -e`, so errexit is ON unless turned off here. It must
+          # be off: the readiness loop below depends on curl exiting non-zero (7, connection refused)
+          # while the Bun server is still starting, and under errexit the first such exit would abort
+          # the step and report a build failure instead of a smoke result. `fail` is accumulated by hand
+          # and returned at the end precisely so every zone gets reported, not just the first bad one.
+          set +e
+          fail=0
+          for z in $ZONES; do
+            # The missing-image check comes FIRST, before the config is read. A zone the tree has but
+            # the Makefile never built is the headline case this step exists to report, and reading its
+            # svelte.config.js first would print a `sed: can't read …` above the diagnosis whenever the
+            # stale-ZONES zone is also a half-added one — noise on top of the line that matters.
+            if ! docker image inspect "lance-$z:dev" >/dev/null 2>&1; then
+              echo "FAIL  $z  no image lance-$z:dev was built — is the Makefile ZONES list stale?"
+              fail=1
+              continue
+            fi
+            cfg="frontend/components/frontends/$z/svelte.config.js"
+            base=$(sed -n "s/.*paths:[[:space:]]*{[^}]*base:[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" "$cfg" | head -1)
+            docker rm -f "smoke-$z" >/dev/null 2>&1 || true
+            docker run -d --name "smoke-$z" -p 3000:3000 "lance-$z:dev" >/dev/null
+            # No `|| echo 000` fallback: curl already writes 000 to %{http_code} when it cannot connect
+            # (verified: exit 7, stdout "000"), so a fallback appends a SECOND code and $code becomes
+            # "000000" — or "301000" if curl exits non-zero on a request that did get a response, which
+            # would then never equal 200 no matter what the server said. `set -e` is off precisely so
+            # this loop can absorb curl's non-zero exits while the server is still warming up.
+            code=000
+            for _ in $(seq 1 30); do
+              code=$(curl -sL --max-redirs 5 -o "/tmp/smoke-$z.html" -w '%{http_code}' \
+                     --max-time 10 "http://127.0.0.1:3000${base}/")
+              [ "$code" = 200 ] && break
+              sleep 2
+            done
+            state=$(docker inspect -f '{{.State.Status}}' "smoke-$z")
+            title=$(grep -o '<title>[^<]*</title>' "/tmp/smoke-$z.html" | head -1)
+            if [ "$code" = 200 ] && [ "$state" = running ] &&
+               grep -q 'data-sveltekit' "/tmp/smoke-$z.html"; then
+              echo "ok    $z  base='$base'  200  $title"
+            else
+              echo "FAIL  $z  base='$base'  http=$code  state=$state"
+              docker logs "smoke-$z" 2>&1 | tail -30
+              fail=1
+            fi
+            docker rm -f "smoke-$z" >/dev/null 2>&1 || true
+          done
+          exit $fail
 
   # AGE-backed lineage e2e (§7): the graph repository's REAL Cypher runs against a real Apache AGE
   # Postgres — the unit fakes can't catch AGE dialect behavior (the int-vs-string $ver at-version

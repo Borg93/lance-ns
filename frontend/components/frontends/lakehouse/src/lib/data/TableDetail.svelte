@@ -14,6 +14,7 @@
 	import { page } from '$app/state';
 	import AccessGraph from './AccessGraph.svelte';
 	import { fetchProducers } from '$lib/api';
+	import type { ProducerInfo } from '@repo/api/lineage';
 	import { bffPath } from '$lib/http';
 	import { checkAccess, fetchAccess, grantAccess, revokeAccess } from './namespace';
 	import { deriveQuality, type QualityBadge } from '$lib/quality';
@@ -22,18 +23,13 @@
 		addColumn,
 		backfillColumn,
 		compactTable,
-		createTableBranch,
 		createTableIndex,
-		createTableTag,
 		deleteRows,
-		deleteTableBranch,
 		deleteTablePolicy,
-		deleteTableTag,
 		deregisterTable,
 		dropColumn,
 		dropTable,
 		dropTableIndex,
-		moveTableTag,
 		renameColumn,
 		renameTable,
 		updateRows,
@@ -48,12 +44,13 @@
 		RETYPE_TYPES,
 		type TableStats,
 		type TableDetail,
-		restoreTableVersion,
 		retypeColumn,
 		runMaintenance,
 		setTablePolicy,
 	} from './catalog';
 	import DetailTabs from './DetailTabs.svelte';
+	import { fmtBytes, fmtEpoch } from './history';
+	import TableHistory from './TableHistory.svelte';
 	import StageBadge from './StageBadge.svelte';
 	import { stageOfTable } from './stage';
 	import TablePreview from './TablePreview.svelte';
@@ -63,9 +60,24 @@
 
 	// Goal cond 3: the FGA view lives on an Access TAB (overview stays the default); the medallion
 	// stage badge is derived from the table's namespace segment. Goal cond 5 adds the Preview tab.
-	// `?tab=` deep-links a tab (the registry drawer's "access" jump uses it).
-	const TABS = ['overview', 'preview', 'access'];
-	let tab = $state('overview');
+	// #113 adds History — the commit log, which took the version/branch/tag surface off overview.
+	// `?tab=` deep-links a tab (the registry drawer's "access" jump uses it) and the tab bar now WRITES it,
+	// so a tab is linkable, reload-stable and back-button-able.
+	const TABS = ['overview', 'preview', 'history', 'access'];
+	// DERIVED from the URL, not mirrored into it: the tab is a linkable, reload-stable, back-button-able
+	// piece of the address, and deriving it is the only way that cannot race. (Mirroring `tab` into the URL
+	// from an effect left the deep link at the mercy of effect order — on reload the mirror stripped
+	// `?tab=history` before the reader saw it, and the page opened on overview.)
+	const tab = $derived.by(() => {
+		const wanted = page.url.searchParams.get('tab') ?? 'overview';
+		return TABS.includes(wanted) ? wanted : 'overview';
+	});
+	function selectTab(next: string): void {
+		const url = new URL(page.url);
+		if (next === 'overview') url.searchParams.delete('tab');
+		else url.searchParams.set('tab', next);
+		goto(url, { replaceState: true, keepFocus: true, noScroll: true });
+	}
 	const stageInfo = $derived(stageOfTable(table));
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
@@ -89,17 +101,6 @@
 		target: number | null; // #76 target_rows_per_fragment
 		enabled: boolean;
 	}>({ retention_days: null, retain_versions: null, interval: null, target: null, enabled: true });
-
-	// #64 version management — name (tag) a Lance version (writer-gated). Reset on table change below.
-	let tagName = $state('');
-	let tagVersion = $state(''); // the bits-ui Select value is a string; parsed to a number on submit
-	let tagBusy = $state(false);
-	let tagError = $state<string | null>(null);
-
-	// #64 restore-to-version (owner-gated) — two-click confirm, since restore mutates the current table.
-	let restoreConfirm = $state<number | null>(null);
-	let restoreBusy = $state(false);
-	let restoreError = $state<string | null>(null);
 
 	// #64 blob preview — the credential-less read of a blob cell (GET /blobs?column=&row=), session-gated
 	// by the catch-all BFF (reader-tier can_read_data). Only offered for binary/blob-typed columns.
@@ -301,12 +302,16 @@
 	// scope #6 quality gate — the validator's latest dataQualityAssertions verdict for this dataset, from
 	// the lineage service's producing runs (medallion stages record it; a plain catalog table has none).
 	let quality = $state<QualityBadge>(null);
+	// The same runs, kept rather than thrown away: #113's "by whom" column joins them to versions, so the
+	// commit log costs no extra request. `null` = the lineage store did not answer at all.
+	let producerRuns = $state<ProducerInfo[] | null>(null);
 
 	async function loadQuality(): Promise<void> {
 		const current = table;
 		const res = await fetchProducers(current);
 		if (table !== current) return; // latest-wins
 		quality = deriveQuality(res);
+		producerRuns = res?.producers ?? null;
 	}
 
 	const unauthorized = $derived(detail === null && lastStatus === 401);
@@ -332,19 +337,11 @@
 		// Reset every piece of state on a table change — including the edit form, or an editor opened
 		// on A would survive into B and Save would write A's draft to B (audit 2026-07-16).
 		void table;
-		// honour a ?tab= deep link (drawer jump links); anything unknown falls back to overview
-		const wanted = page.url.searchParams.get('tab') ?? 'overview';
-		tab = TABS.includes(wanted) ? wanted : 'overview';
 		detail = null;
 		lastStatus = 0;
 		editingPolicy = false;
 		policyError = null;
 		busy = false;
-		tagName = '';
-		tagVersion = '';
-		tagError = null;
-		restoreConfirm = null;
-		restoreError = null;
 		blobCol = '';
 		blobRow = null;
 		blobSrc = null;
@@ -380,12 +377,6 @@
 		renameTo = '';
 		retyping = null;
 		retypeTo = '';
-		refBusy = false;
-		refError = null;
-		movingTag = null;
-		moveTo = '';
-		newBranch = '';
-		newBranchFrom = '';
 		// #73 index-builder editor — reset too, or a column/type/distance (or error) typed on table A pre-fills
 		// B's Build-index form and runCreateIndex(B) would use A's column. (audit 2026-07-20)
 		ixColumn = '';
@@ -394,6 +385,7 @@
 		ixBusy = false;
 		ixError = null;
 		quality = null;
+		producerRuns = null;
 		load();
 		loadQuality();
 	});
@@ -587,52 +579,6 @@
 		}
 	}
 
-	// #74 ref-plane mutations — tag delete/move (owner can_update_tag) + branch create/delete.
-	let refBusy = $state(false);
-	let refError = $state<string | null>(null);
-	let movingTag = $state<string | null>(null); // the tag currently being moved
-	let moveTo = $state(''); // target version (bits-ui Select string)
-	let newBranch = $state('');
-	let newBranchFrom = $state(''); // optional source version (Select string)
-
-	function refFail(status: number, detail: string): void {
-		if (status === 401) refError = 'Sign in to manage tags & branches.';
-		else if (status === 403) refError = 'Denied: managing refs needs writer/owner access.';
-		else refError = detail;
-	}
-
-	async function refDo(fn: () => Promise<CatalogResult<unknown>>): Promise<void> {
-		if (refBusy) return;
-		refBusy = true;
-		refError = null;
-		try {
-			const res = await fn();
-			if (res.ok) await load();
-			else refFail(res.status, res.detail);
-		} finally {
-			refBusy = false;
-		}
-	}
-
-	const runDeleteTag = (name: string) => refDo(() => deleteTableTag(table, name));
-	const runDeleteBranch = (name: string) => refDo(() => deleteTableBranch(table, name));
-
-	async function runMoveTag(): Promise<void> {
-		if (!movingTag || !moveTo) return;
-		const name = movingTag;
-		await refDo(() => moveTableTag(table, name, Number(moveTo)));
-		movingTag = null;
-		moveTo = '';
-	}
-
-	async function runCreateBranch(): Promise<void> {
-		const name = newBranch.trim();
-		if (!name) return;
-		await refDo(() => createTableBranch(table, name, newBranchFrom ? Number(newBranchFrom) : null));
-		newBranch = '';
-		newBranchFrom = '';
-	}
-
 	// #76 compact-now — merge small fragments (non-destructive), using the policy's target size if set.
 	let compactBusy = $state(false);
 	let compactResult = $state<string | null>(null);
@@ -650,50 +596,6 @@
 			} else gcFail(res.status, res.detail);
 		} finally {
 			compactBusy = false;
-		}
-	}
-
-	async function runTag(): Promise<void> {
-		const name = tagName.trim();
-		if (tagBusy || !name || !tagVersion) return;
-		tagBusy = true;
-		tagError = null;
-		try {
-			const res = await createTableTag(table, name, Number(tagVersion));
-			if (res.ok) {
-				tagName = '';
-				tagVersion = '';
-				await load(); // pull the new tag into the tags row
-			} else if (res.status === 401) {
-				tagError = 'Sign in to tag a version.';
-			} else if (res.status === 403) {
-				tagError = 'Denied: tagging a version needs writer access (can_create_tag).';
-			} else {
-				tagError = res.detail;
-			}
-		} finally {
-			tagBusy = false;
-		}
-	}
-
-	async function runRestore(version: number | undefined): Promise<void> {
-		if (restoreBusy || version == null) return;
-		restoreBusy = true;
-		restoreError = null;
-		try {
-			const res = await restoreTableVersion(table, version);
-			if (res.ok) {
-				restoreConfirm = null;
-				await load(); // restore mints a fresh current version — refresh to show it
-			} else if (res.status === 401) {
-				restoreError = 'Sign in to restore a version.';
-			} else if (res.status === 403) {
-				restoreError = 'Denied: restoring a version needs the owner tier (can_restore).';
-			} else {
-				restoreError = res.detail;
-			}
-		} finally {
-			restoreBusy = false;
 		}
 	}
 
@@ -885,25 +787,6 @@
 			ixBusy = false;
 		}
 	}
-
-	function fmtBytes(n: number | null | undefined): string {
-		if (n == null) return '—';
-		const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
-		let v = n;
-		let u = 0;
-		while (v >= 1024 && u < units.length - 1) {
-			v /= 1024;
-			u += 1;
-		}
-		return `${v.toFixed(v >= 10 || u === 0 ? 0 : 1)} ${units[u]}`;
-	}
-
-	// version manifest timestamps arrive in ms; branch createAt in seconds — normalise to one UTC string.
-	function fmtEpoch(value: number | null | undefined, unit: 'ms' | 's'): string {
-		if (value == null) return '—';
-		const ms = unit === 's' ? value * 1000 : value;
-		return `${new Date(ms).toISOString().replace('T', ' ').slice(0, 16)}Z`;
-	}
 </script>
 
 <div class="page">
@@ -948,10 +831,25 @@
 	{:else if detail === null}
 		<div class="empty"><p>Loading…</p></div>
 	{:else}
-		<!-- Goal cond 3: overview (default) | preview (goal cond 5) | access — each on its own tab. -->
-		<DetailTabs tabs={TABS} bind:active={tab} />
+		<!-- Goal cond 3: overview (default) | preview (goal cond 5) | history (#113) | access. -->
+		<DetailTabs tabs={TABS} active={tab} onselect={selectTab} />
 		{#if tab === 'preview'}
 			<TablePreview {table} />
+		{:else if tab === 'history'}
+			<!-- #113 the commit log. `producers` is the SAME fetch the quality badge already made, so the
+			     author join costs no extra request. Keyed by table so a navigation REMOUNTS it: every
+			     selection, armed confirm and filter belongs to one table and resets by construction. -->
+			{#key table}
+				<TableHistory
+					{table}
+					manifests={versions}
+					{tags}
+					{branches}
+					producers={producerRuns}
+					currentVersion={detail.describe.version ?? null}
+					onchange={load}
+				/>
+			{/key}
 		{:else if tab === 'access'}
 			<section>
 				<h2>Access</h2>
@@ -1323,163 +1221,6 @@
 			</section>
 
 			<section>
-				<h2>Versions, branches & tags</h2>
-				{#if versions.length === 0}
-					<p class="mut">No version history available.</p>
-				{:else}
-					<p class="mut">
-						{versions.length} version{versions.length === 1 ? '' : 's'} — most recent first, one Lance manifest
-						per commit:
-					</p>
-					<table>
-						<thead><tr><th>version</th><th>committed</th><th>manifest</th><th></th></tr></thead>
-						<tbody>
-							{#each versions.slice().reverse().slice(0, 10) as v (v.version)}
-								<tr>
-									<td class="mono">v{v.version}</td>
-									<td class="mono">{fmtEpoch(v.timestamp_millis, 'ms')}</td>
-									<td class="mono">{fmtBytes(v.manifest_size)}</td>
-									<td class="act">
-										{#if restoreConfirm === v.version}
-											<button
-												class="btn tiny danger"
-												disabled={restoreBusy}
-												onclick={() => runRestore(v.version)}
-											>
-												{restoreBusy ? '…' : 'confirm restore'}
-											</button>
-											<button class="btn tiny ghost" onclick={() => (restoreConfirm = null)}> cancel </button>
-										{:else}
-											<button
-												class="btn tiny ghost"
-												onclick={() => {
-	restoreConfirm = v.version ?? null;
-	restoreError = null;
-}}
-											>
-												restore
-											</button>
-										{/if}
-									</td>
-								</tr>
-							{/each}
-						</tbody>
-					</table>
-					{#if versions.length > 10}<p class="mut">…and {versions.length - 10} older.</p>{/if}
-					{#if restoreError}<p class="error">{restoreError}</p>{/if}
-				{/if}
-
-				<div class="refs br">
-					<span class="mut">branches:</span>
-					<span class="chip mono">main</span>
-					{#each branches as [name, b] (name)}
-						<span class="chip branch mono"
-							>{name}<span class="mut"> · {fmtBytes(b.manifestSize)}</span>
-							<button
-								class="chip-x"
-								title="delete branch"
-								aria-label="delete branch {name}"
-								disabled={refBusy}
-								onclick={() => runDeleteBranch(name)}>×</button
-							></span
-						>
-					{/each}
-				</div>
-				<!-- #74 create a branch from a version (owner-gated can_create_branch). -->
-				<form
-					class="row addcol"
-					onsubmit={(e) => {
-	e.preventDefault();
-	runCreateBranch();
-}}
-				>
-					<input
-						class="mono"
-						bind:value={newBranch}
-						placeholder="new branch"
-						aria-label="New branch name"
-					/>
-					<Select
-						bind:value={newBranchFrom}
-						ariaLabel="Branch from version"
-						placeholder="from version (latest)"
-						options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
-					/>
-					<button class="btn" type="submit" disabled={refBusy || !newBranch.trim()}>Create branch</button
-					>
-				</form>
-
-				<div class="refs">
-					{#if tags.length === 0}
-						<span class="mut">No tags — a promotion pins its version with one (e.g. blessed).</span>
-					{:else}
-						{#each tags as [name, t] (name)}
-							{#if movingTag === name}
-								<span class="chip tag mono">
-									{name} →
-									<span class="movesel">
-										<Select
-											bind:value={moveTo}
-											ariaLabel="move {name} to version"
-											placeholder="version"
-											options={versions.map((v) => ({
-	value: String(v.version),
-	label: `v${v.version}`,
-}))}
-										/>
-									</span>
-									<button class="chip-x" disabled={refBusy || !moveTo} onclick={runMoveTag}>save</button>
-									<button class="chip-x" onclick={() => (movingTag = null)}>×</button>
-								</span>
-							{:else}
-								<span class="chip tag mono"
-									>{name} → v{t.version}
-									<button
-										class="chip-x"
-										title="move tag"
-										aria-label="move tag {name}"
-										disabled={refBusy}
-										onclick={() => {
-	movingTag = name;
-	moveTo = '';
-}}>↪</button
-									>
-									<button
-										class="chip-x"
-										title="delete tag"
-										aria-label="delete tag {name}"
-										disabled={refBusy}
-										onclick={() => runDeleteTag(name)}>×</button
-									></span
-								>
-							{/if}
-						{/each}
-					{/if}
-				</div>
-				{#if refError}<p class="error">{refError}</p>{/if}
-
-				{#if versions.length > 0}
-					<div class="refs tagform">
-						<input class="mono" placeholder="tag name (e.g. blessed)" bind:value={tagName} />
-						<Select
-							bind:value={tagVersion}
-							ariaLabel="Version to tag"
-							placeholder="version…"
-							options={versions.map((v) => ({ value: String(v.version), label: `v${v.version}` }))}
-						/>
-						<button
-							class="btn"
-							disabled={tagBusy || !tagName.trim() || !tagVersion}
-							onclick={runTag}
-						>
-							{tagBusy ? '…' : 'Tag version'}
-						</button>
-						{#if tagError}<span class="error">{tagError}</span>{/if}
-					</div>
-				{/if}
-			</section>
-
-			<section>
 				<h2>Maintenance policy</h2>
 				{#if editingPolicy}
 					<div class="policy-edit">
@@ -1817,17 +1558,8 @@
 		opacity: 0.4;
 		cursor: default;
 	}
-	.chip.tag {
-		border-color: color-mix(in srgb, var(--ok) 45%, var(--line));
-	}
 	.chip.off {
 		border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
-	}
-	.chip.branch {
-		border-color: color-mix(in srgb, var(--faint) 60%, var(--line));
-	}
-	.refs.br {
-		margin-top: 10px;
 	}
 	.mut {
 		color: var(--faint);
@@ -1908,14 +1640,6 @@
 	.btn:disabled {
 		opacity: 0.5;
 		cursor: default;
-	}
-	.btn.tiny {
-		font-size: 11px;
-		padding: 1px 7px;
-	}
-	.act {
-		white-space: nowrap;
-		text-align: right;
 	}
 	.blob {
 		display: block;

@@ -176,45 +176,61 @@ test.beforeEach(async ({ page }) => {
 	});
 });
 
-test('renders the manifest-per-commit version table, branches, and tags (#66)', async ({
+/** #113 the version/branch/tag surface lives on the History tab now, not in an overview section. */
+async function openHistory(page: import('@playwright/test').Page): Promise<void> {
+	await page.getByRole('tab', { name: 'history' }).click();
+	await expect(page.locator('section.hist')).toBeVisible();
+}
+
+test('the commit log lists every version newest-first, with branches and tags (#66/#113)', async ({
 	page,
 }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
 	await expect(page.getByRole('heading', { name: 'db1$t' })).toBeVisible();
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
-	// newest-first version rows with the manifest size surfaced
+	// The old surface is GONE from overview — one version table in the zone, not two.
+	await expect(page.getByText('Versions, branches & tags')).toHaveCount(0);
+	await openHistory(page);
+	const section = page.locator('section.hist');
 	await expect(section.locator('tbody tr').first()).toContainText('v3');
-	await expect(section.locator('tbody tr').first()).toContainText('2.0 KiB');
 	await expect(section).toContainText('v1');
-	// branches row + the tag chip
+	// the tag decorates the version it pins, on that row — not in a disconnected chip row far below
+	await expect(section.locator('tbody tr', { hasText: 'v2' }).first()).toContainText('blessed');
+	// branches + tags sections moved with it
 	await expect(section).toContainText('main');
 	await expect(section).toContainText('blessed → v2');
-	// indexes section (#64)
+	// indexes stay on overview (#64)
+	await page.getByRole('tab', { name: 'overview' }).click();
 	const indexes = page.locator('section', { hasText: 'Indexes' });
 	await expect(indexes).toContainText('id_idx');
 	await expect(indexes).toContainText('BTREE');
 });
 
-test('tag-a-version form posts {tag, version} through the BFF (#64)', async ({ page }) => {
+test('tagging is a per-row action on the selected commit (#64/#113)', async ({ page }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
-	await section.getByPlaceholder('tag name (e.g. blessed)').fill('release-1');
-	// the version picker is the @repo/ui Select (bits-ui) — open it, then click the option
-	await section.getByLabel('Version to tag').click();
-	await page.getByRole('option', { name: 'v3', exact: true }).click();
-	await section.getByRole('button', { name: 'Tag version' }).click();
+	await openHistory(page);
+	// "pin THIS version" — select the commit, then name it. No version dropdown to get wrong.
+	await page.getByRole('button', { name: 'details for v3', exact: true }).click();
+	const panel = page.getByTestId('commit-panel');
+	await panel.getByLabel('Tag name').fill('release-1');
+	await panel.getByRole('button', { name: 'Tag v3' }).click();
 	await expect.poll(() => tagPost).toEqual({ tag: 'release-1', version: 3 });
 });
 
-test('restore is a two-click confirm and posts {version} (#64)', async ({ page }) => {
+test('restore needs the version TYPED before it posts {version} (#64/#113)', async ({ page }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
-	const firstRow = section.locator('tbody tr').first(); // v3
-	await firstRow.getByRole('button', { name: 'restore' }).click();
-	// first click only arms the confirm — no write yet
+	await openHistory(page);
+	await page.getByRole('button', { name: 'details for v2', exact: true }).click();
+	const panel = page.getByTestId('commit-panel');
+	// The label says what a restore actually does — it mints a NEW version, it does not rewrite history.
+	await panel.getByRole('button', { name: 'Restore v2 (creates a new version)' }).click();
+	// Arming is not confirming, and the confirm stays disabled until the identifier matches.
 	expect(restorePost).toBeNull();
-	await firstRow.getByRole('button', { name: 'confirm restore' }).click();
-	await expect.poll(() => restorePost).toEqual({ version: 3 });
+	await expect(panel.getByRole('button', { name: 'Confirm restore' })).toBeDisabled();
+	await panel.getByLabel('Type the version to confirm the restore').fill('v9');
+	await expect(panel.getByRole('button', { name: 'Confirm restore' })).toBeDisabled();
+	await panel.getByLabel('Type the version to confirm the restore').fill('v2');
+	await panel.getByRole('button', { name: 'Confirm restore' }).click();
+	await expect.poll(() => restorePost).toEqual({ version: 2 });
 });
 
 test('insert-rows form encodes JSON to an Arrow-IPC body and posts to /insert (#64)', async ({
@@ -370,17 +386,22 @@ test('delete a column property posts a null-valued key (#74 tail)', async ({ pag
 	});
 });
 
-test('delete a tag via the chip × (#74)', async ({ page }) => {
+test('deleting a tag asks first, then posts (#74/#113)', async ({ page }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
+	await openHistory(page);
+	const section = page.locator('section.hist');
 	await section.getByRole('button', { name: 'delete tag blessed' }).click();
+	// The bare × used to delete a ref on ONE click, with no confirmation at all.
+	expect(refPost).toBeNull();
+	await section.getByRole('button', { name: 'confirm delete tag blessed' }).click();
 	await expect.poll(() => refPost?.path).toBe('tags/delete');
 	expect(refPost?.body).toEqual({ tag: 'blessed' });
 });
 
 test('move a tag to another version (#74)', async ({ page }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
+	await openHistory(page);
+	const section = page.locator('section.hist');
 	await section.getByRole('button', { name: 'move tag blessed' }).click();
 	await section.getByLabel('move blessed to version').click();
 	await page.getByRole('option', { name: 'v3', exact: true }).click();
@@ -391,7 +412,8 @@ test('move a tag to another version (#74)', async ({ page }) => {
 
 test('create a branch from a version (#74)', async ({ page }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
+	await openHistory(page);
+	const section = page.locator('section.hist');
 	await section.getByLabel('New branch name').fill('feature');
 	await section.getByLabel('Branch from version').click();
 	await page.getByRole('option', { name: 'v2', exact: true }).click();
@@ -400,10 +422,13 @@ test('create a branch from a version (#74)', async ({ page }) => {
 	expect(refPost?.body).toEqual({ name: 'feature', from_version: 2 });
 });
 
-test('delete a branch via the chip × (#74)', async ({ page }) => {
+test('deleting a branch asks first, then posts (#74/#113)', async ({ page }) => {
 	await page.goto('/lakehouse/data/tables/db1%24t');
-	const section = page.locator('section', { hasText: 'Versions, branches & tags' });
+	await openHistory(page);
+	const section = page.locator('section.hist');
 	await section.getByRole('button', { name: 'delete branch dev' }).click();
+	expect(refPost).toBeNull();
+	await section.getByRole('button', { name: 'confirm delete branch dev' }).click();
 	await expect.poll(() => refPost?.path).toBe('branches/delete');
 	expect(refPost?.body).toEqual({ name: 'dev' });
 });

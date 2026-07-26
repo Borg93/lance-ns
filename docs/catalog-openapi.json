@@ -12624,6 +12624,66 @@
         ]
       }
     },
+    "/v1/table/{id}/history": {
+      "get": {
+        "description": "The table's commit log \u2014 one row per version, newest first: **what** changed and **when**.\n\nAnswers the question a Lakekeeper-style history view asks, from the format itself rather than from a\nside-table we would have to keep in sync. Lance is immutable and append-only at the manifest level, so\n``versions()`` gives the timestamps and the transaction log gives the substance: the operation kind, the\ndelete predicate exactly as the caller wrote it, which fields an update rewrote, fragment deltas, and\nwhether the schema was set at that version.\n\n**It does not answer WHO, deliberately.** Lance's transaction log has no notion of a user and should not\nhave one \u2014 identity is this estate's concern, not the format's. The actor per version already lives in\nthe lineage store, on the ``author`` run facet\n(``GET /datasets/{name}/producers`` \u2192 ``dataset_version`` + ``author`` + ``operation``), which is written\nfrom the verified OIDC subject on every governed write. A who/when/what view joins the two on the version\nnumber. Two sources, each authoritative for its own half \u2014 a third that merged them would just be a copy\nof one of them, free to drift.\n\nReader-tier: ``can_get_metadata`` on the table, the same rung as describe/list-versions. A commit log is\nmetadata about the data, and it leaks real information (predicates name values, field names name\ncolumns), so it is gated exactly like the schema is rather than being treated as public.\n\n``limit`` bounds the per-version transaction reads \u2014 a table with 10k versions must not turn a UI page\ninto 10k object-store round trips.",
+        "operationId": "table_history_v1_table__id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "title": "Response Table History V1 Table  Id  History Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Table History",
+        "tags": [
+          "version"
+        ]
+      }
+    },
     "/v1/table/{id}/index/list": {
       "post": {
         "description": "List the indices defined on a table (paged) \u2014 wraps the native ``list_table_indices`` op.",

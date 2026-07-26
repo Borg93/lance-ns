@@ -1033,6 +1033,87 @@ def update_field_metadata(
     return UpdateFieldMetadataResponse(version=_version(ns, so, table_id), fields=fields)
 
 
+#: Per-operation fields worth surfacing in a commit log, keyed by the pylance operation class name. Read
+#: off the real objects rather than guessed — probed against pylance 8.0.0 with a create → append → delete
+#: → update sequence, which is where the shape of each of these came from:
+#:
+#:   Overwrite  fragments, new_schema           (a create: "the table came into being with these columns")
+#:   Append     fragments                       ("N fragments arrived")
+#:   Delete     predicate, updated_fragments,   ("rows matching `id = 2` went away") — the predicate is the
+#:              deleted_fragment_ids             single most useful field in the whole log
+#:   Update     update_mode, fields_modified,   ("these fields were rewritten, this way")
+#:              updated_fragments, new_fragments
+#:
+#: Anything not listed still gets its operation NAME, so a Merge/Compact/CreateIndex commit appears in the
+#: log as itself rather than vanishing — an unknown operation is a gap in this table, never a gap in the
+#: history.
+_TXN_DETAIL_FIELDS = (
+    "predicate",
+    "update_mode",
+    "fields_modified",
+    "updated_fragments",
+    "new_fragments",
+    "removed_fragment_ids",
+    "deleted_fragment_ids",
+    "fragments",
+)
+
+
+def table_history(
+    ns: LanceNamespace, so: StorageOptions, table_id: list[str], limit: int = 50
+) -> list[dict[str, Any]]:
+    """The table's commit log: one row per version, newest first — what changed, and when.
+
+    Lance is immutable and append-only at the manifest level, so the history is not something we have to
+    keep a side-table for: ``versions()`` supplies the WHEN and the transaction log supplies the WHAT
+    (operation kind, the delete predicate as the caller wrote it, which fields an update rewrote, fragment
+    deltas). This reads both and joins them by version.
+
+    It deliberately does NOT answer WHO. Lance's transaction log has no notion of a user and should not —
+    identity is our concern, not the format's. The actor per version lives in the lineage store's
+    ``author`` run facet (``GET /datasets/{name}/producers`` returns ``dataset_version`` + ``author`` +
+    ``operation``), so a caller that wants who/when/what joins this with that on the version number. Two
+    sources, each authoritative for its own half; inventing a third would mean keeping a copy of one of
+    them in sync.
+
+    ``limit`` bounds the transaction reads, not the versions list: a table with 10k versions should not
+    become 10k object-store round trips because a UI asked for a page.
+    """
+    dataset = open_dataset(ns, so, table_id)
+    versions = sorted(dataset.versions(), key=lambda v: int(v["version"]), reverse=True)[:limit]
+    out: list[dict[str, Any]] = []
+    for entry in versions:
+        version = int(entry["version"])
+        row: dict[str, Any] = {
+            "version": version,
+            "timestamp": entry.get("timestamp").isoformat() if entry.get("timestamp") else None,
+            "operation": None,
+        }
+        try:
+            txn = dataset.read_transaction(version)
+        except Exception as exc:  # noqa: BLE001 — a missing/unreadable txn file must not hide the version
+            # Versions written before transaction files, or a GC'd txn, still belong in the log. Reporting
+            # the version with a null operation is honest; dropping it would make the history lie by omission.
+            log.info("txn_unreadable", extra={"table": table_id, "version": version, "error": str(exc)})
+            out.append(row)
+            continue
+        op = getattr(txn, "operation", None)
+        if op is None:
+            out.append(row)
+            continue
+        row["operation"] = type(op).__name__
+        for field in _TXN_DETAIL_FIELDS:
+            if not hasattr(op, field):
+                continue
+            value = getattr(op, field)
+            # Fragment lists are long and carry no meaning in a log — the COUNT is the signal.
+            row[field] = len(value) if isinstance(value, (list, tuple)) else value
+        # A create carries the whole schema; the useful fact for a log row is that the schema was set here.
+        row["schema_set"] = hasattr(op, "new_schema") and getattr(op, "new_schema", None) is not None
+        out.append(row)
+    return out
+
+
 def list_tags(ns: LanceNamespace, so: StorageOptions, req: ListTableTagsRequest) -> ListTableTagsResponse:
     """List the table's tags as ``{name: TagContents{version, manifest_size, branch}}``."""
     table_id = _table_id(req)

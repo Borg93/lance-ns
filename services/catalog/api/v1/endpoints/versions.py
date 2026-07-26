@@ -24,16 +24,56 @@ from catalog.api.dependencies import (
     FgaClientDep,
     NamespaceDep,
     SettingsDep,
+    StorageOptionsDep,
     assert_no_warehouse_bound_namespace,
 )
 from catalog.api.security import CurrentToken
 from catalog.core.identifiers import parse_identifier, reconcile_body_id
-from catalog.services import native
+from catalog.services import dataplane, native
 
 # The native dir backend implements create / describe / batch-delete versions, but its bindings are typed
 # ``request: dict`` (not the pydantic model) — ``native.call`` marshals the request to a dict for those, so
 # these delegate directly and return real results instead of the marshalling-bug 501 they surfaced before.
 router = APIRouter(prefix="/v1/table", tags=["version"])
+
+
+@router.get("/{id}/history", response_model_exclude_none=True)
+async def table_history(
+    id: str,
+    ns: NamespaceDep,
+    settings: SettingsDep,
+    so: StorageOptionsDep,
+    token: CurrentToken,
+    client: FgaClientDep,
+    limit: int = 50,
+) -> dict[str, object]:
+    """The table's commit log — one row per version, newest first: **what** changed and **when**.
+
+    Answers the question a Lakekeeper-style history view asks, from the format itself rather than from a
+    side-table we would have to keep in sync. Lance is immutable and append-only at the manifest level, so
+    ``versions()`` gives the timestamps and the transaction log gives the substance: the operation kind, the
+    delete predicate exactly as the caller wrote it, which fields an update rewrote, fragment deltas, and
+    whether the schema was set at that version.
+
+    **It does not answer WHO, deliberately.** Lance's transaction log has no notion of a user and should not
+    have one — identity is this estate's concern, not the format's. The actor per version already lives in
+    the lineage store, on the ``author`` run facet
+    (``GET /datasets/{name}/producers`` → ``dataset_version`` + ``author`` + ``operation``), which is written
+    from the verified OIDC subject on every governed write. A who/when/what view joins the two on the version
+    number. Two sources, each authoritative for its own half — a third that merged them would just be a copy
+    of one of them, free to drift.
+
+    Reader-tier: ``can_get_metadata`` on the table, the same rung as describe/list-versions. A commit log is
+    metadata about the data, and it leaks real information (predicates name values, field names name
+    columns), so it is gated exactly like the schema is rather than being treated as public.
+
+    ``limit`` bounds the per-version transaction reads — a table with 10k versions must not turn a UI page
+    into 10k object-store round trips.
+    """
+    segments = parse_identifier(id, settings.delimiter)
+    await fga_deps.require_can_get_metadata(client, settings, token, segments=segments)
+    rows = await run_in_threadpool(dataplane.table_history, ns, so, segments, limit)
+    return {"table": id, "versions": rows}
 
 
 @router.post("/version/batch-create", response_model_exclude_none=True)

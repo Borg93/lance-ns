@@ -143,8 +143,8 @@ test('below the breakpoint the zone links collapse into one overflow menu that s
 	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
 	await expect(panel.locator('[data-slot="navbar-overflow-group"]')).toHaveText([
 		'Lakehouse',
-		'Lineage',
-		'Media',
+		'Search',
+		'Annotate',
 	]);
 	// One row per destination the wide bar reaches — including each zone's own root and the
 	// estate-admin-only governance rows.
@@ -177,9 +177,11 @@ test('above the breakpoint the zone links stay on the bar (no overflow menu) (#1
 	await page.setViewportSize({ width: 1440, height: 900 });
 	await openShell(page, baseURL);
 	await expect(page.getByRole('button', { name: 'Menu' })).toHaveCount(0);
-	for (const label of ['Lakehouse', 'Lineage', 'Media']) {
+	// Panel triggers are buttons; Annotate is a plain link (single-surface zone), so assert by role.
+	for (const label of ['Lakehouse', 'Search']) {
 		await expect(page.getByRole('button', { name: label })).toBeVisible();
 	}
+	await expect(page.getByRole('link', { name: 'Annotate', exact: true })).toBeVisible();
 });
 
 test('the breadcrumb truncates MIDDLE segments and always shows the current page (#105)', async ({

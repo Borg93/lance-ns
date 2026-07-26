@@ -57,9 +57,12 @@ test('a non-estate-admin sees ForbiddenPage on every admin route + no admin nav 
 	}
 	// The navbar hides the admin surfaces from a non-admin (fail-closed IA, not just the door).
 	const nav = page.getByRole('navigation', { name: 'Zones' });
-	// The bar itself is identity-independent — three domain triggers, no Admin entry in any shape…
+	// The bar itself is identity-independent — one trigger per zone, no Admin entry in any shape…
 	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button')).toHaveCount(3);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
 	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
 	await expect(nav.getByRole('link', { name: 'Admin', exact: true })).toHaveCount(0);
 	await expect(nav.getByText('Access')).toHaveCount(0);
@@ -87,7 +90,10 @@ test("an estate admin passes the door and gets Lakehouse's governance columns", 
 	await expect(page.getByRole('heading', { name: 'Tenants' })).toBeVisible();
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	// Still three triggers — an admin earns panel COLUMNS, never an extra top-level entry.
-	await expect(nav.getByRole('button')).toHaveCount(3);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
 	await expect(nav.getByRole('button', { name: 'Admin', exact: true })).toHaveCount(0);
 	// Access is NOT a top-level navbar entry, in either shape…
 	await expect(nav.getByRole('link', { name: 'Access', exact: true })).toHaveCount(0);

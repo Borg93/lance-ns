@@ -135,12 +135,15 @@ test('the Tuples tab lists, filters server-side, grants via the dialog and revok
 	// (and an audit event) per keystroke.
 	const before = tupleQueries.length;
 	await page.getByLabel('User filter').pressSequentially('user:bob');
+	// Scoped to the FORM: the navbar's media trigger is also named Search since the zone rename, so a
+	// page-wide role query matches two buttons and trips strict mode.
+	const searchBtn = page.locator('form').getByRole('button', { name: 'Search', exact: true });
 	// A bare user filter is rejected by the API by design — the form refuses to send one.
-	await expect(page.getByRole('button', { name: 'Search', exact: true })).toBeDisabled();
+	await expect(searchBtn).toBeDisabled();
 	await expect(page.getByText('needs an object_type or object')).toBeVisible();
 	expect(tupleQueries.length).toBe(before);
 	await page.getByLabel('Object type filter').fill('table');
-	await page.getByRole('button', { name: 'Search', exact: true }).click();
+	await searchBtn.click();
 	await expect
 		.poll(() =>
 			tupleQueries.some((q) => q.includes('user=user%3Abob') && q.includes('object_type=table')),

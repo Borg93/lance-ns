@@ -38,20 +38,25 @@ const ADMIN = {
 	projects: [{ project: 'acme', role: 'admin' }],
 };
 
-test('an estate admin gets the three domain triggers + the models sidebar leaves', async ({
-	page,
-}) => {
+test('an estate admin gets the zone triggers + the models sidebar leaves', async ({ page }) => {
 	await page.route('**/capi/v1/me', (route) => json(route, ADMIN));
 	await page.goto('/lakehouse/models');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	// Three domain triggers, even for an estate admin — the extra surfaces are panel columns, not
 	// new entries. Every one carries sub-areas, so every one is a button; with the panels closed
 	// the bar holds no links at all (Home is the product mark, not an entry).
-	for (const domain of ['Lakehouse', 'Lineage', 'Media']) {
+	for (const domain of ['Lakehouse', 'Search']) {
 		await expect(nav.getByRole('button', { name: domain, exact: true })).toBeVisible();
 	}
-	await expect(nav.getByRole('button')).toHaveCount(3);
-	await expect(nav.getByRole('link')).toHaveCount(0);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
+	// Home is the product mark, not a nav entry. With every panel closed the ONLY link in the bar is
+	// Annotate — the single-surface zone that is a plain link by design; each panel TRIGGER must stay a
+	// button, or clicking it would navigate instead of opening the panel.
+	await expect(nav.getByRole('link')).toHaveCount(1);
+	await expect(nav.getByRole('link', { name: 'Annotate', exact: true })).toBeVisible();
 	// This zone is NOT its own entry any more, and Access is not one either (in any shape).
 	await expect(nav.getByRole('link', { name: 'Models', exact: true })).toHaveCount(0);
 	await expect(nav.getByRole('link', { name: 'Access', exact: true })).toHaveCount(0);
@@ -71,7 +76,10 @@ test('a signed-out / unresolved identity gets no governance column (fail-closed)
 	// The bar looks identical whoever is looking — privilege shows up only INSIDE the panel, so
 	// that is where the fail-closed assertion has to bite.
 	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button')).toHaveCount(3);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
 	await expect(nav.getByText('Access')).toHaveCount(0);
 	const panel = await openPanel(page, 'Lakehouse');
 	// The non-admin panel is the tighter two-column one: catalog + models, nothing governing.

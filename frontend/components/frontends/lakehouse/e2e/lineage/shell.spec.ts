@@ -41,7 +41,7 @@ test.beforeEach(async ({ page }) => {
 	});
 });
 
-test('an estate admin gets the three domain triggers + the Marquez-parity sidebar leaves', async ({
+test('an estate admin gets the zone triggers + the Marquez-parity sidebar leaves', async ({
 	page,
 }) => {
 	await page.route('**/capi/v1/me', (route) =>
@@ -58,12 +58,18 @@ test('an estate admin gets the three domain triggers + the Marquez-parity sideba
 	// The bar is three DOMAIN triggers and nothing else — even for an estate admin, whose extra
 	// surfaces arrive as columns inside Lakehouse's panel rather than as new top-level entries.
 	// All three carry sub-areas, so all three are NavigationMenu triggers (buttons), never links.
-	for (const domain of ['Lakehouse', 'Lineage', 'Media']) {
+	for (const domain of ['Lakehouse', 'Search']) {
 		await expect(nav.getByRole('button', { name: domain, exact: true })).toBeVisible();
 	}
-	await expect(nav.getByRole('button')).toHaveCount(3);
-	// Home is the product mark, not a nav entry: with every panel closed the bar holds no links.
-	await expect(nav.getByRole('link')).toHaveCount(0);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
+	// Home is the product mark, not a nav entry. With every panel closed the ONLY link in the bar is
+	// Annotate — the single-surface zone that is a plain link by design; each panel TRIGGER must stay a
+	// button, or clicking it would navigate instead of opening the panel.
+	await expect(nav.getByRole('link')).toHaveCount(1);
+	await expect(nav.getByRole('link', { name: 'Annotate', exact: true })).toBeVisible();
 	// The zone sidebar lists exactly the four first-class views + the Graph (active at the root).
 	// Scoped to the sidebar: page content may legitimately link to the same views (e.g. the graph
 	// header's capped hint links to Datasets), which would trip strict mode on a page-wide query.
@@ -92,7 +98,10 @@ test('a signed-out / unresolved identity gets NO governance column (fail-closed)
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	// The bar never advertises privilege — the same three triggers whoever is looking…
 	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
-	await expect(nav.getByRole('button')).toHaveCount(3);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
 	// …so the fail-closed guarantee now lives one level in, on Lakehouse's COLUMNS. This is what
 	// the old "no Admin entry in the bar" assertion stood for: with the admin surfaces folded into
 	// a shared trigger, hiding them means the Governance/Operations columns never render at all and
@@ -192,14 +201,15 @@ test('a domain trigger opens a panel of its rows — pointer and keyboard, same-
 });
 
 test('a row that genuinely leaves the zone still hard-navigates', async ({ page }) => {
-	// The merge shrank the set of cross-zone links to media + annotator, so the guard that forces a
-	// document load has fewer places to fire — and this pins that it still fires in them. A soft nav
-	// here would route into a manifest this zone does not own, i.e. a 404.
+	// Cross-zone links must force a document load: a soft nav would route into a manifest this zone
+	// does not own, i.e. a 404. Two shapes to pin, because the bar now has both: a panel ROW (Search's
+	// media rows) and a top-level plain LINK (Annotate, whose zone has a single surface).
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/lakehouse/lineage');
-	await openPanel(page, 'Media');
+	const nav = page.getByRole('navigation', { name: 'Zones' });
+	await expect(nav.locator('a[href="/annotator"]')).toHaveAttribute('data-sveltekit-reload', '');
+	await openPanel(page, 'Search');
 	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
-	await expect(panel.locator('a[href="/annotator"]')).toHaveAttribute('data-sveltekit-reload', '');
 	await expect(panel.locator('a[href="/media/atlas"]')).toHaveAttribute(
 		'data-sveltekit-reload',
 		'',
@@ -209,12 +219,12 @@ test('a row that genuinely leaves the zone still hard-navigates', async ({ page 
 test('a panel reaches its own zone root exactly once — the trigger is a button, not a link', async ({
 	page,
 }) => {
-	// The trigger opens a panel instead of navigating, so the zone ROOT has to be a row or it
-	// becomes unreachable from the bar. Lineage's root IS a row (Graph = /lineage), so the panel
-	// must not also synthesize a header row for it — exactly one link to the root, no duplicate.
+	// The trigger opens a panel instead of navigating, so a reachable root has to be a ROW. Lineage is
+	// a column of Lakehouse's panel and its Graph row IS the area root (/lakehouse/lineage), so the
+	// panel must not also synthesize a header row for it — exactly one link, no duplicate.
 	await page.route('**/capi/v1/me', (route) => json(route, { detail: 'anon' }, 401));
 	await page.goto('/lakehouse/lineage');
-	const panel = await openPanel(page, 'Lineage');
+	const panel = await openPanel(page, 'Lakehouse');
 	await expect(panel.locator('a[href="/lakehouse/lineage"]')).toHaveCount(1);
 	await expect(panel.getByRole('link', { name: /^Graph/ })).toHaveAttribute(
 		'href',
@@ -284,7 +294,10 @@ test('the loading skeleton reserves the resolved entry widths — no shift when 
 	release();
 	await expect(nav.getByRole('button', { name: 'Lakehouse', exact: true })).toBeVisible();
 	// The resolved bar carries the same three triggers the skeleton reserved — no earned entry.
-	await expect(nav.getByRole('button')).toHaveCount(3);
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
 	const resolved = (await nav.boundingBox())!;
 	expect(Math.abs(resolved.width - loading.width)).toBeLessThanOrEqual(1);
 	expect(Math.abs(resolved.x - loading.x)).toBeLessThanOrEqual(1);

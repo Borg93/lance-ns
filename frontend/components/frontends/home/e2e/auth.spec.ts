@@ -25,19 +25,23 @@ test('GET /auth/logout clears the session and redirects home', async ({ page, ba
 	expect(page.url()).toBe(`${baseURL}/`);
 });
 
-test('the navbar carries the three domain triggers and no governance column for an anonymous visitor', async ({
+test('the navbar carries one trigger per zone and no governance column for an anonymous visitor', async ({
 	page,
 }) => {
 	await page.goto('/');
 	const nav = page.getByRole('navigation', { name: 'Zones' });
 	await expect(nav).toBeVisible();
-	// The IA is three DOMAIN triggers (8a0fbbc) — every one carries sub-areas, so every one is a
-	// NavigationMenu trigger opening a panel. The old flat per-zone links are gone: Models and
-	// Annotate are now rows inside a panel, and Home is the product mark, not an entry at all.
-	for (const domain of ['Lakehouse', 'Lineage', 'Media']) {
+	// One trigger per ZONE: Lakehouse (catalog + models + lineage + governance) and Search (the media
+	// read plane) carry sub-areas, so they are NavigationMenu triggers opening a panel; Annotate is a
+	// single-surface zone and stays a plain link. Home is the product mark, not an entry at all.
+	for (const domain of ['Lakehouse', 'Search']) {
 		await expect(nav.getByRole('button', { name: domain, exact: true })).toBeVisible();
 	}
-	await expect(nav.getByRole('button')).toHaveCount(3);
+	await expect(nav.getByRole('link', { name: 'Annotate', exact: true })).toBeVisible();
+	// Two TRIGGERS (Lakehouse, Search) — Annotate is a plain link, not a button, because that
+	// zone has a single surface and a one-row dropdown would be noise. Compute joins as a third
+	// trigger when the rask zone lands.
+	await expect(nav.getByRole('button')).toHaveCount(2);
 	await expect(nav.getByRole('link', { name: 'Home', exact: true })).toHaveCount(0);
 	// fetchMe resolves null (no session, no catalog) → estate_admin is unknowable → fail-closed.
 	// Access has no home outside the estate-admin Governance column, so it is nowhere in this bar…

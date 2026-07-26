@@ -145,10 +145,10 @@ test('the shared sidebar marks Registry active and links to Lineage as a same-zo
 	await expect(page.locator('[data-active="true"]').filter({ hasText: 'Registry' })).toBeVisible();
 	// Lineage used to be a DIFFERENT zone, so these links had to force a full-document reload. It is
 	// an AREA of this same zone now: the route manifest already contains them, so they must soft-nav.
-	// It carries sub-areas, so the navbar renders it as a panel trigger and the links live inside.
+	// And it is a COLUMN of Lakehouse's panel, not a trigger of its own — reached via that trigger.
 	await page
 		.getByRole('navigation', { name: 'Zones' })
-		.getByRole('button', { name: 'Lineage' })
+		.getByRole('button', { name: 'Lakehouse' })
 		.click();
 	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
 	// The area root appears exactly once (lineage's Graph row IS /lakehouse/lineage — no duplicate).

@@ -24,10 +24,10 @@ Three measurements, already taken, decide the order:
 | - | --------- | ----------------------- |
 | 1 | **The history endpoint is actually deployed.** `#113`'s view was built against a contract; the running catalog predates the endpoint by 81 minutes | `curl /openapi.json` on the live pod lists a `history` path, and the view renders real versions in a browser as alice, screenshotted |
 | 2 | **Live feeds survive.** nginx severs an idle stream at 60s and SvelteKit's SSE emits no keepalive, so `query.live` at scale would be *worse* than polling | `proxy-read-timeout` on the Ingress, and a feed observed open past 60s |
-| 3 | **Notifications exist.** A run that starts, finishes or fails is surfaced without the user hunting for it, in every zone, from `/runs` — no new backend | Drive a real cascade run as alice; screenshot the surface showing START then COMPLETE/FAIL with its error text |
+| 3 | **Notifications exist** — REFUTED once, partly fixed. The bell marked runs read it never showed (13 marked, 8 rendered, the FAIL buried) and clipped its descenders; both fixed in `ef97e01`. The zone-mount defect the verifier found is still open. A run that starts, finishes or fails is surfaced without the user hunting for it, in every zone, from `/runs` — no new backend | Drive a real cascade run as alice; screenshot the surface showing START then COMPLETE/FAIL with its error text |
 | 4 | **The timers are gone.** `setInterval` replaced by `query.live` on the lineage cursor | `grep -rl setInterval` per zone, with a stated reason for any survivor |
 | 5 | **User work persists.** The workflow graph and saved views leave `localStorage` for the state store, per subject | Write in one browser context, read it in a fresh one — proven, not asserted |
-| 6 | **The expensive read is cached server-side.** Redis, authorize-every-request, keyed on `(resource, version)`, single-flight | A second user's first atlas load serves from cache; a user without access still gets 403 |
+| 6 | **The expensive read is cached server-side** — REFUTED once, fixed in `91a472d`: a caller-supplied `v` forked the cache without bound (20 junk tokens = 20 extra 6.6 MB reads, shared entry cold, single-flight defeated), and the anonymous read was still open one URL away at `/annotator/api/atlas/points`. Needs a re-drive. Redis, authorize-every-request, keyed on `(resource, version)`, single-flight | A second user's first atlas load serves from cache; a user without access still gets 403 |
 | 7 | **Green and pushed.** Every gate, cold | Python 1173+, whole-repo `ty`, `ruff services tests`, all four zone suites, `turbo --force`, prod-render, CI read to completion |
 
 ## Conditions 8–12: the standing rules, as conditions rather than good intentions
@@ -69,6 +69,32 @@ ten-condition goal.
 | `/lakehouse/data` scaffold, `/lakehouse/admin` orphan | Product decisions, not defects with one right answer |
 | `#20` | **Parked by the owner** — NATS HA via the nats operator, NACK/GitOps, query engine. Stays parked; listed so it is not mistaken for forgotten |
 | `#90` rask merge | Blocked and owner-gated: never rask main, no rask push, decisions proposed only |
+
+## Conditions 15–20: what the adversarial pass returned
+
+All four verify agents returned **REFUTED**, which is the pass working rather than failing. Four defects
+were in code already pushed; three are fixed (`91a472d`, `ef97e01`). These are what is left, plus the
+residuals the agents stated rather than hid.
+
+| # | Condition | Evidence that closes it |
+| - | --------- | ----------------------- |
+| 15 | **A live stream survives without reconnecting.** `IDLE_TIMEOUT: 255` is a ceiling, not a fix — SvelteKit's SSE emits no heartbeat, so an idle stream still drops at 255s and each reconnect re-primes the whole 200-event window and writes an audit record | A keepalive on the stream, and one observed open past 255s with no reconnect in the access log |
+| 16 | **Zone images redeploy too.** Condition 8 said "backend or chart", so the running lakehouse image predated `#113`: the tab bar had no History, `?tab=history` silently fell back to overview, and the agent's own "newest version renders" check passed on a badge beside the title | A digest change per zone image, and the new surface asserted INSIDE its own panel, not on a neighbouring element |
+| 17 | **A session-gated 200 must not say `Cache-Control: public`.** `KEPT_HEADERS` passes the upstream's value through verbatim on responses that now require a session. No leak today (no `proxy_cache` on the Ingress) — wrong the moment one is added, which the author's own scaling note recommends | The header rewritten to `private` on gated routes, with a test |
+| 18 | **The history log's `rows / bytes` column is `—` on every row** — noted while looking, not chased | Either populated from the lineage `row_count`/`size_bytes`, or the column removed; never a misleading `0` |
+| 19 | **Condition 5 is not closed.** The user-state backend survives active attack (bob cannot read or delete alice's state — proven by inverting the key AND the owner check), but the verifier found an undisclosed data-loss path | The path named, fixed, and covered by a test that fails without the fix |
+| 20 | **Workflows use `pipeline()`, not `parallel()`.** Three build agents sat finished for ~40 minutes because a barrier made the verify phase wait on the slowest one | No `parallel()` in a workflow script unless a stage genuinely needs every prior result at once, with the reason stated |
+
+### The screenshot lesson, and a correction to condition 10
+
+Condition 10 said "open the screenshots and describe them". That is **not sufficient**, and this pass
+proved it on my own work: I read `notifications-panel-open.png` row by row and reported it correct, while
+it was rendering `inqest_events` for `ingest_events` and `aqqreqate_qold` for `aggregate_gold` — every
+descender clipped by `truncate` + `leading-none` on a line box 2px shorter than the glyphs (`clientH 14`
+vs `scrollH 16`). A reader silently repairs words; it took the verifier a **4× zoom** to see it.
+
+So condition 10 now requires: zoom on text, and where a defect is suspected, measure it in the DOM
+(`clientHeight` vs `scrollHeight`) rather than judging by eye.
 
 ## Condition 14: the mistakes from 2026-07-26 do not recur
 

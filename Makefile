@@ -33,9 +33,12 @@ TILT_V      := 0.33.21
 FGA_V       := 0.6.4
 CATALOG_IMG := lance-rest-catalog:dev
 RAY_IMG     := ray-lance:dev
-# The micro-frontend zones (P5): the catch-all `home` + the four domain zones. Each builds from the ONE
-# parametrized .docker/frontend.dockerfile via --build-arg APP=<zone>, image lance-<zone>:dev.
-ZONES       := home data lineage models admin media annotator
+# The micro-frontend zones (P5): the catch-all `home` + the three domain zones. Each builds from the ONE
+# parametrized .docker/frontend.dockerfile via --build-arg APP=<zone>, image lance-<zone>:dev. Also drives
+# frontend-load and load (kind load docker-image lance-$z:dev). @repo/zone-contract fails if this drifts
+# from the zone directories — it listed the seven pre-merge zones for a while, which broke `make images`
+# outright: the loop died on the first zone that no longer exists and never reached lakehouse.
+ZONES       := home lakehouse media annotator
 MEDALLION_PORT := 8000
 # OCI label provenance — supplied to every image build (BUILD_DATE rfc3339, VCS_REF full SHA, VERSION).
 BUILD_DATE  := $(shell date -u +%FT%TZ)
@@ -91,7 +94,7 @@ deps: ## Add subchart repos + vendor chart deps into chart/charts/
 	@helm repo update >/dev/null && helm dependency build ./chart >/dev/null
 	@echo "✓ chart deps vendored"
 
-images: frontend-images ## Build the catalog (catalog+lineage) + the 5 MFE zone images
+images: frontend-images ## Build the catalog (catalog+lineage) + the 4 MFE zone images
 	docker build $(BUILD_ARGS) -f .docker/rest-catalog.dockerfile -t $(CATALOG_IMG) .
 
 load: ## Side-load the app + zone images into kind

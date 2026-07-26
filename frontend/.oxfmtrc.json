@@ -10,6 +10,7 @@
 		"**/build/**",
 		"**/dist/**",
 		"**/*.generated.ts",
-		"**/src/generated/**"
+		"**/src/generated/**",
+		"**/docs/*-openapi.json"
 	]
 }

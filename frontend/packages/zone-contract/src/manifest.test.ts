@@ -214,6 +214,24 @@ describe('the budget gate is ordered after the builds it weighs', () => {
 	});
 });
 
+describe('the Makefile builds and loads exactly the zones that exist', () => {
+	// `ZONES` drives `make frontend-images` (docker build --build-arg APP=$z), `make frontend-load` and
+	// `make load` (kind load docker-image lance-$z:dev). It still listed the SEVEN pre-merge zones, so
+	// the first command anyone would run in a real cluster — `make images`, hence `make up` — died on
+	// `bun run --cwd components/frontends/data build` and never reached lakehouse. Nothing type-checks a
+	// Makefile and no CI leg builds the images, so this is the only thing that can catch it.
+	const makefile = readFileSync(resolve(REPO_ROOT, 'Makefile'), 'utf8');
+	const declared = (/^ZONES\s*:?=\s*(.+)$/m.exec(makefile)?.[1] ?? '').trim().split(/\s+/);
+
+	it('declares a ZONES list', () => {
+		expect(declared.filter(Boolean).length).toBeGreaterThan(0);
+	});
+
+	it('names every zone directory, and nothing else', () => {
+		expect([...declared].sort()).toEqual([...zones].sort());
+	});
+});
+
 describe('the zone image can actually install the workspace', () => {
 	// `bun install --frozen-lockfile` inside .docker/frontend.dockerfile fails with "Workspace not
 	// found" if a member of `workspaces` was never COPYed in — and nothing else catches it, because no
@@ -248,6 +266,7 @@ describe('nothing outside the frontend still points at a moved path', () => {
 	// build. A rename is not done until this passes.
 	const DEAD = ['@rask/', '@lance/', 'packages/rask-ui', 'components/frontends/data'];
 	const SEARCHED = [
+		'Makefile',
 		'.docker/frontend.dockerfile',
 		'chart/templates/frontends.yaml',
 		'chart/templates/ingress.yaml',

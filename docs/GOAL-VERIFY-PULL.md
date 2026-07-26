@@ -35,7 +35,7 @@ is carried in conversation memory alone.
 | ----- | ---- | ---- | ------ |
 | Lineage track | OpenLineage spec fidelity; Dapr/FastAPI/Ray test coverage; Marquez parity; gold JSONB-in-Lance | #111 | Agent work salvaged; gold finding landed. Spec/coverage/parity reports partial |
 | Dapr sweep | Is Dapr missing anywhere in the lance-audio merge (viewer/search/annotator)? | — | **DONE — nothing missing**; see below |
-| Git-like data history | Answer "what changed, by whom, when" from Lance transactions/manifests/tags+branches, Lakekeeper-style | #113 | NOT STARTED |
+| Git-like data history | Answer "what changed, by whom, when" from Lance transactions/manifests/tags+branches, Lakekeeper-style | #113 | **Feasibility PROVEN against pylance 8** — see the section below. The format supplies what/when; the blocker is that mutating control events do not stamp the resulting version, so "who" has no join key |
 | Lance OTel | Wire Lance's own observability into our OTLP→Collector→GreptimeDB path | #114 | NOT STARTED |
 | Navbar IA | Four triggers: Lakehouse (incl. lineage + admin), Search, Annotate, Compute (after rask) | — | **DONE** — Compute deliberately unrendered until the zone exists |
 | Settings surface | Break out auth / authz / audit into their own surface | #112 | Deferred by owner ("keep it as is") |
@@ -162,6 +162,40 @@ gate was broken deliberately and watched to fail: static ceiling 420→300 → *
 gzipped on entry, over its 300 KB budget"*; deferred 4200→1000 → *"ships 3854 KB behind dynamic
 imports"*; and pointing the OpenCV detector at a marker that *is* static (`pixi.js`) reddened it on
 exactly the 3 chunks measured independently.
+
+## #113 git-like data history — what the format actually gives us (verified, not assumed)
+
+Before designing anything: probed pylance 8.0.0 against a real dataset (create → append → delete → update)
+in `scratchpad/histprobe.lance`. `LanceDataset.get_transactions(n)` and `read_transaction(version)` exist and
+return a `Transaction` per version whose `operation` carries the substance:
+
+| version | operation | what it tells us |
+| ------- | --------- | ---------------- |
+| 1 (create) | `Overwrite` | `fragments`, **`new_schema`** (full field list, ids, types) |
+| 2 (append) | `Append` | `fragments` |
+| 3 (delete) | `Delete` | **`predicate = 'id = 2'`**, `updated_fragments`, `deleted_fragment_ids` |
+| 4 (update) | `Update` | `update_mode = 'rewrite_rows'`, `fields_modified`, `updated_fragments`, `new_fragments` |
+
+So **"what changed" is already in the format** — operation kind, the literal delete predicate, which fields
+an update touched, fragment deltas, and schema at create. `versions()` supplies the *when*. Manifests give
+path/size/etag, and tags give the human names.
+
+**The missing half is "who", and the reason is a missing join key.** Control events carry the verified
+`actor` (`f"user:{token.sub}"`, `endpoints/tables.py:125`) but the emit payload does not carry the version
+the mutation produced — except `table_created`, which does (`endpoints/data.py:291`, `"version"`). Lance's
+transaction log has no notion of a user, and it should not. So the work is:
+
+1. Stamp the resulting version on **every** mutating control event (rows update/delete, column add/drop,
+   merge, compaction, restore), the way `table_created` already does. That is the join key; without it
+   "who" can only ever be guessed by timestamp proximity, which is wrong under concurrency.
+2. A read endpoint that joins per version: Lance transaction (operation, predicate, fragment/field deltas)
+   + control-event actor + tag names pointing at that version + the lineage run id when a medallion stage
+   produced it.
+3. The lakehouse surface: a commit-log view — one row per version, columns *when / who / operation / what*,
+   expanding to the detail (predicate, fields, schema diff at create).
+
+Tasks #65/#66 surfaced versions, tags, manifests and schema. Neither answers "who changed this row, and
+what did they change" — that is what this adds, and step 1 is a prerequisite nothing else can substitute.
 
 ## Dapr coverage for the merged services (owner question)
 

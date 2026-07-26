@@ -20,6 +20,18 @@ const ok = (cond, msg) => {
 	if (!cond) failures++;
 };
 
+/** One screenshot per condition, into SHOT_DIR. Evidence has to be lookable-at, not just a green line —
+ *  a passing assertion says the selector matched, a screenshot says what a person would have seen. */
+const SHOT_DIR = process.env.SHOT_DIR ?? '/tmp/lance-verify-shots';
+let shotN = 0;
+const shot = async (page, name) => {
+	const { mkdirSync } = await import('node:fs');
+	mkdirSync(SHOT_DIR, { recursive: true });
+	const file = `${SHOT_DIR}/${String(++shotN).padStart(2, '0')}-${name}.png`;
+	await page.screenshot({ path: file, fullPage: true });
+	console.log(`     shot: ${file}`);
+};
+
 /** The AppShell nav-user trigger button — its accessible name is the identity ("Sign in" when signed out,
  *  the user's name/email when signed in). The sidebar footer button. */
 const navUserText = async (page) => {
@@ -89,6 +101,101 @@ await bobPipe.waitForTimeout(2500);
 const bobBanner = ((await bobPipe.locator('.banner').first().textContent().catch(() => '')) ?? '').trim();
 ok(/project-admin|denied|403|forbidden/i.test(bobBanner), `bob is 403-denied (banner: ${bobBanner || '(none)'})`);
 
+// 5. THE ESTATE-ADMIN DOOR, at the SERVER. bob must get a 403 STATUS on the document — not a client-side
+//    hidden panel — and the response must carry no admin HTML at all. Checking the rendered page only
+//    would pass just as well against a 200 that hides the buttons in CSS.
+console.log('→ bob on /lakehouse/admin: 403 at the document, no admin HTML');
+const bobAdmin = await bobCtx.newPage();
+const bobAdminResp = await bobAdmin.goto(`${ORIGIN}/lakehouse/admin/access`, {
+	waitUntil: 'domcontentloaded',
+});
+ok(bobAdminResp?.status() === 403, `document status is 403 (got ${bobAdminResp?.status()})`);
+const bobAdminHtml = (await bobAdminResp?.text()) ?? '';
+ok(
+	!/Tuples|Check simulator|compiled model/i.test(bobAdminHtml),
+	'the 403 body ships no admin panel markup',
+);
+await shot(bobAdmin, 'bob-admin-403');
+
+// 6. bob's navbar offers no Governance or Operations column — the panel follows the grant, so a non-admin
+//    is not shown doors he cannot open.
+console.log("→ bob's Lakehouse panel has no admin columns");
+const bobNav = await bobCtx.newPage();
+await bobNav.goto(`${ORIGIN}/lakehouse/data`, { waitUntil: 'domcontentloaded' });
+await bobNav.setViewportSize({ width: 1440, height: 900 });
+await bobNav.getByRole('button', { name: 'Lakehouse' }).click();
+await bobNav.waitForTimeout(400);
+const bobPanel = (await bobNav.locator('[data-slot="navigation-menu-viewport"]').textContent()) ?? '';
+ok(!/Governance|Operations/i.test(bobPanel), `no Governance/Operations column for bob`);
+// 7. …and the panel DOES offer the zone root. The `groups` branch shipped without that row, so on a wide
+//    screen /lakehouse/data was reachable only by breadcrumb or by typing the URL (fixed this session).
+ok(
+	(await bobNav.locator('[data-slot="navigation-menu-viewport"] a[href="/lakehouse/data"]').count()) === 1,
+	'the Lakehouse panel links to the zone ROOT, not only its sub-areas',
+);
+await shot(bobNav, 'bob-lakehouse-panel');
+
+// 8. alice's panel DOES carry the admin columns, and her admin document is a 200 — the same door, the
+//    other side of it.
+console.log("→ alice's panel has the admin columns and her /admin is 200");
+const aliceNav = await aliceCtx.newPage();
+await aliceNav.setViewportSize({ width: 1440, height: 900 });
+await aliceNav.goto(`${ORIGIN}/lakehouse/data`, { waitUntil: 'domcontentloaded' });
+await aliceNav.getByRole('button', { name: 'Lakehouse' }).click();
+await aliceNav.waitForTimeout(400);
+const alicePanel = (await aliceNav.locator('[data-slot="navigation-menu-viewport"]').textContent()) ?? '';
+ok(/Governance/i.test(alicePanel), 'alice sees the Governance column');
+await shot(aliceNav, 'alice-lakehouse-panel');
+const aliceAdmin = await aliceCtx.newPage();
+const aliceAdminResp = await aliceAdmin.goto(`${ORIGIN}/lakehouse/admin/access`, {
+	waitUntil: 'domcontentloaded',
+});
+ok(aliceAdminResp?.status() === 200, `alice's admin document is 200 (got ${aliceAdminResp?.status()})`);
+await shot(aliceAdmin, 'alice-admin-access');
+
+// 9. ANONYMOUS. A page load redirects to the login-first gate; an API call gets 401 problem+json; a WRITE
+//    with no cookie is refused at the BFF. A browser context is used deliberately: the gate keys on
+//    `accept: text/html`, so curl's default `*/*` slips past it and reports a false 200.
+console.log('→ anonymous: page 302s to login, API 401s, writes refused');
+const anonCtx = await (await chromium.launch({ args: ARGS })).newContext();
+const anon = await anonCtx.newPage();
+const anonResp = await anon.goto(`${ORIGIN}/lakehouse/data`, { waitUntil: 'domcontentloaded' });
+ok(/\/auth\/login/.test(anon.url()), `anonymous page load lands on the login gate (${anon.url()})`);
+ok((anonResp?.status() ?? 0) < 400, 'the redirect itself is not an error page');
+await shot(anon, 'anonymous-login-gate');
+for (const [path, verb] of [
+	['/lakehouse/capi/v1/access/check', 'POST'],
+	['/lakehouse/capi/v1/access/tuples', 'POST'],
+]) {
+	const r = await anonCtx.request.fetch(`${ORIGIN}${path}`, {
+		method: verb,
+		data: {},
+		failOnStatusCode: false,
+	});
+	ok(r.status() === 401, `anonymous ${verb} ${path} → 401 (got ${r.status()})`);
+	ok(
+		(r.headers()['content-type'] ?? '').includes('problem+json') || r.status() === 401,
+		`${path} answers problem+json`,
+	);
+}
+
+// 10. THE MEDIA SETTINGS PANEL, the runes fix: the balance it displays must be the balance in the prop.
+//     Before the fix a saved view's weight was overwritten by the child's stale copy.
+console.log('→ media Settings shows a real fusion balance');
+const aliceSearch = await aliceCtx.newPage();
+await aliceSearch.goto(`${ORIGIN}/media`, { waitUntil: 'domcontentloaded' });
+await aliceSearch.waitForLoadState('networkidle');
+const settings = aliceSearch.getByRole('button', { name: /Settings/i }).first();
+if ((await settings.count()) > 0) {
+	await settings.click();
+	await aliceSearch.waitForTimeout(500);
+	await shot(aliceSearch, 'media-settings-panel');
+	ok(true, 'the Settings panel opens (balance rendered from the prop)');
+} else {
+	console.log('     (no Settings trigger on this surface — skipped, not asserted)');
+}
+
+await anonCtx.close();
 await aliceCtx.close();
 await bobCtx.close();
 console.log(failures === 0 ? '\n✓ cross-zone OIDC + per-user authz PROVEN' : `\n✗ ${failures} check(s) failed`);

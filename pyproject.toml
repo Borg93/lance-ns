@@ -48,7 +48,12 @@ dev = [
     "requests>=2.32",
     "ruff>=0.6",
     "moto[s3,server]>=5",
+    # The OpenLineage spec gate (tests/unit/test_openlineage_spec_conformance.py) needs both: the client
+    # for the authoritative facet _schemaURLs, jsonschema to validate our hand-built RunEvents against the
+    # vendored 2-0-2 core schema. jsonschema was already resolvable as a moto transitive — declared here
+    # because the gate depends on it directly and must not break when moto's tree changes.
     "openlineage-python>=1.50.0",
+    "jsonschema>=4.26",
     "duckdb>=1.4",
 ]
 

@@ -3,6 +3,16 @@
 Keeping these in one place is what makes our hand-built ``RunEvent``s spec-true (and therefore
 reusable by a Marquez-style consumer): a valid **UUID** ``runId``, the **required** top-level
 ``schemaURL``, and the ``_producer`` / ``_schemaURL`` every facet — standard OR custom — must carry.
+
+We hand-build the wire dicts rather than importing ``openlineage-python``: the client is a **dev-only**
+dependency (``[dependency-groups] dev`` in ``pyproject.toml``) and is deliberately kept out of the service
+images, so ``lineage.seed`` (the demo producer) is the only module that constructs events through the
+official ``event_v2`` / ``facet_v2`` classes. What makes the hand-built path safe is that these constants
+are asserted EQUAL to the official facet classes' ``_get_schema()`` by
+``tests/unit/test_openlineage_spec_conformance.py`` — bumping ``openlineage-python`` reddens CI the moment
+a facet's published version moves. That gate was missing until 2026-07-26, and three of the URLs below had
+already drifted (``SchemaDatasetFacet`` 1-1-1→1-2-0, ``DatasourceDatasetFacet`` and ``ErrorMessageRunFacet``
+1-0-0→1-0-1 — the 1-0-0 facets ``$ref`` the retired ``1-0-2`` core spec while our envelope declares 2-0-2).
 """
 
 from __future__ import annotations
@@ -26,7 +36,7 @@ BASE_FACET_SCHEMA_URL = "https://openlineage.io/spec/2-0-2/OpenLineage.json#/$de
 #: blob/vector-aware type via ``common.schema.facet_fields``). Shared here so every emitter (catalog,
 #: medallion) stamps the SAME spec version; a per-emitter copy would silently drift when one bumps it.
 SCHEMA_FACET_SCHEMA_URL = (
-    "https://openlineage.io/spec/facets/1-1-1/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
+    "https://openlineage.io/spec/facets/1-2-0/SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet"
 )
 
 #: Standard ``DatasetVersionDatasetFacet`` schema URL — the Lance version stamped on inputs/outputs (the
@@ -39,12 +49,12 @@ VERSION_FACET_SCHEMA_URL = (
 #: Standard ``DatasourceDatasetFacet`` schema URL — the physical storage URI on outputs (what lets
 #: reconcile find the on-disk dataset and back-fill lost writes).
 DATASOURCE_FACET_SCHEMA_URL = (
-    "https://openlineage.io/spec/facets/1-0-0/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
+    "https://openlineage.io/spec/facets/1-0-1/DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet"
 )
 
 #: Standard ``ErrorMessageRunFacet`` schema URL — the FAIL emitters' error payload (medallion + compaction).
 ERROR_MESSAGE_FACET_SCHEMA_URL = (
-    "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json#/$defs/ErrorMessageRunFacet"
+    "https://openlineage.io/spec/facets/1-0-1/ErrorMessageRunFacet.json#/$defs/ErrorMessageRunFacet"
 )
 
 #: Fixed namespace for lance-ns name-based run ids (``uuid5`` of the project URL under ``NAMESPACE_URL``

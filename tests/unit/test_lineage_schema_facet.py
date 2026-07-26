@@ -36,6 +36,24 @@ def test_type_label_covers_list_and_plain_binary() -> None:
     assert schema.type_label(pa.field("raw", pa.binary())) == "binary"
 
 
+def test_type_label_renders_a_json_column_as_json() -> None:
+    # ASSERTS: a ``pa.json_()`` column (Lance stores it as JSONB) is labelled "json", not the raw
+    # ``extension<arrow.json>`` repr — the label seed.py already declares for gold's ``lineage``
+    # column and the one the merged chunk schema's ``alignments_json`` must carry.
+    assert schema.type_label(pa.field("lineage", pa.json_())) == "json"
+
+
+def test_lancekit_mirror_labels_json_the_same_way() -> None:
+    # ASSERTS the vendored mirror stays in step: the same column labelled by
+    # ``common.lancekit.openlineage`` (the ratch/annotation emit path) and by ``common.schema``
+    # (the medallion emit path) must reach the lineage graph as the SAME type string.
+    from common.lancekit import openlineage as lancekit_ol
+
+    arrow_schema = pa.schema([pa.field("id", pa.int64()), pa.field("alignments_json", pa.json_())])
+    assert lancekit_ol.facet_fields(arrow_schema) == schema.facet_fields(arrow_schema)
+    assert lancekit_ol.facet_fields(arrow_schema)[1]["type"] == "json"
+
+
 def test_build_run_event_carries_schema_facet_on_the_output() -> None:
     fields = [{"name": "payload", "type": "blob"}, {"name": "embedding", "type": "array<float>"}]
     event = build_run_event(

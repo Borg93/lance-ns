@@ -40,7 +40,7 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 import psycopg
-from common.openlineage import RUN_EVENT_SCHEMA_URL, run_id_for
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
 from common.schema import SchemaFields
 from psycopg import sql
 from psycopg_pool import AsyncConnectionPool
@@ -296,6 +296,9 @@ _LINK_WROTE: Final = "MATCH (r:Run {run_id:$rid}), (d:Dataset {name:$name}) MERG
 _SET_WROTE_VERSION: Final = (
     "MATCH (r:Run {run_id:$rid})-[w:WROTE]->(d:Dataset {name:$name}) SET w.version=$ver RETURN 1"
 )
+# OpenLineage ``producer`` URI for the back-fill's synthetic event — spec-required, and what a Marquez-style
+# consumer records as the event source (here: the lineage service repairing its own graph, not a producer).
+_RECONCILE_PRODUCER: Final = "https://github.com/Borg93/lance-ns/tree/main/services/lineage"
 # Storage->graph reconciliation back-fill (B4) — a synthetic 'reconcile' run recording a Lance write whose
 # lineage event was lost (the outbox gap). Idempotent (MERGE on the reconcile run id), so re-running the
 # reconcile never duplicates; the WROTE version is stamped in its own statement (the AGE MERGE+SET quirk).
@@ -1174,14 +1177,32 @@ class LineageRepository:
                 await run_cypher(
                     conn, self._graph, _SET_WROTE_SCHEMA, {**params, "schema": json.dumps(schema)}
                 )
-        # A feed row too, so /events also knows the reconcile (the third view). A synthetic but spec-shaped
-        # RECONCILED event — the repair is auditable next to the ingested writes it recovered.
+        # A feed row too, so /events also knows the reconcile (the third view) — the repair is auditable
+        # next to the ingested writes it recovered.
+        #
+        # The blob is a REAL OpenLineage RunEvent, so a Marquez-style consumer replaying /events ingests it
+        # unchanged. Two fidelity rules the first cut broke (found 2026-07-26 by validating the live feed
+        # against https://openlineage.io/spec/2-0-2/OpenLineage.json — 14 of 200 events failed):
+        #   * ``eventType`` must be in the spec enum. ``RECONCILED`` is not; ``OTHER`` is the spec's own slot
+        #     for "additional metadata added to the same run [after it completed]", which is exactly what a
+        #     back-fill is. The ``lance.operation="reconcile"`` marker (below) is what names it precisely.
+        #   * every facet — custom ones included — must carry ``_producer`` + ``_schemaURL`` (BaseFacet
+        #     ``required``). The bare ``{"operation": ...}`` dict didn't; ``custom_facet`` is the helper that
+        #     stamps both, and is what every other emitter already uses.
+        # ``event_type=RECONCILED`` stays on the ROW (and on the ``(:Run)`` node): it is our own storage
+        # marker — the /events + /runs views and the ``_TERMINAL_TYPES`` dedup index key off it, and it must
+        # stay distinguishable from a producer-sent OTHER.
         synthetic = {
-            "eventType": "RECONCILED",
+            "eventType": "OTHER",
             "eventTime": tm,
-            "producer": "https://github.com/Borg93/lance-ns/tree/main/services/lineage",
+            "producer": _RECONCILE_PRODUCER,
             "schemaURL": RUN_EVENT_SCHEMA_URL,
-            "run": {"runId": rid, "facets": {"lance": {"operation": "reconcile", "version": version}}},
+            "run": {
+                "runId": rid,
+                "facets": {
+                    "lance": custom_facet(_RECONCILE_PRODUCER, operation="reconcile", version=version)
+                },
+            },
             "job": {"namespace": "lance-reconcile", "name": f"reconcile.{name}"},
             "inputs": [],
             "outputs": [{"namespace": "", "name": name}],

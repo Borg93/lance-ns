@@ -1086,6 +1086,7 @@ dependencies = [
 [package.dev-dependencies]
 dev = [
     { name = "duckdb", marker = "sys_platform == 'linux'" },
+    { name = "jsonschema", marker = "sys_platform == 'linux'" },
     { name = "moto", extra = ["s3", "server"], marker = "sys_platform == 'linux'" },
     { name = "openlineage-python", marker = "sys_platform == 'linux'" },
     { name = "pytest", marker = "sys_platform == 'linux'" },
@@ -1127,6 +1128,7 @@ requires-dist = [
 [package.metadata.requires-dev]
 dev = [
     { name = "duckdb", specifier = ">=1.4" },
+    { name = "jsonschema", specifier = ">=4.26" },
     { name = "moto", extras = ["s3", "server"], specifier = ">=5" },
     { name = "openlineage-python", specifier = ">=1.50.0" },
     { name = "pytest", specifier = ">=8" },

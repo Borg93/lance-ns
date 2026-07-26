@@ -27,6 +27,11 @@ from collections.abc import Callable
 import pyarrow as pa
 import pytest
 import requests
+from common.openlineage import RUN_EVENT_SCHEMA_URL, custom_facet, run_id_for
+
+#: OpenLineage ``producer`` URI for the promote event this suite emits — the spec requires one, and a
+#: fixture standing in for a real lance-ray job has to look like one.
+_PRODUCER = "https://github.com/Borg93/lance-ns/tree/main/tests/e2e/test_governance_e2e.py"
 
 SERVER = os.environ.get("LANCE_E2E_AUTH_SERVER", "")
 LINEAGE = os.environ.get("LANCE_E2E_LINEAGE_URL", "")
@@ -150,13 +155,21 @@ def test_governance_flow(stack: tuple[str, str]) -> None:
     creator = _poll(lambda: _get_json(f"{lineage}/datasets/{bronze}/creator", ah).get("creator"), alice_sub)
     assert creator == alice_sub, f"expected lineage creator={alice_sub}, got {creator}"
 
-    # 5. a promote run (bronze -> silver), as a lance-ray job would emit
+    # 5. a promote run (bronze -> silver), as a lance-ray job would emit.
+    # Spec-true on purpose: this fixture is our stand-in for a real producer, so it has to carry what the
+    # spec REQUIRES — a UUID ``runId`` (``format: uuid``; Marquez rejects anything else), ``producer`` and
+    # ``schemaURL`` on the envelope, and ``_producer``/``_schemaURL`` on the custom ``author`` facet. The
+    # first cut had none of those (``runId`` was ``promote-<pid>``) and the ingest accepted it, so what the
+    # test really pinned was our own tolerance, not the contract (found 2026-07-26 — the event was still
+    # sitting in the live /events feed as the one non-conforming non-reconcile event).
     promote = {
         "eventType": "COMPLETE",
         "eventTime": "2026-06-24T00:00:00+00:00",
+        "producer": _PRODUCER,
+        "schemaURL": RUN_EVENT_SCHEMA_URL,
         "run": {
-            "runId": f"promote-{os.getpid()}",
-            "facets": {"author": {"name": alice_sub, "sub": alice_sub}},
+            "runId": run_id_for(f"promote-{ns}-{os.getpid()}"),
+            "facets": {"author": custom_facet(_PRODUCER, name=alice_sub, sub=alice_sub)},
         },
         "job": {"namespace": "lance-ray", "name": "promote_bronze_to_silver"},
         "inputs": [{"namespace": ns, "name": bronze}],

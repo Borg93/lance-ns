@@ -97,7 +97,7 @@ def build_event(
     if error is not None:
         run_facets["errorMessage"] = {
             "_producer": _PRODUCER,
-            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/ErrorMessageRunFacet.json"
+            "_schemaURL": "https://openlineage.io/spec/facets/1-0-1/ErrorMessageRunFacet.json"
             "#/$defs/ErrorMessageRunFacet",
             "message": error[:1000],
             "programmingLanguage": "PYTHON",
@@ -122,7 +122,7 @@ def build_event(
     if registry_uri:  # location metadata, on ALL event types — the reconcile back-fill key
         output_facets["dataSource"] = {
             "_producer": _PRODUCER,
-            "_schemaURL": "https://openlineage.io/spec/facets/1-0-0/"
+            "_schemaURL": "https://openlineage.io/spec/facets/1-0-1/"
             "DatasourceDatasetFacet.json#/$defs/DatasourceDatasetFacet",
             "name": registry_uri,
             "uri": registry_uri,
@@ -135,7 +135,7 @@ def build_event(
         }
         output_facets["schema"] = {
             "_producer": _PRODUCER,
-            "_schemaURL": "https://openlineage.io/spec/facets/1-1-1/"
+            "_schemaURL": "https://openlineage.io/spec/facets/1-2-0/"
             "SchemaDatasetFacet.json#/$defs/SchemaDatasetFacet",
             "fields": [
                 {"name": "artifact", "type": "string"},

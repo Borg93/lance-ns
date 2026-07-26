@@ -19,6 +19,15 @@ class Dataset(BaseModel):
     ``facets`` carries the standard OpenLineage dataset facets; we read several:
     ``version`` (which Lance version a run produced), ``dataSource`` (where the table
     physically lives — the S3-compatible location), and ``tags`` (governance labels).
+
+    The spec splits dataset metadata across THREE slots, by the facet's base type: plain
+    ``DatasetFacet``s ride ``facets``, ``InputDatasetFacet``s ride ``inputFacets`` on an input, and
+    ``OutputDatasetFacet``s ride ``outputFacets`` on an output. Two facets we consume are not plain
+    ``DatasetFacet``s — ``OutputStatisticsOutputDatasetFacet`` is an output facet and
+    ``DataQualityAssertionsDatasetFacet`` is an input facet — so the official ``openlineage-python``
+    client (and therefore Spark/Airflow/dbt/Marquez producers, and our own ``lineage.seed``) serialises
+    them into the typed slots, NOT into ``facets``. Reading only ``facets`` silently dropped them from
+    every such producer; :meth:`facet` looks in all three.
     """
 
     model_config = _MODEL
@@ -26,14 +35,32 @@ class Dataset(BaseModel):
     name: str
     facets: dict[str, Any] = Field(default_factory=dict)
 
+    def facet(self, name: str) -> dict[str, Any] | None:
+        """The named facet from whichever spec slot the producer used, else ``None``.
+
+        Facet names are unique across the spec's three dataset slots, so a single merged lookup is
+        unambiguous and tolerates both placements: our own emitters put everything in ``facets``, the
+        official client splits by base type. ``facets`` wins a (spec-impossible) collision because it is
+        the slot our own producers write. ``inputFacets`` / ``outputFacets`` are read off ``model_extra``
+        rather than declared as fields so the feed blob (``model_dump(by_alias=True)``) keeps a producer's
+        slots EXACTLY as sent — declaring them would stamp an empty ``outputFacets`` onto every input
+        dataset, a key the spec's ``InputDataset`` does not have.
+        """
+        extra = self.model_extra or {}
+        for slot in (self.facets, extra.get("outputFacets"), extra.get("inputFacets")):
+            value = slot.get(name) if isinstance(slot, dict) else None
+            if isinstance(value, dict):
+                return value
+        return None
+
     @property
     def source_uri(self) -> str | None:
         """Where this dataset physically lives, from the standard ``dataSource`` facet.
 
         For a Lance table this is the S3-compatible URI (e.g. ``s3://lakehouse/silver/features``).
         """
-        facet = (self.facets or {}).get("dataSource")
-        uri = facet.get("uri") if isinstance(facet, dict) else None
+        facet = self.facet("dataSource")
+        uri = facet.get("uri") if facet else None
         return uri if isinstance(uri, str) and uri else None
 
     @property
@@ -43,8 +70,8 @@ class Dataset(BaseModel):
         This is the per-version schema the lineage service persists onto the ``WROTE`` edge (#24
         prerequisite); previously the ``SchemaDatasetFacet`` was received and discarded.
         """
-        facet = (self.facets or {}).get("schema")
-        items = facet.get("fields") if isinstance(facet, dict) else None
+        facet = self.facet("schema")
+        items = facet.get("fields") if facet else None
         if not isinstance(items, list):
             return []
         out: list[dict[str, str]] = []
@@ -67,8 +94,8 @@ class Dataset(BaseModel):
         ``inputFields[].transformations``) carries the kind (``DIRECT``/``IDENTITY`` vs a real change)
         and the ``masking`` governance flag. Previously this facet was received and discarded on ingest.
         """
-        facet = (self.facets or {}).get("columnLineage")
-        fields = facet.get("fields") if isinstance(facet, dict) else None
+        facet = self.facet("columnLineage")
+        fields = facet.get("fields") if facet else None
         if not isinstance(fields, dict):
             return []
         edges: list[dict[str, Any]] = []
@@ -120,8 +147,8 @@ class Dataset(BaseModel):
         absent half — never a fabricated ``-1`` that ``producers()`` would serve as a real measurement.
         Returns ``None`` (the whole tuple) only when NEITHER field is present.
         """
-        facet = (self.facets or {}).get("outputStatistics")
-        if not isinstance(facet, dict):
+        facet = self.facet("outputStatistics")
+        if facet is None:
             return None
         row_count, size = facet.get("rowCount"), facet.get("size")
         if not isinstance(row_count, int) and not isinstance(size, int):
@@ -141,8 +168,8 @@ class Dataset(BaseModel):
         record of a batch the gate BLOCKED from promotion — the WROTE edge keeps both the failed assertion
         and the version it wrote, so the bad batch is auditable.
         """
-        facet = (self.facets or {}).get("dataQualityAssertions")
-        items = facet.get("assertions") if isinstance(facet, dict) else None
+        facet = self.facet("dataQualityAssertions")
+        items = facet.get("assertions") if facet else None
         if not isinstance(items, list):
             return []
         out: list[dict[str, Any]] = []
@@ -161,8 +188,8 @@ class Dataset(BaseModel):
     @property
     def tags(self) -> list[str]:
         """Governance labels from the standard ``tags`` facet, as ``key=value`` strings."""
-        facet = (self.facets or {}).get("tags")
-        items = facet.get("tags") if isinstance(facet, dict) else None
+        facet = self.facet("tags")
+        items = facet.get("tags") if facet else None
         if not isinstance(items, list):
             return []
         labels: list[str] = []
@@ -301,8 +328,8 @@ class RunEvent(BaseModel):
         """
         for ds in self.outputs:
             if ds.name == name:
-                facet = (ds.facets or {}).get("version")
-                version = facet.get("datasetVersion") if isinstance(facet, dict) else None
+                facet = ds.facet("version")
+                version = facet.get("datasetVersion") if facet else None
                 return str(version) if version is not None else None
         return None
 
@@ -318,7 +345,7 @@ class RunEvent(BaseModel):
         """
         for ds in self.inputs:
             if ds.name == name:
-                facet = (ds.facets or {}).get("version")
-                version = facet.get("datasetVersion") if isinstance(facet, dict) else None
+                facet = ds.facet("version")
+                version = facet.get("datasetVersion") if facet else None
                 return str(version) if version is not None else None
         return None

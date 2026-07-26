@@ -86,6 +86,22 @@ def test_version_facet_spec_pin_matches_the_medallion_emitter() -> None:
         version=1,
     )
     assert complete["outputs"][0]["facets"]["schema"]["_schemaURL"] == common_ol.SCHEMA_FACET_SCHEMA_URL
+    # dataSource + errorMessage were the two mirrors still UNPINNED, and both had drifted a version
+    # behind (1-0-0 while common stamps 1-0-1) — the 1-0-0 documents even $ref the retired 1-0-2 core
+    # spec while this event's envelope declares 2-0-2. Pinned now so the whole mirror is guarded.
+    assert (
+        complete["outputs"][0]["facets"]["dataSource"]["_schemaURL"] == common_ol.DATASOURCE_FACET_SCHEMA_URL
+    )
+    failed = job.build_event(
+        event_type="FAIL",
+        token="pin",
+        model="m",
+        namespace="models",
+        features=[{"dataset": "silver$f", "version": 1}],
+        registry_uri="s3://x/m",
+        error="boom",
+    )
+    assert failed["run"]["facets"]["errorMessage"]["_schemaURL"] == common_ol.ERROR_MESSAGE_FACET_SCHEMA_URL
 
 
 def test_start_event_carries_training_jobtype_and_input_pins() -> None:

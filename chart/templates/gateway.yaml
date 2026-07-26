@@ -89,7 +89,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-gateway
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.gateway.replicas | default 1 }}
+  replicas: {{ (hasKey .Values.gateway "replicas") | ternary .Values.gateway.replicas 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: gateway, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:

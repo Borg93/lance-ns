@@ -147,7 +147,7 @@ ray-demo: ray-image ## Real Ray cluster + `ray job submit`: distributed Lance wr
 	@kubectl rollout status deploy/ray-lance-head --timeout=180s
 	@# A pod's imageID is the containerd MANIFEST digest; `docker inspect .Id` is the CONFIG digest — so
 	@# match the pod's digest against the FULL set crictl holds for the tag (kind load replaces it → fresh).
-	@RUNNING="$$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"; \
+	@RUNNING="$$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="ray-head")].imageID}')"; \
 	 POD_SHA="$${RUNNING##*:}"; \
 	 NODE_SHAS="$$(docker exec $(CLUSTER)-control-plane crictl images -o json | python3 -c "import sys,json; print(' '.join(s for i in json.load(sys.stdin).get('images',[]) if any('$(RAY_IMG)' in t for t in (i.get('repoTags') or [])) for s in ([i['id'].split(':')[-1]] + [r.split(':')[-1] for r in (i.get('repoDigests') or [])])))")"; \
 	 case " $$NODE_SHAS " in *" $$POD_SHA "*) echo "ray head serves the freshly-loaded image ($$POD_SHA)" ;; \

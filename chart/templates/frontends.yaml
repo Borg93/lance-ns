@@ -25,7 +25,7 @@ metadata:
     {{- include "lance.labels" $root | nindent 4 }}
     app.kubernetes.io/component: {{ $comp }}
 spec:
-  replicas: {{ $fe.replicas | default 1 }}
+  replicas: {{ (hasKey $fe "replicas") | ternary $fe.replicas 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: {{ $comp }}, app.kubernetes.io/instance: {{ $root.Release.Name }} }
   template:

@@ -51,7 +51,7 @@ spec:
                   nats --server "$S" stream add "$1" \
                     --subjects "$2" --storage file --retention limits \
                     --max-age=168h --max-bytes=-1 --max-msgs=-1 --max-msgs-per-subject=-1 \
-                    --max-msg-size=-1 --discard old --dupe-window=2m --replicas {{ .Values.nats.streamReplicas | default 1 }} \
+                    --max-msg-size=-1 --discard old --dupe-window=2m --replicas {{ (hasKey .Values.nats "streamReplicas") | ternary .Values.nats.streamReplicas 1 }} \
                     --no-allow-rollup --deny-delete --deny-purge
                 fi
               }

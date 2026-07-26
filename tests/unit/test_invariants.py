@@ -507,3 +507,93 @@ def test_user_state_store_default_matches_the_component_the_catalog_is_scoped_to
         f"the catalog app-id is not in {default}'s scopes — the sidecar refuses to load the component "
         "for it, so per-subject user state is unreachable however correct the code is"
     )
+
+
+# --------------------------------------------------------------------------------------------------
+# 8. The 2026-07-26 mistake classes, as mechanical guards rather than resolutions
+# --------------------------------------------------------------------------------------------------
+
+
+def _uncommented(text: str) -> str:
+    """Blank out Helm/YAML comments, keeping line numbers, so prose ABOUT a pattern is not a use of it."""
+    text = re.sub(r"\{\{-?/\*.*?\*/-?\}\}", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
+    return "\n".join("" if line.lstrip().startswith("#") else line for line in text.splitlines())
+
+
+def test_no_numeric_helm_default_can_swallow_an_explicit_zero() -> None:
+    """`| default 255` rendered 255 for an explicit `0`, so a config change looked applied and nothing moved.
+
+    Helm's `default` fires on any EMPTY value, and Go templates count `0` as empty. So every numeric knob
+    written as `{{ .Values.x | default N }}` silently ignores the one value an operator is most likely to
+    mean deliberately: `0` for "disabled", "unbounded", or "scaled to nothing". This cost a live debugging
+    round on `frontend.idleTimeoutSeconds`, where `0` means "no connection lifetime cap" — exactly the
+    value the live-stream fix needed — and where the rendered manifest kept saying 255.
+
+    The correct idiom is `(hasKey $parent "key") | ternary $parent.key N`, which tests PRESENCE. This
+    forbids the broken one chart-wide, because carving out exceptions is how the next instance gets in.
+    """
+    offenders = [
+        f"{path.relative_to(REPO)}:{n}: {line.strip()}"
+        for path in sorted((CHART / "templates").rglob("*"))
+        if path.is_file()
+        for n, line in enumerate(_uncommented(path.read_text()).splitlines(), 1)
+        if re.search(r"\|\s*default\s+-?\d", line)
+    ]
+    assert not offenders, (
+        "`| default <number>` treats an explicit 0 as absent, so the operator's value is silently "
+        "replaced by the fallback. Use `(hasKey $parent \"key\") | ternary $parent.key <n>`:\n  "
+        + "\n  ".join(offenders)
+    )
+
+
+def test_no_pod_container_is_read_by_index() -> None:
+    """`containerStatuses[0]` is the DAPR SIDECAR on a 2/2 pod, and its digest is identical everywhere.
+
+    Reading index 0 to check whether a redeploy landed reported three services as unchanged when all three
+    had in fact been replaced — the sidecar digest never moves, which should itself have been the tell.
+    Any container read must name the container, e.g. `containerStatuses[?(@.name=="ray-head")]`.
+    """
+    roots = [REPO / "scripts", REPO / "Makefile", REPO / "tests", CHART]
+    offenders = [
+        f"{path.relative_to(REPO)}:{n}: {line.strip()}"
+        for root in roots
+        for path in ([root] if root.is_file() else sorted(root.rglob("*")))
+        if path.is_file() and path.suffix in {"", ".sh", ".mjs", ".py", ".yaml", ".ts"}
+        and path != Path(__file__)  # this file names the pattern in order to forbid it
+        for n, line in enumerate(path.read_text(errors="ignore").splitlines(), 1)
+        if "containerStatuses[0]" in line
+    ]
+    assert not offenders, (
+        "a pod's containers are ordered by the injector, not by importance — index 0 is daprd on every "
+        "sidecar-injected pod. Select by name instead:\n  " + "\n  ".join(offenders)
+    )
+
+
+def test_every_dapr_component_resolves_its_secrets_through_the_secret_store() -> None:
+    """A password-bearing DSN was put in a k8s Secret — the exact anti-pattern `common/secrets.py` records.
+
+    The estate's rule is that app-tier secrets come from OpenBao through the Dapr secret store as the sole
+    source, fail-closed; k8s Secrets are for the infra tier (an owner's own credential, consumed by
+    `secretKeyRef` in a pod spec). A Dapr Component is app tier. So a Component may reference a secret, but
+    only by `secretKeyRef` WITH an `auth.secretStore` naming who resolves it — without that line Dapr looks
+    in Kubernetes Secrets, which is how the anti-pattern comes back in while looking correct.
+
+    It also forbids a literal credential in component metadata, which no `auth` block can redeem.
+    """
+    rendered = _helm_template()
+    components = [d for d in rendered.split("\n---") if re.search(r"^kind: Component$", d, re.M)]
+    assert components, "the chart rendered no Dapr components — this guard would pass vacuously"
+
+    for doc in components:
+        name = re.search(r"^  name: (\S+)", doc, re.M)
+        label = name.group(1) if name else "<unnamed>"
+        if "secretKeyRef" in doc:
+            assert re.search(r"^auth:\s*$", doc, re.M) and re.search(r"^\s+secretStore: \S", doc, re.M), (
+                f"component {label} uses secretKeyRef with no auth.secretStore, so Dapr resolves it from "
+                "a Kubernetes Secret instead of OpenBao"
+            )
+        literal = re.search(r"value: \"?[a-z]+://[^\"\s]*:[^\"\s@]+@", doc)
+        assert not literal, (
+            f"component {label} carries a credential inline: {literal.group(0)[:60]}… — it must be a "
+            "secretKeyRef resolved through the secret store"
+        )

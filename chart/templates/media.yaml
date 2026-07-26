@@ -29,7 +29,7 @@ metadata:
   name: {{ include "lance.fullname" $root }}-{{ $name }}
   labels: {{- include "lance.labels" $root | nindent 4 }}
 spec:
-  replicas: {{ $svc.replicas | default 1 }}
+  replicas: {{ (hasKey $svc "replicas") | ternary $svc.replicas 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: {{ $name }}, app.kubernetes.io/instance: {{ $root.Release.Name }} }
   template:

@@ -122,7 +122,7 @@ step "3/6 deploy the real KubeRay head + assert the fresh image"
 kubectl apply -f deploy/ray-lance-demo.yaml
 kubectl delete pods -l app=ray-lance-head --ignore-not-found >/dev/null 2>&1 || true
 kubectl rollout status deploy/ray-lance-head --timeout=300s
-RAY_RUNNING="$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[0].imageID}')"
+RAY_RUNNING="$(kubectl get pods -l app=ray-lance-head -o jsonpath='{.items[0].status.containerStatuses[?(@.name=="ray-head")].imageID}')"
 assert_fresh "$RAY_IMG" "$RAY_RUNNING"
 
 step "4/6 port-forward the services the suites talk to"

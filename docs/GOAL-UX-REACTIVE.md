@@ -103,19 +103,44 @@ So condition 10 now requires: zoom on text, and where a defect is suspected, mea
 
 ## Condition 14: the mistakes from 2026-07-26 do not recur
 
-Six defects were introduced or asserted falsely in one session, all by the same habit — acting before
-checking. Each gets a guard, and the guard is what closes this condition, not a promise.
+Twelve defects were introduced or asserted falsely in one session, all by the same habit — acting before
+checking. Each gets a guard, and **the guard is what closes this condition, not a promise** — so where a
+mistake was mechanically checkable it is now a test that fails on the mistake, not a rule I intend to
+follow. The three that became tests were each broken deliberately and watched to fail:
+
+```
+=== guard 1: reintroduce | default 1 ===
+E   chart/templates/gateway.yaml:92: replicas: {{ .Values.gateway.replicas | default 1 }}
+=== guard 2: reintroduce containerStatuses[0] ===
+E   scripts/ray_e2e_stack.sh:125: … jsonpath='{.items[0].status.containerStatuses[0].imageID}'
+=== guard 3: drop auth.secretStore from the state store ===
+E   AssertionError: component lance-statestore uses secretKeyRef with no auth.secretStore, so Dapr
+    resolves it from a Kubernetes Secret instead of OpenBao
+```
+
+Restored: `pytest tests/unit/test_invariants.py` → **34 passed**.
+
+Guard 1 found a live instance of its own class that had nothing to do with the original bug: nine
+`replicas: {{ … | default 1 }}` sites across the chart, every one of which silently rendered `1` for an
+operator's explicit `0`. Proven by rendering it both ways — `AFTER gateway Deployment -> replicas: 0`,
+`BEFORE gateway Deployment -> replicas: 1` — and the full render is otherwise byte-identical, so nothing
+in the estate's current shape moved.
 
 | What went wrong | Guard |
 | --------------- | ----- |
 | **`helm upgrade -f chart/values.yaml` wiped the release.** Every override went — the media plane, auth and runners were deleted from a live cluster. Recovered from revision 49 | Never upgrade from chart defaults. Always `helm get values lance-ns -o yaml > /tmp/v.yaml` first and upgrade with `-f /tmp/v.yaml`. Verify the pod count before and after |
-| **A password-bearing DSN was put in a k8s Secret**, which is the exact anti-pattern `services/common/secrets.py` opens by describing as an audit finding | Secrets for app services come from the Dapr secret store (OpenBao) as the sole source. `grep` the chart for a new password or DSN in `stringData` before deploying |
+| **A password-bearing DSN was put in a k8s Secret**, which is the exact anti-pattern `services/common/secrets.py` opens by describing as an audit finding | **Mechanical:** `test_every_dapr_component_resolves_its_secrets_through_the_secret_store` renders the chart and requires every `kind: Component` using `secretKeyRef` to declare `auth.secretStore` — without that line Dapr silently reads a k8s Secret instead — and forbids any inline `scheme://user:pass@` in component metadata |
 | **The state store was scoped to an app the secret store was not scoped to**, silently disabling actor hosting — the sidecar logged it and nothing failed loudly | The secret store's scopes are now derived from `stateStore.scopes`. After any scope change, grep the sidecar log for `isn't loaded` and `Actor state store not configured` |
 | **Notifications were designed without reading `services/lineage/schemas.py`**, where `RunStatus` already carried START/RUNNING/COMPLETE/FAIL with progress and error | Read the code before designing. For any new surface, first grep for an existing model, endpoint and client method |
 | **Deleting the OpenBao pod wiped every secret and took the estate down.** It runs `server -dev` — in-memory — and the seed Job runs only on install/upgrade, so a blanket `kubectl delete pod -l instance=lance-ns` destroyed all three secrets and nine pods then correctly fail-closed: `RuntimeError: secret 'rustfs-secret-key' unavailable from Dapr store 'lance-secrets'/'lance' — failing closed (store is the sole source)` | Never delete the OpenBao pod in devMode as part of a redeploy sweep. If it is deleted, re-seed before restarting anything: `bao kv put secret/lance …` with all three keys, then restart the dependents. The fail-closed behaviour is correct and is what made this visible in 90 seconds rather than as corrupted data |
-| **I read `containerStatuses[0]` and called three services "SAME"** — index 0 on a 2/2 pod is the Dapr SIDECAR, whose digest is identical across every service, which should itself have been the tell | Read the app container BY NAME (`[c for c in containerStatuses if c.name != 'daprd']`), never by index |
+| **I read `containerStatuses[0]` and called three services "SAME"** — index 0 on a 2/2 pod is the Dapr SIDECAR, whose digest is identical across every service, which should itself have been the tell | **Mechanical:** `test_no_pod_container_is_read_by_index` forbids `containerStatuses[0]` across `scripts/`, `tests/`, the chart and the Makefile. It found two live instances I had not made — `scripts/ray_e2e_stack.sh:125` and `Makefile:150` — correct only because the ray head happens to be 1/1 today, and wrong the moment a sidecar is injected. Both now select `[?(@.name=="ray-head")]` and return the same digest |
 | **The goal itself omitted six open tasks**, including `#97`, a ten-condition goal | Build the task list by diffing against the tracker with a script, not from memory. Condition 13 is that diff |
 | **Two false alarms in ten minutes** — the catalog was probed on port 8100 when it listens on 2333, then an idle event buffer was called a broken cursor | Read the service port from the Service object before probing. Distinguish "no data yet" from "broken" before reporting either |
+| **`| default 255` rendered 255 for an explicit `0`**, so `frontend.idleTimeoutSeconds: 0` looked applied while the connection cap never moved — a whole debugging round spent on a change that had not taken | **Mechanical:** `test_no_numeric_helm_default_can_swallow_an_explicit_zero` forbids `\| default <number>` chart-wide, because `0` is exactly the value an operator means deliberately — disabled, unbounded, scaled to nothing. The idiom is `(hasKey $parent "key") | ternary $parent.key <n>`, which tests presence |
+| **I fixed the wrong layer for notifications** — reordered `visibleRuns` in the shared component and nothing changed, because the trim to `NOTICE_WINDOW` happens SERVER-side in `feeds.remote.ts` before the component ever sees the list | Before reordering or filtering in a component, find where the list is TRUNCATED. A sort after a slice is decoration |
+| **I added a conditional column to `TableDetail` and dropped 6 of its 10 history versions** (`missing: 9, 8, 7, 5, 4, 3`) with `svelte-check` reporting 0 errors and 0 warnings | Reverted. This is the live argument for #119 rather than a note about it: the component's 60-assignment reset effect punishes casual edits, and no type-checker sees it. Any edit there is driven in a browser and the row count counted |
+| **`node --check` cannot validate a workflow script** (top-level `return` is legal there, not in a module) and my `&& echo "syntax OK"` printed regardless | Do not chain a success message onto a check whose failure mode you have not tested. Verify the checker rejects a known-bad input first |
+| **A `parallel()` barrier cost ~40 minutes** — three agents finished and sat waiting on the slowest, with no cross-item dependency to justify the wait | Use `pipeline()` unless a stage genuinely needs every prior result at once. "Cleaner code" is not a reason to synchronise |
 
 ## The polling measured live, 2026-07-26
 

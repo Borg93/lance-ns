@@ -11,7 +11,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-catalog
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.services.catalog.replicas | default 1 }}
+  replicas: {{ (hasKey .Values.services.catalog "replicas") | ternary .Values.services.catalog.replicas 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: catalog, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:
@@ -204,7 +204,7 @@ metadata:
   name: {{ include "lance.fullname" . }}-lineage
   labels: {{- include "lance.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.services.lineage.replicas | default 1 }}
+  replicas: {{ (hasKey .Values.services.lineage "replicas") | ternary .Values.services.lineage.replicas 1 }}
   selector:
     matchLabels: { app.kubernetes.io/component: lineage, app.kubernetes.io/instance: {{ .Release.Name }} }
   template:

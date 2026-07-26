@@ -3,29 +3,20 @@
 	// Styled on the estate design system (button variants + the success/warning/
 	// destructive status tokens) so it reads as part of the shared sidebar rather
 	// than a zone-private widget.
-	import { getHealth, type Health } from '@repo/media-api';
 	import { Popover } from 'bits-ui';
 	import { Activity } from '@lucide/svelte';
 	import { Button, buttonVariants, cn } from '@repo/ui';
+	import { serviceHealth } from '$lib/service-health.svelte';
 
-	let health = $state<Health | null>(null);
-	let lastError = $state<string | null>(null);
-
-	async function refresh() {
-		try {
-			health = await getHealth();
-			lastError = null;
-		} catch (e) {
-			lastError = e instanceof Error ? e.message : 'fetch failed';
-			health = null;
-		}
-	}
-
-	$effect(() => {
-		refresh();
-		const id = setInterval(refresh, 10_000);
-		return () => clearInterval(id);
-	});
+	// The poll moved into a zone-wide store. This badge was the ONLY reader of /api/health, which is how
+	// the search bar came to offer Vector and Hybrid on a deployment with no embedding service — the
+	// backend was reporting `embed.ok: false` the whole time and nothing but this dot consumed it. Sharing
+	// one store also means the dot and the mode selector cannot disagree; two independent fetches would
+	// eventually show a green dot beside a disabled mode.
+	$effect(() => serviceHealth.subscribe());
+	const health = $derived(serviceHealth.current);
+	const lastError = $derived(serviceHealth.error);
+	const refresh = () => serviceHealth.refresh();
 
 	/** Overall dot: success when both are up, warning when one is down, destructive
 	 *  when both are down or the backend is unreachable — the estate status tokens. */

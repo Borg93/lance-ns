@@ -11,6 +11,7 @@
 	import { activeView, type SearchSpec, type SearchMode } from '@repo/media-api';
 	import { untrack } from 'svelte';
 	import { voiceSearch } from '$lib/voice-search.svelte';
+	import { serviceHealth } from '$lib/service-health.svelte';
 	import { AudioLines, Loader2, Paperclip, Search, X, ImagePlus } from '@lucide/svelte';
 	import { on } from 'svelte/events';
 
@@ -93,8 +94,21 @@
 	// (a new embedding column) appears as its own option keyed by its space name,
 	// so a fresh embedding is searchable with no code change here. Image-encoder
 	// spaces use the Image attach affordance instead of a dial entry.
+	// A mode is offered when the DATASET declares it AND the DEPLOYMENT can serve it. Those are two
+	// different questions and only the first was being asked: this estate ran with no embedding service
+	// (the viewer's `embed_url` still defaulted to lance-media's sidecar-era 127.0.0.1:8001 and the chart
+	// never re-pointed it), so Vector and Hybrid were listed, selectable, and 503'd — measured through the
+	// ingress on 2026-07-26: `mode=fts` 200 with rows, `mode=semantic` and `mode=hybrid` 503 "embed …".
+	// A user picked one, got a failure toast, and learned nothing; the only signal was a permanently red
+	// dot in the sidebar corner.
+	//
+	// Disabled rather than hidden, on purpose. Hiding says "this dataset has no vectors", which is a
+	// different and wrong story — the corpus HAS 145k vector-bearing chunks. Disabled with the reason says
+	// "this exists but the encoder is down", which is the truth and is actionable.
+	const encoderModes = new Set(['meaning', 'both']);
 	const kindOptions = $derived.by<SelectOption[]>(() => {
 		const view = activeView();
+		const blocked = !serviceHealth.canEmbed;
 		const opts: SelectOption[] = [];
 		if (view.hasMode('fts')) opts.push({ value: 'keyword', label: 'Keyword' });
 		if (view.hasMode('semantic')) opts.push({ value: 'meaning', label: 'Vector' });
@@ -106,7 +120,12 @@
 				opts.push({ value: s.key, label: humanize(s.key) });
 			}
 		}
-		return opts;
+		// Every non-keyword, non-scene mode needs a query encoder; a declared embedding space does too.
+		return opts.map((o) =>
+			blocked && (encoderModes.has(o.value) || !['keyword', 'scene'].includes(o.value))
+				? { ...o, label: `${o.label} — encoder offline`, disabled: true }
+				: o,
+		);
 	});
 
 	// The first declared IMAGE-embedding space (any key — not just `visual`) — an
@@ -115,10 +134,13 @@
 	const imageSpace = $derived(activeView().vectorSpaces.find((s) => s.encoder === 'image') ?? null);
 	const hasVisual = $derived(imageSpace !== null);
 
-	// Keep `kind` valid if the dataset doesn't offer the current mode.
+	// Keep `kind` valid if the dataset doesn't offer the current mode — or if the deployment stopped being
+	// able to serve it (the encoder went down while a vector mode was selected). Falls back to the first
+	// SELECTABLE option, so it cannot land on a disabled one.
 	$effect(() => {
-		if (kindOptions.length > 0 && !kindOptions.some((o) => o.value === kind)) {
-			kind = kindOptions[0]!.value;
+		const usable = kindOptions.filter((o) => !o.disabled);
+		if (usable.length > 0 && !usable.some((o) => o.value === kind)) {
+			kind = usable[0]!.value;
 		}
 	});
 

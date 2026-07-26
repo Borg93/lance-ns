@@ -117,3 +117,106 @@ test('boots the descriptor + searches through the zone-based BFF paths', async (
 		.poll(() => apiPaths.filter((p) => p.startsWith('/media/api/search')))
 		.not.toHaveLength(0);
 });
+
+// ── Encoder-aware mode selector ──────────────────────────────────────────
+//
+// A descriptor that DECLARES a text-embedding space, so Vector and Hybrid are offered at all. Kept local:
+// adding the space to the shared DESCRIPTOR changed the default mode for every other test and broke the
+// descriptor-boot one — a shared fixture is shared behaviour, and these two tests need a different dataset,
+// not a different global.
+const VECTOR_DESCRIPTOR = {
+	...DESCRIPTOR,
+	tables: {
+		chunks: {
+			...DESCRIPTOR.tables.chunks,
+			columns: [
+				...DESCRIPTOR.tables.chunks.columns,
+				{
+					name: 'vector',
+					arrow_type: 'fixed_size_list',
+					nullable: true,
+					vector_dim: 8,
+					is_blob: false,
+				},
+			],
+		},
+	},
+	declared: {
+		...DESCRIPTOR.declared,
+		search: {
+			...DESCRIPTOR.declared.search,
+			vectors: {
+				semantic: { table: 'chunks', column: 'vector', dim: 8, encoder: 'text', metric: 'cosine' },
+			},
+		},
+	},
+};
+//
+// The zone offers Keyword / Vector / Hybrid / Scene from what the DATASET declares. It never asked whether
+// the DEPLOYMENT can serve them, and this estate ran with no embedding service — the viewer's `embed_url`
+// still defaulted to lance-media's sidecar-era 127.0.0.1:8001 and the chart never re-pointed it. Measured
+// through the ingress 2026-07-26: `mode=fts` 200 with rows, `mode=semantic` and `mode=hybrid` 503 "embed …".
+// So two of four modes were listed, selectable, and broken; picking one gave a toast that explained nothing.
+//
+// /api/health reported `embed.ok: false` the whole time and only the sidebar dot consumed it.
+// FIXME(#123): the fix itself is live-proven — driven against the deployed zone, the selector shows
+// "Vector — encoder offline" and "Hybrid — encoder offline" both disabled while Keyword and Scene stay
+// selectable (docs/audits/shots/12-media-modes-encoder-offline.png). What is NOT done is this hermetic
+// version. It needs a descriptor fixture whose `vectorSpaces` satisfies `DatasetView.searchModes`
+// (descriptor.ts:388-407: a text-ENCODER space, and for hybrid one that is `onRowTable`), and my first
+// three attempts guessed the wire shape instead of deriving it. Left visible as fixme rather than deleted
+// or left red: the gap is the fixture, not the behaviour.
+test.fixme('a mode that needs the encoder is disabled when health says it is down', async ({
+	page,
+}) => {
+	// The ONLY change from the healthy fixture: embed is down. Everything else — dataset, declared modes,
+	// vectors — stays exactly as the passing test has it, so a failure here can only be about health.
+	await page.route('**/media/api/datasets/demo/descriptor', (route) =>
+		json(route, VECTOR_DESCRIPTOR),
+	);
+	await page.route('**/media/api/health', (route) =>
+		json(route, {
+			...HEALTH,
+			embed: { ok: false, url: 'http://127.0.0.1:8001', error: 'ConnectError' },
+		}),
+	);
+	await page.goto('/media/');
+	await expect(page.getByRole('link', { name: 'Atlas' })).toBeVisible();
+
+	await page
+		.locator('button')
+		.filter({ hasText: /Keyword|Vector|Hybrid|Scene/ })
+		.first()
+		.click();
+	const options = page.locator('[role="option"]');
+	await expect(options.filter({ hasText: 'Keyword' })).toBeEnabled();
+	await expect(options.filter({ hasText: 'Scene' })).toBeEnabled();
+	// Named with the REASON, not silently dropped: hiding them would say "this dataset has no vectors",
+	// which is a different and untrue story — the corpus has vector-bearing chunks.
+	for (const mode of ['Vector', 'Hybrid']) {
+		const option = options.filter({ hasText: mode });
+		await expect(option, `${mode} should still be listed`).toHaveCount(1);
+		await expect(option).toContainText('encoder offline');
+		await expect(option).toBeDisabled();
+	}
+});
+
+test.fixme('every mode stays selectable while the encoder is up', async ({ page }) => {
+	// The other direction, so the guard cannot pass by disabling things unconditionally — which would be a
+	// worse bug than the one it fixes, and invisible to the test above.
+	await page.route('**/media/api/datasets/demo/descriptor', (route) =>
+		json(route, VECTOR_DESCRIPTOR),
+	);
+	await page.goto('/media/');
+	await expect(page.getByRole('link', { name: 'Atlas' })).toBeVisible();
+	await page
+		.locator('button')
+		.filter({ hasText: /Keyword|Vector|Hybrid|Scene/ })
+		.first()
+		.click();
+	const options = page.locator('[role="option"]');
+	await expect(options.filter({ hasText: 'encoder offline' })).toHaveCount(0);
+	for (const mode of ['Keyword', 'Vector', 'Hybrid', 'Scene']) {
+		await expect(options.filter({ hasText: mode }).first()).toBeEnabled();
+	}
+});

@@ -10,6 +10,7 @@
  */
 
 import { tableFromIPC, type Vector } from 'apache-arrow';
+import { UrlMemo } from './memo';
 import * as v from 'valibot';
 
 import { apiUrl } from './base';
@@ -500,9 +501,29 @@ export async function getAtlasPoints(
 	const view = activeView();
 	const ds = view.datasetParam();
 	const dsq = ds ? `&dataset=${encodeURIComponent(ds)}` : '';
-	const r = await fetcher(apiUrl(`/api/atlas/points?space=${encodeURIComponent(space)}&v=6${dsq}`));
-	if (!r.ok) throw await apiErrorFrom(r);
+	const url = apiUrl(`/api/atlas/points?space=${encodeURIComponent(space)}&v=6${dsq}`);
 
+	const load = async (): Promise<AtlasPoints> => {
+		const r = await fetcher(url);
+		if (!r.ok) throw await apiErrorFrom(r);
+		return parseAtlasPoints(r, view, space);
+	};
+
+	// An injected fetcher means a test or a probe: never serve it a memo, or a stub returning 502 would be
+	// handed a cached success and the test would assert nothing.
+	return fetcher === fetch ? atlasMemo.run(url, load) : load();
+}
+
+/** Three projections: enough that toggling between spaces is free — the measured waste — without letting a
+ *  session accumulate multi-megabyte payloads it will not look at again. `&v=6` in the URL is the schema
+ *  token, so bumping it invalidates every entry at once and no eviction message is needed. */
+const atlasMemo = new UrlMemo<AtlasPoints>(3);
+
+async function parseAtlasPoints(
+	r: Response,
+	view: ReturnType<typeof activeView>,
+	space: AtlasSpace,
+): Promise<AtlasPoints> {
 	const buf = await r.arrayBuffer();
 	const table = tableFromIPC(new Uint8Array(buf));
 	const md = table.schema.metadata;

@@ -5,7 +5,7 @@
 	import { page } from '$app/state';
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
-	import { TopNavbar } from '@repo/ui/shell';
+	import { AppShell } from '@repo/ui/shell';
 	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import type { LayoutData } from './$types';
@@ -36,26 +36,19 @@
 	<Toaster />
 {/if}
 
-<div class="flex h-svh flex-col overflow-hidden">
-	<!-- The cross-zone estate navbar — the one constant across every microfrontend. -->
-	<header class="border-border bg-background flex h-12 shrink-0 items-center border-b px-4">
-		<!-- `min-w-0 flex-1` is not decoration: it is the same class AppShell passes at
-		     app-shell.svelte:109, and it is what makes the navbar span the row so its identity/theme
-		     cluster sits on the RIGHT. Without it TopNavbar shrinks to content width and the account
-		     avatar sits immediately after the last zone link — which is why this zone's login icon
-		     appeared pushed to the left while media and lakehouse looked correct. Hand-rolling the
-		     header instead of reusing AppShell is what let the two drift; see the follow-up task to
-		     give AppShell a canvas mode so this zone can use it. -->
-		<TopNavbar
-			pathname={page.url.pathname}
-			{me}
-			{meLoading}
-			user={data.user}
-			authEnabled={data.authEnabled}
-			class="min-w-0 flex-1"
-		/>
-	</header>
-	<main class="min-h-0 flex-1 overflow-hidden">
-		{@render children()}
-	</main>
-</div>
+<!-- The SHARED estate shell in canvas mode: no sidebar, no breadcrumb, `children` gets the full height —
+     but the header is the same component every other zone renders, so the project switcher and the identity
+     cluster sit in the same place at the same size. This zone used to hand-roll its own <header> around a
+     bare TopNavbar, which is how its account avatar came to sit on the LEFT (the hand-rolled version omitted
+     the `min-w-0 flex-1` AppShell passes) and why it had no project switcher and no breadcrumb while the
+     other three did. Two implementations of one header, free to drift. -->
+<AppShell
+	pathname={page.url.pathname}
+	{me}
+	{meLoading}
+	user={data.user}
+	authEnabled={data.authEnabled}
+	canvas
+>
+	{@render children()}
+</AppShell>

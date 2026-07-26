@@ -39,6 +39,7 @@ is carried in conversation memory alone.
 | Lance OTel | Wire Lance's own observability into our OTLP→Collector→GreptimeDB path | #114 | NOT STARTED |
 | Navbar IA | Four triggers: Lakehouse (incl. lineage + admin), Search, Annotate, Compute (after rask) | — | **DONE** — Compute deliberately unrendered until the zone exists |
 | Settings surface | Break out auth / authz / audit into their own surface | #112 | Deferred by owner ("keep it as is") |
+| **Reactive data flow** | Every zone refreshes itself on new data/events — no hand-cranked polling, no "weird refresh back"; decide where state/cache/KV belongs | #102 | **MEASURED, largest remaining frontend item.** The right pattern exists in ONE file: `admin.remote.ts` uses `query.live()` — a server-side generator holding cursor + window + dedup, yielding only on change, with SvelteKit owning the stream and reconnect. Everywhere else polls from the client: **15 `setInterval` files** (lakehouse 13, media 1, engine 1), **0 `EventSource`**, **no client query cache**. So two panels on the same entity can disagree, and a mutation in one does not refresh another until a timer fires. See #102 for the pattern to standardise on and the one genuinely open question (event scoping for non-admins, since `/v1/events` is gated on `can_observe_events`) |
 
 ## Defects found and fixed (the actual output of this pass)
 

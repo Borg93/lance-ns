@@ -51,6 +51,7 @@
 		me = null,
 		meLoading = false,
 		sidebarFooter,
+		canvas = false,
 		children,
 	}: {
 		pathname?: string;
@@ -64,6 +65,17 @@
 		me?: Me | null;
 		/** True while the zone's fetchMe() is in flight — the navbar renders skeletons. */
 		meLoading?: boolean;
+		/** A zone whose CONTENT owns the whole viewport — an annotation canvas, not a page of panels.
+		 *  Drops the sidebar and the breadcrumb row and gives `children` the full height, while keeping the
+		 *  one thing every zone must share: this header, with the project switcher and the identity cluster
+		 *  in the same place at the same size.
+		 *
+		 *  It exists because the annotator hand-rolled its own `<header>` around a bare TopNavbar instead —
+		 *  two implementations of the estate header, free to drift, and they did: that zone's account avatar
+		 *  sat on the LEFT (it omitted the `min-w-0 flex-1` this file passes), and it had no project
+		 *  switcher and no breadcrumb while the other three did. A missing variant is why a zone forks the
+		 *  shell; adding the variant is the fix. */
+		canvas?: boolean;
 		/** Optional zone-owned sidebar footer (e.g. media's live service-status popover). */
 		sidebarFooter?: Snippet;
 		children: Snippet;
@@ -93,7 +105,9 @@
 </script>
 
 <Sidebar.Provider class="h-svh overflow-hidden">
-	<AppSidebar {pathname} {zoneNav} footer={sidebarFooter} />
+	{#if !canvas}
+		<AppSidebar {pathname} {zoneNav} footer={sidebarFooter} />
+	{/if}
 	<Sidebar.Inset class="flex min-w-0 flex-col overflow-hidden">
 		<header class="flex min-w-0 shrink-0 flex-col">
 			<!-- Row 1 — the estate navbar. Integrated (sidebar-07): no border, h-14 → h-12 when the
@@ -102,8 +116,11 @@
 			<div
 				class="flex h-14 min-w-0 shrink-0 items-center gap-2 px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
 			>
-				<Sidebar.Trigger class="text-muted-foreground hover:text-foreground -ml-1 shrink-0" />
-				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
+				{#if !canvas}
+					<!-- Nothing to toggle when there is no sidebar; the switcher and identity stay either way. -->
+					<Sidebar.Trigger class="text-muted-foreground hover:text-foreground -ml-1 shrink-0" />
+					<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
+				{/if}
 				<ProjectSwitcher project={shellProject} />
 				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
 				<TopNavbar {pathname} {me} {meLoading} {user} {authEnabled} class="min-w-0 flex-1" />
@@ -111,6 +128,7 @@
 			<!-- Row 2 — the breadcrumb bar. Its own slim row, so it can never be squeezed by (or
 			     overlap) the zone links; within the row, a trail too long to fit folds its MIDDLE
 			     behind the ellipsis menu (`collapseCrumbs`) instead of shrinking the current page. -->
+			{#if !canvas}
 			<nav
 				aria-label="Breadcrumb"
 				class="border-border/60 bg-muted/20 flex h-9 min-w-0 shrink-0 items-center overflow-hidden border-y px-4 text-sm"
@@ -176,6 +194,7 @@
 					{/each}
 				</ol>
 			</nav>
+			{/if}
 		</header>
 		<div
 			class="content-enter flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden"

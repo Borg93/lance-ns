@@ -1,4 +1,5 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { execFileSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 import { FRONTEND_ROOT, zoneDirs } from './manifest';
@@ -14,16 +15,60 @@ import { FRONTEND_ROOT, zoneDirs } from './manifest';
  *
  * So: every route must have a caller, somewhere in the zone or in a package the zone imports.
  */
-const grep = (pattern: string): string => {
-	try {
-		return execFileSync('git', ['grep', '-l', '-e', pattern, '--', 'components', 'packages'], {
-			cwd: FRONTEND_ROOT,
-			encoding: 'utf8',
-		});
-	} catch {
-		return ''; // git grep exits non-zero on no match
+/** Source files this gate may search: the zones and the packages they import, minus anything
+ *  generated. Deliberately a filesystem walk and NOT `git grep`.
+ *
+ *  `git grep` made this gate FAIL SILENTLY in CI. The frontend gate runs inside a Dagger container
+ *  where the source is COPIED, so there is no `.git` — git grep exits with "fatal: not a git
+ *  repository", the catch mapped that to "" and "" is indistinguishable from "no match". Every route
+ *  then reported "nothing calls it": 15 red assertions describing a problem that did not exist, from a
+ *  gate that could not tell "I found nothing" from "I could not look". Locally it passed, because
+ *  locally there IS a git tree — the worst shape of failure, since the gate is green exactly where
+ *  nobody needs it and red only where it cannot be debugged. (Found 2026-07-26 from a CI log.) */
+const SKIP_DIRS = new Set([
+	'node_modules',
+	'build',
+	'.svelte-kit',
+	'dist',
+	'.turbo',
+	'test-results',
+]);
+function sourceFiles(): string[] {
+	const out: string[] = [];
+	const walk = (dir: string): void => {
+		for (const e of readdirSync(dir, { withFileTypes: true })) {
+			if (e.isDirectory()) {
+				if (!SKIP_DIRS.has(e.name)) walk(resolve(dir, e.name));
+			} else if (/\.(ts|js|mjs|svelte)$/.test(e.name)) {
+				out.push(resolve(dir, e.name));
+			}
+		}
+	};
+	for (const root of ['components', 'packages']) walk(resolve(FRONTEND_ROOT, root));
+	return out;
+}
+
+/** Cached once: the walk is the same for every route assertion. */
+let cachedSources: { path: string; text: string }[] | null = null;
+function sources(): { path: string; text: string }[] {
+	if (cachedSources === null) {
+		cachedSources = sourceFiles().map((path) => ({ path, text: readFileSync(path, 'utf8') }));
+		// A gate that searched nothing must SHOUT, not pass: this is the failure mode above.
+		if (cachedSources.length === 0) {
+			throw new Error(
+				'bff-routes gate found no source files to search — refusing to report a pass',
+			);
+		}
 	}
-};
+	return cachedSources;
+}
+
+/** Files containing `pattern`, as paths relative to FRONTEND_ROOT (matching the old git-grep output). */
+const grep = (pattern: string): string =>
+	sources()
+		.filter((f) => f.text.includes(pattern))
+		.map((f) => f.path.slice(FRONTEND_ROOT.length + 1))
+		.join('\n');
 
 /** The route paths a zone serves, as URL prefixes (`/api/annotations/tags`). */
 function bffRoutes(zone: string): string[] {

@@ -29,10 +29,17 @@ separate bugs were fixed blind:
 Both now have gates in `@repo/zone-contract` (every workspace glob has a COPY line; `ZONES` equals the
 zone directories), but **a passing gate is not a passing build.**
 
-- [ ] All four images build: `home`, `lakehouse`, `media`, `annotator`
-- [ ] `docker run --rm lance-home:dev` starts and answers on :3000 (the HEALTHCHECK probes `/`)
-- [ ] The image runs as uid **10001**, non-root: `docker run --rm --entrypoint id lance-home:dev`
-- [ ] `annotator` is the big one (Pixi + OpenCV wasm) — check the image size is not a surprise
+- [x] All four images build: `home`, `lakehouse`, `media`, `annotator` — verified 2026-07-26; rebuilt again
+      the same day after the navbar/link fixes so the running images match the shipped source.
+- [x] `docker run --rm lance-home:dev` answers on :3000 — `home` 200 at `/`, `lakehouse` 307 → `/lakehouse/data`
+      → 200. NOTE the gate weakness found while doing this: the dockerfile HEALTHCHECK probes `/` and accepts
+      `<500`, so a BASED zone reports healthy while 404ing its own probe. Defensible (it proves the SSR server
+      is alive) but it never exercises the app.
+- [x] All four run as uid **10001**, non-root — checked per image, not just `home`.
+- [x] Sizes: home 1.32 / lakehouse 1.34 / media 1.35 / annotator 1.42 GB. The annotator is only ~8% above
+      the others, so the wasm is not the blowup this line feared. The surprise was elsewhere and is now
+      measured: of the annotator's 4179 KB gzipped CLIENT bundle, 3809 KB is the OpenCV chunk and it loads
+      only on first use of the magnetic tool — see the budget-gate defect in docs/GOAL-VERIFY-PULL.md.
 
 ## 2. Render the chart
 
@@ -44,14 +51,21 @@ make charts                   # the chart CI gate via Dagger (helm lint + render
 
 **Why:** the chart changed in three ways this session and none has been rendered.
 
-- [ ] Four `web-<zone>` Deployments + Services, no `web-data`/`web-lineage`/`web-models`/`web-admin`
+- [x] Exactly four `web-<zone>` Deployments, no stale ones. Related defect found and fixed while checking:
+      `chart/templates/network-policy.yaml:253` still admitted `web-admin` to the NATS monitor, so the rule
+      matched NO pod and the prod ops view could not reach varz/jsz — default-deny fails closed and silently
+      (`f4c545d`).
 - [ ] **Per-zone image tags** work: set `tag:` on one entry of `frontend.apps` and confirm only that
       Deployment moves. This is the whole point of the zone split — if one shared tag ships every zone,
       independent deploy buys nothing.
+      **Verified**: pinning only `media` to `probe-xyz` left the other three on `dev`.
 - [ ] **Per-zone media env is scoped**: `media` gets `VIEWER_API` + `ANNOTATOR_API` + `SEARCH_API`;
       `annotator` gets `VIEWER_API` + `ANNOTATOR_API` and **no `SEARCH_API`**. `lakehouse`/`home` get
       neither. (`chart/templates/frontends.yaml`)
-- [ ] Ingress: `/lakehouse`, `/media`, `/annotator` as Prefix rules, `/` → `home` last
+      **Verified on the LIVE pod env, not the template**: media = VIEWER+ANNOTATOR+SEARCH; annotator =
+      VIEWER+ANNOTATOR with no `SEARCH_API`; home/lakehouse neither.
+- [x] Ingress: `/lakehouse`, `/media`, `/annotator` Prefix + `/` catch-all last; base paths agree with
+      each zone's `svelte.config.js`.
 
 ## 3. Deploy and drive the composed estate
 
@@ -112,9 +126,21 @@ Deploy **auth ON + FGA ON**, then:
 bun run build && bunx turbo run test --filter=@repo/zone-contract
 ```
 
-- [ ] The four budgets in `packages/zone-contract/src/budget.json` still hold on CI's machine. They were
-      measured here; the gate skips silently when no build exists, so **confirm it actually ran** rather
-      than trusting a green.
+- [x] The budgets hold, and the doubt in this line turned out to be well placed — though the defect was
+      worse than "did it run". The gate was measuring the WRONG THING: it gzipped every emitted file and
+      called the total "what the browser pays to enter a zone", but 3809 of the annotator's 4179 KB is an
+      OpenCV chunk behind a dynamic `import()`. So the annotator read 87% of budget while its real entry
+      cost was 324 KB, and a change that DOUBLED the entry graph would have passed unnoticed. It also made
+      the estate unreadable: on entry cost media is the heaviest zone (927 KB) and the annotator the
+      second-lightest — the opposite of what `budget.json`'s own note and the test named "the annotator
+      split still pays for itself" both asserted. Now measured in two halves from Vite's manifest
+      (`imports` vs `dynamicImports`), both ceilinged, with the OpenCV-stays-lazy invariant as a named
+      test. Fixed in `56a6aad`; each new gate was broken deliberately and watched to fail.
+      Measured static/deferred gz KB: home 157/1, lakehouse 490/46, media 927/46, annotator 324/3854.
+- [x] "Confirm it actually ran rather than trusting a green" — the skip-when-unbuilt hole is still there by
+      design (`turbo run test` does not depend on `build`), but it is no longer silent in practice: the
+      run that matters is CI's, where `@repo/zone-contract#test` explicitly dependsOn all four zone builds
+      in `frontend/turbo.json`, so a build always exists there.
 
 ---
 

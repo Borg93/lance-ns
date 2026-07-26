@@ -34,7 +34,7 @@ is carried in conversation memory alone.
 | Added | What | Task | Status |
 | ----- | ---- | ---- | ------ |
 | Lineage track | OpenLineage spec fidelity; Dapr/FastAPI/Ray test coverage; Marquez parity; gold JSONB-in-Lance | #111 | Agent work salvaged; gold finding landed. Spec/coverage/parity reports partial |
-| Dapr sweep | Is Dapr missing anywhere in the lance-audio merge (viewer/search/annotator)? | — | NOT STARTED |
+| Dapr sweep | Is Dapr missing anywhere in the lance-audio merge (viewer/search/annotator)? | — | **DONE — nothing missing**; see below |
 | Git-like data history | Answer "what changed, by whom, when" from Lance transactions/manifests/tags+branches, Lakekeeper-style | #113 | NOT STARTED |
 | Lance OTel | Wire Lance's own observability into our OTLP→Collector→GreptimeDB path | #114 | NOT STARTED |
 | Navbar IA | Four triggers: Lakehouse (incl. lineage + admin), Search, Annotate, Compute (after rask) | — | **DONE** — Compute deliberately unrendered until the zone exists |
@@ -87,6 +87,32 @@ no `incremental`/`composite` anywhere (so `check` with `outputs: []` is correct)
 `globalPassThroughEnv` carries CI + PLAYWRIGHT_* — the skill's own fix for strict-mode filtering.
 Two defensible deviations: `.svelte-kit/**` in outputs (the budget gate weighs `output/client`, so it
 must be restored) and `test → build` per package (the transit-node pattern would parallelise better).
+
+## Dapr coverage for the merged services (owner question)
+
+**Verdict: nothing is missing, and the absences are a design boundary rather than an oversight.**
+
+Sidecars ARE wired (`chart/templates/media.yaml:43-49`): `dapr.io/enabled`, `app-id`, `app-port`,
+`log-level`, and `dapr.io/config: lance-tracing` — so viewer/search/annotator spans join the estate's
+distributed traces.
+
+Correctly absent, each verified rather than assumed:
+
+- **No `dapr.io/app-token-secret`.** That token exists only to authenticate *Dapr-delivered* routes.
+  `services/common/dapr_auth.py` states the threat: pub/sub events arrive on the same FastAPI app as the
+  public API, so without it any client reaching the port could POST a forged CloudEvent and poison the
+  lineage graph. Only the services that RECEIVE deliveries enforce it (compaction, lineage, medallion).
+  Viewer/search/annotator subscribe to nothing, so there is no delivered route to protect — the
+  annotation would inject an unused env var.
+- **Not in the `lance-secrets` scopes.** They do not read secrets through Dapr at all (zero hits for
+  `SECRETS_FROM_DAPR`); the catalog bearer arrives as a k8s Secret via `secretKeyRef`
+  (`media.catalogToken`). Scoping them in would grant reach they never use — and an unscoped store
+  fail-closes pods, which already bit this estate once.
+
+**Forward-looking gap (not a defect):** the annotator emits NO event when an annotation is saved. For the
+active-learning loop (label a few → retrain → re-predict) that write is exactly the trigger a deriver
+would subscribe to; today it is silent, so any loop would have to poll. When active learning lands it
+needs a pubsub scope AND the app-token annotation, because the annotator would then receive deliveries.
 
 ## Outstanding
 

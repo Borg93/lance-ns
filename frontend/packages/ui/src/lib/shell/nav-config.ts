@@ -216,6 +216,13 @@ export function topNav(estateAdmin: boolean): TopNavEntry[] {
 	const lakehouse: TopNavGroup[] = [
 		{ label: 'Catalog', items: DATA_ITEMS },
 		{ label: 'Models', items: MODEL_ITEMS },
+		// Lineage is an AREA of this zone (/lakehouse/lineage), exactly like Models
+		// (/lakehouse/models) — so it is a column, not a trigger of its own. It used to be top-level,
+		// which forced the Lakehouse trigger to carve lineage out of its own match to stop both
+		// lighting up, and left a bar where one entry was a zone and another was an area inside it
+		// with no way for a reader to tell why. Trigger = zone, column = area; the bar is now
+		// Lakehouse + Media, and a new route is a row in a column.
+		{ label: 'Lineage', items: LINEAGE_ITEMS },
 	];
 	if (estateAdmin) {
 		lakehouse.push(
@@ -227,18 +234,10 @@ export function topNav(estateAdmin: boolean): TopNavEntry[] {
 		{
 			title: 'Lakehouse',
 			href: '/lakehouse/data',
-			// The catalog, models and governance areas of the merged lakehouse zone — everything under
-			// /lakehouse EXCEPT the lineage area, which keeps its own trigger below. Without the
-			// exclusion both entries would light up together on every lineage route, since they now
-			// share a zone prefix.
-			match: (p) => under('/lakehouse')(p) && !under('/lakehouse/lineage')(p),
+			// The whole merged zone — catalog, models, lineage, and (for an admin) governance and
+			// operations. No carve-out: every area is a column of this one trigger.
+			match: under('/lakehouse'),
 			groups: lakehouse,
-		},
-		{
-			title: 'Lineage',
-			href: '/lakehouse/lineage',
-			match: under('/lakehouse/lineage'),
-			items: LINEAGE_ITEMS,
 		},
 		{
 			title: 'Media',

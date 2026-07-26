@@ -2,23 +2,20 @@ import { describe, expect, it } from 'vitest';
 import { exact, norm, seg, topNav, under, zoneOf } from '../src/lib/shell/nav-config';
 
 // The top-navbar IA + the shared matchers every zone builds its ZoneNav sidebar config with.
-// The bar groups by DOMAIN, not by zone, and since the merge the two are no longer the same thing:
-// Lakehouse and Lineage are two triggers over ONE zone (/lakehouse), while Media covers two. Lakehouse
-// gathers everything that describes or governs the estate (the catalog, the model registry, and —
-// estate-admin only — governance and operations), so the bar stays three words while the product
-// grows. A new route becomes a row in a panel column, never a new top-level entry.
+// ONE TRIGGER PER ZONE, one column per area. Lakehouse covers the whole merged /lakehouse zone — the
+// catalog, the model registry, lineage, and (estate-admin only) governance and operations — and Media
+// covers /media plus the annotator zone it hands off to. Lineage used to be its own trigger, which
+// made the bar mix a zone with an area inside that zone and forced Lakehouse to subtract the lineage
+// subtree from its own match; it is a column now. A new route becomes a row in a column, never a new
+// top-level entry.
 describe('topNav', () => {
 	it('exposes three domain triggers, in order, for a non-admin (fail-closed)', () => {
-		expect(topNav(false).map((e) => e.title)).toEqual(['Lakehouse', 'Lineage', 'Media']);
-		expect(topNav(false).map((e) => e.href)).toEqual([
-			'/lakehouse/data',
-			'/lakehouse/lineage',
-			'/media',
-		]);
+		expect(topNav(false).map((e) => e.title)).toEqual(['Lakehouse', 'Media']);
+		expect(topNav(false).map((e) => e.href)).toEqual(['/lakehouse/data', '/media']);
 	});
 
 	it('keeps the same three triggers for an estate admin — admin earns COLUMNS, not an entry', () => {
-		expect(topNav(true).map((e) => e.title)).toEqual(['Lakehouse', 'Lineage', 'Media']);
+		expect(topNav(true).map((e) => e.title)).toEqual(['Lakehouse', 'Media']);
 	});
 
 	it('gates governance + operations behind estate-admin, inside the Lakehouse panel', () => {
@@ -27,8 +24,8 @@ describe('topNav', () => {
 				.find((e) => e.title === 'Lakehouse')!
 				.groups!.map((g) => g.label);
 		// The governance guarantee, both polarities: a non-admin's panel cannot even name them.
-		expect(labels(false)).toEqual(['Catalog', 'Models']);
-		expect(labels(true)).toEqual(['Catalog', 'Models', 'Governance', 'Operations']);
+		expect(labels(false)).toEqual(['Catalog', 'Models', 'Lineage']);
+		expect(labels(true)).toEqual(['Catalog', 'Models', 'Lineage', 'Governance', 'Operations']);
 	});
 
 	it('never exposes Access as a navbar entry — it is one row of the Governance column', () => {
@@ -48,9 +45,9 @@ describe('topNav', () => {
 		expect(nonAdminHrefs.map((i) => i.href)).not.toContain('/lakehouse/admin/access');
 	});
 
-	it('active-match: Lakehouse lights across every area it covers, EXCEPT lineage', () => {
-		// Lakehouse and Lineage now share the /lakehouse prefix, so the Lakehouse trigger has to
-		// subtract the lineage subtree or both entries light up together on every lineage route.
+	it('active-match: Lakehouse lights across every area of its zone, lineage included', () => {
+		// One trigger owns the whole zone, so there is no subtree to subtract and no pair of entries
+		// that can light up together.
 		const lakehouse = topNav(true).find((e) => e.title === 'Lakehouse')!;
 		for (const p of [
 			'/lakehouse/data',
@@ -61,18 +58,19 @@ describe('topNav', () => {
 		]) {
 			expect(lakehouse.match(p)).toBe(true);
 		}
-		expect(lakehouse.match('/lakehouse/lineage')).toBe(false);
-		expect(lakehouse.match('/lakehouse/lineage/runs')).toBe(false);
+		expect(lakehouse.match('/lakehouse/lineage')).toBe(true);
+		expect(lakehouse.match('/lakehouse/lineage/runs')).toBe(true);
 		expect(lakehouse.match('/')).toBe(false);
 		expect(lakehouse.match('/media')).toBe(false);
 	});
 
-	it('active-match: Lineage claims its own area, and nothing else in the zone', () => {
-		const lineage = topNav(true).find((e) => e.title === 'Lineage')!;
-		expect(lineage.match('/lakehouse/lineage')).toBe(true);
-		expect(lineage.match('/lakehouse/lineage/runs')).toBe(true);
-		expect(lineage.match('/lakehouse/data/tables')).toBe(false);
-		expect(lineage.match('/lakehouse')).toBe(false);
+	it('lineage is a COLUMN of the lakehouse panel, never a trigger of its own', () => {
+		expect(topNav(true).map((e) => e.title)).not.toContain('Lineage');
+		const lakehouse = topNav(true).find((e) => e.title === 'Lakehouse')!;
+		expect(lakehouse.groups!.find((g) => g.label === 'Lineage')).toBeDefined();
+		// …and the trigger claims the lineage routes, so it lights up while you are in there.
+		expect(lakehouse.match('/lakehouse/lineage')).toBe(true);
+		expect(lakehouse.match('/lakehouse/lineage/runs')).toBe(true);
 	});
 
 	it('active-match: Media covers the annotator zone too — Annotate is its panel row', () => {
@@ -92,11 +90,7 @@ describe('topNav', () => {
 		expect(groups.Models).toEqual(['Registry', 'Experiments', 'Pipeline']);
 		expect(groups.Governance).toEqual(['Access', 'Tenants', 'Audit']);
 		expect(groups.Operations).toEqual(['Events', 'Streams', 'DLQ']);
-		expect(
-			topNav(false)
-				.find((e) => e.title === 'Lineage')!
-				.items?.map((i) => i.title),
-		).toEqual(['Datasets', 'Jobs', 'Runs', 'Columns', 'Graph']);
+		expect(groups.Lineage).toEqual(['Datasets', 'Jobs', 'Runs', 'Columns', 'Graph']);
 	});
 
 	it('every panel row is an absolute path with a description', () => {

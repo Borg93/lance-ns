@@ -22,6 +22,11 @@ const config = {
 		// svelte-adapter-bun serves assets at the based path too, so no
 		// base-stripping proxy is needed in front of the built server.
 		paths: { base: '/media', relative: false },
+		// Remote functions: the zone's run-notification feed is a `query.live` generator
+		// (`src/lib/live/feeds.remote.ts`). Without this the build fails outright rather than silently
+		// dropping the endpoint, which is the right failure — see @repo/zone-contract's
+		// notification-surface gate for why the bell must exist in every zone.
+		experimental: { remoteFunctions: true },
 		alias: {
 			$lib: './src/lib',
 			'$lib/*': './src/lib/*',

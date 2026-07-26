@@ -36,6 +36,10 @@
 		"./bff": {
 			"types": "./src/bff.ts",
 			"default": "./src/bff.ts"
+		},
+		"./runs-feed": {
+			"types": "./src/runs-feed.ts",
+			"default": "./src/runs-feed.ts"
 		}
 	},
 	"scripts": {

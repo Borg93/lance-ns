@@ -2,7 +2,17 @@ import { error } from '@sveltejs/kit';
 import { getRequestEvent, query } from '$app/server';
 import { env } from '$env/dynamic/private';
 import { fetchMe, parse } from '@repo/api';
+import {
+	KEEPALIVE_MS,
+	lineageAuthHeaders,
+	lineagePulse,
+	POLL_MS,
+	PROBE_TIMEOUT_MS,
+	type LineagePulse,
+} from '@repo/api/runs-feed';
 import * as v from 'valibot';
+
+export type { LineagePulse, RunNotice } from '@repo/api/runs-feed';
 
 /**
  * The zone's LIVE CURSORS — `query.live` generators that say *when the estate changed*, so a panel can
@@ -52,18 +62,10 @@ const LINEAGE_API = env.LINEAGE_API ?? 'http://localhost:8001';
 const CATALOG_API = env.CATALOG_API ?? 'http://localhost:2333';
 const NATS_MONITOR_API = env.NATS_MONITOR_API ?? '';
 
-/** How often the server re-probes its cursor. The browser only hears about it when it moved. */
-const POLL_MS = 5000;
-/** Re-yield an unmoved cursor at least this often, so an idle stream is never severed as idle. */
-const KEEPALIVE_MS = 20_000;
-/** A probe is a liveness signal, not a page load: bound it so a wedged upstream can't stall the loop. */
-const PROBE_TIMEOUT_MS = 4000;
-
 const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 // Parsed, not cast, at the wire boundary (the @repo/api parse-don't-validate rule) — a drift in the feed's
 // shape must fail here rather than silently read `undefined` as "nothing changed" forever.
-const LineageProbeSchema = v.object({ events: v.array(v.object({ seq: v.number() })) });
 const ControlProbeSchema = v.object({ cursor: v.number(), reset: v.boolean() });
 const JszProbeSchema = v.object({
 	streams: v.number(),
@@ -71,39 +73,14 @@ const JszProbeSchema = v.object({
 	messages: v.number(),
 });
 
-/**
- * The credential for a lineage read, mirroring `makeLineageProxy` exactly: the signed-in user's bearer
- * when there is one, else the READ-only service credential a governed stack uses to serve reads without a
- * per-user login. Anything else (auth-off dev) sends nothing. Duplicating the proxy's posture rather than
- * hopping through it keeps this a single upstream call, the way `admin.remote.ts` reaches the catalog.
- */
+/** This zone's credential for a lineage read — the shared posture, given this request's session. */
 function lineageHeaders(): Record<string, string> {
 	const { locals } = getRequestEvent();
-	const token = locals.session?.accessToken;
-	if (token) return { authorization: `Bearer ${token}` };
-	if (env.LINEAGE_SERVICE_TOKEN) {
-		return {
-			'dapr-api-token': env.LINEAGE_SERVICE_TOKEN,
-			'x-lance-service-identity': env.LINEAGE_SERVICE_ID ?? '',
-		};
-	}
-	return {};
-}
-
-/** The newest lineage `seq` THIS caller may see, or `null` when the probe did not resolve. */
-async function probeLineage(): Promise<number | null> {
-	const { fetch } = getRequestEvent();
-	try {
-		const res = await fetch(`${LINEAGE_API}/events?limit=1&summary=true`, {
-			headers: lineageHeaders(),
-			signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-		});
-		if (!res.ok) return null;
-		// An empty visible feed is a real answer (cursor 0), not a failure — it must settle the consumer.
-		return parse(LineageProbeSchema, await res.json()).events[0]?.seq ?? 0;
-	} catch {
-		return null;
-	}
+	return lineageAuthHeaders({
+		accessToken: locals.session?.accessToken,
+		serviceToken: env.LINEAGE_SERVICE_TOKEN,
+		serviceId: env.LINEAGE_SERVICE_ID,
+	});
 }
 
 /**
@@ -206,136 +183,15 @@ export const jetstreamCursor = query.live(async function* (): AsyncGenerator<num
 	}
 });
 
-/** One run as the notification surface renders it — the `/runs` row minus everything a bell never shows. */
-export interface RunNotice {
-	run_id: string;
-	job: string | null;
-	/** Who ran it. Dropped from the first version of this trim, and the bell rendered "unknown author" on
-	 *  every row — a field the surface displays is not an optional field. Caught by looking at the
-	 *  screenshot (`docs/audits/shots/live-notification-bell.png`), not by any assertion. */
-	author: string | null;
-	state: string | null;
-	progress_done: number | null;
-	progress_total: number | null;
-	error_message: string | null;
-	updated_at: string | null;
-	operation: string | null;
-}
-
-const RunsSchema = v.object({
-	runs: v.array(
-		v.object({
-			run_id: v.string(),
-			job: v.nullish(v.string()),
-			author: v.nullish(v.string()),
-			state: v.nullish(v.string()),
-			progress_done: v.nullish(v.number()),
-			progress_total: v.nullish(v.number()),
-			error_message: v.nullish(v.string()),
-			updated_at: v.nullish(v.string()),
-			operation: v.nullish(v.string()),
-		}),
-	),
-});
-
-/** How many runs the bell keeps. A notification surface is a recency window, not the run board. */
-const NOTICE_WINDOW = 20;
-
-/** One beat of the lineage plane: where the estate's event log stands, and the runs behind the bell. */
-export interface LineagePulse {
-	/** The newest event `seq` this caller may see — the cursor every lineage-backed surface re-reads on. */
-	cursor: number;
-	/** The most recently active runs, trimmed to {@link NOTICE_WINDOW} on the server. */
-	runs: RunNotice[];
-}
-
 /**
- * THE lineage feed — one stream carrying both the cursor and the notification runs, because the whole zone
- * needs exactly these two things and needs them to agree.
+ * THE lineage feed — the cursor every panel in this zone re-reads on, and the runs behind the shell's bell.
  *
- * It was two live queries at first: a cursor for the panels and a run feed for the shell's bell. Both are
- * mounted on every page (the bell lives in the root layout), so every page held two long-lived streams to
- * the same origin, each polling the same `/events` probe on its own clock. Measured against the e2e suite,
- * that peaked at ~30 probes/second — two per page, times pages whose server-side generator outlives the
- * closed page by a poll or two. Merging them halves that at a stroke, and it removes a subtler problem
- * for free: with separate cursors the bell and the table under it could be a poll apart on the same
- * estate, which is the exact complaint this whole change set exists to fix.
- *
- * `/runs` is the right backend for the notification half and needed nothing new — it folds each run's
- * lifecycle into a current state (START → RUNNING → COMPLETE/FAIL) with progress and error text, and it is
- * governed per subject (a run is shown only if the caller `can_get_metadata` on every dataset it wrote).
- * What did not exist was any surface at all.
- *
- * The runs are trimmed HERE, not in the browser: `/runs` measured 330_103 bytes on the live estate (875
- * runs), and a bell renders the newest {@link NOTICE_WINDOW} rows and the nine fields it displays. That is the
- * part of "server-side" that pays for itself.
+ * The generator itself is `@repo/api/runs-feed`, shared with the other three zones: the bell shipped in one
+ * zone out of four because the COMPONENT was shared and the TRANSPORT was not. What stays here is the
+ * SvelteKit binding, which cannot be shared — `query.live` needs an endpoint in this app, and
+ * `getRequestEvent` only exists inside it.
  */
-export const lineageFeed = query.live(async function* (): AsyncGenerator<LineagePulse> {
+export const lineageFeed = query.live(function (): AsyncGenerator<LineagePulse> {
 	const { fetch } = getRequestEvent();
-	let cursor = -1;
-	let sent = false;
-	let sentAt = 0;
-
-	async function read(): Promise<RunNotice[] | null> {
-		try {
-			const res = await fetch(`${LINEAGE_API}/runs`, {
-				headers: lineageHeaders(),
-				signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-			});
-			if (!res.ok) return null;
-			const board = parse(RunsSchema, await res.json());
-			// FAILURES FIRST, then newest — and the order matters HERE, not only in the surface, because
-			// this is where the list is CUT. Measured against the live estate: 891 runs with the first
-			// FAIL at position 445, so a recency-only trim to 20 handed the bell twenty successes and the
-			// panel could not have shown a failure however it sorted them. Fixing the component's ordering
-			// alone changed nothing, which is what made the layering obvious.
-			const failed = (r: { state?: string | null }) =>
-				(r.state ?? '').toUpperCase() === 'FAIL' || (r.state ?? '').toUpperCase() === 'ABORT';
-			return board.runs
-				.slice()
-				.sort((a, b) => {
-					if (failed(a) !== failed(b)) return failed(a) ? -1 : 1;
-					return (b.updated_at ?? '').localeCompare(a.updated_at ?? '');
-				})
-				.slice(0, NOTICE_WINDOW)
-				.map((r) => ({
-					run_id: r.run_id,
-					job: r.job ?? null,
-					author: r.author ?? null,
-					state: r.state ?? null,
-					progress_done: r.progress_done ?? null,
-					progress_total: r.progress_total ?? null,
-					error_message: r.error_message ?? null,
-					updated_at: r.updated_at ?? null,
-					operation: r.operation ?? null,
-				}));
-		} catch {
-			return null;
-		}
-	}
-
-	let last: RunNotice[] = [];
-	for (;;) {
-		const seq = await probeLineage();
-		const moved = seq !== null && seq !== cursor;
-		if (seq !== null) cursor = seq;
-		const now = Date.now();
-		// The run board is re-read only when the estate moved (or on the very first pass, so consumers
-		// settle into an honest empty state instead of hanging in `pending`). Anything else is a
-		// keepalive: it re-sends the LAST pulse so the stream is never severed as idle, and because
-		// `cursor` is then an unchanged number, no panel's `$effect` re-runs on it.
-		if (moved || !sent) {
-			const runs = await read();
-			if (runs !== null) last = runs;
-			if (runs !== null || !sent) {
-				sent = true;
-				sentAt = now;
-				yield { cursor: Math.max(cursor, 0), runs: last };
-			}
-		} else if (now - sentAt >= KEEPALIVE_MS) {
-			sentAt = now;
-			yield { cursor: Math.max(cursor, 0), runs: last };
-		}
-		await sleep(POLL_MS);
-	}
+	return lineagePulse({ lineageApi: LINEAGE_API, fetch, headers: lineageHeaders });
 });

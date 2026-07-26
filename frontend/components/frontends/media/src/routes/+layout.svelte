@@ -7,6 +7,7 @@
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
 	import { AppShell } from '@repo/ui/shell';
+	import { lineageFeed, type LineagePulse } from '$lib/live/feeds.remote';
 	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import { MEDIA_ZONE_NAV } from '$lib/nav';
@@ -15,6 +16,22 @@
 	import type { LayoutData } from './$types';
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
+
+	// The navbar's notification bell (@repo/ui's NotificationCenter, mounted by AppShell). The shell owns
+	// the surface and never fetches — the zone owns the transport — and the transport is now shared
+	// (`@repo/api/runs-feed`), so a run that started, finished or FAILED reaches whoever is in this zone
+	// rather than only whoever happens to be on the run board. Opened ON MOUNT, never at init: a live
+	// query touched during render makes the SERVER hold the page until the feed's first value.
+	let feed = $state<{ current: LineagePulse | undefined } | null>(null);
+	onMount(() => {
+		feed = lineageFeed();
+	});
+	// `.current` is undefined until the first value lands; an empty feed and a not-yet-connected one both
+	// render as "no notifications", which is the honest reading of both.
+	const notifications = $derived({
+		runs: feed?.current?.runs ?? [],
+		allHref: '/lakehouse/lineage/runs',
+	});
 
 	// The frozen /v1/me identity for the navbar, fetched browser-side through this zone's
 	// bearer-forwarding /capi/v1/me pass-through (skeleton pills while in flight; null = signed
@@ -63,6 +80,7 @@
 	zoneNav={MEDIA_ZONE_NAV}
 	{me}
 	{meLoading}
+	{notifications}
 >
 	{#snippet sidebarFooter()}
 		<StatusBadge />

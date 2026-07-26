@@ -23,6 +23,11 @@ const config = {
 		// session per request, and the zone's OWN BFF routes serve `${base}/api/*`
 		// (src/routes/api/**) — the Pixi canvas page opts out per-page (+page.ts).
 		adapter: adapter(),
+		// Remote functions: the zone's run-notification feed is a `query.live` generator
+		// (`src/lib/live/feeds.remote.ts`). Without this the build fails outright rather than silently
+		// dropping the endpoint, which is the right failure — see @repo/zone-contract's
+		// notification-surface gate for why the bell must exist in every zone.
+		experimental: { remoteFunctions: true },
 		alias: {
 			$lib: './src/lib',
 			'$lib/*': './src/lib/*',

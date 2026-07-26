@@ -9,6 +9,7 @@
 		unreadRuns,
 		visibleRuns,
 		type RunStatusLike,
+		seenOnClose,
 	} from '../runs/run-status.js';
 
 	// The estate's notification surface, in @repo/ui so every zone gets the SAME one — the header was
@@ -64,7 +65,12 @@
 	// Read on CLOSE, not on open: while the panel is open the new rows keep their unread mark, so the
 	// viewer can see WHICH ones are new; the count clears once they have had the chance to look.
 	function markSeen() {
-		const ids = visible.map(runNotificationId);
+		// Only what was actually RENDERED. `visible` is the full ordered set; the list renders
+		// `slice(0, limit)` and says "N older runs not shown". Marking the unsliced list meant opening and
+		// closing the bell marked all 13 read — including a FAILED run pushed past the cap that the user
+		// never saw — and `seen` is what a zone persists per subject, so the failure was gone for good.
+		// That is the exact outcome this component exists to prevent.
+		const ids = seenOnClose(visible, limit);
 		const next = [...new Set([...seen, ...ids])];
 		if (next.length === seen.length) return;
 		seen = next;

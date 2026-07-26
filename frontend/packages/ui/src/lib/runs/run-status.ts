@@ -124,3 +124,17 @@ export function unreadRuns(
 	const read = new Set(seen);
 	return visibleRuns(runs, dismissed).filter((run) => !read.has(runNotificationId(run)));
 }
+
+/**
+ * The notification ids a close may mark as read: only the rows the panel actually RENDERED.
+ *
+ * The list renders `slice(0, limit)` and tells the reader "N older runs not shown". Marking the whole
+ * ordered set instead meant that opening and closing the bell marked every run read — proven in a browser
+ * with 13 runs where a FAILED one had been pushed past the cap: the badge cleared, the harness reported
+ * `seen: 13`, and the failure the user never saw was gone for good, because `seen` is what a zone persists
+ * per subject. That is the precise outcome the surface exists to prevent, so the cap belongs here, beside
+ * the ordering, rather than inline in a component where no test can reach it.
+ */
+export function seenOnClose(runs: RunStatusLike[], limit: number): string[] {
+	return runs.slice(0, Math.max(0, limit)).map(runNotificationId);
+}

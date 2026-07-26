@@ -9,6 +9,7 @@ import {
 	unreadRuns,
 	visibleRuns,
 	type RunStatusLike,
+	seenOnClose,
 } from '../src/lib/runs/run-status.js';
 
 // The run shape and the rules the notification surface is built on. The rendering itself is asserted
@@ -144,5 +145,34 @@ describe('visibleRuns / unreadRuns', () => {
 	it('counts only what the viewer has not read', () => {
 		expect(unreadRuns(runs, ['old@COMPLETE']).map((r) => r.run_id)).toEqual(['new']);
 		expect(unreadRuns(runs, ['old@COMPLETE', 'new@FAIL'])).toHaveLength(0);
+	});
+});
+
+describe('seenOnClose', () => {
+	const run = (id: string, state: string): RunStatusLike =>
+		({
+			run_id: id,
+			state,
+			job: id,
+			updated_at: `2026-07-26T00:00:${id.padStart(2, '0')}Z`,
+		}) as RunStatusLike;
+
+	it('marks only the rows the panel rendered, never the ones it said were not shown', () => {
+		// 13 runs, a cap of 8, and the failure pushed past it — the exact shape proven broken in a browser:
+		// the badge cleared, `seen` recorded all 13, and the failed run the user never saw was gone.
+		const runs = [...Array(12)].map((_, i) => run(String(i), 'COMPLETE'));
+		runs.push(run('12', 'FAIL'));
+
+		const ids = seenOnClose(runs, 8);
+
+		expect(ids).toHaveLength(8);
+		expect(ids).not.toContain(runNotificationId(runs[12]!)); // the FAIL, past the cap
+		expect(new Set(ids).size).toBe(8);
+	});
+
+	it('a limit larger than the list marks everything, and a zero limit marks nothing', () => {
+		const runs = [run('1', 'COMPLETE'), run('2', 'FAIL')];
+		expect(seenOnClose(runs, 99)).toHaveLength(2);
+		expect(seenOnClose(runs, 0)).toEqual([]);
 	});
 });

@@ -14,8 +14,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Callable, Iterator
-from contextlib import suppress
+from contextlib import contextmanager, suppress
 from dataclasses import dataclass
 from typing import Any
 
@@ -855,13 +856,53 @@ def _json_arrow_to_pa_type(dt: dict[str, Any]) -> pa.DataType:
     raise InvalidInputError(f"unsupported alter_columns data_type: {dt.get('type')!r}")
 
 
+#: Lance prefixes a caller-expression failure with this, whatever exception class it picks.
+_USER_INPUT_MARKER = "Invalid user input"
+#: Lance appends the Rust source location that raised — ``, /home/runner/work/lance/lance/rust/…:150:14``.
+#: Useful in a server log, noise in an API response, and it publishes the build path of a vendored library
+#: to every caller. Trimmed from the detail; the log line still carries the original exception.
+_RUST_SOURCE_SUFFIX = re.compile(r",\s*/\S+\.rs:\d+:\d+\s*\.?\s*$")
+
+
+@contextmanager
+def _user_sql(action: str) -> Iterator[None]:
+    """Translate Lance's expression-parse failures into a 4xx instead of letting them escape as a 500.
+
+    ``updates`` and ``predicate`` are SQL fragments the CALLER wrote, and Lance validates them at execution
+    time — an unknown column or a syntax slip surfaces as ``Invalid user input: Schema error: No field named
+    "Z". Valid fields are id, v.``. Uncaught, that became a 500 ``InternalError``, which is wrong in three
+    ways: it tells the caller the server broke when their expression was wrong, it hides Lance's genuinely
+    useful message (it lists the valid fields) behind a generic body, and it spends the error budget — a 500
+    is what alerting watches — on a client mistake. Found live 2026-07-26 driving
+    ``POST /v1/table/{id}/update`` with an unquoted string literal, which Lance reads as a column reference.
+
+    Discriminates on Lance's ``Invalid user input`` MARKER, not on the exception class, because the class is
+    not consistent across operations: the same bad predicate is a ``ValueError`` out of ``update()`` and an
+    ``OSError`` out of ``delete()`` (both observed here, identical message). Keying on the type would have
+    fixed update and left delete throwing 500s — and keying on ``except Exception`` would flip a genuine
+    object-store outage into "fix your query". Anything without the marker propagates untouched.
+    """
+    try:
+        yield
+    except (ValueError, OSError) as exc:
+        message = str(exc)
+        if _USER_INPUT_MARKER not in message:
+            raise  # a storage / IO failure: a real 5xx, and it stays one
+        # Keep Lance's text — it names the columns that do exist — minus its prefix, which we replace, and
+        # minus the Rust source location, which the caller can do nothing with.
+        detail = _RUST_SOURCE_SUFFIX.sub("", message.split(_USER_INPUT_MARKER, 1)[1].lstrip(": ")).strip()
+        log.info("user_sql_rejected", extra={"action": action, "error": message})
+        raise InvalidInputError(f"{action}: {detail}") from exc
+
+
 def update_table(ns: LanceNamespace, so: StorageOptions, req: UpdateTableRequest) -> UpdateTableResponse:
     """Apply SQL ``[path, expression]`` updates to matching rows."""
     table_id = _table_id(req)
     updates = dict(req.updates or [])
     if not updates:
         raise InvalidInputError("update requires at least one [path, expression] pair")
-    result = open_dataset(ns, so, table_id).update(updates, where=req.predicate)
+    with _user_sql("invalid update expression or predicate"):
+        result = open_dataset(ns, so, table_id).update(updates, where=req.predicate)
     # pylance's update() returns an UpdateResult TypedDict (a plain dict at runtime); the row count is
     # `num_rows_updated`. (The previous `getattr(result, "num_updated_rows", ...)` was wrong twice — attr
     # access on a dict + wrong key — so updated_rows was hard-wired to 0 on every successful update.)
@@ -876,7 +917,8 @@ def delete_from_table(
 ) -> DeleteFromTableResponse:
     """Delete rows matching the request predicate."""
     table_id = _table_id(req)
-    open_dataset(ns, so, table_id).delete(req.predicate)
+    with _user_sql("invalid delete predicate"):
+        open_dataset(ns, so, table_id).delete(req.predicate)
     return DeleteFromTableResponse(version=_version(ns, so, table_id))
 
 

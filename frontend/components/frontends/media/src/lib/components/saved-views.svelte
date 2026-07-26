@@ -19,9 +19,15 @@
 	const dataset = $derived(activeView().datasetParam() ?? '');
 	const views = $derived(savedViews.forDataset(dataset));
 
-	function save(): void {
+	// The store loads once per session; mounting it here rather than in the layout keeps the fetch with
+	// the only surface that reads it. `load()` is idempotent, so a second popover mount just re-reads.
+	$effect(() => {
+		if (!savedViews.ready && savedViews.unreadable === null) void savedViews.load();
+	});
+
+	async function save(): Promise<void> {
 		if (!name.trim()) return;
-		savedViews.save(name, spec, dataset);
+		await savedViews.save(name, spec, dataset);
 		name = '';
 	}
 	function apply(s: SearchSpec): void {
@@ -52,12 +58,24 @@
 					class="h-7 rounded-lg text-xs"
 					onkeydown={(e) => e.key === 'Enter' && save()}
 				/>
-				<Button size="icon-sm" disabled={!name.trim()} onclick={save} title="Save view">
+				<Button
+					size="icon-sm"
+					disabled={!name.trim() || !savedViews.ready}
+					onclick={save}
+					title={savedViews.ready ? 'Save view' : 'Saving is disabled until your views load'}
+				>
 					<Check />
 				</Button>
 			</div>
 
-			{#if views.length}
+			{#if savedViews.unreadable}
+				<!-- The point of the whole change: an empty list and an unreadable one look identical, and
+				     only one of them means the user's views are still there. Saving stays disabled above, so
+				     nothing can be written over a record we could not read. -->
+				<p class="text-destructive mt-2 text-xs">
+					{savedViews.unreadable}
+				</p>
+			{:else if views.length}
 				<ul class="mt-2 flex flex-col gap-0.5">
 					{#each views as v (v.name)}
 						<li class="hover:bg-muted/60 flex items-center gap-1 rounded-md">
@@ -74,7 +92,7 @@
 								class="hover:text-destructive"
 								title="Delete view"
 								aria-label="Delete view {v.name}"
-								onclick={() => savedViews.remove(v.name, dataset)}
+								onclick={() => void savedViews.remove(v.name, dataset)}
 							>
 								<X />
 							</Button>

@@ -261,6 +261,21 @@ export class SharedPayloadCache {
 			const value = upstream.headers.get(name);
 			if (value !== null) headers[name] = value;
 		}
+		// The upstream's `cache-control` is about OUR shared cache, not about the browser's or any proxy
+		// between us and it. This route requires a session, so replaying `public, max-age=300` verbatim
+		// invites a shared cache in front of the estate to store an authorised payload and serve it to the
+		// next caller — including one whose request would have been refused. No leak today (the Ingress
+		// runs no `proxy_cache`), and wrong the moment anyone adds one, which the scaling note in this
+		// module's own header recommends. `private` still lets the requesting browser reuse it.
+		if (headers['cache-control'] !== undefined) {
+			headers['cache-control'] = headers['cache-control']
+				.split(',')
+				.map((token) => (token.trim().toLowerCase() === 'public' ? 'private' : token.trim()))
+				.join(', ');
+			if (!/\bprivate\b/.test(headers['cache-control'])) {
+				headers['cache-control'] = `private, ${headers['cache-control']}`;
+			}
+		}
 		const entry: Entry = { bytes, headers, expiresAt: this.#now() + (ttl ?? 0) };
 
 		if (ttl === null) {

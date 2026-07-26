@@ -314,3 +314,41 @@ describe('SharedPayloadCache — the memory budget', () => {
 		expect(cache.stats().entries).toBe(0);
 	});
 });
+
+describe('SharedPayloadCache — what it tells the NEXT cache', () => {
+	it('never replays `public` on a response this route gated behind a session', async () => {
+		// The upstream's cache-control describes OUR shared cache, not a proxy between us and the browser.
+		// Replaying `public, max-age=300` verbatim invites any shared cache in front of the estate to store
+		// an authorised payload and hand it to a caller who would have been refused. No leak today — the
+		// Ingress runs no proxy_cache — and wrong the moment one is added, which this module's own scaling
+		// note recommends.
+		const cache = new SharedPayloadCache({ maxBytes: 1 << 20 });
+		const load = upstream(PAYLOAD, { headers: { 'cache-control': 'public, max-age=300' } });
+
+		const res = await cache.serve(KEY, { authorize: allow, load, maxAgeMs: CEILING });
+
+		expect(res.status).toBe(200);
+		expect(res.headers.get('cache-control')).toBe('private, max-age=300');
+		expect(res.headers.get('cache-control')).not.toContain('public');
+	});
+
+	it('and the warm replay says private too — a hit is the same body', async () => {
+		const cache = new SharedPayloadCache({ maxBytes: 1 << 20 });
+		const load = upstream(PAYLOAD, { headers: { 'cache-control': 'public, max-age=300' } });
+
+		await cache.serve(KEY, { authorize: allow, load, maxAgeMs: CEILING });
+		const warm = await cache.serve(KEY, { authorize: allow, load, maxAgeMs: CEILING });
+
+		expect(warm.headers.get('x-cache')).toBe('hit');
+		expect(warm.headers.get('cache-control')).toBe('private, max-age=300');
+	});
+
+	it('a max-age with no directive still gains private — silence is not permission', async () => {
+		const cache = new SharedPayloadCache({ maxBytes: 1 << 20 });
+		const load = upstream(PAYLOAD, { headers: { 'cache-control': 'max-age=120' } });
+
+		const res = await cache.serve(KEY, { authorize: allow, load, maxAgeMs: CEILING });
+
+		expect(res.headers.get('cache-control')).toBe('private, max-age=120');
+	});
+});

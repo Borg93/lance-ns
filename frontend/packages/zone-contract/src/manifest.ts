@@ -43,8 +43,27 @@ export function zoneDirs(): string[] {
 	return readdirSync(resolve(FRONTEND_ROOT, 'components/frontends'), { withFileTypes: true })
 		.filter((e) => e.isDirectory())
 		.map((e) => e.name)
-		.filter((name) => existsSync(resolve(FRONTEND_ROOT, 'components/frontends', name, 'package.json')))
+		.filter((name) =>
+			existsSync(resolve(FRONTEND_ROOT, 'components/frontends', name, 'package.json')),
+		)
 		.sort();
+}
+
+/** Does this package hold anything oxlint would lint? Decides which lint command it must declare:
+ *  plain `oxlint .` exits 1 on a package with no matching file, so a config-only package (two JSON
+ *  files) needs `--no-error-on-unmatched-pattern` — and a package WITH source must not use that flag,
+ *  or a zone whose paths stopped matching would pass silently. Build output is skipped: it is
+ *  gitignored, absent in CI, and would otherwise make the answer depend on whether someone had run a
+ *  build. */
+export function hasLintableFiles(pkgDir: string): boolean {
+	const SKIP = new Set(['node_modules', 'build', '.svelte-kit', 'dist', '.turbo']);
+	const walk = (dir: string): boolean =>
+		readdirSync(dir, { withFileTypes: true }).some((e) =>
+			e.isDirectory()
+				? !SKIP.has(e.name) && walk(resolve(dir, e.name))
+				: /\.(ts|js|mjs|svelte)$/.test(e.name),
+		);
+	return existsSync(pkgDir) && walk(pkgDir);
 }
 
 /** The `paths.base` a zone serves under, from its svelte.config.js. `''` for the catch-all zone. */

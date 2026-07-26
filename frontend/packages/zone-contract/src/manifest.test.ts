@@ -5,6 +5,7 @@ import {
 	chartApps,
 	devScript,
 	FRONTEND_ROOT,
+	hasLintableFiles,
 	REPO_ROOT,
 	packageName,
 	routingConfig,
@@ -130,8 +131,17 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 	// other extension to oxfmt, and oxlint hosts the Svelte rules through @rsvelte/oxlint-plugin — so a
 	// package that still spawns eslint or prettier is running a toolchain that is no longer installed,
 	// and `--no-error-on-unmatched-pattern` would make that look like a pass.
+	// `--no-error-on-unmatched-pattern` is allowed for EXACTLY the packages that have no lintable file
+	// (a config-only package like @repo/config ships two JSON files; plain `oxlint .` exits 1 there, so
+	// without this the package must drop the script — the omission the next assertion forbids). It is
+	// FORBIDDEN for every package that does have source, which is the masking case the comment above
+	// warns about: the filesystem decides which command a package must declare, so the flag can never
+	// hide a zone whose paths stopped matching.
+	const lintFor = (pkg: string) =>
+		hasLintableFiles(resolve(FRONTEND_ROOT, pkg))
+			? 'oxlint .'
+			: 'oxlint --no-error-on-unmatched-pattern .';
 	const EXPECTED: Record<string, string> = {
-		lint: 'oxlint .',
 		fmt: 'rsvelte-fmt .',
 		'fmt:check': 'rsvelte-fmt --check .',
 	};
@@ -145,7 +155,7 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 		// toolchain while every gate stays green. @repo/config was exactly that (found 2026-07-25:
 		// two JSON files, no scripts, never format-checked). A package with genuinely nothing to
 		// check still declares them; oxlint/rsvelte-fmt over zero matching files is free.
-		for (const [task, expected] of Object.entries(EXPECTED)) {
+		for (const [task, expected] of Object.entries({ ...EXPECTED, lint: lintFor(pkg) })) {
 			expect(scripts[task], `${pkg} is missing the shared ${task} script`).toBe(expected);
 		}
 		for (const [task, script] of Object.entries(scripts)) {

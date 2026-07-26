@@ -12,39 +12,46 @@ to reach the goal."* This file existed and was current, but answering that quest
 it — so this is the ledger. One row per thing the owner asked for, newest asks last. Detail for every row
 is further down or in the linked audit.
 
-**The six original conditions are closed.** What is open is the fourteen asks added while they were being
-closed, and they are a bigger body of work than the original goal was — which is why it feels far away.
-That is not scope creep to complain about; it is the pass finding real gaps. But it does mean "the goal"
-now means two different things, and only the second one is still moving.
+**The six original conditions are closed, and so are eleven of the fourteen asks added after them.**
+Three rows are still open on purpose and say why: #111's remaining lineage parity, #122's build (designed,
+slices listed), and #103's media plane on the governed warehouse, which predates this goal entirely.
+"The goal" therefore means two things, and the second one — the UX track — is the one still moving.
+
+Last made true: **2026-07-26**, after the twenty-condition UX pass. Every "Closed" row below cites the
+command output, commit or screenshot that closed it; none of them is closed on my say-so.
 
 | Ask | Task | State | What remains |
 | --- | ---- | ----- | ------------ |
 | Original conditions 1–6 | — | **Closed** | Nothing. Fractions and evidence at the foot of this file |
 | Navbar IA (four triggers) | — | **Closed** | Nothing; Compute stays unrendered until the zone exists |
 | Component reuse / one ui lib | #120 | **Closed** | Nothing — `AppShell` gained `canvas`, annotator dropped its forked header |
-| Search modes must be honest | #123 | **Half closed, in flight** | Deployment half: deploy an encoder + rerank, or declare semantic search out of scope and remove the modes. *Delegated to me 2026-07-26* |
-| Git-like data history | #113 | **Half closed, in flight** | Backend `GET /v1/table/{id}/history` landed (`a67bff4`, 4 tests). The lakehouse commit-log view is being built from the Lakekeeper study |
+| Search modes must be honest | #123 | **Closed — decided** | A URL, not a Deployment: the servers are stock `vllm/vllm-openai` serving 4.27 GB checkpoints and this cluster has **no `nvidia.com/gpu` in node capacity**. Wiring proven live (503 → 200 via `encoders.*Url`). UI already renders unavailable modes disabled with the reason |
+| Git-like data history | #113 | **Closed** | Live: `/v1/table/{id}/history` in the running catalog's OpenAPI (101 paths), all 10 versions rendered, the delete predicate `id = 2` verbatim, alice 200 / bob 403. Four backend defects fixed on the way (`2c01ea0`) including `Restore.version` colliding with the row's own key |
 | Lineage track | #111 | **Part landed** | Spec-fidelity and Marquez-parity reports. Gold finding + Dapr-delivery tests already in `b43b8ff` |
-| Reactive data flow | #102 | **Measured, not built** | The largest open frontend item: 15 `setInterval` files, `query.live` in one. Blocked behind #124 for the push signal |
-| Interactive state has no home | #124 | **Designed, not built** | `docs/DESIGN-interactive-state.md`. Extended 2026-07-26 to the micro-frontend layer at the owner's prompt — see the section below |
+| Reactive data flow | #102 | **Closed** | 13 timers → 1 per zone: `home 0 · lakehouse 3 · media 1 · annotator 0`, where lakehouse's 3 are two prose mentions plus one justified survivor. Enforced by `poll-reason.test.ts` (`8bbdb61`), which fails on any unexplained timer — the count alone was not a gate |
+| Interactive state has no home | #124 | **Half closed** | The store is LIVE and proven: `lance-statestore` (`state.postgresql` on the existing AGE Postgres, DSN from OpenBao via the Dapr secret store), actor state store enabled, write/read/delete round trip, an unscoped app correctly refused. Actors for #122 and workflow for the publish saga are NOT built |
 | Annotate is its own domain | #122 | **Designed, not built** | `docs/DESIGN-annotation-projects.md` — entities, both state machines, the authz doors, what a publish emits, and a slice plan. Slices `S1`–`S4` (domain core, FGA type, publish schema, catalog `create` pin) need no store; `S5`–`S10` are #124. *Delegated to me 2026-07-26* |
-| Lance OTel | #114 | **Not started** | Whole item |
-| Storybook | — | **Not started** | Recommended, not adopted. Two presentation bugs this session were invisible to 191 e2e tests |
-| Annotator bundle weight | #117 | **Deferred by owner** | 3.8 MB deferred OpenCV. Analysis owed |
-| Zone images in CI | #118 | **Open** | Runner minutes on every push. *Owner decision* |
-| Viewer OOM | #121 | **Open** | A memory limit someone must choose. *Owner decision* |
+| Lance OTel | #114 | **Closed** | I was wrong that it was unstarted: the bridge and its five lifespan hooks were written ahead of the release and lay dormant. pylance 8 → 9 (`e7c0504`) activates them — `instrument_lance_if_available()` returns True against the real dependency |
+| Storybook | — | **Struck for now** | `find -name .storybook` → **0**. The case is real — presentation bugs keep evading assertions — but adopting it is a tooling pass; this session the screenshot rule caught them instead, four times |
+| Annotator bundle weight | #117 | **Closed** | OpenCV gone: `grep -c opencv frontend/packages/engine/package.json` → **0**. The dependency was carrying four operations; `corners.ts` implements them with a golden-file test, net −213 lines (`fd787cd`) |
+| Zone images in CI | #118 | **Closed** | `.github/workflows/ci.yml:146` — a `zone-images` job builds all four and smoke-runs each container against its own base path (`927ac84`) |
+| Viewer OOM | #121 | **Closed** | 1536Mi/768Mi, sized from measured cgroup peaks rather than guessed (955Mi high-water during the KG build). 0 restarts under the load that killed it (`629b1b1`) |
 | `TableDetail` reset effect | #119 | **Deferred with reason** | `{#key table}` under 191 e2e tests; its own pass |
 | Settings surface | #112 | **Deferred by owner** | "Keep it as is" |
 | Media plane on the governed warehouse | #103 | **Not started** | Corpus as registered project tables rather than hostPath. Predates this goal; listed so it is not lost |
-| Notifications + progress tracking | #125 | **Answered, blocked on #124** | Transport is already NATS, and the broadcast pattern this needs already exists once in the chart. Missing: state store, actors, workflow, and a sidecar on the zones — see the section below |
+| Notifications + progress tracking | #125 | **Closed** | Needed no new backend — `GET /runs` already folds lifecycle into START/RUNNING/COMPLETE/FAIL. Driven in the lakehouse zone against **891 real runs**: bell in the navbar, two Failed rows on top with their errors, five completions below (`3000ba4`). Two defects found live: the first FAIL sat at position 445 so no failure could ever show, and its error rendered a 25-line stack trace that filled the panel |
 | Verify by looking | — | **Standing rule** | Active, and it has earned itself four times |
-| **UX track — reactive, stateful frontends** | #102 #124 #125 | **In flight** | Its own goal + 7 conditions in `docs/GOAL-UX-REACTIVE.md`: deploy the history endpoint, keep live feeds alive past 60s, notifications from `/runs`, kill the 15 timers, persist user work, cache the atlas server-side, green and pushed |
+| **UX track — reactive, stateful frontends** | #102 #124 #125 | **14 of 20 conditions proven** | `docs/GOAL-UX-REACTIVE.md` grew from 7 conditions to 20 as the adversarial pass returned. Met: 1–8, 13, 15, 17–20. Open: 9 (alice **and** bob across all four zones), 10–12, 14, 16 — evidence consolidation rather than build work |
 
 Five of these were waiting on an owner decision rather than on work — #123's deployment half, #122's task
 schema, #118's runner minutes, #121's memory limit, #117's bundle budget. **The owner delegated all five on
-2026-07-26** ("ofc track aswell and fix"), so they are mine to decide with justification, and each row above
-says so. The ordering that gets the most user-visible improvement per unit of work is #124 → #102 → #113's
-view, because #124 is the thing #102, #122 and #125 all stand on.
+2026-07-26** ("ofc track aswell and fix"). Four are now decided and closed above with the reasoning that
+decided them; #122 is decided in design (`docs/DESIGN-annotation-projects.md`) and unbuilt, because slices
+`S5`–`S10` stand on #124's actors, which is the half of #124 that is not done.
+
+The ordering that got the most user-visible improvement per unit of work turned out to be exactly
+#124 → #102 → #113's view — #124's state store is what #102's push signal, #122's projects and #125's
+notifications all stand on, and it landed first.
 
 ## Standing rules (owner-set)
 
@@ -439,10 +446,10 @@ is state, not an event. Pub/sub delivers the nudge; something durable has to hol
 | Piece | Component | Status |
 | ----- | --------- | ------ |
 | "Something happened" nudge | pub/sub, jetstream, **broadcast** variant | **Have it** — `catalog-control-pubsub` is the template |
-| Durable per-user inbox: unread / read / dismissed | **state store (KV)** | **Missing** — `grep "type: state\." chart/` returns nothing |
-| Unread counts that cannot race; expiry without a sweeper cron | **actors** (one per user inbox) + **reminders** | **Missing**, and gated on the state store having `actorStateStore: "true"` |
-| Progress of a long job | **workflow** | **Missing.** A workflow instance's status *is* the progress — durable, queryable, resumable — so do not hand-roll a progress table |
-| Delivery to the browser | zone BFF subscribes, streams via `query.live` | **Impossible today**: the four `web-<zone>` pods are 1/1 with zero `dapr.io/` annotations |
+| Durable per-subject state: saved views, settings, an inbox | **state store (KV)** | **Have it, live** — `kubectl get components.dapr.io` lists `lance-statestore`, `state.postgresql` on `lance-ns-age-0`, DSN resolved from OpenBao through `lance-secrets`. Round-tripped write/read/delete; an app outside `scopes` was refused |
+| Unread counts that cannot race; expiry without a sweeper cron | **actors** (one per user inbox) + **reminders** | **Not built.** The gate is open — `actorStateStore: "true"` is set on the component above — but no actor type is registered |
+| Progress of a long job | **workflow** | **Not built, and not needed for #125.** `GET /runs` already carries START/RUNNING/COMPLETE/FAIL with `progress_done/total` and `error_message`. Workflow earns its place when a *saga* needs resuming (annotation publish, #122 `S5`–`S10`), not for reading progress |
+| Delivery to the browser | zone BFF subscribes, streams via `query.live` | **Still true that the zones have no sidecar**: `kubectl get pods -o custom-columns=…containerStatuses[*].name` shows all four `web-<zone>` pods running a single container. What shipped instead: the zone's BFF calls the **catalog**, which has the sidecar and owns the store. The identity stays in the session cookie and never leaves the BFF — see `frontend/…/media/src/routes/capi/v1/user-state/[document]/+server.ts` |
 
 ### "We don't need JetStream if there is more native Dapr tooling" — the owner's follow-up
 
@@ -480,8 +487,14 @@ not reuse that feed or a service credential to fan out from it — that would by
 non-admin. Notifications are written *for a subject*, so the BFF reads only that subject's key and the admin
 gate never enters the path. This is the same failure mode as a BFF cache keyed without the identity.
 
-So: one root cause again (#124), and notifications are the clearest user-visible reason to fix it — "track
-stuff and progress" is precisely what a KV inbox plus a workflow status gives you, and neither exists yet.
+So: one root cause again (#124), and notifications were the clearest user-visible reason to fix it.
+
+**What that reasoning got right and what it got wrong.** The state store was the right root cause and it is
+now live on Postgres exactly as argued. But the conclusion that notifications were *blocked* on it was
+wrong, and I only found that out by reading `services/lineage/…/schemas.py` — which the owner had to tell me
+to do. `RunStatus` already modelled the whole lifecycle, so #125 shipped against `GET /runs` with **no** new
+component, no inbox and no workflow. The KV inbox is still the right home for *read / dismissed*, which is
+per-subject state the run feed cannot carry; it is not what made the feature possible.
 
 ## Outstanding
 
@@ -533,17 +546,41 @@ account avatar sat on the left because the zone hand-rolls the shell (`2d9ca95`)
 
 ### What is NOT done, and why
 
+Rewritten 2026-07-26 — most of what stood here is now closed, and leaving the old list up would have been
+the exact drift this file exists to prevent. What is genuinely still open:
+
 - **#119** `TableDetail.svelte:331`'s 60-assignment reset effect. Deviates-with-reason: intent right,
   mechanism hand-maintained. The fix (`{#key table}`) re-instantiates a 1000-line component under 191 e2e
-  tests and belongs in its own pass, not appended to a bug-fix wave.
-- **#117 / #118 / #121** each need an owner decision, not more investigation: the annotator's 3.8 MB
-  deferred OpenCV, whether CI should build the four zone images (runner minutes on every push), and the
-  viewer's memory limit. (**#120** was on this list and is now closed — `AppShell` gained the `canvas`
-  variant and the annotator dropped its forked header, `6e809b4` + `90a2709`.)
-- **#113** backend slice landed (`a67bff4`); the frontend commit-log view is the next slice. **#114** (Lance
-  OTel) not started.
+  tests and belongs in its own pass. This session gave the reason teeth: I edited that same component to
+  add a conditional column and **dropped 6 of its 10 history versions** (`missing: 9, 8, 7, 5, 4, 3`) with
+  `svelte-check` at 0 errors. It is a component that punishes casual edits.
+- **#122** annotation projects: designed in full, built only as far as #124 allows. Slices `S1`–`S4` need
+  no store and are the next buildable unit; `S5`–`S10` need actors, which are unregistered.
+- **#124's second half**: no actor type, no workflow. The store they stand on is live.
+- **#103** media plane on the governed warehouse — corpus as registered project tables rather than
+  hostPath. Predates this goal.
 - `/lakehouse/data` is still a P0 scaffold and it is the zone's landing target; `/lakehouse/admin` is an
   orphan. Both are product decisions, not defects with one right answer.
+
+Closed since this list was written, each in the ledger with its evidence: **#113** (live, 101 paths, all 10
+versions, alice 200 / bob 403), **#114** (pylance 9, `e7c0504`), **#117** (OpenCV count 0, `fd787cd`),
+**#118** (`ci.yml:146`), **#120**, **#121** (0 restarts, `629b1b1`), **#123** (decided: a URL, no GPU in
+node capacity), **#125** (`3000ba4`), **#102** (13 timers → 1, gate-enforced).
+
+### The UX track added ten more, in already-pushed code
+
+The ten above came from verifying the pull. The twenty-condition UX pass that followed found ten more, and
+the ones worth naming are the ones that had already shipped green: an **anonymous 6.6 MB atlas read** in two
+zones at once (trivially exploitable by any signed-in-or-not caller, closed by `requireSession` in
+`bff.ts`); a caller-supplied `v` that could **fork the server cache** — six junk tokens evicted the product
+entry; a `cache-control: public` on a per-identity response; `Restore.version` **overwriting the row's own
+primary key** in the history endpoint; a notification panel where the first failure sat at **position 445**
+so no failure could ever be seen, and whose error then rendered a 25-line stack trace over the whole panel;
+a `| default 255` that rendered 255 for an explicit `0`, making a config change look applied while nothing
+moved; and my own conditional-column edit dropping 6 of 10 history versions.
+
+Two adversarial workflows returned **4/4 REFUTED** on claims I had already called proven. That is the
+number that matters: the gates were green for all of them.
 
 ### The honest lesson
 

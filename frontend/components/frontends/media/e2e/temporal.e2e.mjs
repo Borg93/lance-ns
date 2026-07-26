@@ -5,6 +5,10 @@
  * WebGPU Chromium, against fixture media in static/e2e/ (the demo doc has no media
  * blob). Same preconditions as the annotator suite (see lib.mjs / TESTING.md).
  */
+// NOTE: `waitUntil: 'networkidle'` is deliberately absent from this file. Every zone's shell now holds a
+// LIVE `query.live` stream open for the notification bell, so these apps have no idle network by design —
+// the wait would sit until its timeout on every navigation. Each drive waits on the ELEMENT it is about
+// to act on instead, which is the condition it actually needs.
 import { tableFromIPC } from 'apache-arrow';
 import { API, BASE, KEY, assertPreconditions, collector, launchBrowser, seed } from './lib.mjs';
 
@@ -48,7 +52,7 @@ async function fetchRows() {
 async function suite() {
 	// ════ AUDIO — waveform · drag-create · region-resize · save · review times ════
 	await page.goto(`${BASE}/annotator?keys=${KEY}&kind=audio&media=/e2e/tone.wav`, {
-		waitUntil: 'networkidle',
+		waitUntil: 'domcontentloaded',
 		timeout: 60000,
 	});
 	await page.waitForTimeout(1000);
@@ -132,7 +136,7 @@ async function suite() {
 
 	// reload → the segment survives + still listed
 	await page.goto(`${BASE}/annotator?keys=${KEY}&kind=audio&media=/e2e/tone.wav`, {
-		waitUntil: 'networkidle',
+		waitUntil: 'domcontentloaded',
 		timeout: 60000,
 	});
 	await page.waitForTimeout(1200);
@@ -142,7 +146,7 @@ async function suite() {
 	// ════ VIDEO — frame under overlay · scrub · draw-on-frame pinned at playhead ════
 	seed(); // fresh table for the video leg
 	await page.goto(`${BASE}/annotator?keys=${KEY}&kind=video&media=/e2e/clip.mp4`, {
-		waitUntil: 'networkidle',
+		waitUntil: 'domcontentloaded',
 		timeout: 60000,
 	});
 	await page.waitForTimeout(1500);
@@ -205,7 +209,7 @@ async function suite() {
 
 	// reload → persists
 	await page.goto(`${BASE}/annotator?keys=${KEY}&kind=video&media=/e2e/clip.mp4`, {
-		waitUntil: 'networkidle',
+		waitUntil: 'domcontentloaded',
 		timeout: 60000,
 	});
 	await page.waitForTimeout(1500);

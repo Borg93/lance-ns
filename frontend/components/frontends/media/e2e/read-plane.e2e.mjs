@@ -4,6 +4,10 @@
  * Graduated from the session scratchpad smoke into the committed suite. Same
  * preconditions as the annotator suite (see lib.mjs / TESTING.md).
  */
+// NOTE: `waitUntil: 'networkidle'` is deliberately absent from this file. Every zone's shell now holds a
+// LIVE `query.live` stream open for the notification bell, so these apps have no idle network by design —
+// the wait would sit until its timeout on every navigation. Each drive waits on the ELEMENT it is about
+// to act on instead, which is the condition it actually needs.
 import { BASE, KEY, assertPreconditions, collector, launchBrowser, seed } from './lib.mjs';
 
 const { ok, finish } = collector('read-plane E2E');
@@ -18,7 +22,7 @@ page.on('pageerror', (e) => pageErrors.push(e.message));
 
 async function suite() {
 	// ── front page: WebGPU + SavedViews ──
-	await page.goto(`${BASE}/`, { waitUntil: 'networkidle', timeout: 60000 });
+	await page.goto(`${BASE}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 	// Adapter acquisition can transiently fail right after another browser instance
 	// released the GPU (Vulkan device contention) — retry on a FRESH page before
 	// declaring WebGPU broken. This is the suite's only explicit WebGPU assertion
@@ -79,7 +83,10 @@ async function suite() {
 	ok('view deletes', (await page.locator('li', { hasText: 'e2e-view' }).count()) === 0);
 
 	// ── annotator provenance: the History panel fetches /versions + lists rows ──
-	await page.goto(`${BASE}/annotator?keys=${KEY}`, { waitUntil: 'networkidle', timeout: 60000 });
+	await page.goto(`${BASE}/annotator?keys=${KEY}`, {
+		waitUntil: 'domcontentloaded',
+		timeout: 60000,
+	});
 	await page.waitForTimeout(2000);
 	const history = page.locator('[data-testid="version-history"]');
 	ok('History panel present', (await history.count()) > 0);
@@ -94,7 +101,7 @@ async function suite() {
 	ok('History lists version rows', vrows > 0, `${vrows} rows`);
 
 	// ── workflow un-tag sync: inline tag → Save (adds) → un-tag → Save (removes) ──
-	await page.goto(`${BASE}/workflow`, { waitUntil: 'networkidle', timeout: 60000 });
+	await page.goto(`${BASE}/workflow`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 	// Detach the FTS node from the vector chain (scene needs the embedding model
 	// server, not part of this suite's preconditions) — FTS+backend is deterministic.
 	for (let i = 0; i < 3 && (await page.locator('[data-id="e-scene-said"]').count()) > 0; i++) {

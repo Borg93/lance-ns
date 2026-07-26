@@ -15,6 +15,10 @@
  * Run: `bun run test:e2e` (from apps/media). Re-seeds the demo annotations before + after,
  * so the suite is deterministic and leaves the demo clean.
  */
+// NOTE: `waitUntil: 'networkidle'` is deliberately absent from this file. Every zone's shell now holds a
+// LIVE `query.live` stream open for the notification bell, so these apps have no idle network by design —
+// the wait would sit until its timeout on every navigation. Each drive waits on the ELEMENT it is about
+// to act on instead, which is the condition it actually needs.
 import { BASE, KEY, assertPreconditions, collector, launchBrowser, seed } from './lib.mjs';
 
 const { ok, finish } = collector('annotator E2E');
@@ -80,7 +84,10 @@ async function draws(name, key, gesture) {
 }
 
 async function suite() {
-	await page.goto(`${BASE}/annotator?keys=${KEY}`, { waitUntil: 'networkidle', timeout: 60000 });
+	await page.goto(`${BASE}/annotator?keys=${KEY}`, {
+		waitUntil: 'domcontentloaded',
+		timeout: 60000,
+	});
 	await page.waitForTimeout(2500);
 	const status = await page
 		.locator('[data-testid="annotate-status"]')
@@ -237,7 +244,10 @@ async function suite() {
 	await page.keyboard.press('Control+s');
 	ok('save POSTs the batch', await saved);
 	await page.waitForTimeout(600);
-	await page.goto(`${BASE}/annotator?keys=${KEY}`, { waitUntil: 'networkidle', timeout: 60000 });
+	await page.goto(`${BASE}/annotator?keys=${KEY}`, {
+		waitUntil: 'domcontentloaded',
+		timeout: 60000,
+	});
 	await page.waitForTimeout(2500);
 	const persisted = await count();
 	ok(

@@ -47,12 +47,19 @@ test('the navbar carries one trigger per zone and no governance column for an an
 	// Access has no home outside the estate-admin Governance column, so it is nowhere in this bar…
 	await expect(nav.getByText('Access')).toHaveCount(0);
 	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
-	// This zone SSRs the resolved triggers (fetchMe has nothing to wait for auth-off), so the
-	// buttons are in the markup before the client bundle has attached bits-ui's handlers — clicking
-	// straight away lands on inert HTML and the panel silently never opens. Let the module load.
-	await page.waitForLoadState('networkidle');
-	await nav.getByRole('button', { name: 'Lakehouse', exact: true }).click();
-	await expect(panel).toBeVisible();
+	// This zone SSRs the resolved triggers (fetchMe has nothing to wait for auth-off), so the buttons are
+	// in the markup before the client bundle has attached bits-ui's handlers — clicking straight away
+	// lands on inert HTML and the panel silently never opens.
+	//
+	// That wait used to be `networkidle`, and it can never fire again: every zone's shell now holds a
+	// LIVE query open for the notification bell, so this app has no idle network BY DESIGN. Waiting for
+	// the button to exist would not help either — it exists in the server-rendered HTML, before any
+	// listener is attached. The honest condition is "clicking this actually opens the panel", so that is
+	// what is asserted: click, and if nothing happened yet, click again until it does.
+	await expect(async () => {
+		await nav.getByRole('button', { name: 'Lakehouse', exact: true }).click();
+		await expect(panel).toBeVisible({ timeout: 1000 });
+	}).toPass({ timeout: 20_000 });
 	// …and opening the one trigger that WOULD carry them proves the columns never rendered.
 	await expect(panel.getByText('Catalog', { exact: true })).toBeVisible();
 	await expect(panel.getByText('Governance', { exact: true })).toHaveCount(0);

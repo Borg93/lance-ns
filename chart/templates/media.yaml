@@ -86,6 +86,24 @@ spec:
               valueFrom:
                 secretKeyRef: { name: {{ include "lance.fullname" $root }}-media-catalog-token, key: token }
             {{- end }}
+            {{- if or (eq $name "search") (eq $name "viewer") }}
+            # Query encoders (values.encoders). search CALLS them (vector/hybrid/rerank legs); viewer
+            # only PROBES them for /api/health, which is what drives the media zone's mode gating — so
+            # both must see the same URLs or the UI disables a mode search can actually serve. Rendered
+            # only when set: unset leaves the settings default (127.0.0.1, unreachable in a pod) and the
+            # health probe reports ok=false, which is the honest "no encoder deployed" state.
+            {{- /* `default dict`, not a bare field access: `encoders` is a NEW top-level key, so under
+            `helm upgrade --reuse-values` the stored values carry no `encoders` at all and
+            `.Values.encoders.embedUrl` aborts the entire render with "nil pointer evaluating
+            interface {}.embedUrl". Gated by scripts/verify_encoder_wiring.sh step 2b. */}}
+            {{- $enc := $root.Values.encoders | default dict }}
+            {{- with $enc.embedUrl }}
+            - { name: MEDIA_EMBED_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- with $enc.rerankUrl }}
+            - { name: MEDIA_RERANK_URL, value: {{ . | quote }} }
+            {{- end }}
+            {{- end }}
             {{- if and (eq $name "annotator") $root.Values.runners.enabled }}
             # The assist runner (runners.yaml): flips the annotator's in-repo assist mock to REAL
             # GroundingDINO+SAM predictions — same request/response wire shape, zero code change.

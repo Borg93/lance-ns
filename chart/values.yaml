@@ -788,6 +788,33 @@ media:
     search: { port: 8102, daprAppId: search }
     annotator: { port: 8103, daprAppId: annotator }
 
+# --- Query encoders — the vector/rerank half of media search -------------------------------------
+# The search + viewer services are CLIENTS of two OpenAI-shaped HTTP endpoints
+# (services/search/services/encoders/{embedding,reranker}.py): Qwen3-VL-Embedding-2B on
+# `POST {embedUrl}/v1/embeddings` and Qwen3-VL-Reranker-2B on `POST {rerankUrl}/v1/rerank`. Neither
+# server is our code — lance-audio serves both from the stock `vllm/vllm-openai` image
+# (its Makefile embed-server / rerank-server targets), so this is a URL, not a Deployment.
+#
+# The settings default is `http://127.0.0.1:8001` / `:8002` — a sidecar-era address that inside a pod
+# is the POD's own loopback, so every vector mode 503s until these are set. Measured 2026-07-26 on
+# this release: fts + scene_fts 200, and `semantic`/`visual`/`scene`/`hybrid`/`all` + `rerank=true`
+# all 503. Leaving them empty is the HONEST off state, not an oversight: /api/health reports
+# embed.ok=false / rerank.ok=false and the media zone disables the modes with that reason.
+#
+# Why no in-chart Deployment: the models are 4.27 GB bf16 2B checkpoints that need a real GPU
+# (`nvidia.com/gpu`), and this kind cluster cannot schedule one — no device plugin, no nvidia runtime
+# in the node's containerd, no `nvidia.com/gpu` in node capacity. A Deployment we cannot schedule or
+# test is worse than a URL that says where the encoder fleet lives. Same call, same reason, as
+# `runners.jobsUrl` above.
+#
+# Point these at whatever serves the two models — an out-of-cluster fleet, or a host-run vLLM reached
+# through the node gateway (on this kind cluster the host is 172.19.0.1 from inside a pod; verified).
+# Under `networkPolicy.enabled` an off-cluster endpoint also needs a `networkPolicy.extraEgress`
+# entry, the same as the externalized S3/NATS/OTLP endpoints.
+encoders:
+  embedUrl: "" # e.g. http://encoders.internal:8001 — enables semantic / visual / scene / hybrid / all
+  rerankUrl: "" # e.g. http://encoders.internal:8002 — enables the rerank leg on any mode
+
 # --- Model runners (runners/ — the lance-audio fold) ----------------------------------------------
 # Only the CPU-viable subset ships: `assist` (GroundingDINO-tiny + SAM-ViT-base, CPU wheels, weights
 # baked into the image). The CUDA-pinned runners (asr/diarize/voiceprint) and the LLM-dependent batch
@@ -823,6 +850,27 @@ resources:
   assist:
     requests: { cpu: "1", memory: 2Gi }
     limits: { cpu: "8", memory: 6Gi }
+  # The viewer is not a request pod: it holds an in-process lance-graph CypherEngine over the KG and a
+  # cache of Arrow-IPC atlas point clouds, both sized by the corpus. On the default 512Mi tier a SINGLE
+  # `GET /api/graph/status` (what the media zone's /graph page calls on mount) OOM-killed it — measured
+  # 2026-07-26 on this cluster, kernel `Memory cgroup out of memory: Killed process (uvicorn)
+  # anon-rss:510000kB`, exit 137, and the annotator's next thumbnail fetch surfaced the bare 502.
+  #
+  # Sizing, from cgroup memory.current on the live pod (11 GB corpus: 145,175 chunks, 139,407 KG
+  # entities, 290,408 relations, 507,344 mentions):
+  #   idle 124Mi → all 1154 thumbnails 139Mi → three atlas point clouds 265Mi → KG engine built 736Mi
+  #   → full concurrent mixed drive 609Mi steady, high-water 955Mi (the KG build's transient).
+  # 1536Mi = 1.6x the measured 955Mi peak; requests 768Mi covers the 609-736Mi steady working set so
+  # the scheduler reserves what the pod actually holds. Thumbnails are NOT the cost: the whole corpus
+  # of them is +15Mi at 175 req/s.
+  #
+  # CPU 2 is for the thumbnail grid, measured at conc 8 on the same pod: 172 req/s p95 80ms at a
+  # 1-core limit vs 310 req/s p95 46ms at 2 — the annotator opens a whole page of tiles at once.
+  # It does NOT rescue the grid during a cold KG build (p95 2162ms at 1 core vs 1958ms at 2): that
+  # stall is GIL-bound in the 507k-row to_pylist, so it is a code fix, not a core count.
+  viewer:
+    requests: { cpu: 200m, memory: 768Mi }
+    limits: { cpu: "2", memory: 1536Mi }
 
 # --- Ingress — fronts the gateway Service in prod (kind uses a port-forward instead) ---------------
 ingress:

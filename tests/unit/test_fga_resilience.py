@@ -21,8 +21,8 @@ import aiohttp
 import pytest
 from common import fga
 from lance_namespace import ServiceUnavailableError
-from openfga_sdk import OpenFgaClient
-from openfga_sdk.client.models import ClientCheckRequest, ClientTuple
+from openfga_sdk import ApiException, OpenFgaClient
+from openfga_sdk.client.models import ClientCheckRequest, ClientTuple, ClientWriteRequest
 
 
 def test_is_transient_classifies_network_errors() -> None:
@@ -190,6 +190,102 @@ def test_write_tuples_fails_closed_on_network_error() -> None:
                 retry_max_backoff_seconds=0.0,
             )
         )
+
+
+class _TransactionalStore:
+    """A fake that behaves the way a real OpenFGA store actually does on ``Write``.
+
+    The whole call is ONE transaction: if any tuple in the batch already exists, the server rejects the
+    entire write with ``write_failed_due_to_invalid_input`` and persists NOTHING. Verified against the live
+    OpenFGA on 2026-07-26 — writing [existing, new] left only `existing` behind, and the new tuple was
+    silently lost. Modelling that here is the point: a fake that accepts partial batches would let the bug
+    back in.
+    """
+
+    def __init__(self, existing: set[tuple[str, str, str]]) -> None:
+        self.tuples = set(existing)
+        self.write_calls: list[int] = []  # batch size per call, so the fast path stays provable
+
+    async def write(self, request: ClientWriteRequest) -> object:
+        batch = [(t.user, t.relation, t.object) for t in request.writes or []]
+        self.write_calls.append(len(batch))
+        dupes = [t for t in batch if t in self.tuples]
+        if dupes:
+            raise ApiException(
+                status=400,
+                reason=f"cannot write a tuple which already exists: {dupes[0]}: invalid write input",
+            )
+        self.tuples.update(batch)
+        return SimpleNamespace()
+
+
+def test_write_tuples_lands_siblings_when_one_tuple_already_exists() -> None:
+    """A duplicate in the batch must not silently drop the OTHER grants.
+
+    This is the warehouse-owner bug: ``seed_warehouse`` batches [owner on the warehouse, project edge,
+    admin on the project] and the e2e seed had already written that last tuple, so OpenFGA rejected the
+    whole transaction, ``write_tuples`` swallowed it as "already idempotent", and the creator never got
+    ``owner`` — the next call 403'd with ``can_create_namespace required on warehouse:e2e-wh-a``.
+    """
+    seeded = ("user:alice", "admin", "project:acme")
+    store = _TransactionalStore({seeded})
+    owner = ClientTuple(user="user:alice", relation="owner", object="warehouse:wh-a")
+    parent = ClientTuple(user="project:acme", relation="project", object="warehouse:wh-a")
+    dupe = ClientTuple(user="user:alice", relation="admin", object="project:acme")
+
+    asyncio.run(
+        fga.write_tuples(
+            cast(OpenFgaClient, store),
+            [owner, parent, dupe],
+            retry_attempts=1,
+            retry_backoff_seconds=0.0,
+            retry_max_backoff_seconds=0.0,
+        )
+    )
+
+    assert ("user:alice", "owner", "warehouse:wh-a") in store.tuples, (
+        "the owner grant was dropped because a SIBLING tuple already existed"
+    )
+    assert ("project:acme", "project", "warehouse:wh-a") in store.tuples
+    # One transactional attempt, then one write per tuple — the fast path is not paid for twice.
+    assert store.write_calls == [3, 1, 1, 1]
+
+
+def test_write_tuples_batch_without_duplicates_stays_one_call() -> None:
+    """No duplicate → a single transactional write, no per-tuple fallback."""
+    store = _TransactionalStore(set())
+    tuples = [
+        ClientTuple(user="user:alice", relation="owner", object="warehouse:wh-b"),
+        ClientTuple(user="project:acme", relation="project", object="warehouse:wh-b"),
+    ]
+    asyncio.run(
+        fga.write_tuples(
+            cast(OpenFgaClient, store),
+            tuples,
+            retry_attempts=1,
+            retry_backoff_seconds=0.0,
+            retry_max_backoff_seconds=0.0,
+        )
+    )
+    assert store.write_calls == [2]
+    assert len(store.tuples) == 2
+
+
+def test_write_tuples_single_duplicate_is_still_a_no_op() -> None:
+    """The original contract holds for a one-tuple batch: already-granted is success, not an error."""
+    seeded = ("user:alice", "owner", "warehouse:wh-a")
+    store = _TransactionalStore({seeded})
+    asyncio.run(
+        fga.write_tuples(
+            cast(OpenFgaClient, store),
+            [ClientTuple(user="user:alice", relation="owner", object="warehouse:wh-a")],
+            retry_attempts=1,
+            retry_backoff_seconds=0.0,
+            retry_max_backoff_seconds=0.0,
+        )
+    )
+    assert store.tuples == {seeded}
+    assert store.write_calls == [1]  # no pointless fallback for a batch of one
 
 
 @pytest.mark.parametrize(

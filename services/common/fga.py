@@ -566,20 +566,57 @@ async def write_tuples(
 ) -> None:
     """Persist relationship tuples (the single write path after a successful mutation).
 
-    Idempotent: a duplicate-tuple write (the tuple already exists) is swallowed,
-    since the desired post-condition already holds. Transient failures are retried;
-    on outage we fail closed with ``ServiceUnavailableError`` so the caller does
-    not believe a grant succeeded when it did not.
+    Idempotent **per tuple**, which is not the same thing as per call. An OpenFGA ``Write`` is one
+    transaction: if a single tuple in the batch already exists, the server rejects the ENTIRE write with
+    ``write_failed_due_to_invalid_input`` and nothing lands. Swallowing that as "the post-condition already
+    holds" is true only for a one-tuple batch — for a batch it silently drops every sibling grant, and the
+    caller is told the grant succeeded. That is how a warehouse creator lost ``owner`` on their own
+    warehouse: :func:`~catalog.api.fga_deps.seed_warehouse` batches the owner grant, the project edge and
+    (on tenant bootstrap) ``admin`` on the project — and the seed scripts had already written that last
+    tuple, so the whole batch was rejected, silently, and the next call 403'd with
+    ``can_create_namespace required``. Verified against a live OpenFGA 2026-07-26: writing [existing, new]
+    leaves only `existing` behind.
+
+    So a duplicate rejection falls back to writing the tuples ONE AT A TIME, where "already exists" really
+    does mean the post-condition holds for that tuple and its siblings still land. The fast path is
+    unchanged (one transactional write); the fallback only runs on the rejection. This is the same hazard
+    :func:`delete_tuples` was already written to avoid — the lesson simply never crossed to the write side.
+
+    Transient failures are retried; on outage we fail closed with ``ServiceUnavailableError`` so the caller
+    does not believe a grant succeeded when it did not.
     """
 
     @_retrying(retry_attempts, retry_backoff_seconds, retry_max_backoff_seconds)
-    async def _do_write() -> None:
-        await client.write(ClientWriteRequest(writes=tuples))
+    async def _do_write(batch: list[ClientTuple]) -> None:
+        await client.write(ClientWriteRequest(writes=batch))
+
+    async def _write_one_by_one() -> None:
+        for item in tuples:
+            try:
+                await _do_write([item])
+            except _FAIL_CLOSED as exc:
+                if isinstance(exc, ApiException) and _is_duplicate_write(exc):
+                    log.debug(
+                        "openfga_write_duplicate_skipped",
+                        extra={"object": item.object, "relation": item.relation},
+                    )
+                    continue
+                log.error(
+                    "openfga_write_unavailable",
+                    extra={"object": item.object, "relation": item.relation},
+                    exc_info=True,
+                )
+                raise ServiceUnavailableError("authorization service unavailable") from exc
 
     try:
-        await _do_write()
+        await _do_write(tuples)
     except _FAIL_CLOSED as exc:
         if isinstance(exc, ApiException) and _is_duplicate_write(exc):
+            if len(tuples) > 1:
+                # One duplicate rejected the batch; the siblings are still unwritten. Land them.
+                log.info("openfga_write_batch_duplicate_retrying_singly", extra={"tuples": len(tuples)})
+                await _write_one_by_one()
+                return
             log.debug("openfga_write_duplicate_skipped")
             return
         log.error("openfga_write_unavailable", exc_info=True)

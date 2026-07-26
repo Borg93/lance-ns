@@ -95,7 +95,7 @@ export class AnnotatorController {
 	// segmenter as its region prompt instead of being inserted as a manual shape — the
 	// ra-atr SAM click-to-segment loop. Null = normal drawing.
 	assistProducer = $state<string | null>(null);
-	// True when the OpenCV magnetic tool can run — a still image is loaded
+	// True when the magnetic corner-snap tool can run — a still image is loaded
 	// (video frames don't qualify). Gates their toolbar buttons.
 	cvCapable = $state(false);
 	// Which CV tools have finished their lazy init (wasm + edge/corner maps) — the

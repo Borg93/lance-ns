@@ -22,6 +22,7 @@ export * from './tools/RectTool.js';
 export * from './tools/PolygonTool.js';
 export * from './tools/LassoTool.js';
 export * from './tools/MagneticTool.js';
+export * from './tools/corners.js';
 export * from './tools/PencilTool.js';
 export * from './tools/PointTool.js';
 export * from './tools/LineTool.js';

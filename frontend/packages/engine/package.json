@@ -19,7 +19,6 @@
 		"fmt:check": "rsvelte-fmt --check ."
 	},
 	"dependencies": {
-		"@techstark/opencv-js": "5.0.0-release.1",
 		"apache-arrow": "^21.2.0",
 		"flatbush": "^4.6.2",
 		"pixi.js": "^8.19.0",

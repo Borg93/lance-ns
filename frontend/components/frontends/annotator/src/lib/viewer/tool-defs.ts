@@ -26,7 +26,7 @@ export interface ToolDef {
 	key: string;
 	/** A drawing tool (hidden outside edit mode / for non-spatial units). */
 	drawing: boolean;
-	/** Needs the OpenCV still-image pipeline (unavailable over video frames). */
+	/** Needs the still-image corner pipeline (unavailable over video frames). */
 	cv?: boolean;
 }
 

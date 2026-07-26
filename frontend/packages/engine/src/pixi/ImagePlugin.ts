@@ -16,7 +16,7 @@ export class ImagePlugin {
 	imageWidth = 0;
 	imageHeight = 0;
 	/** The loaded still image (null for video-frame backdrops) — the pixel source the
-	 *  OpenCV magnetic tool reads for corner detection. */
+	 *  magnetic tool reads for corner detection. */
 	private _imageElement: HTMLImageElement | null = null;
 	/** The zoom level at which the image fits the viewport (baseline = 100%) */
 	private fitScale = 1;

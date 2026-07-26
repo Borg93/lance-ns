@@ -17,15 +17,15 @@ import budget from './budget.json' with { type: 'json' };
  *
  * The first version gzipped every emitted .js/.css together and called the result "what the browser
  * pays to enter a zone". For three zones that was near enough. For the annotator it was false by an
- * order of magnitude: 3809 of its 4179 KB was ONE chunk — the vendored OpenCV wasm — reached only
- * through a dynamic `import()` inside the magnetic tool, so a session that never picks that tool never
- * downloads a byte of it. The consequences were worse than the wrong number:
+ * order of magnitude: 3809 of its 4179 KB was ONE chunk — a vendored OpenCV wasm build — reached only
+ * through a dynamic `import()` inside the magnetic tool, so a session that never picked that tool never
+ * downloaded a byte of it. The consequences were worse than the wrong number:
  *
- *   - The annotator read as 4179/4800 KB — 87% of budget "used" — while its real entry cost was 324 KB.
+ *   - The annotator read as 4179/4800 KB — 87% of budget "used" — while its real entry cost was 365 KB.
  *     A change that doubled the entry graph would have passed the gate without a murmur, because 400 KB
  *     is noise next to a 3.8 MB constant. The gate could not see the regression it exists to catch.
  *   - It made the estate's shape unreadable. On entry cost the annotator is the SECOND-LIGHTEST zone
- *     (324 KB, against media's 927) — the opposite of what the old number said, and the opposite of
+ *     (365 KB, against media's 929) — the opposite of what the old number said, and the opposite of
  *     what budget.json's own note claimed.
  *
  * So: `staticGzipKB` is the closure of STATIC imports from every entry Vite emitted (SvelteKit marks
@@ -33,6 +33,13 @@ import budget from './budget.json' with { type: 'json' };
  * without a user action, i.e. what crossing the boundary actually costs. `deferredGzipKB` is
  * everything else: real bytes, but ones the user opts into. Both are ceilinged, because an unbounded
  * lazy payload is still a problem — just a different problem, on a different budget.
+ *
+ * That split is also what made the 3.8 MB legible enough to kill (#117). Measured against the live
+ * deployment, no session ever fetched it: the wasm bought exactly two calls, `cvtColor(RGBA2GRAY)` and
+ * `cornerMinEigenVal(5, 3, BORDER_DEFAULT)`, now ~120 lines in `@repo/engine`'s `tools/corners.ts` and
+ * pinned to OpenCV's own recorded output. The annotator's deferred half went 3854 KB → 46 KB with its
+ * entry graph unchanged at 365 KB. So the gate below no longer asks whether the blob is lazy; it asks
+ * that no zone acquires one at all, by name and by size.
  *
  * Read from Vite's own manifest rather than reconstructed by parsing import statements: the manifest
  * distinguishes `imports` from `dynamicImports` at the source of truth, and a regex over minified
@@ -125,9 +132,11 @@ describe('the code a zone loads on entry stays inside its budget', () => {
 	it.each(zones)('%s', (zone) => {
 		const weighed = weigh(zone);
 		if (weighed === null) {
-			// `turbo run test` does not depend on `build`, so a clean checkout has nothing to weigh. The
-			// gate runs wherever a build exists (CI runs build before test:e2e, and locally after any
-			// `bun run build`); it must not fail for being unable to measure.
+			// Only reachable from a bare `vitest run` in a checkout that has never been built. Under turbo
+			// there is always something to weigh: `@repo/zone-contract#test` dependsOn every `<zone>#build`,
+			// and manifest.test.ts (`depends on every zone build, and only those`) fails if that list drifts.
+			// That pairing is what keeps these ceilings from going quietly vacuous — an unmeasurable zone
+			// must not fail the gate, but a missing build dependency must.
 			return;
 		}
 		const limit = limits[zone]!.staticGzipKB;
@@ -153,42 +162,71 @@ describe('lazily-loaded payloads stay inside their own budget', () => {
 	});
 });
 
-describe('the OpenCV wasm stays lazy', () => {
-	// The specific invariant behind the annotator's shape: a static import of @techstark/opencv-js
-	// anywhere in the annotator would move ~3.8 MB gzipped onto the entry path. The static budget above
-	// would catch the size, but this names the cause, which is what the next person needs.
-	it('is reachable only through a dynamic import', () => {
-		const weighed = weigh('annotator');
+describe('no zone vendors OpenCV again', () => {
+	// This test used to assert the opposite — that the OpenCV chunk was present, and lazy. It was
+	// deleted in #117 (two calls reimplemented in @repo/engine/tools/corners.ts), so the invariant
+	// inverts: the dependency is gone and re-adding it is the regression. Checked by name because
+	// the size gate below is a blunt instrument and the next person needs the cause, not a number:
+	// the same two ops are already in the repo, so a reappearing `opencv` means someone reached for
+	// 3.9 MB gzipped that we have already proven unnecessary.
+	it.each(zoneDirs())('%s', (zone) => {
+		const weighed = weigh(zone);
 		if (weighed === null) return;
-		const dir = resolve(FRONTEND_ROOT, CLIENT('annotator'));
+		const dir = resolve(FRONTEND_ROOT, CLIENT(zone));
 		const carriesOpenCv = (f: string) =>
 			f.endsWith('.js') && readFileSync(resolve(dir, f), 'utf8').includes('opencv');
 		expect(
-			weighed.staticFiles.filter(carriesOpenCv),
-			'OpenCV reached the annotator entry graph — it must stay behind the magnetic tool import',
+			[...weighed.staticFiles, ...weighed.deferredFiles].filter(carriesOpenCv),
+			`${zone} vendors OpenCV again. The magnetic tool's two ops (cvtColor RGBA→GRAY and ` +
+				`cornerMinEigenVal) live in @repo/engine's tools/corners.ts, pinned to OpenCV's own ` +
+				`recorded output — use those instead of re-adding 3.9 MB gzipped, lazy or not.`,
 		).toEqual([]);
-		expect(
-			weighed.deferredFiles.some(carriesOpenCv),
-			'OpenCV is not in the deferred set either — has the magnetic tool lost its wasm?',
-		).toBe(true);
 	});
 });
 
-describe('the annotator split still pays for itself', () => {
-	it('the annotator costs LESS to enter than media, because its weight is deferred', () => {
-		// The original form of this test asserted the opposite ("annotator is materially heavier than
-		// media, which is why it is its own zone") against the DECLARED numbers. Measured, the premise was
-		// false: the annotator's entry cost is a third of media's. The split still pays — but for the
-		// other reason. What a searcher is spared is the deferred 3.8 MB, not the entry graph, and that
-		// only stays true while the heavy part stays lazy. So this now guards the real invariant, and the
-		// OpenCV test above guards its cause.
+/** The largest single emitted chunk any zone may ship, gzipped. Media's atlas route is the estate's
+ *  worst at 504 KB (embedding-atlas + d3); everything else is under 120 KB. 600 KB leaves that room
+ *  and nothing like enough for a vendored runtime — the class of thing this catches is megabytes. */
+const MAX_CHUNK_GZIP_KB = 600;
+
+describe('no single chunk dominates its zone', () => {
+	// The failure mode the two-halves split exposed, generalised. One vendored monolith is what made
+	// the annotator's total meaningless, and "it's behind a dynamic import" did not make it free —
+	// somebody still waited 1.6–4.3 s for it the first time. A per-chunk ceiling catches that shape
+	// wherever it lands, in either half, before it swamps a zone's total the way OpenCV did.
+	it.each(zoneDirs())('%s', (zone) => {
+		const weighed = weigh(zone);
+		if (weighed === null) return;
+		const dir = resolve(FRONTEND_ROOT, CLIENT(zone));
+		const worst = [...weighed.staticFiles, ...weighed.deferredFiles]
+			.map((file) => ({
+				file,
+				kb: Math.round(gzipSync(readFileSync(resolve(dir, file)), { level: 9 }).length / 1024),
+			}))
+			.reduce((a, b) => (b.kb > a.kb ? b : a), { file: '(none)', kb: 0 });
+		expect(
+			worst.kb,
+			`${zone} ships ${worst.file} at ${worst.kb} KB gzipped in one chunk, over the ` +
+				`${MAX_CHUNK_GZIP_KB} KB per-chunk ceiling. A blob that size is a vendored runtime, not ` +
+				`application code — split it, or replace the handful of calls that pull it in.`,
+		).toBeLessThanOrEqual(MAX_CHUNK_GZIP_KB);
+	});
+});
+
+describe('the annotator is not the heavy zone the budget once assumed', () => {
+	it('costs less to enter than media, and no longer hides weight behind a lazy import', () => {
+		// Both halves are now measured, and both say the same thing: the annotator is light. Its old
+		// justification-by-weight ("it defers 3.8 MB a searcher is spared") is gone with the OpenCV
+		// removal — its deferred half is 46 KB, the same as media's and lakehouse's. The zone split
+		// stands on ownership and independent deploys, not bytes, and this test says so rather than
+		// asserting a size relationship that no longer holds.
 		const a = weigh('annotator');
 		const m = weigh('media');
 		if (a === null || m === null) return;
 		expect(a.staticKB).toBeLessThan(m.staticKB);
 		expect(
 			a.deferredKB,
-			'the annotator no longer defers a large payload — is the separate zone still buying anything?',
-		).toBeGreaterThan(m.deferredKB);
+			'the annotator is deferring a large payload again — has a heavy dependency crept back in?',
+		).toBeLessThan(200);
 	});
 });

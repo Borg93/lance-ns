@@ -1,7 +1,7 @@
 import { Graphics } from 'pixi.js';
 import Flatbush from 'flatbush';
 import { boundsFromPolygon, snapToPoint } from '../interaction/geometry.js';
-import { loadOpenCV } from './opencv.js';
+import { detectCorners } from './corners.js';
 import {
 	type CommitShape,
 	HANDLE_FILL,
@@ -12,85 +12,11 @@ import {
 } from '../interaction/types.js';
 
 /**
- * Shi–Tomasi corner picking over a min-eigenvalue response map: keep local maxima
- * above `quality × max(response)`, suppressing neighbors within `minDist` via a
- * coarse occupancy grid. Replaces `goodFeaturesToTrack` (absent from the opencv-js
- * build) with the same underlying selection rule. Border rows/cols are excluded from
- * candidacy (the 3×3 max test needs a full neighborhood) — same practical effect as
- * goodFeaturesToTrack's aperture border; snapping falls to the nearest interior corner.
- */
-export function pickCorners(
-	response: Float32Array,
-	cols: number,
-	rows: number,
-	quality: number,
-	minDist: number,
-): [number, number][] {
-	let max = 0;
-	for (let i = 0; i < response.length; i++) if (response[i] > max) max = response[i];
-	const threshold = max * quality;
-	if (threshold <= 0) return [];
-
-	// Candidates = 3×3 local maxima above the quality threshold, strongest first.
-	const candidates: [number, number, number][] = []; // [response, x, y]
-	for (let y = 1; y < rows - 1; y++) {
-		for (let x = 1; x < cols - 1; x++) {
-			const v = response[y * cols + x];
-			if (v < threshold) continue;
-			let isMax = true;
-			for (let dy = -1; dy <= 1 && isMax; dy++) {
-				for (let dx = -1; dx <= 1; dx++) {
-					if ((dx || dy) && response[(y + dy) * cols + (x + dx)] > v) {
-						isMax = false;
-						break;
-					}
-				}
-			}
-			if (isMax) candidates.push([v, x, y]);
-		}
-	}
-	candidates.sort((a, b) => b[0] - a[0]);
-
-	// Greedy min-distance suppression on a cell grid (cell = minDist ⇒ only the
-	// 3×3 neighborhood needs checking).
-	const cell = Math.max(1, minDist);
-	const gw = Math.ceil(cols / cell);
-	const occupied = new Map<number, [number, number][]>();
-	const out: [number, number][] = [];
-	const minDistSq = minDist * minDist;
-	for (const [, x, y] of candidates) {
-		const cx = Math.floor(x / cell);
-		const cy = Math.floor(y / cell);
-		let ok = true;
-		for (let ny = cy - 1; ny <= cy + 1 && ok; ny++) {
-			for (let nx = cx - 1; nx <= cx + 1; nx++) {
-				for (const [px, py] of occupied.get(ny * gw + nx) ?? []) {
-					const ddx = px - x;
-					const ddy = py - y;
-					if (ddx * ddx + ddy * ddy < minDistSq) {
-						ok = false;
-						break;
-					}
-				}
-				if (!ok) break;
-			}
-		}
-		if (!ok) continue;
-		out.push([x, y]);
-		const key = cy * gw + cx;
-		const bucket = occupied.get(key);
-		if (bucket) bucket.push([x, y]);
-		else occupied.set(key, [[x, y]]);
-	}
-	return out;
-}
-
-/**
- * Magnetic Cursor tool — snaps to corner/edge keypoints in the image.
- * Uses OpenCV.js goodFeaturesToTrack + Flatbush spatial index.
+ * Magnetic Cursor tool — snaps to corner keypoints in the image. Shi–Tomasi corner
+ * detection (`./corners.ts`, plain TypeScript) + a Flatbush spatial index.
  *
  * Flow:
- * 1. On init: detect keypoints in image using OpenCV corner detection
+ * 1. On init: detect corners in the still image
  * 2. Build Flatbush spatial index for fast nearest-neighbor queries
  * 3. As cursor moves, snap to nearest keypoint within threshold
  * 4. Click to place points (snapped or unsnapped)
@@ -124,36 +50,25 @@ export class MagneticTool implements Tool {
 		ctx.app.stage.addChild(this.preview);
 	}
 
-	/** Initialize with image element — detect keypoints */
+	/** Initialize with image element — detect the corners the cursor will snap to.
+	 *
+	 *  Detection is a few hundred milliseconds of straight-line work over the pixel buffer
+	 *  (217 ms at 1080p), so yield to the event loop first: the caller flips the toolbar into
+	 *  its loading state immediately before awaiting this, and without a yield that state
+	 *  would never paint. */
 	async initWithImage(imageElement: HTMLImageElement): Promise<void> {
-		// Lazy shared load — the 8MB wasm is paid once across both CV tools.
-		const cv = await loadOpenCV();
+		await new Promise((resolve) => setTimeout(resolve, 0));
 
-		// Render image to canvas
+		const width = imageElement.naturalWidth;
+		const height = imageElement.naturalHeight;
 		const canvas = document.createElement('canvas');
-		canvas.width = imageElement.naturalWidth;
-		canvas.height = imageElement.naturalHeight;
-		const ctx2d = canvas.getContext('2d')!;
+		canvas.width = width;
+		canvas.height = height;
+		const ctx2d = canvas.getContext('2d', { willReadFrequently: false })!;
 		ctx2d.drawImage(imageElement, 0, 0);
 
-		// Detect corners. `goodFeaturesToTrack` is NOT compiled into the opencv-js build
-		// (verified against the installed dist), so we compute its core directly: the
-		// min-eigenvalue corner-response map + quality threshold + local-maximum picking
-		// (grid-suppressed min distance) — the same Shi–Tomasi corners, plain Mat ops only.
-		const src = cv.imread(canvas);
-		const gray = new cv.Mat();
-		cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY, 0);
+		this.keypoints = detectCorners(ctx2d.getImageData(0, 0, width, height).data, width, height);
 
-		const response = new cv.Mat();
-		cv.cornerMinEigenVal(gray, response, 5, 3, cv.BORDER_DEFAULT);
-
-		this.keypoints = pickCorners(
-			response.data32F,
-			response.cols,
-			response.rows,
-			0.001, // quality level (fraction of the max response)
-			3, // min distance between corners (px)
-		);
 		// Build spatial index
 		if (this.keypoints.length > 0) {
 			this.keypointIndex = new Flatbush(this.keypoints.length);
@@ -162,11 +77,6 @@ export class MagneticTool implements Tool {
 			}
 			this.keypointIndex.finish();
 		}
-
-		// Cleanup
-		src.delete();
-		gray.delete();
-		response.delete();
 
 		this.ready = true;
 	}

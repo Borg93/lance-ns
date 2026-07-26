@@ -52,15 +52,15 @@ export class InteractionManager {
 	onSelect?: (index: number | null) => void;
 	onChange?: (index: number, updates: GeometryUpdate) => void;
 	onDirtyChange?: (hasDirtyEdits: boolean) => void;
-	/** Fires when an OpenCV tool's lazy init (wasm + corner maps) completes. */
+	/** Fires when a CV tool's lazy init (corner detection over the still) completes. */
 	onCvToolReady?: (tool: 'magnetic') => void;
 	/** Fires when the magnetic cursor snaps onto / off a detected corner. */
 	onMagneticSnap?: (snapped: boolean) => void;
 
-	// The still image the OpenCV magnetic tool reads pixels from. Set by the viewer
-	// after the backdrop loads; null for video frames (CV tools stay unavailable).
+	// The still image the magnetic tool reads pixels from. Set by the viewer after the
+	// backdrop loads; null for video frames (CV tools stay unavailable).
 	private imageSource: HTMLImageElement | null = null;
-	// Tools whose (expensive, 8MB-wasm) initWithImage has been fired — one init per image.
+	// Tools whose (a-few-hundred-ms) initWithImage has been fired — one init per image.
 	private readonly cvInitialized = new Set<string>();
 
 	constructor(app: Application, arrowPlugin: ArrowDataPlugin) {
@@ -78,9 +78,11 @@ export class InteractionManager {
 		this.tools.set('polygon', polygonTool);
 
 		// NOTE: an IntelligentScissors (edge-trace) tool was removed 2026-07-21 — the
-		// opencv-js segmentation_IntelligentScissorsMB binding pathfinds degenerately
+		// opencv-js segmentation_IntelligentScissorsMB binding pathfound degenerately
 		// (1-point contours for every parameterization, verified in-browser on 5.0.0;
-		// 4.12 fails to even initialize). Re-add if a build with a working binding lands.
+		// 4.12 failed to even initialize). @techstark/opencv-js itself is gone now
+		// (3.9 MB gzipped for two ops — see tools/corners.ts); re-adding edge-trace means
+		// implementing live-wire pathfinding here, not restoring the dependency.
 		const magneticTool = new MagneticTool(ctx);
 		magneticTool.onCommit = (shape) => this.onCommit?.(shape);
 		magneticTool.onSnapChange = (snapped) => this.onMagneticSnap?.(snapped);
@@ -144,14 +146,14 @@ export class InteractionManager {
 		};
 	}
 
-	/** Provide the still image the OpenCV tools read (call after the backdrop loads).
+	/** Provide the still image the CV tools read (call after the backdrop loads).
 	 *  CV inits are lazy — nothing loads until a CV tool is first activated. */
 	setImageSource(image: HTMLImageElement | null): void {
 		this.imageSource = image;
 		this.cvInitialized.clear(); // a new image needs fresh cost maps / keypoints
 	}
 
-	/** True when the OpenCV tools can work here (a still image is loaded). */
+	/** True when the CV tools can work here (a still image is loaded). */
 	get cvCapable(): boolean {
 		return this.imageSource !== null;
 	}
@@ -161,7 +163,7 @@ export class InteractionManager {
 		this._toolName = tool;
 		this.activeTool = tool === 'select' || tool === 'pan' ? null : (this.tools.get(tool) ?? null);
 
-		// Lazy-init the OpenCV magnetic tool on FIRST activation (the 8MB wasm is only
+		// Lazy-init the magnetic tool on first activation (corner detection is only
 		// paid when used). The tool no-ops snapping until ready, so firing async is safe.
 		if (tool === 'magnetic' && this.imageSource) {
 			if (!this.cvInitialized.has(tool)) {

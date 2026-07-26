@@ -10,8 +10,8 @@
 	async function onready(ctx: PixiContext): Promise<void> {
 		try {
 			if (unit.imageUrl) await ctx.plugins.image.load(unit.imageUrl);
-			// Hand the loaded still to the interaction layer so the OpenCV tools
-			// (magnetic corner-snap) can lazily build its corner maps when activated.
+			// Hand the loaded still to the interaction layer so the CV tools
+			// (magnetic corner-snap) can lazily build their corner maps when activated.
 			ctx.plugins.interaction.setImageSource(ctx.plugins.image.imageElement);
 			const { table, version } = await loadAnnotations(unit.annotationsUrl);
 			ctx.plugins.arrow.load(table);

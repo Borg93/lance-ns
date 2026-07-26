@@ -1,5 +1,5 @@
 {
-	"//": "Per-zone client-bundle ceilings in gzipped KB, measured in two halves from Vite's manifest. `staticGzipKB` is the closure of STATIC imports from every emitted entry (entry/start, entry/app and every route node) plus their CSS — what crossing into the zone actually costs. `deferredGzipKB` is everything reachable only through a dynamic import — real bytes, but ones the user opts into. The split exists because one number could not tell those apart: the annotator measured 4179 KB of which 3809 was OpenCV wasm behind a lazy import, so a doubling of its entry graph would have passed unnoticed. Raise a number ONLY with the reason in the commit message; that edit is the review.",
+	"//": "Per-zone client-bundle ceilings in gzipped KB, measured in two halves from Vite's manifest. `staticGzipKB` is the closure of STATIC imports from every emitted entry (entry/start, entry/app and every route node) plus their CSS — what crossing into the zone actually costs. `deferredGzipKB` is everything reachable only through a dynamic import — real bytes, but ones the user opts into. The split exists because one number could not tell those apart: the annotator once measured 4179 KB of which 3809 was OpenCV wasm behind a lazy import, so a doubling of its entry graph would have passed unnoticed. That blob is gone (#117 — two ops reimplemented in @repo/engine/tools/corners.ts), which is why the annotator's deferred ceiling is now in line with every other zone's. Raise a number ONLY with the reason in the commit message; that edit is the review.",
 	"zones": {
 		"home": {
 			"staticGzipKB": 200,
@@ -18,8 +18,8 @@
 		},
 		"annotator": {
 			"staticGzipKB": 420,
-			"deferredGzipKB": 4200,
-			"note": "Pixi ships in the entry graph (a canvas is the whole point of the zone); the vendored OpenCV wasm does NOT — it loads on first use of the magnetic tool, which is why entry costs 324 KB against media's 927. The deferred ceiling is what a searcher is spared by the split, and the `OpenCV wasm stays lazy` test guards the mechanism. Measured 324 / 3854."
+			"deferredGzipKB": 120,
+			"note": "Pixi ships in the entry graph (a canvas is the whole point of the zone) and is most of the 365 KB. The deferred ceiling was 4200 while the magnetic tool pulled a vendored OpenCV build; #117 replaced its two calls (cvtColor RGBA→GRAY, cornerMinEigenVal) with ~120 lines in @repo/engine/tools/corners.ts, pinned to OpenCV's recorded output, and the deferred half fell 3854 → 46 KB with the entry graph unchanged. On entry cost this is the second-lightest zone, against media's 929. Measured 365 / 46."
 		}
 	}
 }

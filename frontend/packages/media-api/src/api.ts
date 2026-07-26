@@ -104,14 +104,52 @@ export class ApiError extends Error {
 // { title, errors:[...] } with no string `detail`. Parse both keys.
 const ProblemSchema = v.object({ detail: v.optional(v.string()), title: v.optional(v.string()) });
 
+/** Which backend a BFF path proxies to. The media plane fans out to THREE services, so a bare
+ *  "502 Bad Gateway" tells an operator nothing — it does not even say which one to go look at.
+ *
+ *  Seen for real: the annotator rendered `api 502: Bad Gateway` with a Retry button and no documents,
+ *  and the cause was the VIEWER being OOM-killed while serving thumbnails. Nothing in the message
+ *  pointed there. Derived from the request path rather than threaded through every call site, because
+ *  the path is already on the Response and the mapping is a property of the BFF routes, not of callers.
+ *  Kept in sync with `components/frontends/{media,annotator}/src/routes/api/**`. */
+export function upstreamFor(path: string): string | null {
+	const api = path.replace(/^\/(media|annotator)/, '');
+	if (!api.startsWith('/api/')) return null;
+	// Mirrors the BFF's own route shape: a few specific domains, and a catch-all. The catch-all
+	// (`api/[...path]/+server.ts`) is `makeViewerProxy(env)` in BOTH zones, so defaulting to the viewer is
+	// the routing table rather than a guess — and it means a newly added viewer path is named correctly
+	// without touching this function.
+	if (api.startsWith('/api/search')) return 'search';
+	if (api.startsWith('/api/annotations') || api.startsWith('/api/jobs')) return 'annotator';
+	if (api.startsWith('/api/assist') || api.startsWith('/api/config')) return 'assist';
+	return 'viewer';
+}
+
+/** 502/503/504 from a reverse proxy carry no problem+json body — the upstream never answered, so there
+ *  is nothing to parse and `statusText` is all that is left ("Bad Gateway"). That is the one case where
+ *  naming the service is the whole value of the message. */
+const GATEWAY_STATUSES = new Set([502, 503, 504]);
+
 async function apiErrorFrom(r: Response): Promise<ApiError> {
 	const body: unknown = await r.json().catch(() => null);
 	const parsed = v.safeParse(ProblemSchema, body);
-	const detail =
-		(parsed.success ? (parsed.output.detail ?? parsed.output.title) : undefined) ||
-		r.statusText ||
-		`HTTP ${r.status}`;
-	return new ApiError(r.status, detail);
+	const fromBody = parsed.success ? (parsed.output.detail ?? parsed.output.title) : undefined;
+	if (!fromBody && GATEWAY_STATUSES.has(r.status)) {
+		let path = '';
+		try {
+			path = new URL(r.url).pathname;
+		} catch {
+			path = r.url; // a relative or malformed url: still better in the message than nothing
+		}
+		const service = upstreamFor(path);
+		return new ApiError(
+			r.status,
+			service
+				? `the ${service} service did not respond (${r.statusText || r.status} at ${path})`
+				: `upstream did not respond (${r.statusText || r.status} at ${path})`,
+		);
+	}
+	return new ApiError(r.status, fromBody || r.statusText || `HTTP ${r.status}`);
 }
 
 async function asJson<T>(r: Response, schema: v.GenericSchema<T>): Promise<T> {

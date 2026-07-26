@@ -27,7 +27,7 @@ now means two different things, and only the second one is still moving.
 | Lineage track | #111 | **Part landed** | Spec-fidelity and Marquez-parity reports. Gold finding + Dapr-delivery tests already in `b43b8ff` |
 | Reactive data flow | #102 | **Measured, not built** | The largest open frontend item: 15 `setInterval` files, `query.live` in one. Blocked behind #124 for the push signal |
 | Interactive state has no home | #124 | **Designed, not built** | `docs/DESIGN-interactive-state.md`. Extended 2026-07-26 to the micro-frontend layer at the owner's prompt — see the section below |
-| Annotate is its own domain | #122 | **In flight** | The task schema — entities, states, who assigns, what "reviewed" means, what a publish emits. *Delegated to me 2026-07-26* |
+| Annotate is its own domain | #122 | **Designed, not built** | `docs/DESIGN-annotation-projects.md` — entities, both state machines, the authz doors, what a publish emits, and a slice plan. Slices `S1`–`S4` (domain core, FGA type, publish schema, catalog `create` pin) need no store; `S5`–`S10` are #124. *Delegated to me 2026-07-26* |
 | Lance OTel | #114 | **Not started** | Whole item |
 | Storybook | — | **Not started** | Recommended, not adopted. Two presentation bugs this session were invisible to 191 e2e tests |
 | Annotator bundle weight | #117 | **Deferred by owner** | 3.8 MB deferred OpenCV. Analysis owed |
@@ -79,7 +79,7 @@ view, because #124 is the thing #102, #122 and #125 all stand on.
 | Lance OTel | Wire Lance's own observability into our OTLP→Collector→GreptimeDB path | #114 | NOT STARTED |
 | Navbar IA | Four triggers: Lakehouse (incl. lineage + admin), Search, Annotate, Compute (after rask) | — | **DONE** — Compute deliberately unrendered until the zone exists |
 | Settings surface | Break out auth / authz / audit into their own surface | #112 | Deferred by owner ("keep it as is") |
-| **Annotate is its own domain** | Annotation state is the annotator's OWN state, **not** the lakehouse's — synced only when we choose to. Labeling project management is a different thing from the app shell's project-as-tenant, with **tasks** as the unit of work like any labeling platform. Items arrive by being SENT from search/atlas/saved view; the landing page is your projects and their progress, not the corpus | #122 | NOT STARTED. **Corrects an earlier note of mine that said a project should "reference governed table rows"** — that is the coupling the owner ruled out. Two stores, one deliberate crossing point: a finished project is PUBLISHED to the lakehouse (governed table + lineage) and nothing lands before that, which is what makes half-labelled, re-labelled and abandoned work safe. Needs the owner's call on the task schema (states, assignment, what "reviewed" means, what a sync publishes) |
+| **Annotate is its own domain** | Annotation state is the annotator's OWN state, **not** the lakehouse's — synced only when we choose to. Labeling project management is a different thing from the app shell's project-as-tenant, with **tasks** as the unit of work like any labeling platform. Items arrive by being SENT from search/atlas/saved view; the landing page is your projects and their progress, not the corpus | #122 | NOT STARTED. **Corrects an earlier note of mine that said a project should "reference governed table rows"** — that is the coupling the owner ruled out. Two stores, one deliberate crossing point: a finished project is PUBLISHED to the lakehouse (governed table + lineage) and nothing lands before that, which is what makes half-labelled, re-labelled and abandoned work safe. **Schema decided 2026-07-26 in `docs/DESIGN-annotation-projects.md`** — four entities (project/task/draft, no `Assignment`: the lease *is* the assignment), one six-state task axis (Label Studio's lease + reviewer vocabulary, CVAT's return-on-reject, not CVAT's stage×state), publish gated on every task terminal and on **two** FGA doors, and a 34-column published table that deliberately carries no task state. The store it needs does not exist: #124 |
 | **Search modes must be honest** | Vector/Hybrid/Rerank were offered on a deployment with no encoder | #123 | **UI half DONE** (`56e3388`) — modes needing an encoder render "encoder offline", disabled, health-driven so they self-enable. Deployment half is an owner decision: deploy an encoder or declare semantic search out of scope |
 | **Component reuse / one ui lib** | Consistency between the apps; put more in `@repo/ui` | #120 | **DONE** (`6e809b4`, `90a2709`) — AppShell gained a `canvas` variant and the annotator dropped its forked header. A missing variant is why a zone forks a shared component |
 | **Storybook** | Are we using it? | — | **No — nothing in any package.json, no `.storybook` anywhere.** Worth adding: the two presentation bugs this session (navbar clipped to 69px, avatar on the left) were invisible to 191 e2e tests and obvious in a screenshot |
@@ -442,6 +442,35 @@ is state, not an event. Pub/sub delivers the nudge; something durable has to hol
 | Unread counts that cannot race; expiry without a sweeper cron | **actors** (one per user inbox) + **reminders** | **Missing**, and gated on the state store having `actorStateStore: "true"` |
 | Progress of a long job | **workflow** | **Missing.** A workflow instance's status *is* the progress — durable, queryable, resumable — so do not hand-roll a progress table |
 | Delivery to the browser | zone BFF subscribes, streams via `query.live` | **Impossible today**: the four `web-<zone>` pods are 1/1 with zero `dapr.io/` annotations |
+
+### "We don't need JetStream if there is more native Dapr tooling" — the owner's follow-up
+
+Two halves, and they land differently.
+
+**For pub/sub there is nothing more native to reach for.** Dapr pub/sub *is* the native tooling; JetStream
+is only the broker behind the component, and the application code cannot tell. Swapping the broker changes
+zero lines in `core/control_emit.py` or `api/dapr.py`. So there is no JetStream decision to revisit here —
+the "more native" thing is the pub/sub API, which is already what we use.
+
+**For the KV half the owner is pointing at, there is a real choice, and NATS is the wrong side of it.**
+Dapr *does* ship a `JetStream KV` state store, so everything could in principle stay on NATS. But per the
+[supported state stores reference](https://docs.dapr.io/reference/components-reference/supported-state-stores/)
+it is **Alpha and does not support actors** — and actor support is exactly the `actorStateStore: "true"`
+flag that gates actors *and* workflow, because Dapr Workflow uses the actor framework internally (Dapr
+skill, `dapr-statestore.md:23`). Choosing JetStream KV would buy the durable inbox and then dead-end at the
+two building blocks that make progress tracking good.
+
+**The pick that needs no new infrastructure is Postgres.** `state.postgresql` is **Stable** with actor
+support in both v1 and v2 — and we already run Postgres: `lance-ns-age-0` is live, and it is what
+`LINEAGE_DATABASE_URL` points at. So the whole missing layer is *one component* aimed at a database that is
+already deployed, backed up and monitored. No Redis, no extra pod, no new failure domain. The Dapr skill's
+example uses Redis only because `dapr init` installs Redis in a container; it is not a recommendation.
+
+| Option | Actors / workflow | New infrastructure |
+| ------ | ----------------- | ------------------ |
+| `state.jetstream` (KV on the NATS we already run) | **No** — Alpha, no actor support | None |
+| `state.redis` (the skill's example) | Yes, Stable | A Redis to run, secure and back up |
+| **`state.postgresql` on `lance-ns-age-0`** | **Yes, Stable (v1 and v2)** | **None** |
 
 ### The trap to avoid
 

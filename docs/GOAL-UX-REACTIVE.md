@@ -70,6 +70,35 @@ ten-condition goal.
 | `#20` | **Parked by the owner** — NATS HA via the nats operator, NACK/GitOps, query engine. Stays parked; listed so it is not mistaken for forgotten |
 | `#90` rask merge | Blocked and owner-gated: never rask main, no rask push, decisions proposed only |
 
+## Condition 14: the mistakes from 2026-07-26 do not recur
+
+Six defects were introduced or asserted falsely in one session, all by the same habit — acting before
+checking. Each gets a guard, and the guard is what closes this condition, not a promise.
+
+| What went wrong | Guard |
+| --------------- | ----- |
+| **`helm upgrade -f chart/values.yaml` wiped the release.** Every override went — the media plane, auth and runners were deleted from a live cluster. Recovered from revision 49 | Never upgrade from chart defaults. Always `helm get values lance-ns -o yaml > /tmp/v.yaml` first and upgrade with `-f /tmp/v.yaml`. Verify the pod count before and after |
+| **A password-bearing DSN was put in a k8s Secret**, which is the exact anti-pattern `services/common/secrets.py` opens by describing as an audit finding | Secrets for app services come from the Dapr secret store (OpenBao) as the sole source. `grep` the chart for a new password or DSN in `stringData` before deploying |
+| **The state store was scoped to an app the secret store was not scoped to**, silently disabling actor hosting — the sidecar logged it and nothing failed loudly | The secret store's scopes are now derived from `stateStore.scopes`. After any scope change, grep the sidecar log for `isn't loaded` and `Actor state store not configured` |
+| **Notifications were designed without reading `services/lineage/schemas.py`**, where `RunStatus` already carried START/RUNNING/COMPLETE/FAIL with progress and error | Read the code before designing. For any new surface, first grep for an existing model, endpoint and client method |
+| **The goal itself omitted six open tasks**, including `#97`, a ten-condition goal | Build the task list by diffing against the tracker with a script, not from memory. Condition 13 is that diff |
+| **Two false alarms in ten minutes** — the catalog was probed on port 8100 when it listens on 2333, then an idle event buffer was called a broken cursor | Read the service port from the Service object before probing. Distinguish "no data yet" from "broken" before reporting either |
+
+## The polling measured live, 2026-07-26
+
+Evidence for condition 4, taken from the running catalog rather than from the source:
+
+```
+167 of 167 requests were /v1/events?since=0     the cursor never advanced
+9 requests in 120s                              one poll every ~13 seconds
+```
+
+The cursor does not advance because the buffer is genuinely empty — the component is ephemeral with
+`deliverPolicy: new` and nothing had happened since the pod restarted. So this is not a broken feed; it is
+a **13-second poll of an idle endpoint, forever**, which is precisely the cost condition 4 removes. Note
+the endpoint is estate-admin gated (`can_observe_events`), so this feed can never serve a non-admin — the
+lineage cursor is the one that can.
+
 ## Rules I am holding myself to
 
 - **Read the code before designing.** Three corrections in one session came from not doing this: the

@@ -25,7 +25,7 @@ is carried in conversation memory alone.
 | 1 | Architecture verified against the skills (turbo.json, 4-zone MFE, Svelte 5) | **turbo.json DONE** (audit table + cache proof below). MFE/Svelte partial |
 | 2 | Toolchain migration complete (no eslint/prettier; identical scripts; gates real) | **DONE** — 3 defects found and fixed |
 | 3 | Zones/routes/abstractions right; judged against the Lakekeeper console | **structural half DONE** (26→26 exact diff). Lakekeeper comparison + orphan sweep OUTSTANDING |
-| 4 | media/annotator split sound and documented; Pixi recommendation | **backend DONE** (live pod env). Bundle numbers + Pixi verdict OUTSTANDING |
+| 4 | media/annotator split sound and documented; Pixi recommendation | **DONE** — backends separate (live pod env), reuse quantified (4 of 5 `@repo/*` shared), Pixi verdict written, and the bundle-budget gate it exposed is fixed + tested |
 | 5 | The cluster TODO (`docs/TODO-CLUSTER-VERIFY.md` §1–6) discharged | **essentially DONE** — see the evidence table |
 | 6 | All gates green, stale dirs deleted, pushed, CI confirmed | **DONE** — every gate green, pushed `e489f2b..f8f1480`, CI `test` job green, rest under watch |
 
@@ -55,6 +55,7 @@ is carried in conversation memory alone.
 | Annotate buried as a row in Search's panel | The annotator is its own zone; one trigger per zone | `d8d3411` |
 | **Gold never embedded JSONB lineage** | Docs, seed and demo header all described behaviour the product does not have. Stale, not dangerous: the only reader is disabled | `b43b8ff` |
 | **A duplicate tuple in a batch FGA write dropped its siblings** | OpenFGA's Write is one transaction, so an already-existing tuple rejects the whole call — and `write_tuples` swallowed that as "already idempotent". The warehouse creator silently lost `owner` on their own warehouse. This is what made `e2e-stack` red (`can_create_namespace required on warehouse:e2e-wh-a`), and it hid for two days because the job is gated `needs: test` and was **skipped on every one of the pull's own runs** | `363de65` |
+| **The bundle-budget gate measured deferred bytes as entry cost** | It gzipped every emitted file and called it "what the browser pays to enter a zone". 3809 of the annotator's 4179 KB is OpenCV behind a lazy import, so a doubling of the entry graph would have passed the gate. It also made the estate unreadable: measured on entry cost, media is the heaviest zone and the annotator the second-lightest — the opposite of what `budget.json` and the split-pays-for-itself test both asserted | `56a6aad` |
 | Zone e2e suites are FLAKY locally | `fullyParallel` + ~32 workers + `retries: 0` (CI uses 1): a cold Vite cache times out the first wave. Two identical runs gave **12 then 6** failures — I twice misread that variance as my own edits regressing. Use `--retries=1 --workers=8` for a true signal | `18c233d` (recorded) |
 | The `Search` rename collided with a form button | Two buttons named Search on `/lakehouse/admin/access` (navbar trigger + Tuples submit) tripped Playwright strict mode; locator scoped to the form | `18c233d` |
 | 138 MB of husk directories | admin/data/lineage/models/rask-ui, zero tracked files | deleted |
@@ -98,6 +99,69 @@ no `incremental`/`composite` anywhere (so `check` with `outputs: []` is correct)
 Two defensible deviations: `.svelte-kit/**` in outputs (the budget gate weighs `output/client`, so it
 must be restored) and `test → build` per package (the transit-node pattern would parallelise better).
 
+## media / annotator: reuse, Pixi, and the bundle-budget consequence (condition 4)
+
+**Backends are genuinely separate** — verified earlier on the rendered Deployments and the live pod env
+(media gets VIEWER+ANNOTATOR+SEARCH, annotator gets VIEWER+ANNOTATOR and **no** SEARCH_API).
+
+**Frontend reuse, quantified.** Of the five `@repo/*` packages the two zones could share, they share
+**four**: `@repo/api`, `@repo/labeling`, `@repo/media-api`, `@repo/ui`. The fifth, `@repo/engine` — the
+Pixi canvas — is **annotator-only**: it is declared in `components/frontends/annotator/package.json` and
+nowhere else, and media's source contains **zero** references to pixi or to `@repo/engine`.
+
+**So no, media and the annotator do not share a viewer — and the reason is not duplication.** Media has
+no single-item viewer to share one with. Its six pages are all *many-item* surfaces: search (`/`),
+`atlas`, `graph`, `tree`, `workflow`, `guide`. Clicking a search hit has nowhere deep to go, so there is
+no surface on which a canvas would mount. Media renders thumbnails as plain `<img>` tiles and drives its
+own WebGL for the atlas/graph (`gpu-scatter.svelte`, `gpu-graph.svelte` — embedding-atlas + d3, not Pixi).
+
+**Recommendation (not implemented — it needs a product decision first).** The missing piece is a media
+item-detail view. When it lands it should mount `@repo/engine`'s canvas rather than grow a second
+pan/zoom implementation, and that requires splitting the package along a seam it does not have today:
+
+- `@repo/engine/canvas` — the Pixi surface, pan/zoom, layers. What a *viewer* needs.
+- `@repo/engine/tools` — rect/polygon/lasso/brush, undo/redo, and the magnetic tool. What a *labeller*
+  needs. This half is what pulls OpenCV.
+
+Media would import only `canvas`. Bundle consequence, measured: the three Pixi-bearing chunks in the
+annotator's entry graph are **75 KB gzipped** (an upper bound — they carry engine code too), against
+media's current 927 KB entry cost, so ~8%. The OpenCV wasm — **3809 KB gzipped** — must not follow, which
+is exactly what the split buys and what the new `the OpenCV wasm stays lazy` gate enforces.
+
+### The bundle-budget gate was measuring the wrong thing
+
+Chasing that number found a defect worth more than the recommendation. `budget.test.ts` gzipped **every**
+emitted `.js`/`.css` and its docstring called the result "what the browser pays to enter a zone". For the
+annotator that was false by an order of magnitude — 3809 of its 4179 KB is one chunk reached only through
+a dynamic `import()` inside the magnetic tool:
+
+| zone | entry cost (static graph) | deferred | old single number |
+| ---- | ------------------------- | -------- | ----------------- |
+| home | 157 | 1 | 158 |
+| lakehouse | 490 | 46 | 536 |
+| media | **927** | 46 | 973 |
+| annotator | **324** | 3854 | 4179 |
+
+Two consequences, both worse than the wrong number itself:
+
+1. **The gate could not see the regression it exists to catch.** The annotator read 4179/4800 — 87% of
+   budget "used" — while its real entry cost was 324 KB. A change that *doubled* the entry graph would
+   have passed silently, because 400 KB is noise beside a 3.8 MB constant.
+2. **It made the estate's shape unreadable, and the repo believed it.** On entry cost the annotator is the
+   second-lightest zone and **media is the heaviest by ~3×** — the opposite of what `budget.json`'s note
+   asserted ("this number is the entire reason the annotator is a zone of its own"), and the opposite of
+   what the test named `the annotator split still pays for itself` asserted, which compared the *declared*
+   numbers and never measured anything.
+
+Fixed by measuring the two halves separately, from Vite's own manifest (`imports` vs `dynamicImports` —
+a regex over minified output cannot tell `import"./x.js"` from `import("./x.js")`). Both halves are now
+ceilinged, the OpenCV-stays-lazy invariant is a named test, and the split-pays-for-itself test now
+asserts the true relation (annotator entry < media entry, annotator deferred > media deferred). Each new
+gate was broken deliberately and watched to fail: static ceiling 420→300 → *"annotator loads 324 KB
+gzipped on entry, over its 300 KB budget"*; deferred 4200→1000 → *"ships 3854 KB behind dynamic
+imports"*; and pointing the OpenCV detector at a marker that *is* static (`pixi.js`) reddened it on
+exactly the 3 chunks measured independently.
+
 ## Dapr coverage for the merged services (owner question)
 
 **Verdict: nothing is missing, and the absences are a design boundary rather than an oversight.**
@@ -127,7 +191,6 @@ needs a pubsub scope AND the app-token annotation, because the annotator would t
 ## Outstanding
 
 1. Lakekeeper console comparison + orphan-route sweep (condition 3).
-2. Pixi bundle numbers + recommendation (condition 4).
 3. Lineage track: spec-fidelity and Marquez-parity reports (gold finding + Dapr-delivery/spec-conformance
    tests already landed in `b43b8ff`).
 4. Confirm `e2e-stack` goes green on `363de65` (every other job is already green: `test`, `frontend`,

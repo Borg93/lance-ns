@@ -1,21 +1,25 @@
 {
-	"//": "Per-zone client-bundle ceilings in gzipped KB, over every .js/.css under .svelte-kit/output/client. A zone boundary is a full document load, so the bundle behind it is the whole cost of crossing one — and with the zones deployable on their own tags nobody watches all four at once. Raise a number ONLY with the reason in the commit message; that edit is the review.",
+	"//": "Per-zone client-bundle ceilings in gzipped KB, measured in two halves from Vite's manifest. `staticGzipKB` is the closure of STATIC imports from every emitted entry (entry/start, entry/app and every route node) plus their CSS — what crossing into the zone actually costs. `deferredGzipKB` is everything reachable only through a dynamic import — real bytes, but ones the user opts into. The split exists because one number could not tell those apart: the annotator measured 4179 KB of which 3809 was OpenCV wasm behind a lazy import, so a doubling of its entry graph would have passed unnoticed. Raise a number ONLY with the reason in the commit message; that edit is the review.",
 	"zones": {
 		"home": {
-			"gzipKB": 190,
-			"note": "The landing + the OIDC round-trip. Should stay the smallest thing in the estate; if it grows, something that belongs in a domain zone has leaked into the shell."
+			"staticGzipKB": 200,
+			"deferredGzipKB": 40,
+			"note": "The landing + the OIDC round-trip. Should stay the smallest thing in the estate; if it grows, something that belongs in a domain zone has leaked into the shell. Measured 157 / 1."
 		},
 		"lakehouse": {
-			"gzipKB": 620,
-			"note": "Four areas (catalog, lineage, models, admin) in one router. Carries @xyflow/svelte for the lineage graph and layerchart for the model experiments."
+			"staticGzipKB": 600,
+			"deferredGzipKB": 120,
+			"note": "Four areas (catalog, lineage, models, admin) in one router. Carries @xyflow/svelte for the lineage graph and layerchart for the model experiments. Measured 490 / 46."
 		},
 		"media": {
-			"gzipKB": 1120,
-			"note": "embedding-atlas + d3 + elkjs for the atlas/tree/graph surfaces."
+			"staticGzipKB": 1050,
+			"deferredGzipKB": 120,
+			"note": "embedding-atlas + d3 + elkjs for the atlas/tree/graph surfaces. The HEAVIEST zone to enter — nearly three times the annotator — which is the opposite of what the single-number budget implied. Measured 927 / 46."
 		},
 		"annotator": {
-			"gzipKB": 4800,
-			"note": "Pixi + the vendored OpenCV wasm. This number is the entire reason the annotator is a zone of its own rather than an area of media: the split keeps it out of a searcher's bundle. If it ever approaches media's, the split has stopped paying for itself."
+			"staticGzipKB": 420,
+			"deferredGzipKB": 4200,
+			"note": "Pixi ships in the entry graph (a canvas is the whole point of the zone); the vendored OpenCV wasm does NOT — it loads on first use of the magnetic tool, which is why entry costs 324 KB against media's 927. The deferred ceiling is what a searcher is spared by the split, and the `OpenCV wasm stays lazy` test guards the mechanism. Measured 324 / 3854."
 		}
 	}
 }

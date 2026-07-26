@@ -5,6 +5,44 @@ Everything in it was unproven against an image, a chart or a cluster. This file 
 goal, the conditions the owner added mid-flight, the evidence, and what is left all live — so none of it
 is carried in conversation memory alone.
 
+## Where we are, in one table
+
+The owner asked, fairly: *"why is there no goal md? Seems like we are not tracking stuff and is far away
+to reach the goal."* This file existed and was current, but answering that question took reading 38 KB of
+it — so this is the ledger. One row per thing the owner asked for, newest asks last. Detail for every row
+is further down or in the linked audit.
+
+**The six original conditions are closed.** What is open is the fourteen asks added while they were being
+closed, and they are a bigger body of work than the original goal was — which is why it feels far away.
+That is not scope creep to complain about; it is the pass finding real gaps. But it does mean "the goal"
+now means two different things, and only the second one is still moving.
+
+| Ask | Task | State | What remains |
+| --- | ---- | ----- | ------------ |
+| Original conditions 1–6 | — | **Closed** | Nothing. Fractions and evidence at the foot of this file |
+| Navbar IA (four triggers) | — | **Closed** | Nothing; Compute stays unrendered until the zone exists |
+| Component reuse / one ui lib | #120 | **Closed** | Nothing — `AppShell` gained `canvas`, annotator dropped its forked header |
+| Search modes must be honest | #123 | **Half closed** | Deployment half: deploy an encoder + rerank, or declare semantic search out of scope. *Owner decision* |
+| Git-like data history | #113 | **Half closed** | Backend `GET /v1/table/{id}/history` landed (`a67bff4`, 4 tests). The lakehouse commit-log view is not built |
+| Lineage track | #111 | **Part landed** | Spec-fidelity and Marquez-parity reports. Gold finding + Dapr-delivery tests already in `b43b8ff` |
+| Reactive data flow | #102 | **Measured, not built** | The largest open frontend item: 15 `setInterval` files, `query.live` in one. Blocked behind #124 for the push signal |
+| Interactive state has no home | #124 | **Designed, not built** | `docs/DESIGN-interactive-state.md`. Extended 2026-07-26 to the micro-frontend layer at the owner's prompt — see the section below |
+| Annotate is its own domain | #122 | **Not started** | Needs the owner's call on the task schema. *Owner decision* |
+| Lance OTel | #114 | **Not started** | Whole item |
+| Storybook | — | **Not started** | Recommended, not adopted. Two presentation bugs this session were invisible to 191 e2e tests |
+| Annotator bundle weight | #117 | **Deferred by owner** | 3.8 MB deferred OpenCV. Analysis owed |
+| Zone images in CI | #118 | **Open** | Runner minutes on every push. *Owner decision* |
+| Viewer OOM | #121 | **Open** | A memory limit someone must choose. *Owner decision* |
+| `TableDetail` reset effect | #119 | **Deferred with reason** | `{#key table}` under 191 e2e tests; its own pass |
+| Settings surface | #112 | **Deferred by owner** | "Keep it as is" |
+| Media plane on the governed warehouse | #103 | **Not started** | Corpus as registered project tables rather than hostPath. Predates this goal; listed so it is not lost |
+| Verify by looking | — | **Standing rule** | Active, and it has earned itself four times |
+
+Five of these wait on an owner decision, not on work: #123's deployment half, #122's task schema, #118's
+runner minutes, #121's memory limit, and #117's bundle budget. The rest is work, and the ordering that
+gets the most user-visible improvement per unit of it is #124 → #102 → #113's view, because #124 is the
+thing #102 and #122 both stand on.
+
 ## Standing rules (owner-set)
 
 - **Evidence, not assertion.** Every claim cites command output, a rendered manifest, or a screenshot.
@@ -326,16 +364,53 @@ active-learning loop (label a few → retrain → re-predict) that write is exac
 would subscribe to; today it is silent, so any loop would have to poll. When active learning lands it
 needs a pubsub scope AND the app-token annotation, because the annotator would then receive deliveries.
 
+## The micro-frontends are outside Dapr entirely (#124, owner's second framing)
+
+The owner's follow-up — *"then you know we are missing cache, kv and state management or actor in the
+micro-frontend right, to improve ux"* — is a **different finding** from the backend one in
+`docs/DESIGN-interactive-state.md`, and it is sharper. That doc argued the services have no operational
+state model. This is about the zones themselves, and it is not a design opinion but a measurement:
+
+```
+$ kubectl get pods            # containers per pod: 2/2 = Dapr sidecar, 1/1 = none
+   lance-ns-catalog-…          2/2      lance-ns-web-annotator-…   1/1
+   lance-ns-lineage-…          2/2      lance-ns-web-home-…        1/1
+   lance-ns-viewer-…           2/2      lance-ns-web-lakehouse-…   1/1
+   lance-ns-search-…           2/2      lance-ns-web-media-…       1/1
+   lance-ns-annotator-…        2/2
+
+$ grep -cE "dapr.io/" chart/templates/frontends.yaml
+   0
+```
+
+Every backend pod has a sidecar. **No frontend zone has one, and the chart never asks for one.** So it is
+not that the zones use Dapr badly — they *cannot* use it at all. No state store (hence no KV and no
+server-side cache), no subscribe (hence the 15 `setInterval` timers), no actors, and no service invocation:
+each BFF reaches backends by direct ClusterIP HTTP.
+
+That matters more for the frontend than for a service, because the zone BFF is the one place in this estate
+that is both **inside** the cluster and **holding the user's identity** (the sealed `lance_session` cookie
+and the forwarded OIDC bearer). It is the natural home for a per-user cache and for cross-zone shared
+state — the sealed session already spans zones, so the mechanism exists and nothing else rides it.
+
+The half that is *not* obvious, and the reason this is not a one-line chart change: a cache in a BFF is a
+cache of **authorized** results. Every backend read is FGA-gated per user, so a key that omits the identity
+turns a performance win into a tenancy leak, and `/v1/events` — the one change feed that exists — is gated
+on `can_observe_events`, i.e. estate admin, so a BFF that subscribed with a service credential and fanned
+out to users would have bypassed that gate. The design is being produced with that adversarial half
+explicit rather than assumed; the recommendation lands in this section when it is.
+
 ## Outstanding
 
-1. Condition 5 re-drive in a browser as alice and bob with screenshots — the frontend changed under it
-   (navbar zone-root row, five repointed links, the media Settings fix), so the earlier evidence no longer
-   covers the shipped code.
-3. Lineage track: spec-fidelity and Marquez-parity reports (gold finding + Dapr-delivery/spec-conformance
-   tests already landed in `b43b8ff`).
-4. Confirm `e2e-stack` goes green on `363de65` (every other job is already green: `test`, `frontend`,
-   `auth-e2e`, `lineage-e2e`, `ray-e2e`).
-5. Then the newly added build work: git-like data history (#113), Lance OTel (#114).
+Superseded by the ledger at the top of this file — keep the two lists from drifting apart by editing that
+one. Two items that stood here are now closed, with their evidence:
+
+- **Condition 5 re-drive, closed.** The frontend changed under the earlier evidence (navbar zone-root row,
+  five repointed links, the media Settings fix), so it was re-driven against the shipped code:
+  `scripts/verify_cross_zone_oidc.mjs` now runs **21 checks** ending `✓ cross-zone OIDC + per-user authz
+  PROVEN`, with a screenshot per condition in `docs/audits/shots/` (13 files).
+- **CI, closed.** The `7605b2f` run is `completed/success` on **all six jobs** — `frontend`, `test`,
+  `ray-e2e`, `lineage-e2e`, `e2e-stack`, `auth-e2e`. The `e2e-stack` job that was under watch is green.
 
 **All four zone Playwright suites are green** (home 5, lakehouse 190/190, media 2, annotator 8) with
 `--retries=1 --workers=8`; every turbo task (43) and every Python gate (972 tests, ruff, ty, openapi
@@ -378,9 +453,10 @@ account avatar sat on the left because the zone hand-rolls the shell (`2d9ca95`)
 - **#119** `TableDetail.svelte:331`'s 60-assignment reset effect. Deviates-with-reason: intent right,
   mechanism hand-maintained. The fix (`{#key table}`) re-instantiates a 1000-line component under 191 e2e
   tests and belongs in its own pass, not appended to a bug-fix wave.
-- **#117 / #118 / #120 / #121** each need an owner decision, not more investigation: the annotator's 3.8 MB
-  deferred OpenCV, whether CI should build the four zone images (runner minutes on every push), the AppShell
-  canvas mode, and the viewer's memory limit.
+- **#117 / #118 / #121** each need an owner decision, not more investigation: the annotator's 3.8 MB
+  deferred OpenCV, whether CI should build the four zone images (runner minutes on every push), and the
+  viewer's memory limit. (**#120** was on this list and is now closed — `AppShell` gained the `canvas`
+  variant and the annotator dropped its forked header, `6e809b4` + `90a2709`.)
 - **#113** backend slice landed (`a67bff4`); the frontend commit-log view is the next slice. **#114** (Lance
   OTel) not started.
 - `/lakehouse/data` is still a P0 scaffold and it is the zone's landing target; `/lakehouse/admin` is an

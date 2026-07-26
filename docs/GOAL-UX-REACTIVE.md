@@ -50,25 +50,30 @@ struck with a stated reason, so none can quietly rot. This list was built by dif
 task tracker, because the first draft of this file silently omitted six of them, including a whole
 ten-condition goal.
 
-| Task | What it needs |
-| ---- | ------------- |
-| **`#97` PRODUCT-WORKS PASS** | **A ten-condition goal still in progress and omitted from the first draft of this file**: annotator loop, runners, one-nav, FGA workbench, create-project, preview, lineage facets, drawers, registry, gates. Each condition re-checked against the deployed product and marked done or struck |
-| `#102` reactive data flow | Conditions 3–4 above are its implementation |
-| `#124` state store / actors / workflow | Store is live and proven. Remaining: actors for `#122` task claims, and workflow for the publish saga |
-| `#125` notifications | Condition 3 above is its implementation |
-| `#111` lineage track | OpenLineage spec-fidelity and Marquez-parity reports (gold finding + Dapr-delivery tests already landed in `b43b8ff`) |
-| `#122` annotation projects | Slices `S1`–`S4` need no store and are buildable now; `S5`–`S10` stand on the state store, which is live |
-| `#123` encoders | Decided: a URL, not a Deployment (no GPU on this cluster). Remaining: record it in the operator docs so nobody re-litigates it |
-| `#103` media on the governed warehouse | Corpus as registered project tables rather than hostPath |
-| `#100` annotator residuals | Export serializer service (COCO/YOLO/CSV/HF) + a managed label taxonomy. Owner said "to schedule" — so schedule it or strike it |
-| `#101` models registry MLflow parity | Owner-deprioritised until after the product pass. `#97` is that pass, so this unblocks with it |
-| `#86` prod-readiness residuals | Inherited from the retired production-readiness tracker; enumerate what is actually left of it |
-| `#119` `TableDetail` reset effect | `{#key table}` under 191 e2e tests — its own pass |
-| `#112` Settings surface | Owner deferred ("keep it as is"); confirm it stays deferred |
-| Storybook | Two presentation bugs this session were invisible to 191 e2e tests and obvious in a screenshot |
-| `/lakehouse/data` scaffold, `/lakehouse/admin` orphan | Product decisions, not defects with one right answer |
-| `#20` | **Parked by the owner** — NATS HA via the nats operator, NACK/GitOps, query engine. Stays parked; listed so it is not mistaken for forgotten |
-| `#90` rask merge | Blocked and owner-gated: never rask main, no rask push, decisions proposed only |
+| Task | Disposition — evidence, or the reason it is struck |
+| ---- | -------------------------------------------------- |
+| `#102` reactive data flow | **DONE.** 13 timers → 1 per zone, gate-enforced: `home 0 · lakehouse 3 · media 1 · annotator 0`, where lakehouse's 3 are two prose mentions plus one justified survivor and media's 1 is justified. `poll-reason.test.ts` fails on any unexplained timer (`8bbdb61`) |
+| `#113` git-like history | **DONE.** Live: `/v1/table/{id}/history` in the running catalog's OpenAPI (101 paths), all 10 versions rendered, the delete predicate `id = 2` verbatim, alice 200 / bob 403 |
+| `#125` notifications | **DONE.** Driven in the lakehouse zone against 891 real runs: bell in the navbar, two Failed rows on top with their errors, five completions below (`3000ba4`) |
+| `#117` annotator bundle | **DONE.** OpenCV gone — `grep -c opencv frontend/packages/engine/package.json` → **0**; replaced by `corners.ts` with a golden-file test, net −213 lines (`fd787cd`) |
+| `#118` zone images in CI | **DONE.** `.github/workflows/ci.yml:146` — a `zone-images` job builds all four and smoke-runs each container against its own base path (`927ac84`). My first check grepped the wrong pattern and read 0; the job was always there |
+| `#121` viewer OOM | **DONE.** 1536Mi/768Mi sized from measured cgroup peaks; 0 restarts under the load that killed it (`629b1b1`) |
+| `#123` encoders | **DECIDED, not built, and that is the answer.** A URL, not a Deployment: the servers are stock `vllm/vllm-openai` serving 4.27 GB checkpoints, and this cluster has **no `nvidia.com/gpu` in node capacity**. Wiring proven live (503 → 200). Remaining: one line in the operator docs so it is not re-litigated |
+| `#124` state store | **HALF DONE.** The store is live and proven — component loaded, actor state store enabled, write/read/delete round trip, unscoped app refused. Actors for `#122` and workflow for the publish saga are NOT built |
+| `#122` annotation projects | **DESIGNED.** `docs/DESIGN-annotation-projects.md`: entities, both state machines, authz doors, publish contract. Slices `S1`–`S4` need no store; `S5`–`S10` stand on `#124`'s actors, which do not exist yet |
+| `#111` lineage track | **PART LANDED.** Gold finding + Dapr-delivery tests in `b43b8ff`. Spec-fidelity and Marquez-parity reports outstanding — and `#18`'s real fix (emitting `outputStatistics` from the catalog write path) belongs here |
+| `#103` media on the governed warehouse | **STRUCK for this goal.** Corpus as registered project tables rather than hostPath is a data-plane migration, not a UX-track item; nothing in conditions 1–20 depends on it |
+| `#100` annotator residuals | **STRUCK — owner-scheduled.** The owner's own words were "user to schedule". Export serializers and a managed taxonomy are new product surface, not this goal |
+| `#101` models MLflow parity | **STRUCK — owner-deprioritised** until after the product pass (`#97`) |
+| `#86` prod-readiness residuals | **STRUCK as a unit, absorbed in part.** Inherited from a retired tracker; the pieces that mattered this session were done under their own conditions (secrets sole-source, prod-render green, fail-closed on a missing secret proven live). What remains is unenumerated, and enumerating it is its own pass |
+| `#119` `TableDetail` reset effect | **STRUCK with reason, and today reinforced it.** `{#key table}` re-instantiates a 1000-line component under 191 e2e tests. I touched this file's column set today and broke six of ten rows; that is the risk profile, and it needs its own pass |
+| `#112` Settings surface | **STRUCK — owner deferred** ("keep it as is"). Confirmed still deferred |
+| `#20` NATS HA / query engine | **STRUCK — parked by the owner.** Listed so parked stays distinguishable from forgotten |
+| `#90` rask merge | **STRUCK — blocked and owner-gated:** never rask main, no rask push, decisions proposed only |
+| `#97` PRODUCT-WORKS PASS | **OPEN — the one I am not closing.** A ten-condition goal of its own. Several of its conditions were advanced today (runners, one-nav, lineage facets, gates), but re-checking all ten against the deployed product is a pass, not a line item, and claiming it here would be the padding this goal exists to prevent |
+| Storybook | **STRUCK for this goal.** `find -name .storybook` → **0**; not adopted. Two presentation bugs this session were invisible to 191 e2e tests, so the case is real — but adopting it is a tooling pass, and today the screenshot rule caught them instead |
+| `/lakehouse/admin` orphan | **RESOLVED — no longer an orphan.** 11 inbound references from zone code today, against zero when it was reported. The IA work re-connected it |
+| `/lakehouse/data` scaffold | **OPEN, product decision.** Still the zone's landing target and still a P0 scaffold — visible in today's screenshot as "The Data zone (P0 scaffold)". Not a defect with one right answer |
 
 ## Conditions 15–20: what the adversarial pass returned
 

@@ -20,6 +20,11 @@
  */
 import { getHealth, type Health } from '@repo/media-api';
 
+// POLL REASON: liveness has no event. Every other feed in the estate moved to `query.live` on a cursor,
+// because its value changes when the estate changes and the change is something a service publishes. This
+// one asks whether the embed and rerank encoders are REACHABLE — and nothing publishes "a service I could
+// not reach is now up". The transition we care about is the recovery, so the only signal is to try again.
+// Subscribing to a cursor here would freeze the search modes at their last known state and call it live.
 const POLL_MS = 10_000;
 
 class ServiceHealth {

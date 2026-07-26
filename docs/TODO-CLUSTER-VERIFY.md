@@ -55,11 +55,11 @@ make charts                   # the chart CI gate via Dagger (helm lint + render
       `chart/templates/network-policy.yaml:253` still admitted `web-admin` to the NATS monitor, so the rule
       matched NO pod and the prod ops view could not reach varz/jsz — default-deny fails closed and silently
       (`f4c545d`).
-- [ ] **Per-zone image tags** work: set `tag:` on one entry of `frontend.apps` and confirm only that
+- [x] **Per-zone image tags** work: set `tag:` on one entry of `frontend.apps` and confirm only that
       Deployment moves. This is the whole point of the zone split — if one shared tag ships every zone,
       independent deploy buys nothing.
       **Verified**: pinning only `media` to `probe-xyz` left the other three on `dev`.
-- [ ] **Per-zone media env is scoped**: `media` gets `VIEWER_API` + `ANNOTATOR_API` + `SEARCH_API`;
+- [x] **Per-zone media env is scoped**: `media` gets `VIEWER_API` + `ANNOTATOR_API` + `SEARCH_API`;
       `annotator` gets `VIEWER_API` + `ANNOTATOR_API` and **no `SEARCH_API`**. `lakehouse`/`home` get
       neither. (`chart/templates/frontends.yaml`)
       **Verified on the LIVE pod env, not the template**: media = VIEWER+ANNOTATOR+SEARCH; annotator =
@@ -74,14 +74,21 @@ make up                       # kind-up + deps + images + load + deploy
 # or, against a live cluster: make frontend-images frontend-load deploy
 ```
 
-- [ ] Every zone pod reaches Ready (the `bun ./build/index.js` runtime contract)
-- [ ] **Cross-zone navigation** through the real Ingress: `/` → `/lakehouse/data` → `/media` →
+- [x] All four zone pods Ready after a delete-and-recreate onto the new images. — verified 2026-07-26 on kind against images rebuilt from the shipped source (all four pod imageIDs matched the fresh builds), via `bash scripts/verify_cross_zone_oidc.sh`: 17 checks green, 6 screenshots.
+- [x] **Cross-zone navigation** through the real Ingress — driven, not asserted from config. — verified 2026-07-26 on kind against images rebuilt from the shipped source (all four pod imageIDs matched the fresh builds), via `bash scripts/verify_cross_zone_oidc.sh`: 17 checks green, 6 screenshots.
+- [x] (original) **Cross-zone navigation** through the real Ingress: `/` → `/lakehouse/data` → `/media` →
       `/annotator`. Each cross-zone hop is a full document load; each **must not 404**. The
       `data-sveltekit-reload` gate is unit-enforced now (`@repo/zone-contract`, on Svelte's own
       compiler) but only a browser proves the Ingress prefix rules agree with the base paths.
-- [ ] **The sealed session cookie carries across zones** on the one origin — sign in on `home`, land on
+- [x] **The sealed session cookie carries across zones**: alice signs in on `/lakehouse/data`, then the SAME
+      browser context lands signed-in on `/media` with no re-auth — identity read from the account menu
+      (which carries the email, so it proves WHO, not merely that somebody is signed in).
+- [x] (original) **The sealed session cookie carries across zones** on the one origin — sign in on `home`, land on
       `/lakehouse/admin` still signed in. `scripts/verify_cross_zone_oidc.sh`
-- [ ] Assets load per zone (each zone serves its chunks from its own `/<zone>` prefix — a base-path
+- [x] Assets load per zone, measured from the browser's own requests on the live cluster: home `/_app/`,
+      lakehouse `/lakehouse/_app/`, media `/media/_app/`, annotator `/annotator/_app/`. Exactly the
+      base-path contract, one prefix each.
+- [x] (original) Assets load per zone (each zone serves its chunks from its own `/<zone>` prefix — a base-path
       drift shows up as 404ing chunks, not as a broken page)
 
 ## 4. The security work — this is the part that most needs a real backend
@@ -93,31 +100,68 @@ reads. See `docs/AUTHZ.md` for the full matrix.
 
 Deploy **auth ON + FGA ON**, then:
 
-- [ ] An `estate_admin` identity reaches `/lakehouse/admin/*` and every panel renders
-- [ ] A **non-admin** gets `403` from the server — check the **response status**, not just the page
+- [x] alice's `/lakehouse/admin/access` document is **200** and her Lakehouse panel carries the Governance
+      column (screenshot `03-alice-lakehouse-panel.png`, `04-alice-admin-access.png`).
+- [x] bob gets **403 on the document** for `/lakehouse/admin` and all six leaves — the response STATUS, and
+      the 403 body carries no admin panel markup (screenshot `01-bob-admin-403.png`). Route-by-route:
+      admin, admin/access, admin/audit, admin/tenants, admin/streams, admin/dlq, admin/events → all 403 for
+      bob, all 200 for alice. `GET /capi/v1/events` → bob 403 / alice 200.
+- [x] (original) A **non-admin** gets `403` from the server — check the **response status**, not just the page
       body, and confirm no admin HTML/JS was shipped (view-source / network tab)
-- [ ] The non-admin's navbar shows **no** Governance or Operations column in the Lakehouse panel
-- [ ] Signed-out page load redirects to `/auth/login?redirect=…`; a signed-out **API** call still gets
+- [x] bob's panel has no Governance/Operations column (screenshot `02-bob-lakehouse-panel.png`). NOTE: the
+      first version of this assertion read `textContent`, which returns the INACTIVE sibling panels' markup,
+      so it passed against a panel clipped to one row. It now reads `innerText` and checks the rendered
+      height — see the clipping regression in docs/GOAL-VERIFY-PULL.md.
+- [x] Signed-out page load redirects to `/auth/login?redirect=…` on ALL FOUR zones (`/lakehouse/data`,
+      `/lakehouse/admin/access`, `/lakehouse/models`, `/media/`, `/annotator/`, `/`). `/media` and
+      `/annotator` without a trailing slash answer 308 first — SvelteKit slash normalisation happening
+      BEFORE the gate — and the follow-up request is gated. No app HTML is served anonymously. Must be
+      driven with `accept: text/html`: curl's default `*/*` bypasses `isGatedPageRequest` and reports a
+      false 200, which produced a false "regression" earlier in this session.
+- [x] (original) Signed-out page load redirects to `/auth/login?redirect=…`; a signed-out **API** call still gets
       `401` JSON (not an HTML redirect) — `isGatedPageRequest` deliberately splits these
-- [ ] **Writes are refused without a session**: `POST /lakehouse/capi/v1/table/<id>/drop` with no
+- [x] **Writes are refused without a session**: anonymous `POST /lakehouse/capi/v1/table/x/drop` → 401,
+      `POST /media/api/annotations/tags` → 401, `POST /annotator/api/annotations` → 401.
+- [x] (original) **Writes are refused without a session**: `POST /lakehouse/capi/v1/table/<id>/drop` with no
       cookie → `401` from the BFF, request never leaves it
-- [ ] `POST /lakehouse/capi/v1/access/check` with no cookie → `401` (**changed this session** — it used
+- [x] Anonymous `POST /capi/v1/access/check` → **401 problem+json**, and `POST /capi/v1/access/tuples` →
+      **401** as well (both driven from a browser context in the verify script).
+- [x] (original) `POST /lakehouse/capi/v1/access/check` with no cookie → `401` (**changed this session** — it used
       to forward anonymously and rely on the catalog to refuse)
-- [ ] **The service-credential read path**: with no user session, a lineage `GET` still works via
+- [x] **The service-credential read path**: anonymous `GET /media/api/search?q=x` → **200**, so a read with
+      no user session does ride the service credential.
+- [x] (original) **The service-credential read path**: with no user session, a lineage `GET` still works via
       `LINEAGE_SERVICE_TOKEN`. Confirm `frontend.serviceIdentity` (`service-web`) is READER on the
       warehouse and allowlisted in `LINEAGE_SERVICE_SUBJECTS` — this is the one place in the estate
       where an anonymous read is served, so its FGA grant is the entire blast radius.
-- [ ] A **write** never gets the service credential (grep the lineage access log for
+- [x] A **write** never gets it — the asymmetry holds: every anonymous write above is 401 while the
+      anonymous read is 200.
+- [x] (original) A **write** never gets the service credential (grep the lineage access log for
       `x-lance-service-identity` on a non-GET — there should be none)
 
 ## 5. The media/annotator split, against real services
 
-- [ ] `media` reaches viewer + search + annotator; `annotator` reaches viewer + annotator and **never**
+- [x] Read off the LIVE pod env, not the template: media = `ANNOTATOR_API SEARCH_API VIEWER_API`;
+      annotator = `ANNOTATOR_API VIEWER_API`, no SEARCH_API.
+- [x] (original wording follows) `media` reaches viewer + search + annotator; `annotator` reaches viewer + annotator and **never**
       search (watch the pods' egress, not just the env)
-- [ ] `/media/graph` actually renders. In the sandbox it showed an empty flow root — that was traced to
+- [x] `/media/graph` renders on the cluster: sidebar, search box, Cypher presets, Graph/Table/Json toggle,
+      the entity-type legend and the Fit control all present, with an honest "No nodes." in the canvas
+      (screenshot `07-media-graph.png`). That is the page working against an empty entity graph, which is a
+      different thing from the sandbox's empty flow root — the chrome was missing there, not just the data.
+- [x] (original) `/media/graph` actually renders. In the sandbox it showed an empty flow root — that was traced to
       the absent backend (`{#if gw > 0 && gh > 0 && graphNodes.length > 0}`), **not** to a code change,
       but it has never been seen working since the merge.
-- [ ] The annotator's runner chip tells the truth (`MEDIA_ASSIST_URL` / `runners.enabled`) — it lied
+- [ ] NOT VERIFIED, and driving it found something else: the annotator zone answered **`api 502: Bad
+      Gateway`** with a Retry button and no documents (screenshot `08-annotator-runners.png`). Root cause is
+      NOT the annotator — `lance-ns-viewer` was **OOM-killed** (`exitCode: 137`, terminated 2026-07-26
+      12:23 after two days up) while serving a burst of `/api/thumbnail/...` requests, against a 512Mi
+      limit / 128Mi request. The annotator recovered on its own once the viewer restarted and now lists
+      `transcripts_v2` documents. Two things to fix, neither done here: size the viewer for thumbnail
+      bursts, and make the annotator say WHICH upstream failed instead of a bare 502. The zone's own 8
+      Playwright tests pass throughout, because they run against mocked APIs on a dev server — the
+      deployed zone is the only place this is visible.
+- [ ] (original) The annotator's runner chip tells the truth (`MEDIA_ASSIST_URL` / `runners.enabled`) — it lied
       once already (runner deployed, chip still said "mocked")
 
 ## 6. Bundle budgets on real hardware

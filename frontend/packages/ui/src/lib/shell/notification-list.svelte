@@ -157,7 +157,17 @@
 						</div>
 					{/if}
 					{#if run.error_message}
-						<p class="text-destructive mt-1.5 text-xs break-words" data-slot="notification-error">
+						<!-- Clamped to three lines, with the whole thing on hover. Unclamped, a real failure from
+						     the estate rendered a 25-line Rust stack trace — object paths, byte offsets, rustc
+						     source lines — that filled the panel and pushed every other notification out of
+						     view. A notification says what broke; a log says why, and this is not the log.
+						     Caught by opening the screenshot: every assertion passed, because the text WAS
+						     present — far too much of it. -->
+						<p
+							class="text-destructive mt-1.5 line-clamp-3 text-xs break-words"
+							data-slot="notification-error"
+							title={run.error_message}
+						>
 							{run.error_message}
 						</p>
 					{/if}

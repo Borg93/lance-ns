@@ -284,9 +284,19 @@ export const lineageFeed = query.live(async function* (): AsyncGenerator<Lineage
 			});
 			if (!res.ok) return null;
 			const board = parse(RunsSchema, await res.json());
+			// FAILURES FIRST, then newest — and the order matters HERE, not only in the surface, because
+			// this is where the list is CUT. Measured against the live estate: 891 runs with the first
+			// FAIL at position 445, so a recency-only trim to 20 handed the bell twenty successes and the
+			// panel could not have shown a failure however it sorted them. Fixing the component's ordering
+			// alone changed nothing, which is what made the layering obvious.
+			const failed = (r: { state?: string | null }) =>
+				(r.state ?? '').toUpperCase() === 'FAIL' || (r.state ?? '').toUpperCase() === 'ABORT';
 			return board.runs
 				.slice()
-				.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''))
+				.sort((a, b) => {
+					if (failed(a) !== failed(b)) return failed(a) ? -1 : 1;
+					return (b.updated_at ?? '').localeCompare(a.updated_at ?? '');
+				})
 				.slice(0, NOTICE_WINDOW)
 				.map((r) => ({
 					run_id: r.run_id,

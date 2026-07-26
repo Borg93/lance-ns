@@ -176,3 +176,44 @@ describe('seenOnClose', () => {
 		expect(seenOnClose(runs, 0)).toEqual([]);
 	});
 });
+
+describe('a failure cannot be buried by recency', () => {
+	const at = (n: number) => `2026-07-26T00:00:${String(n).padStart(2, '0')}Z`;
+	const run = (id: string, state: string, when: number): RunStatusLike =>
+		({ run_id: id, state, job: id, updated_at: at(when) }) as RunStatusLike;
+
+	it('surfaces an OLD failure ahead of newer successes', () => {
+		// The live shape: against 891 real runs the first FAIL sat at position 445, so a panel showing the
+		// newest 8 displayed no failure at all. Every fixture until now had the failure near the top, which
+		// is why the ordering looked correct.
+		const runs = [run('old-fail', 'FAIL', 1)];
+		for (let i = 2; i <= 40; i++) runs.push(run(`ok-${i}`, 'COMPLETE', i));
+
+		const shown = visibleRuns(runs).slice(0, 8);
+
+		expect(shown[0]?.run_id).toBe('old-fail');
+		expect(shown).toHaveLength(8);
+	});
+
+	it('within a group the order is still newest first', () => {
+		const runs = [
+			run('ok-early', 'COMPLETE', 1),
+			run('fail-early', 'FAIL', 2),
+			run('ok-late', 'COMPLETE', 9),
+			run('fail-late', 'FAIL', 8),
+		];
+
+		expect(visibleRuns(runs).map((r) => r.run_id)).toEqual([
+			'fail-late',
+			'fail-early',
+			'ok-late',
+			'ok-early',
+		]);
+	});
+
+	it('a DISMISSED failure stays gone — the rule is about unhandled ones', () => {
+		const runs = [run('old-fail', 'FAIL', 1), run('ok', 'COMPLETE', 9)];
+		const ids = visibleRuns(runs, [runNotificationId(runs[0]!)]).map((r) => r.run_id);
+		expect(ids).toEqual(['ok']);
+	});
+});

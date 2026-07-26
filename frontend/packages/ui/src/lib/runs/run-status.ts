@@ -100,19 +100,33 @@ export function runProgress(
 	return { done, total, percent: Math.round((done / total) * 100) };
 }
 
-/** Newest first by `updated_at`, minus anything dismissed. The service already sorts, but a zone
- *  may merge feeds (a live cursor on top of a first page), so the surface sorts for itself. */
+/**
+ * What the panel shows: undismissed runs, FAILURES FIRST, then newest.
+ *
+ * Recency alone was wrong, and the live estate proved it: against 891 real runs the first `FAIL` sat at
+ * **position 445**, so a panel showing the newest 8 never displayed a single failure. That directly
+ * defeats this surface's stated purpose — nobody should have to hunt for a failed run — and no test
+ * caught it because every fixture had a handful of runs with the failure near the top.
+ *
+ * A dismissed failure is still gone: the point is that a failure the user has NOT dealt with cannot be
+ * pushed off the end by a hundred successes. Within each group the order is newest-first as before, so a
+ * quiet estate looks exactly as it did.
+ */
 export function visibleRuns(
 	runs: RunStatusLike[],
 	dismissed: Iterable<string> = [],
 ): RunStatusLike[] {
 	const gone = new Set(dismissed);
+	const failed = (run: RunStatusLike): boolean => runPhase(run) === 'failed';
 	// `.sort` on the filtered COPY, not `.toSorted` — the package's tsconfig targets ES2022, where
 	// `toSorted` is not in lib (svelte-check: "Property 'toSorted' does not exist"). The copy is what
 	// keeps the caller's array unmutated.
 	return runs
 		.filter((run) => !gone.has(runNotificationId(run)))
-		.sort((a, b) => (b.updated_at ?? '').localeCompare(a.updated_at ?? ''));
+		.sort((a, b) => {
+			if (failed(a) !== failed(b)) return failed(a) ? -1 : 1;
+			return (b.updated_at ?? '').localeCompare(a.updated_at ?? '');
+		});
 }
 
 /** The runs whose CURRENT state the viewer has not seen — what the count on the bell means. */

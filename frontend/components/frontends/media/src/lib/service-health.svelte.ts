@@ -29,6 +29,7 @@ class ServiceHealth {
 	error = $state<string | null>(null);
 	#refs = 0;
 	#timer: ReturnType<typeof setInterval> | null = null;
+	#inflight: Promise<void> | null = null;
 
 	async refresh(): Promise<void> {
 		try {
@@ -40,13 +41,37 @@ class ServiceHealth {
 		}
 	}
 
+	/** The current reading, fetching once if nothing has been read yet.
+	 *
+	 *  This exists so that "one store, one poll" is true for *callers who need the payload*, not only for
+	 *  the two components that watch it. The descriptor store needs `db.path` to derive the default dataset
+	 *  id and used to call `getHealth()` itself — a third independent fetch of the same endpoint on every
+	 *  media page load, which is exactly the drift this class's docstring warns about. It await-ed a fresh
+	 *  response because it needs the value; `subscribe()` cannot serve that, since it returns a teardown and
+	 *  the first reading has not landed yet when it returns.
+	 *
+	 *  Concurrent callers share the one in-flight request: without that, the descriptor store and a
+	 *  subscribing component racing on mount would each open a connection and the deduplication would be
+	 *  cosmetic. Resolves to `null` when the fetch failed — `error` carries why. */
+	async ensure(): Promise<Health | null> {
+		if (this.current !== null) return this.current;
+		this.#inflight ??= this.refresh().finally(() => {
+			this.#inflight = null;
+		});
+		await this.#inflight;
+		return this.current;
+	}
+
 	/** Start polling while at least one component wants it; stop when the last one goes away.
 	 *  Ref-counted because both the sidebar badge and the search bar subscribe, and the first to unmount
 	 *  must not stop the poll the other still depends on. Call from an `$effect` and return the result. */
 	subscribe(): () => void {
 		this.#refs += 1;
 		if (this.#timer === null) {
-			void this.refresh();
+			// `ensure`, not `refresh`: a reading the descriptor store already fetched on this page load is
+			// good enough to paint the badge, and re-fetching it here would restore the duplicate request
+			// this method was changed to remove. The timer keeps it fresh from then on.
+			void this.ensure();
 			this.#timer = setInterval(() => void this.refresh(), POLL_MS);
 		}
 		return () => {

@@ -9,8 +9,9 @@
  * endpoint's db path.
  */
 
-import { getDatasetView, getHealth } from '@repo/media-api';
+import { getDatasetView } from '@repo/media-api';
 import { setActiveView, type DatasetView } from '@repo/media-api/descriptor';
+import { serviceHealth } from '$lib/service-health.svelte';
 
 class DescriptorStore {
 	view = $state<DatasetView | null>(null);
@@ -31,7 +32,14 @@ class DescriptorStore {
 				id = param;
 				isDefault = false;
 			} else {
-				const health = await getHealth();
+				// Through the shared store, not a direct `getHealth()`: this is the zone's ONLY health
+				// fetcher, so the sidebar badge, the search-bar mode selector and this derivation all
+				// read one response. Fetching it here independently made a third request for the same
+				// endpoint on every page load, and let the badge and the modes disagree about whether
+				// search works — the exact drift `service-health.svelte.ts` documents as the reason it
+				// is a single store.
+				const health = await serviceHealth.ensure();
+				if (health === null) throw new Error(serviceHealth.error ?? 'health unavailable');
 				id =
 					health.db.path
 						.replace(/\.lance$/, '')

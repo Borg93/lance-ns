@@ -101,3 +101,55 @@ def test_history_limit_bounds_the_transaction_reads(real_ns_client: TestClient) 
 def test_history_of_a_missing_table_is_not_a_500(real_ns_client: TestClient) -> None:
     r = real_ns_client.get("/v1/table/h1$nope/history")
     assert r.status_code in (400, 404), r.text
+
+
+def test_history_reports_restore_index_and_column_changes(real_ns_client: TestClient) -> None:
+    """The operations a create/delete/update whitelist misses — and the one that could corrupt the log.
+
+    Driven against real pylance commits rather than mocks, because every field here was chosen by reading
+    ``lance.LanceOperation.<Op>.__dataclass_fields__`` off the installed version. A mock would pin the shape
+    we imagined; only a real commit proves the shape Lance writes.
+
+    The Restore assertion is the important one. ``Restore`` carries a field called ``version`` meaning *the
+    version whose content was restored*, while the row already has ``version`` meaning *this version*. Copied
+    through under its own name it silently overwrites the log's primary key — the row would claim to BE the
+    older version, and the lineage actor join would attach the wrong author. So the test asserts both that
+    ``restored_from`` is right and that ``version`` was not clobbered.
+    """
+    _seed(real_ns_client)  # v1 create, v2 delete, v3 update
+
+    added = real_ns_client.post(
+        "/v1/table/h1$t/add_columns",
+        json={"new_columns": [{"name": "double_id", "expression": "id * 2"}]},
+    )
+    assert added.status_code == 200, added.text
+    dropped = real_ns_client.post("/v1/table/h1$t/drop_columns", json={"columns": ["double_id"]})
+    assert dropped.status_code == 200, dropped.text
+    indexed = real_ns_client.post(
+        "/v1/table/h1$t/create_scalar_index", json={"column": "id", "index_type": "BTREE"}
+    )
+    assert indexed.status_code == 200, indexed.text
+    restored = real_ns_client.post("/v1/table/h1$t/restore", json={"version": 1})
+    assert restored.status_code == 200, restored.text
+
+    rows = real_ns_client.get("/v1/table/h1$t/history?limit=50").json()["versions"]
+    by_op: dict[str, dict[str, object]] = {}
+    for row in rows:
+        by_op.setdefault(str(row.get("operation")), row)
+
+    # add_columns commits a Merge, drop_columns commits a Project. Neither carries `new_schema` — only
+    # `schema` — so a whitelist testing `new_schema` alone reported schema_set false for a column drop,
+    # which is the log denying the change a reader is most likely hunting for.
+    assert by_op["Merge"]["schema_set"] is True, by_op["Merge"]
+    assert by_op["Project"]["schema_set"] is True, by_op["Project"]
+
+    # An index build must read as more than a bare word.
+    assert by_op["CreateIndex"]["new_indices"] == 1, by_op["CreateIndex"]
+
+    # The restore: renamed, present, correct — and the row's own version survived.
+    restore_row = by_op["Restore"]
+    assert restore_row["restored_from"] == 1, restore_row
+    assert restore_row["version"] != 1, (
+        f"the row's own version was clobbered by Restore.version: {restore_row}"
+    )
+    assert restore_row["version"] == max(int(r["version"]) for r in rows), restore_row

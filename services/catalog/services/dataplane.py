@@ -1044,9 +1044,20 @@ def update_field_metadata(
 #:   Update     update_mode, fields_modified,   ("these fields were rewritten, this way")
 #:              updated_fragments, new_fragments
 #:
+#:   Restore    version                          ("this version's content is version N's") — see the rename
+#:              below; the field name collides with the row's own key
+#:   CreateIndex new_indices, removed_indices     ("an index was built/dropped here")
+#:   Rewrite    groups, rewritten_indices         (compaction: "14 groups were rewritten")
+#:   Project    schema                            (drop_columns)
+#:   Merge      fragments, schema                 (add_columns)
+#:
 #: Anything not listed still gets its operation NAME, so a Merge/Compact/CreateIndex commit appears in the
 #: log as itself rather than vanishing — an unknown operation is a gap in this table, never a gap in the
 #: history.
+#:
+#: Verified against pylance 8.0.0 by reading ``__dataclass_fields__`` off each ``lance.LanceOperation``
+#: class rather than trusting the docs, because the whole value of this endpoint is reporting what Lance
+#: actually recorded.
 _TXN_DETAIL_FIELDS = (
     "predicate",
     "update_mode",
@@ -1056,7 +1067,21 @@ _TXN_DETAIL_FIELDS = (
     "removed_fragment_ids",
     "deleted_fragment_ids",
     "fragments",
+    "new_indices",
+    "removed_indices",
+    "groups",
+    "version",
 )
+
+#: Operation fields whose own name collides with a row key, or reads wrong out of context.
+#:
+#: ``Restore.version`` is the dangerous one and the reason this map exists. Restore mints a *fresh* version
+#: whose content equals an older one (``api/v1/endpoints/tables.py`` — restore commits rather than rewinds),
+#: so the log shows v12 with ``operation: "Restore"`` and, without this field, no clue what it restored. But
+#: copying it through under its own name would overwrite ``row["version"]`` — the log's primary key and the
+#: join key for the lineage actor — turning "v12 restored from v7" into a row claiming to *be* v7. The most
+#: valuable missing field and a silent corruption share one name, so it is renamed on the way out.
+_TXN_FIELD_RENAMES = {"version": "restored_from"}
 
 
 def table_history(
@@ -1106,10 +1131,16 @@ def table_history(
             if not hasattr(op, field):
                 continue
             value = getattr(op, field)
-            # Fragment lists are long and carry no meaning in a log — the COUNT is the signal.
-            row[field] = len(value) if isinstance(value, (list, tuple)) else value
-        # A create carries the whole schema; the useful fact for a log row is that the schema was set here.
-        row["schema_set"] = hasattr(op, "new_schema") and getattr(op, "new_schema", None) is not None
+            # Fragment and index lists are long and carry no meaning in a log — the COUNT is the signal.
+            row[_TXN_FIELD_RENAMES.get(field, field)] = (
+                len(value) if isinstance(value, (list, tuple)) else value
+            )
+        # Did this version change the columns? Both attribute names must be tested: only ``Overwrite`` (a
+        # create) carries ``new_schema``, while ``drop_columns`` commits a ``Project`` and ``add_columns``
+        # commits a ``Merge`` — and both of those carry plain ``schema``. Testing only ``new_schema``
+        # reported ``schema_set: false`` for a column drop, which is the log denying the one kind of change
+        # a reader is most likely to be hunting for.
+        row["schema_set"] = any(getattr(op, name, None) is not None for name in ("new_schema", "schema"))
         out.append(row)
     return out
 

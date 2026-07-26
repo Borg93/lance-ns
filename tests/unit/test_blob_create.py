@@ -17,6 +17,7 @@ from catalog.services.dataplane import create_table
 from common import blobs
 from lance import Blob, blob_array, blob_field
 from lance_namespace import (
+    CreateNamespaceRequest,
     DeclareTableRequest,
     DescribeTableRequest,
     InvalidInputError,
@@ -24,6 +25,17 @@ from lance_namespace import (
     TableNotFoundError,
     connect,
 )
+
+
+def _declare_namespace(ns: object, name: str) -> None:
+    """Create a child namespace before putting a table in it.
+
+    Required since pylance 9.0: the `dir` backend now answers a child-namespace read with
+    ``NamespaceNotFoundError: Child namespace reads require an existing __manifest dataset``, where 8.0
+    treated any directory as one. Renaming ACROSS namespaces therefore needs both ends declared — the
+    destination is read before the move.
+    """
+    ns.create_namespace(CreateNamespaceRequest(id=[name]))  # ty: ignore[unresolved-attribute]
 
 
 def _blob_schema() -> pa.Schema:
@@ -270,6 +282,8 @@ def test_rename_into_another_namespace(tmp_path: Path) -> None:
     from catalog.services.dataplane import rename_table
 
     ns = connect("dir", {"root": str(tmp_path)})
+    _declare_namespace(ns, "src")
+    _declare_namespace(ns, "dst")
     create_table(ns, {}, ["src", "clip"], _blob_ipc([b"x"]), mode="create")
 
     new_segments, _ = rename_table(ns, {}, ["src", "clip"], "clip", ["dst"])

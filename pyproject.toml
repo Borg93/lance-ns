@@ -5,10 +5,13 @@ description = "Lance Namespace REST Catalog (FastAPI over native pylance Directo
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    # 8.0.0 is the NEWEST PyPI release (verified 2026-07-10; 9.0 exists only as unreleased betas).
-    # AT THE 9.0 BUMP: switch to "pylance[otel]" — common/lance_metrics.py + the five lifespan hooks
-    # are pre-wired and light up Lance-native IO metrics automatically (guarded no-op until then).
-    "pylance>=8.0.0",
+    # 9.0.0 (released; verified on PyPI 2026-07-26 — it carries the `otel` extra). The extra is what
+    # activates `common/lance_metrics.py`: the bridge and its five lifespan hooks were pre-wired at the
+    # 8.x pin as a guarded no-op, because `lance.otel` did not exist before 9.0. With it, Lance's own
+    # Rust-side object-store/IO metrics register on the MeterProvider that `opentelemetry-instrument`
+    # already installs in every deployed service, so they flow down the existing OTLP → Collector →
+    # GreptimeDB path with no new configuration (#114).
+    "pylance[otel]>=9.0.0",
     "pyarrow",
     "fastapi",
     "uvicorn[standard]",

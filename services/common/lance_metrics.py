@@ -25,7 +25,7 @@ def instrument_lance_if_available() -> bool:
     missing module (pylance < 9) nor a bridge failure may touch service startup.
     """
     try:
-        from lance.otel import instrument_lance_metrics  # ty: ignore[unresolved-import]
+        from lance.otel import instrument_lance_metrics
     except ImportError:
         log.info("lance_metrics_unavailable", extra={"reason": "pylance<9 has no lance.otel bridge"})
         return False

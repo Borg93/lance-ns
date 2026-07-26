@@ -111,7 +111,21 @@ def test_describe_table_maps_query_params(client: TestClient, fake_ns: MagicMock
     assert req.load_detailed_metadata is True
 
 
+def _ensure_namespace(client: TestClient, name: str) -> None:
+    """Create the parent namespace before creating a table under it.
+
+    Required since pylance 9.0: the `dir` backend answers a child-namespace read with
+    ``NamespaceNotFoundError: Child namespace reads require an existing __manifest dataset``, where 8.0
+    treated any directory as a namespace. So a table create under an undeclared namespace is now a 404
+    rather than an implicit mkdir — which is the stricter and more honest contract, and the one the
+    product already follows (the namespace-create endpoint and the medallion bootstrap both declare
+    theirs). These tests were relying on the implicit behaviour.
+    """
+    assert client.post(f"/v1/namespace/{name}/create", json={}).status_code == 200
+
+
 def test_create_table_passes_arrow_bytes_through(real_ns_client: TestClient) -> None:
+    _ensure_namespace(real_ns_client, "db")
     # The raw Arrow-IPC body is written verbatim as the new table's first version. Driven against a REAL
     # dir namespace (a MagicMock can no longer stand in — the create does a real 2.2 write), so this now
     # proves the ACTUAL round-trip: the rows land, not merely that bytes reached a mocked method.
@@ -128,6 +142,7 @@ def test_create_table_passes_arrow_bytes_through(real_ns_client: TestClient) -> 
 
 
 def test_create_table_accepts_spec_properties_query_param(real_ns_client: TestClient) -> None:
+    _ensure_namespace(real_ns_client, "db")
     # Spec 0.9 passes properties as a JSON-encoded query param (no header form). The endpoint must parse it
     # and the create must succeed carrying them — driven for real so the parse + write path both run.
     body = _arrow_ipc(pa.table({"id": [1]}))
@@ -145,6 +160,7 @@ def _arrow_ipc(table: pa.Table) -> bytes:
 
 
 def test_create_strips_root_storage_options_from_response(real_ns_client: TestClient) -> None:
+    _ensure_namespace(real_ns_client, "db")
     # #88: a create response must NEVER carry storage credentials (storage access is vended only via
     # /credentials). Driven for real: the direct 2.2 write builds its own response and never populates
     # storage_options, so the guarantee is now structural — this pins it against a regression that re-adds it.
@@ -570,6 +586,7 @@ def test_restore_emits_lineage_at_new_version(client: TestClient, fake_ns: Magic
 def test_create_exist_ok_reads_schema_back_instead_of_trusting_payload(
     real_ns_client: TestClient, monkeypatch
 ) -> None:
+    _ensure_namespace(real_ns_client, "db")
     # ExistOk KEEPS an existing table (nothing written, response.version = the existing version): the
     # payload's schema may then belong to a table that was never created — the true schema must be read back
     # PINNED at that version, never parsed from the payload. Now driven for real: the table genuinely exists.
@@ -596,6 +613,7 @@ def test_create_exist_ok_reads_schema_back_instead_of_trusting_payload(
 
 
 def test_create_parses_payload_schema_without_dataset_reopen(real_ns_client: TestClient, monkeypatch) -> None:
+    _ensure_namespace(real_ns_client, "db")
     # A fresh create writes exactly the request bytes — the schema facet comes from the in-memory payload,
     # never from a describe + dataset reopen (which would add two network round trips per create).
     called: dict[str, object] = {}

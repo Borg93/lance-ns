@@ -115,6 +115,12 @@ for (const user of ['alice@example.com', 'bob@example.com']) {
 			status < 400 && id.includes(user),
 			`${status}, account menu: ${id.slice(0, 60) || '(none)'}`,
 		);
+
+		// The bell, in EVERY zone. It shipped in one of four — the component was shared, the transport was
+		// not — and the zone where someone waits on a batch is the annotator, not the run board.
+		const bells = await page.getByRole('button', { name: /notification/i }).count();
+		check(`${who} sees the run bell in /${zone.name}`, bells === 1, `${bells} bell(s)`);
+
 		await page.screenshot({ path: `${SHOT}/zones-${who}-${zone.name}.png`, fullPage: false });
 	}
 
@@ -190,6 +196,32 @@ for (const user of ['alice@example.com', 'bob@example.com']) {
 		// The panel's own crop, at scale 3 — this is the "zoom on the text" half of condition 10.
 		await panel.screenshot({ path: `${SHOT}/cond16-notification-panel.png` });
 		console.log(`   crop: ${SHOT}/cond16-notification-panel.png (deviceScaleFactor 3)`);
+
+		// Same surface, a DIFFERENT zone, with its own transport — the point of sharing the feed. The
+		// annotator is the one that matters: it is where a person waits on the batch they are annotating
+		// for, and it is where the bell was missing.
+		for (const other of ['media', 'annotator']) {
+			await page.goto(`${ORIGIN}/${other}/`, { waitUntil: 'domcontentloaded' });
+			await page.waitForTimeout(3000);
+			const otherBell = page.getByRole('button', { name: /notification/i }).first();
+			if ((await otherBell.count()) === 0) {
+				check(`the ${other} zone's bell opens a fed panel`, false, 'no bell');
+				continue;
+			}
+			await otherBell.click();
+			await page.waitForTimeout(1500);
+			const otherPanel = page.getByRole('dialog', { name: 'Notifications' });
+			const text = ((await otherPanel.innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ');
+			check(
+				`the ${other} zone's bell opens a panel fed by ITS OWN transport`,
+				(await otherPanel.count()) === 1 && /Failed|Completed|Running|Started/.test(text),
+				text.slice(0, 70) || '(empty)',
+			);
+			await otherPanel
+				.screenshot({ path: `${SHOT}/cond16-notification-panel-${other}.png` })
+				.catch(() => {});
+			await page.keyboard.press('Escape');
+		}
 	}
 
 	await ctx.close();

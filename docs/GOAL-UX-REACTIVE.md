@@ -101,6 +101,72 @@ vs `scrollH 16`). A reader silently repairs words; it took the verifier a **4× 
 So condition 10 now requires: zoom on text, and where a defect is suspected, measure it in the DOM
 (`clientHeight` vs `scrollHeight`) rather than judging by eye.
 
+## Conditions 9 + 16: the drive that found the bell shipping in one zone out of four
+
+Conditions 9 (both users, all four zones), 10 (measure, don't eyeball) and 16 (redeploy, then assert the
+new surface inside its own panel) are one script — `scripts/verify_all_zones_both_users.mjs` — because
+each one alone is satisfiable by a broken estate, and running them together is what surfaced the gap.
+
+**Redeployed first**, because a drive against yesterday's image proves nothing about today's code. All four
+zone digests moved:
+
+```
+annotator  33bd12c2 → 4d6f2d90
+home       ac8a88d1 → 0aa2e0f6
+lakehouse  fbcc366b → 50869fd3
+media      598d1eed → 28e69448     (= the image `kind load` had just reported loading)
+```
+
+**What the drive found.** Every zone rendered for both users, and the admin gate is real — alice 200 with
+the surface, bob **403** with *"Admin is estate-admin only. These surfaces span every tenant. Your identity
+does not hold the estate-admin privilege (can_observe_events on the FGA root)"*. But:
+
+```
+bell in home: 0 · lakehouse: 1 · media: 0 · annotator: 0
+```
+
+The notification bell shipped in **one zone out of four** — and the wrong one. `notification-center.svelte`
+says in its own header that it lives in `@repo/ui` "so every zone gets the SAME one", and that was true of
+the *component*. The **transport** stayed in the lakehouse zone, so the three zones where someone actually
+waits on a batch — annotating, searching, on the landing page — had no way to learn that it failed. No test
+was red. Every zone already had `LINEAGE_API` in its pod env, so nothing was blocking it.
+
+**Fixed** (`19de3f1`): the generator moved to `@repo/api/runs-feed` — probe the cursor, re-read `/runs` on
+a move, failures first, trim to the window, keepalive — and each zone owns a four-line `.remote.ts` that
+hands it a `fetch` and a credential, because `query.live` must be declared in the app to get an endpoint.
+`media` and `annotator` also needed `kit.experimental.remoteFunctions`, without which the build fails
+outright rather than dropping the endpoint silently, which is the right failure.
+
+**Gated**, so it cannot regress to one zone again: `@repo/zone-contract`'s `notification-surface.test.ts`
+requires, per zone, that the root layout passes `{notifications}` to `AppShell` **and** that a feed exists
+built on the shared module. Both halves broken deliberately:
+
+```
+AssertionError: annotator's root layout renders AppShell WITHOUT a notifications feed, so a run that
+                fails is invisible to anyone working in this zone
+AssertionError: expected 'import { getRequestEvent, query } fro…' to contain '@repo/api/runs-feed'
+```
+
+Restored: **587 passed**. `orderForNotice` also has its own five tests in `@repo/api`, pinning the
+failures-first rule where the list is actually cut.
+
+### Condition 10: two "defects" that were my measurement, not the product
+
+The first run of this script reported two failures. Both were wrong, and finding that out is the condition.
+
+- **"2 clipped rows in the notification panel"** — `clientH 48, scrollH 384`. That is a deliberate
+  `line-clamp-3` with a visible ellipsis and `title={run.error_message}` carrying the whole string. My
+  check conflated *announced* truncation with the accidental kind (a line box two pixels short of its
+  glyphs, which draws nothing). It now flags only overflow with no clamp and no ellipsis, and separately
+  asserts every truncated row has a `title` — announced but unrecoverable is its own defect.
+- **"bob is shown an empty table"** — I read 200 characters of `main`, which was all sidebar chrome. The
+  screenshot said *"Admin is estate-admin only"* in 24px type. Reading the whole region fixed it.
+
+Two other suspicions were measured rather than reported: the black annotator thumbnails are **not** broken
+(`24 images, broken (naturalWidth 0): 0` — they are black opening frames of archival video), and the media
+zone's red services dot is **honest** — `embed.ok: false`, `rerank.ok: false`, `ConnectError: [Errno 111]
+Connection refused`, which is #123's decision showing through the UI exactly as it should.
+
 ## Condition 14: the mistakes from 2026-07-26 do not recur
 
 Twelve defects were introduced or asserted falsely in one session, all by the same habit — acting before

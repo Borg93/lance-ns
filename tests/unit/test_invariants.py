@@ -541,7 +541,7 @@ def test_no_numeric_helm_default_can_swallow_an_explicit_zero() -> None:
     ]
     assert not offenders, (
         "`| default <number>` treats an explicit 0 as absent, so the operator's value is silently "
-        "replaced by the fallback. Use `(hasKey $parent \"key\") | ternary $parent.key <n>`:\n  "
+        'replaced by the fallback. Use `(hasKey $parent "key") | ternary $parent.key <n>`:\n  '
         + "\n  ".join(offenders)
     )
 
@@ -558,7 +558,8 @@ def test_no_pod_container_is_read_by_index() -> None:
         f"{path.relative_to(REPO)}:{n}: {line.strip()}"
         for root in roots
         for path in ([root] if root.is_file() else sorted(root.rglob("*")))
-        if path.is_file() and path.suffix in {"", ".sh", ".mjs", ".py", ".yaml", ".ts"}
+        if path.is_file()
+        and path.suffix in {"", ".sh", ".mjs", ".py", ".yaml", ".ts"}
         and path != Path(__file__)  # this file names the pattern in order to forbid it
         for n, line in enumerate(path.read_text(errors="ignore").splitlines(), 1)
         if "containerStatuses[0]" in line

@@ -28,9 +28,7 @@ describe('the notification surface is estate-wide, not lakehouse-only', () => {
 
 		it(`${zone} passes {notifications} to AppShell`, () => {
 			const source = readFileSync(layout, 'utf8');
-			expect(source, `${zone}'s root layout does not mount the estate shell`).toContain(
-				'AppShell',
-			);
+			expect(source, `${zone}'s root layout does not mount the estate shell`).toContain('AppShell');
 			expect(
 				/\{notifications\}|notifications=\{/.test(source),
 				`${zone}'s root layout renders AppShell WITHOUT a notifications feed, so a run that ` +

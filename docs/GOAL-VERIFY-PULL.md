@@ -197,6 +197,12 @@ transaction log has no notion of a user, and it should not. So the work is:
 Tasks #65/#66 surfaced versions, tags, manifests and schema. Neither answers "who changed this row, and
 what did they change" — that is what this adds, and step 1 is a prerequisite nothing else can substitute.
 
+## Where the long-form evidence lives
+
+`docs/audits/` — the three audits in full (routes + IA, MFE composition, Svelte 5), each with its
+adversarial verification pass appended. They were written to a scratchpad first, which would have lost them;
+a claim like "26 routes map 1:1" needs the table behind it to be worth anything.
+
 ## Condition 1 — the MFE + Svelte 5 halves (adversarially verified)
 
 Three audits ran in parallel, each re-checked by a second agent whose default verdict was REFUTED unless
@@ -247,6 +253,16 @@ sub-claims, which is the point of running it.
 - Runes hygiene otherwise clean: 135 component-tag `bind:` directives, 0 binding to a non-`$bindable`
   prop (re-counted by AST, not regex — the report's 133 was an undercount); 253 `.svelte` × client+server
   plus 18 `.svelte.ts` compile with 0 diagnostics.
+- **MCP autofixer, all 9 `.svelte` changed since the pull** (`git diff --name-only e489f2b..HEAD -- '*.svelte'`):
+  clean on 8. `top-navbar.svelte` was re-run AFTER the clipping fix, not just before it. The 9th,
+  `lineage/datasets/[name]/+page.svelte`, returns 4 suggestions about calling `load`/`setInterval`/
+  `clearInterval` inside an `$effect` — all four are heuristic false positives and the verdict is
+  **conforms**: `:63-68` is a polling effect that captures `name`, loads once, sets an interval and
+  `return () => clearInterval(timer)`, which is the `svelte-runes` skill's own "✅ CORRECT: $effect with
+  cleanup" shape. The tool hedges its own suggestion ("ignore if you are sure this function is not assigning
+  any stateful variable"). Worth contrasting with the media bug, which had no cleanup and no side effect —
+  it was derived state written by an effect, the one thing an effect must not be used for.
+  `TableDetail.svelte`'s 60 suggestions are one pattern, judged above, not 60 defects.
 
 ## Condition 3 — IA judged against the Lakekeeper console
 

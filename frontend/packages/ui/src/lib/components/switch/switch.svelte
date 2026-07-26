@@ -6,7 +6,16 @@
 		checked = $bindable(false),
 		class: className,
 		...rest
-	}: { checked?: boolean; class?: string; 'aria-label'?: string } = $props();
+	}: {
+		checked?: boolean;
+		class?: string;
+		'aria-label'?: string;
+		/** Fires on user interaction only, like the Slider's `onValueChange`. Lets a caller whose truth
+		 *  lives in a PROP write straight to that prop instead of mirroring it into local `$state` and
+		 *  syncing back with an `$effect` — a mirror goes stale the moment the parent replaces the prop,
+		 *  and then overwrites it. Reaches `Switch.Root` through `...rest`; declared here so it type-checks. */
+		onCheckedChange?: (checked: boolean) => void;
+	} = $props();
 </script>
 
 <Switch.Root

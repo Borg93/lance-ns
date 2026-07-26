@@ -63,14 +63,33 @@
 		},
 	];
 
-	// Balance is stored as weightPct ∈ [0,100] | null (null = parameter-free RRF).
-	// Drive it from a local number + an "auto" switch so the Slider always sees a
-	// number, then mirror back into the bindable weightPct.
-	let auto = $state(weightPct === null);
-	let weightVal = $state(weightPct ?? 50);
-	$effect(() => {
-		weightPct = auto ? null : weightVal;
-	});
+	// Balance is stored as weightPct ∈ [0,100] | null (null = parameter-free RRF). `weightPct` is the
+	// SINGLE source of truth and is read, never mirrored.
+	//
+	// It used to be copied into `auto` + `weightVal` $state at creation and synced back with an $effect.
+	// Both copies were initialised exactly once, so the moment the parent replaced `weightPct` from the
+	// outside — `adoptSpec` (search-bar.svelte) loading a saved view, which persists `weight` — the copies
+	// were stale AND the effect promptly wrote the stale value back over the adopted one. The Settings
+	// panel then displayed a fusion balance the search was not running, and reopening the popover did not
+	// help: <SearchSettings> sits outside the {#if}, so the locals survive. Found by an audit of runes
+	// usage and confirmed link by link.
+	//
+	// `auto` and the slider position are now DERIVED from the prop; only `lastManual` is local, because
+	// "where the slider was before you switched to Auto" is genuinely not expressible in `weightPct`
+	// (null carries no number). User interaction writes the prop directly through the components'
+	// change callbacks, so there is one direction of flow and nothing to keep in sync.
+	let lastManual = $state(weightPct ?? 50);
+	const auto = $derived(weightPct === null);
+	const weightVal = $derived(weightPct ?? lastManual);
+
+	function setAuto(on: boolean): void {
+		weightPct = on ? null : lastManual;
+	}
+
+	function setWeight(value: number): void {
+		lastManual = value;
+		weightPct = value;
+	}
 
 	const balanceLabel = $derived(
 		auto
@@ -123,10 +142,17 @@
 					</div>
 					<label class="flex items-center justify-between">
 						<span class="text-muted-foreground text-xs">Auto-fuse (RRF)</span>
-						<Switch bind:checked={auto} aria-label="Auto-fuse with RRF" />
+						<Switch checked={auto} onCheckedChange={setAuto} aria-label="Auto-fuse with RRF" />
 					</label>
 					{#if !auto}
-						<Slider bind:value={weightVal} min={0} max={100} step={5} aria-label="Fusion balance" />
+						<Slider
+							value={weightVal}
+							onValueChange={setWeight}
+							min={0}
+							max={100}
+							step={5}
+							aria-label="Fusion balance"
+						/>
 						<div class="text-muted-foreground flex justify-between text-[0.7rem]">
 							<span>← keyword</span>
 							<span>vector →</span>

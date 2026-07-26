@@ -27,7 +27,7 @@ is carried in conversation memory alone.
 | 3 | Zones/routes/abstractions right; judged against the Lakekeeper console | **structural half DONE** (26→26 exact diff). Lakekeeper comparison + orphan sweep OUTSTANDING |
 | 4 | media/annotator split sound and documented; Pixi recommendation | **backend DONE** (live pod env). Bundle numbers + Pixi verdict OUTSTANDING |
 | 5 | The cluster TODO (`docs/TODO-CLUSTER-VERIFY.md` §1–6) discharged | **essentially DONE** — see the evidence table |
-| 6 | All gates green, stale dirs deleted, pushed, CI confirmed | **blocked**: 16 lakehouse e2e failures (self-inflicted, below) |
+| 6 | All gates green, stale dirs deleted, pushed, CI confirmed | **DONE** — every gate green, pushed `e489f2b..f8f1480`, CI `test` job green, rest under watch |
 
 ## Conditions the owner added mid-flight
 
@@ -53,7 +53,9 @@ is carried in conversation memory alone.
 | Stale `@repo/engine` lockfile entry | package.json had dropped it; lock had not been regenerated | `d28a334` |
 | Lineage was a navbar trigger AND an area of the lakehouse zone | Mixed levels; forced Lakehouse to carve lineage out of its own match | `3349e5c` |
 | Annotate buried as a row in Search's panel | The annotator is its own zone; one trigger per zone | `d8d3411` |
-| **Gold never embedded JSONB lineage** | Docs, seed and demo header all described behaviour the product does not have. Stale, not dangerous: the only reader is disabled | (lineage track, uncommitted) |
+| **Gold never embedded JSONB lineage** | Docs, seed and demo header all described behaviour the product does not have. Stale, not dangerous: the only reader is disabled | `b43b8ff` |
+| Zone e2e suites are FLAKY locally | `fullyParallel` + ~32 workers + `retries: 0` (CI uses 1): a cold Vite cache times out the first wave. Two identical runs gave **12 then 6** failures — I twice misread that variance as my own edits regressing. Use `--retries=1 --workers=8` for a true signal | `18c233d` (recorded) |
+| The `Search` rename collided with a form button | Two buttons named Search on `/lakehouse/admin/access` (navbar trigger + Tuples submit) tripped Playwright strict mode; locator scoped to the form | `18c233d` |
 | 138 MB of husk directories | admin/data/lineage/models/rask-ui, zero tracked files | deleted |
 | Playwright chromium missing | The pull bumped `@playwright/test`; all four suites failed to launch | installed |
 
@@ -116,14 +118,16 @@ needs a pubsub scope AND the app-token annotation, because the annotator would t
 
 ## Outstanding
 
-1. **16 lakehouse e2e failures — self-inflicted** by the navbar restructure. Specs assert the old
-   trigger set. Mine to fix; no push until green.
-2. Lakekeeper console comparison + orphan-route sweep (condition 3).
-3. Pixi bundle numbers + recommendation (condition 4).
-4. Dapr coverage sweep for viewer/search/annotator.
-5. Lineage track: spec-fidelity, seam coverage and Marquez-parity reports (gold finding already landed).
-6. Push + read CI green.
-7. Then the newly added build work: git-like data history (#113), Lance OTel (#114).
+1. Lakekeeper console comparison + orphan-route sweep (condition 3).
+2. Pixi bundle numbers + recommendation (condition 4).
+3. Lineage track: spec-fidelity and Marquez-parity reports (gold finding + Dapr-delivery/spec-conformance
+   tests already landed in `b43b8ff`).
+4. Read CI to completion for `f8f1480`.
+5. Then the newly added build work: git-like data history (#113), Lance OTel (#114).
+
+**All four zone Playwright suites are green** (home 5, lakehouse 190/190, media 2, annotator 8) with
+`--retries=1 --workers=8`; every turbo task (43) and every Python gate (972 tests, ruff, ty, openapi
+drift, prod-render) is green.
 
 ## Note on the subagent failures
 

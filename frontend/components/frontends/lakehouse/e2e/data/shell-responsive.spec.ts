@@ -202,6 +202,24 @@ test('the wide Lakehouse panel offers a way into the zone ROOT, not only its sub
 	// The trigger stays a button (that is the whole reason the row is needed), so this is not a regression
 	// to a link-trigger — the panel row is the way in.
 	await expect(page.getByRole('button', { name: 'Lakehouse' })).toBeVisible();
+
+	// …and the row must not COST the columns. The first attempt at this fix added the row as a sibling
+	// before the grid, which gave NavigationMenu.Content two children; bits-ui sizes the shared viewport
+	// from the active content, so it measured 69px — the row's own height — and clipped all five columns.
+	// The href assertion above passed anyway (every link was still in the DOM, and Playwright reported
+	// them visible: the clip is on an ancestor). A screenshot is what caught it. So assert the rendered
+	// GEOMETRY, which is the thing that was wrong.
+	const box = await panel.boundingBox();
+	expect(box!.height, 'the panel is clipped — the group columns are not showing').toBeGreaterThan(
+		200,
+	);
+	// And assert on innerText, not textContent: textContent returns every panel's markup including the
+	// inactive siblings', which is how "alice sees the Governance column" passed against a 69px panel.
+	// innerText reflects RENDERED text, and the group labels are CSS-uppercased, so compare case-insensitively.
+	const visible = (await panel.innerText()).toLowerCase();
+	for (const group of ['catalog', 'models', 'lineage']) {
+		expect(visible, `the ${group} column is not visible in the panel`).toContain(group);
+	}
 });
 
 test('the breadcrumb truncates MIDDLE segments and always shows the current page (#105)', async ({

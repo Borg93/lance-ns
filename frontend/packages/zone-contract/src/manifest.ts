@@ -2,7 +2,7 @@
 // live in manifest.test.ts. Deliberately regex/JSON based rather than importing the configs: the point
 // is to read what is WRITTEN in each file, so a value that only agrees because one file imports the
 // other still counts as a disagreement.
-import { readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -28,11 +28,22 @@ export function routingConfig(): RoutingConfig {
 }
 
 /** The zone directories that actually exist under components/frontends — the ground truth every other
- *  declaration is checked against. */
+ *  declaration is checked against.
+ *
+ *  A zone is a directory with a `package.json`, which is what makes it a bun workspace member and a
+ *  turbo package — the same rule the rest of the toolchain resolves by. Bare `isDirectory()` is NOT
+ *  that rule: deleting a zone leaves its gitignored build output behind (`build/`, `.svelte-kit/`,
+ *  `node_modules/`, `.turbo/`), so the four pre-merge zones — admin, data, lineage, models — survive
+ *  as husks in every working tree that ever built them. `git status` is clean, a fresh checkout looks
+ *  fine, and the CI cache hides it too. Counting those husks as zones failed 39 tests across all four
+ *  gate files at once, and `.svelte-kit/output/client` is still there so even the budget gate found
+ *  something to weigh. A gate that fires on leftover build output is worse than no gate: the fix
+ *  people reach for is deleting the gate. */
 export function zoneDirs(): string[] {
 	return readdirSync(resolve(FRONTEND_ROOT, 'components/frontends'), { withFileTypes: true })
 		.filter((e) => e.isDirectory())
 		.map((e) => e.name)
+		.filter((name) => existsSync(resolve(FRONTEND_ROOT, 'components/frontends', name, 'package.json')))
 		.sort();
 }
 

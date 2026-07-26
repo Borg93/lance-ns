@@ -134,14 +134,26 @@ describe('JWT + session', () => {
 	});
 
 	test('a session key SEALS the cookie (AES-256-GCM): round-trips, tamper → null, wrong key → null', () => {
-		const s: Session = { sub: 'u1', name: 'Dee', email: null, accessToken: 'AT', expiresAt: 0 };
+		// The token is long and distinctive ON PURPOSE. With the two-character 'AT' the other tests use,
+		// `not.toContain` was a coin flip rather than an assertion: the sealed cookie is `v1.` plus ~130
+		// base64url characters of random ciphertext, and a 2-char needle turns up in that haystack about
+		// 3% of the time. Measured, not estimated — 616 of 20000 seals contained 'AT', which is one CI run
+		// in 32 going red on a SECURITY assertion for no reason, and the natural response to that is to
+		// re-run the job rather than read it. The same 20000 seals contained this token 0 times.
+		const token = 'access-token-must-not-be-readable';
+		const s: Session = { sub: 'u1', name: 'Dee', email: null, accessToken: token, expiresAt: 0 };
 		const key = deriveSessionKey('server-secret');
 		const sealed = encodeSession(s, key);
 		expect(sealed.startsWith('v1.')).toBe(true); // sealed form, not raw base64
-		expect(sealed).not.toContain('AT'); // the access token is NOT readable in the cookie
+		expect(sealed).not.toContain(token); // the access token is NOT readable in the cookie
 		expect(decodeSession(sealed, key)).toEqual(s); // round-trip with the right key
 		expect(decodeSession(sealed, deriveSessionKey('other-secret'))).toBeNull(); // wrong key → GCM fails
-		expect(decodeSession(sealed.slice(0, -4) + 'AAAA', key)).toBeNull(); // tampered ciphertext → null
+		// Tamper with the tail, and make sure it is ACTUALLY a change: substituting a fixed 'AAAA' is a
+		// no-op on the 1-in-16-million cookie that already ends that way, and a no-op tamper would pass
+		// this assertion for the wrong reason.
+		const tampered = sealed.slice(0, -4) + (sealed.endsWith('AAAA') ? 'BBBB' : 'AAAA');
+		expect(tampered).not.toBe(sealed);
+		expect(decodeSession(tampered, key)).toBeNull(); // tampered ciphertext → null
 	});
 
 	test('with a key, an UNSEALED (forged base64) cookie is rejected — no impersonation', () => {

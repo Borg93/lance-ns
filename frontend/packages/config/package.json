@@ -9,5 +9,10 @@
 	"exports": {
 		"./tsconfig.base.json": "./tsconfig.base.json",
 		"./package.json": "./package.json"
+	},
+	"scripts": {
+		"lint": "oxlint .",
+		"fmt": "rsvelte-fmt .",
+		"fmt:check": "rsvelte-fmt --check ."
 	}
 }

@@ -1,9 +1,18 @@
 # Frontend toolchain
 
-**bun + oxlint + rsvelte-fmt.** One linter, one formatter, for every file in the workspace. ESLint and
-Prettier are gone, along with `eslint-config-prettier`, `eslint-plugin-svelte`, `typescript-eslint`,
-`@eslint/compat`, `globals`, `prettier-plugin-svelte`, `prettier-plugin-tailwindcss`, `eslint.config.js`
-and the `@repo/eslint-rules` workspace.
+**bun + oxlint + rsvelte-fmt.** One linter, one formatter, for every file in the workspace. No workspace
+package declares `eslint` or `prettier`, none of their configs remain (`eslint.config.js`,
+`.prettierrc*`, `.prettierignore`), nothing in CI, the dockerfiles or the Makefile invokes them, and the
+`@repo/eslint-rules` workspace is gone — along with `eslint-config-prettier`, `eslint-plugin-svelte`,
+`typescript-eslint`, `@eslint/compat`, `globals` and `prettier-plugin-svelte`.
+
+One honest caveat, because "is prettier gone?" deserves a precise answer: **prettier is still in the
+installed tree, pulled in by the replacement formatter itself.** `@rsvelte/fmt` depends on
+`prettier-plugin-tailwindcss`, which peer-depends on `prettier`. So the binary exists under
+`node_modules/` and appears in `bun.lock` — but nothing in this repo configures or invokes it, and no
+package.json asks for it. It is upstream's dependency, not ours; it disappears when rsvelte-fmt drops
+it. Audit the question with `grep -rn '"\(eslint\|prettier\)' --include=package.json`, which is the
+claim that actually matters, not a bare lockfile grep.
 
 | Surface                                  | Lint                                  | Format                    | Type-check                                |
 | ---------------------------------------- | ------------------------------------- | ------------------------- | ----------------------------------------- |

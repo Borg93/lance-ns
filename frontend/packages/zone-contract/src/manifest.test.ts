@@ -139,9 +139,14 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 		const { scripts = {} } = JSON.parse(
 			readFileSync(resolve(FRONTEND_ROOT, pkg, 'package.json'), 'utf8'),
 		) as { scripts?: Record<string, string> };
+		// REQUIRED, not just "correct if present". Skipping an absent task made the gate vacuous in
+		// the direction that actually happens: a package does not drift to a WRONG command, it ships
+		// with NO lint/fmt scripts and turbo then has nothing to run for it — silently outside the
+		// toolchain while every gate stays green. @repo/config was exactly that (found 2026-07-25:
+		// two JSON files, no scripts, never format-checked). A package with genuinely nothing to
+		// check still declares them; oxlint/rsvelte-fmt over zero matching files is free.
 		for (const [task, expected] of Object.entries(EXPECTED)) {
-			if (!(task in scripts)) continue;
-			expect(scripts[task], `${pkg} ${task}`).toBe(expected);
+			expect(scripts[task], `${pkg} is missing the shared ${task} script`).toBe(expected);
 		}
 		for (const [task, script] of Object.entries(scripts)) {
 			expect(script, `${pkg} ${task} still invokes a removed tool`).not.toMatch(

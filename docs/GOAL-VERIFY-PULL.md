@@ -54,6 +54,7 @@ is carried in conversation memory alone.
 | Lineage was a navbar trigger AND an area of the lakehouse zone | Mixed levels; forced Lakehouse to carve lineage out of its own match | `3349e5c` |
 | Annotate buried as a row in Search's panel | The annotator is its own zone; one trigger per zone | `d8d3411` |
 | **Gold never embedded JSONB lineage** | Docs, seed and demo header all described behaviour the product does not have. Stale, not dangerous: the only reader is disabled | `b43b8ff` |
+| **A duplicate tuple in a batch FGA write dropped its siblings** | OpenFGA's Write is one transaction, so an already-existing tuple rejects the whole call — and `write_tuples` swallowed that as "already idempotent". The warehouse creator silently lost `owner` on their own warehouse. This is what made `e2e-stack` red (`can_create_namespace required on warehouse:e2e-wh-a`), and it hid for two days because the job is gated `needs: test` and was **skipped on every one of the pull's own runs** | `363de65` |
 | Zone e2e suites are FLAKY locally | `fullyParallel` + ~32 workers + `retries: 0` (CI uses 1): a cold Vite cache times out the first wave. Two identical runs gave **12 then 6** failures — I twice misread that variance as my own edits regressing. Use `--retries=1 --workers=8` for a true signal | `18c233d` (recorded) |
 | The `Search` rename collided with a form button | Two buttons named Search on `/lakehouse/admin/access` (navbar trigger + Tuples submit) tripped Playwright strict mode; locator scoped to the form | `18c233d` |
 | 138 MB of husk directories | admin/data/lineage/models/rask-ui, zero tracked files | deleted |
@@ -77,6 +78,13 @@ is carried in conversation memory alone.
   `/lakehouse/data`, each a full document load into a different app.
 - Gate weakness noted: the dockerfile HEALTHCHECK probes `/` and accepts `<500`, so a based zone reports
   healthy while 404ing the probe. Defensible (proves the SSR server is alive) but it never exercises the app.
+- **The batch-write authz bug was reproduced and then fixed on the live cluster**, not argued from code:
+  writing `[existing, new]` straight at OpenFGA left only `existing` behind (so the transactional
+  all-or-nothing claim is measured, not assumed); the deployed catalog then gave warehouse-create 200 with
+  **zero tuples** on the warehouse and namespace-create 403; after `docker build` → `kind load` → pod
+  delete (imageID digest confirmed changed to the new build) the identical flow returned 200 with
+  `owner` + `project` present, and the warehouse broken by the old code recovered its `owner` grant on an
+  idempotent re-POST.
 
 ## turbo.json audit (condition 1)
 
@@ -122,7 +130,8 @@ needs a pubsub scope AND the app-token annotation, because the annotator would t
 2. Pixi bundle numbers + recommendation (condition 4).
 3. Lineage track: spec-fidelity and Marquez-parity reports (gold finding + Dapr-delivery/spec-conformance
    tests already landed in `b43b8ff`).
-4. Read CI to completion for `f8f1480`.
+4. Confirm `e2e-stack` goes green on `363de65` (every other job is already green: `test`, `frontend`,
+   `auth-e2e`, `lineage-e2e`, `ray-e2e`).
 5. Then the newly added build work: git-like data history (#113), Lance OTel (#114).
 
 **All four zone Playwright suites are green** (home 5, lakehouse 190/190, media 2, annotator 8) with

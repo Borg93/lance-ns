@@ -28,8 +28,26 @@ class SavedViewsStore {
 	/** Why the server's copy could not be read, when it could not. Saving is refused while this is set. */
 	unreadable = $state<string | null>(null);
 
-	/** Load the caller's views. Call once from the layout; safe to call again (it just re-reads). */
-	async load(): Promise<void> {
+	/** The read in flight, if one is. Two callers awaiting the same read is one request, not two. */
+	#loading: Promise<void> | null = null;
+
+	/**
+	 * Load the caller's views. Safe to call from an `$effect` and safe to call concurrently.
+	 *
+	 * The effect that calls this reads `ready` and `unreadable` in its own guard, and `load` assigns
+	 * both — so the guard cannot be what serialises the calls: it only takes effect one microtask AFTER
+	 * the read settles. Two components mounting the popover in the same tick would each see the guard
+	 * open and issue a full GET. De-duplicating here makes that structurally impossible rather than
+	 * timing-dependent, which is the svelte MCP autofixer's point about calling functions in effects.
+	 */
+	load(): Promise<void> {
+		this.#loading ??= this.#read().finally(() => {
+			this.#loading = null;
+		});
+		return this.#loading;
+	}
+
+	async #read(): Promise<void> {
 		const got = await readUserState<SavedView[]>('saved-views');
 		if (got.status === 'unreadable') {
 			// Deliberately leaves `ready` false: the list stays empty AND unsaveable, so a user sees their

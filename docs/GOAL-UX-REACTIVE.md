@@ -142,6 +142,24 @@ in the estate's current shape moved.
 | **`node --check` cannot validate a workflow script** (top-level `return` is legal there, not in a module) and my `&& echo "syntax OK"` printed regardless | Do not chain a success message onto a check whose failure mode you have not tested. Verify the checker rejects a known-bad input first |
 | **A `parallel()` barrier cost ~40 minutes** — three agents finished and sat waiting on the slowest, with no cross-item dependency to justify the wait | Use `pipeline()` unless a stage genuinely needs every prior result at once. "Cleaner code" is not a reason to synchronise |
 
+## Condition 11: the svelte MCP autofixer on every touched component
+
+Twenty-six `.svelte` files changed since the goal was set (`git diff --name-only 59e6490..HEAD -- '*.svelte'`).
+Every one went through `mcp__svelte__svelte-autofixer` at `desired_svelte_version: 5`. **Twenty came back
+`{"issues":[],"suggestions":[]}`.** Six returned suggestions; none was an `issue`, and each is judged below
+rather than waved off — the point of running a tool is to answer what it says.
+
+| File | What it said | Judgement |
+| ---- | ------------ | --------- |
+| `media/…/components/saved-views.svelte` | a function is called inside an `$effect` and may assign state the effect reads | **Taken, and it was right.** `load()` assigns `ready` and `unreadable`, which the effect's own guard reads — so the guard closes one microtask *after* the read settles, and two components mounting the popover in the same tick would each issue a full GET of the user's document. Fixed in the store with an in-flight promise (`load()` returns the pending read); `saved-views-store.svelte.test.ts` asserts three concurrent loads are one request and that a later load is still a fresh read. Broken deliberately: `AssertionError: expected 3 to be 1` |
+| `lakehouse/…/models/Experiments.svelte` | `setInterval` / `clearInterval` inside an `$effect` | **Conforms.** This is the one surviving timer in the zone and it carries the `POLL REASON:` marker condition 4's gate requires: the panel renders `rate(lance_training_runs_total[5m])`, a rate over a *moving* window whose value decays with the clock even when nothing happens. There is no event meaning "the window moved", so driving it from the lineage cursor would freeze a decaying rate and call it live |
+| `lakehouse/…/data/NamespaceRegistry.svelte:66` | mutable `Map`, use `SvelteMap` | **Conforms.** A local inside `$derived.by`, discarded at the end of the derivation. `SvelteMap` buys reactivity for a value nothing observes |
+| `lakehouse/…/lineage/ColumnLineage.svelte` | `nodes` / `edges` / `buildMs` assigned in an `$effect`; `Map` at 131 | **Conforms, with the reason.** The build reads `prev.get(id)?.position` — the *previous* node positions, because SvelteFlow writes drag positions back into the same array. A `$derived` recomputing from scratch would discard every position the user dragged, and reading its own last output inside a derived is a cycle. The `Map` is local to the pure `datasetDepths()` |
+| `lakehouse/…/routes/lineage/+page.svelte` | the same effect pattern, plus `Map` at 97/156/166 and `Set` at 214 | **Conforms.** Same position-preserving graph build; all four containers are locals inside `depths()` or the jobs-plane build block |
+| `lakehouse/…/routes/lineage/columns/+page.svelte` | `goto` inside an `$effect` | **Conforms, checked rather than assumed.** A `goto` in an effect is a redirect loop waiting to happen, so I traced it: the effect reads `selected` and writes the URL; it never reads `page.url`, which is sampled once at init. The only same-route inbound link is the sidebar's `/lakehouse/lineage/columns`, and the documented design is one-way state → URL, so the selection surviving that click is intended, not drift |
+
+The distinction that matters: the autofixer reports `issues` and `suggestions` separately, and **zero issues** were found across all 26. Suggestions are heuristics about scope the tool cannot see — but one of the six was a real concurrency defect, which is the argument for reading them instead of counting them.
+
 ## The polling measured live, 2026-07-26
 
 Evidence for condition 4, taken from the running catalog rather than from the source:

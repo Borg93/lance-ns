@@ -310,5 +310,13 @@ export function makeViewerProxy(env: Env): RequestHandler {
 		stripPrefix: KEEP_API_PREFIX,
 		forwardRequestHeaders: ['range', 'accept', 'if-none-match', 'if-modified-since'],
 		forwardResponseHeaders: true,
+		// The catch-all served the corpus to anyone. Measured on the live estate:
+		// `GET /annotator/api/atlas/points?space=text` returned `200` and **6,678,928 bytes** with no
+		// session — the identical payload, from the identical upstream, one URL away from the media route
+		// that had just been gated. Gating a URL is not gating a resource, and this helper is the resource:
+		// both the media and annotator zones mount it as their media-plane catch-all, so the door closes in
+		// both at once. `atlas/chunks` beside it already required a session, which is what made the gap
+		// visible as an inconsistency rather than a policy.
+		requireSession: true,
 	});
 }

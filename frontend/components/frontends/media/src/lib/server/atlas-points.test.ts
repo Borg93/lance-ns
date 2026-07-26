@@ -156,7 +156,7 @@ describe('the atlas-points route keys on the resource, not the caller', () => {
 		expect(new Uint8Array(await bob.arrayBuffer())).toEqual(POINTS);
 		expect(up.points()).toHaveLength(1);
 		// The bearer differs per caller and must never reach the key.
-		expect(resourceKey(new URL(URL_TEXT))).toBe('atlas/points?dataset=demo&space=text&v=6');
+		expect(resourceKey(new URL(URL_TEXT))).toBe('atlas/points?dataset=demo&space=text');
 	});
 
 	it('canonicalises the key so parameter order cannot fork the cache', () => {
@@ -172,10 +172,29 @@ describe('the atlas-points route keys on the resource, not the caller', () => {
 		await call(route, event(up.fetch, ALICE, `${URL_TEXT}&cachebust=${Date.now()}&user=bob`));
 
 		expect(route.cache.stats().entries).toBe(1);
-		expect(up.points()[0]).toBe('http://viewer:8101/api/atlas/points?dataset=demo&space=text&v=6');
+		expect(up.points()[0]).toBe('http://viewer:8101/api/atlas/points?dataset=demo&space=text');
 		// A second caller with different junk gets the same entry rather than a second 6.6 MB read.
 		await call(route, event(up.fetch, BOB, `${URL_TEXT}&cachebust=other`));
 		expect(up.points()).toHaveLength(1);
+	});
+
+	it('a caller-supplied `v` can NOT fork the cache — the amplification hole', async () => {
+		// Measured against the live estate before this was closed: six junk `v` tokens evicted the product
+		// entry (`x-cache: hit` -> `miss`), and twenty tokens from ONE signed-in session added twenty reads
+		// to the viewer's access log — 133 MB on demand, the shared entry permanently cold, and
+		// single-flight defeated because every key was unique. That is the same burst of concurrent
+		// multi-megabyte reads that OOM-killed the viewer.
+		const route = makeAtlasPointsRoute(ENV);
+		const up = viewer();
+
+		await call(route, event(up.fetch, ALICE, URL_TEXT)); // the product URL, v=6
+		for (const junk of ['1', '99', 'x', '', '6.0', String(Date.now())]) {
+			await call(route, event(up.fetch, BOB, `${URL_TEXT.replace('v=6', `v=${junk}`)}`));
+		}
+
+		// One resource, one fill, one entry — no matter what any caller puts in `v`.
+		expect(up.points()).toHaveLength(1);
+		expect(route.cache.stats().entries).toBe(1);
 	});
 
 	it('a different space is a different resource', async () => {

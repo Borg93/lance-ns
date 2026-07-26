@@ -87,7 +87,27 @@ const MAX_AGE_MS = 300_000;
  * list is deliberately closed: an open key would let `?foo=1` fork the cache, and a key built from the
  * raw query string would let it be forked without bound.
  */
-const RESOURCE_PARAMS = ['dataset', 'space', 'v'] as const;
+const RESOURCE_PARAMS = ['dataset', 'space'] as const;
+
+/**
+ * `v` is deliberately NOT here, and the omission is the fix for a real hole rather than an oversight.
+ *
+ * It is a caller-supplied, unvalidated token. While it was part of the key, any signed-in user could mint
+ * unbounded distinct keys — each one a full 6.6 MB upstream read and a retained 6.6 MB entry. Measured
+ * against the live estate: six junk tokens evicted the product entry (`x-cache: hit` → `miss`), and twenty
+ * tokens from ONE session added twenty reads to the viewer's own access log — 133 MB on demand, the shared
+ * entry permanently cold, and single-flight defeated because every key was unique. That is precisely the
+ * burst of concurrent multi-megabyte reads that OOM-killed the viewer in the first place.
+ *
+ * Dropping it is safe because the upstream does not read it: `services/viewer/api/v1/endpoints/atlas.py`
+ * takes `space` and `dataset` only. `v` exists for the BROWSER memo, where a bump must make old entries
+ * unreachable in a tab; here the freshness bound is MAX_AGE_MS, which does the same job without letting a
+ * caller choose the key.
+ *
+ * The earlier test asserted that `?cachebust=` and `?user=` were dropped, so cache-forking read as closed
+ * while the one parameter that was kept was the unbounded one. A test that proves the good cases and skips
+ * the live one is worse than no test, because it is believed.
+ */
 
 /** The canonical, sorted resource query — the same for two callers who spelled it in a different order. */
 export function resourceQuery(url: URL): URLSearchParams {

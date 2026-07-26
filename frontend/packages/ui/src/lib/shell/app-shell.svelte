@@ -113,8 +113,14 @@
 			<!-- Row 1 — the estate navbar. Integrated (sidebar-07): no border, h-14 → h-12 when the
 			     sidebar is icon-collapsed. Trigger + project switcher on the left; the cross-zone
 			     TopNavbar (zone links + identity/theme) takes the rest of the row on its own. -->
+			<!-- `border-b` only in canvas mode: normally the breadcrumb row below carries `border-y` and
+			     supplies the separation, so adding one here would double it. Canvas mode drops that row —
+			     and took the divider with it, leaving the header floating against the content, which is
+			     visible the moment you look at the two zones side by side. -->
 			<div
-				class="flex h-14 min-w-0 shrink-0 items-center gap-2 px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12"
+				class="flex h-14 min-w-0 shrink-0 items-center gap-2 px-4 transition-[width,height] ease-linear group-has-data-[collapsible=icon]/sidebar-wrapper:h-12 {canvas
+					? 'border-border/60 border-b'
+					: ''}"
 			>
 				{#if !canvas}
 					<!-- Nothing to toggle when there is no sidebar; the switcher and identity stay either way. -->
@@ -129,71 +135,71 @@
 			     overlap) the zone links; within the row, a trail too long to fit folds its MIDDLE
 			     behind the ellipsis menu (`collapseCrumbs`) instead of shrinking the current page. -->
 			{#if !canvas}
-			<nav
-				aria-label="Breadcrumb"
-				class="border-border/60 bg-muted/20 flex h-9 min-w-0 shrink-0 items-center overflow-hidden border-y px-4 text-sm"
-			>
-				<ol class="flex min-w-0 items-center gap-1.5">
-					<li class="text-muted-foreground shrink-0 capitalize">{projectName}</li>
-					{#each trail.lead as crumb (crumb.id)}
-						<li class="flex min-w-0 shrink-0 items-center gap-1.5">
-							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
-							<a
-								href={crumb.href}
-								class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 truncate rounded-sm capitalize transition-colors outline-none focus-visible:ring-3"
-								>{crumb.label}</a
-							>
-						</li>
-					{/each}
-					{#if trail.hidden.length > 0}
-						<!-- The folded middle: an affordance, not a deletion — every skipped ancestor is one
-						     click away, so the trail stays navigable at any width. -->
-						<li class="flex shrink-0 items-center gap-1.5">
-							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
-							<DropdownMenu.Root>
-								<DropdownMenu.Trigger>
-									{#snippet child({ props })}
-										<button
-											{...props}
-											type="button"
-											data-slot="breadcrumb-ellipsis"
-											aria-label="Show hidden breadcrumbs"
-											class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-sm transition-colors outline-none focus-visible:ring-3"
-										>
-											<MoreHorizontal class="size-3.5" />
-										</button>
-									{/snippet}
-								</DropdownMenu.Trigger>
-								<DropdownMenu.Content class="min-w-40 rounded-lg" side="bottom" align="start">
-									{#each trail.hidden as crumb (crumb.id)}
-										<DropdownMenu.Item class="p-0">
-											<a href={crumb.href} class="w-full truncate px-2 py-1.5 capitalize">{crumb.label}</a>
-										</DropdownMenu.Item>
-									{/each}
-								</DropdownMenu.Content>
-							</DropdownMenu.Root>
-						</li>
-					{/if}
-					{#each trail.tail as crumb (crumb.id)}
-						<li class="flex min-w-0 items-center gap-1.5">
-							<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
-							{#if crumb.id === lastCrumbId}
-								<span
-									aria-current="page"
-									class="text-foreground truncate font-medium capitalize"
-									data-slot="breadcrumb-page">{crumb.label}</span
-								>
-							{:else}
+				<nav
+					aria-label="Breadcrumb"
+					class="border-border/60 bg-muted/20 flex h-9 min-w-0 shrink-0 items-center overflow-hidden border-y px-4 text-sm"
+				>
+					<ol class="flex min-w-0 items-center gap-1.5">
+						<li class="text-muted-foreground shrink-0 capitalize">{projectName}</li>
+						{#each trail.lead as crumb (crumb.id)}
+							<li class="flex min-w-0 shrink-0 items-center gap-1.5">
+								<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
 								<a
 									href={crumb.href}
 									class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 truncate rounded-sm capitalize transition-colors outline-none focus-visible:ring-3"
 									>{crumb.label}</a
 								>
-							{/if}
-						</li>
-					{/each}
-				</ol>
-			</nav>
+							</li>
+						{/each}
+						{#if trail.hidden.length > 0}
+							<!-- The folded middle: an affordance, not a deletion — every skipped ancestor is one
+						     click away, so the trail stays navigable at any width. -->
+							<li class="flex shrink-0 items-center gap-1.5">
+								<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
+								<DropdownMenu.Root>
+									<DropdownMenu.Trigger>
+										{#snippet child({ props })}
+											<button
+												{...props}
+												type="button"
+												data-slot="breadcrumb-ellipsis"
+												aria-label="Show hidden breadcrumbs"
+												class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 flex size-5 items-center justify-center rounded-sm transition-colors outline-none focus-visible:ring-3"
+											>
+												<MoreHorizontal class="size-3.5" />
+											</button>
+										{/snippet}
+									</DropdownMenu.Trigger>
+									<DropdownMenu.Content class="min-w-40 rounded-lg" side="bottom" align="start">
+										{#each trail.hidden as crumb (crumb.id)}
+											<DropdownMenu.Item class="p-0">
+												<a href={crumb.href} class="w-full truncate px-2 py-1.5 capitalize">{crumb.label}</a>
+											</DropdownMenu.Item>
+										{/each}
+									</DropdownMenu.Content>
+								</DropdownMenu.Root>
+							</li>
+						{/if}
+						{#each trail.tail as crumb (crumb.id)}
+							<li class="flex min-w-0 items-center gap-1.5">
+								<ChevronRight class="text-muted-foreground/40 size-3.5 shrink-0" />
+								{#if crumb.id === lastCrumbId}
+									<span
+										aria-current="page"
+										class="text-foreground truncate font-medium capitalize"
+										data-slot="breadcrumb-page">{crumb.label}</span
+									>
+								{:else}
+									<a
+										href={crumb.href}
+										class="text-muted-foreground hover:text-foreground focus-visible:ring-ring/50 truncate rounded-sm capitalize transition-colors outline-none focus-visible:ring-3"
+										>{crumb.label}</a
+									>
+								{/if}
+							</li>
+						{/each}
+					</ol>
+				</nav>
 			{/if}
 		</header>
 		<div

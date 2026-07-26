@@ -8,12 +8,21 @@
 			"inputs": ["$TURBO_DEFAULT$", ".env*"],
 			"outputs": ["build/**", ".svelte-kit/**", "dist/**"]
 		},
+		// `check` runs `svelte-kit sync`, which GENERATES and prunes `.svelte-kit/types` — the same tree
+		// `vite build` is reading. With only `^build` these two ran CONCURRENTLY inside a package, and on
+		// a cold checkout (CI, nothing cached) the build lost the race:
+		//
+		//     media:build: ENOENT … '/src/frontend/components/frontends/media/.svelte-kit/types/route_meta_data.json'
+		//
+		// It reads as a flake because it hits whichever zone happens to interleave, and it never
+		// reproduces locally where `.svelte-kit` is already warm. Depending on the package's OWN build
+		// serialises the two writers. `test` already did exactly this, for the same reason.
 		"check": {
-			"dependsOn": ["^build"],
+			"dependsOn": ["^build", "build"],
 			"outputs": []
 		},
 		"check:tsgo": {
-			"dependsOn": ["^build"],
+			"dependsOn": ["^build", "build"],
 			"outputs": []
 		},
 		"test": {

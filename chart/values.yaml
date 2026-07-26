@@ -559,11 +559,18 @@ frontend:
   # How long a zone's Bun server tolerates an idle connection, in seconds — the FIRST cut on a live query,
   # not the edge. svelte-adapter-bun defaults it to 10, which turned `query.live` into a ~12s reconnect
   # loop on kind (nginx logged "upstream prematurely closed connection", upstream_response_time 12.001).
-  # 255 is Bun's maximum; it must stay ABOVE ingress.annotations' proxy-read-timeout to be the slack rather
-  # than the limit, and 0 (disable) is deliberately not the default — a wedged client would hold a socket
-  # for ever. A live feed that must outlive 255s of silence needs a keepalive in the stream, not a bigger
-  # number here.
-  idleTimeoutSeconds: 255
+  # 0 = disabled, and the measurement is why. 255 is Bun's maximum and the earlier note here said a feed
+  # outliving it "needs a keepalive in the stream, not a bigger number" — the estate HAS one
+  # (`KEEPALIVE_MS` = 20s in feeds.remote.ts, which re-yields an unmoved cursor so bytes keep flowing) and
+  # a stream still died at **256.8s**, measured over a 290s hold with the edge at 3600s. So Bun's
+  # `idleTimeout` is not refreshed by outbound SSE writes: for a streaming response it behaves as a
+  # maximum connection LIFETIME, and no keepalive can beat it.
+  #
+  # The objection to disabling it — a wedged client holding a socket for ever — is answered by that same
+  # keepalive: every 20s the server WRITES to the socket, so a vanished peer fails the write and ends the
+  # generator. The liveness check moved into the application, where it can tell a silent estate from a
+  # silent client; the transport could not.
+  idleTimeoutSeconds: 0
   # The bare FGA subject the zones' BFF names when reading lineage as a SERVICE (no user session) — must be
   # READER on the warehouse (seed_medallion_fga.sh) + allowlisted in LINEAGE_SERVICE_SUBJECTS. The same
   # identity the retired web pod used, so the seeded grants carry over unchanged.

@@ -107,7 +107,16 @@ if (first) {
 	ok(age > 75, `the first stream lived ${age.toFixed(1)}s — clear of nginx's 60s default`);
 	ok(first.endedAt === null, 'the first stream is still open at the end of the hold');
 }
-ok(streams.length === 1, `exactly one stream request in ${HOLD_S}s (no reconnect churn)`);
+// Churn is a stream that was SEVERED and replaced, not the number of subscriptions a page opens. This
+// asserted `length === 1` and went red once the notification bell was mounted in the root layout: the
+// admin page legitimately holds two concurrent streams (its own controlEvents, plus the bell's lineage
+// feed), both healthy. Counting closures measures the thing the check is actually named for — and it
+// still catches the original failure, where the first stream ended and a second appeared to replace it.
+const severed = streams.filter((s) => s.endedAt !== null);
+ok(
+	severed.length === 0,
+	`no stream was severed during ${HOLD_S}s — ${streams.length} opened, ${severed.length} closed`,
+);
 
 await browser.close();
 console.log(failures ? `\n✗ ${failures} check(s) failed` : '\n✓ the live stream survived past 60s');

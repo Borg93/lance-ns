@@ -102,10 +102,20 @@ that severs a live query, well before the edge. Measured on kind 2026-07-26: wit
 alone, `query.live` streams died every ~12s — nginx logged "upstream prematurely closed connection" with
 upstream_response_time 12.001, i.e. the zone's own server hung up 10s after its last yield, not the proxy.
 A generator that yields only on change is idle by design, so the default made every live subscription a
-12-second reconnect loop: more traffic than the setInterval it replaced. Bun caps idleTimeout at 255s, so
-that is the ceiling here (0 would disable reaping entirely and leak sockets on wedged clients). Pair it
-with ingress.annotations' proxy-read-timeout: both hops must hold, and the SMALLER one always wins. */}}
-- { name: IDLE_TIMEOUT, value: {{ .Values.frontend.idleTimeoutSeconds | default 255 | quote }} }
+12-second reconnect loop: more traffic than the setInterval it replaced. Bun caps idleTimeout at 255s.
+
+255 turned out NOT to be enough, and the note that used to sit here — that a feed outliving it needs a
+keepalive rather than a bigger number — is refuted by measurement: the estate has a 20s keepalive and a
+stream still died at 256.8s over a 290s hold. Bun's idleTimeout is not refreshed by outbound SSE writes;
+for a streaming response it is a maximum connection LIFETIME. So 0 (disabled) is now the default, and the
+old objection (a wedged client leaking a socket) is answered by that keepalive: the server writes every
+20s, so a vanished peer fails the write and the generator ends.
+
+`hasKey` rather than `| default`: Helm's `default` treats 0 as empty, so `| default 255` rendered 255 for
+an explicit 0 and the change looked applied while nothing moved — the same trap already recorded for
+booleans, biting an integer. Pair with ingress.annotations' proxy-read-timeout: both hops must hold, and
+the SMALLER one always wins. */}}
+- { name: IDLE_TIMEOUT, value: {{ (hasKey .Values.frontend "idleTimeoutSeconds") | ternary .Values.frontend.idleTimeoutSeconds 255 | quote }} }
 {{- if .Values.auth.enabled }}
 # Governed READ fallback: with no user session the BFF authenticates to lineage as a SERVICE (bounded by
 # frontend.serviceIdentity's FGA READER rung), so the read-only UI works without a per-user browser login.

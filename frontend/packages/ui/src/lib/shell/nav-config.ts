@@ -240,15 +240,25 @@ export function topNav(estateAdmin: boolean): TopNavEntry[] {
 			groups: lakehouse,
 		},
 		{
-			title: 'Media',
+			// SEARCH is the media read plane — the viewer. Named for what it is FOR, not for the
+			// directory it lives in: a person looking for a moment in the corpus is searching, and
+			// "Media" described our folder layout rather than their task.
+			title: 'Search',
 			href: '/media',
-			match: under('/media', '/annotator'),
-			// Annotate is the ONE pointer into the annotator zone (its own microfrontend).
-			items: [
-				...MEDIA_ITEMS,
-				{ title: 'Annotate', href: '/annotator', description: 'Label and review the corpus.' },
-			],
+			match: under('/media'),
+			items: [...MEDIA_ITEMS],
 		},
+		{
+			// ANNOTATE is its own microfrontend (/annotator) and its own job: the write plane over the
+			// same corpus Search reads. One trigger per zone is the rule, so it is a trigger — it was
+			// briefly a row inside Search's panel, which broke that rule and buried the labeling
+			// workflow one hover deep. A single surface, so a plain link rather than a panel.
+			title: 'Annotate',
+			href: '/annotator',
+			match: under('/annotator'),
+		},
+		// COMPUTE (rask) lands here as the fourth trigger when that merge happens — the Ray/job plane.
+		// Deliberately NOT rendered yet: a trigger with nowhere to go is worse than a missing one.
 	];
 }
 

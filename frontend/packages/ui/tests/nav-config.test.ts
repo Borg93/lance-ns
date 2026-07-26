@@ -10,12 +10,12 @@ import { exact, norm, seg, topNav, under, zoneOf } from '../src/lib/shell/nav-co
 // top-level entry.
 describe('topNav', () => {
 	it('exposes three domain triggers, in order, for a non-admin (fail-closed)', () => {
-		expect(topNav(false).map((e) => e.title)).toEqual(['Lakehouse', 'Media']);
-		expect(topNav(false).map((e) => e.href)).toEqual(['/lakehouse/data', '/media']);
+		expect(topNav(false).map((e) => e.title)).toEqual(['Lakehouse', 'Search', 'Annotate']);
+		expect(topNav(false).map((e) => e.href)).toEqual(['/lakehouse/data', '/media', '/annotator']);
 	});
 
 	it('keeps the same three triggers for an estate admin — admin earns COLUMNS, not an entry', () => {
-		expect(topNav(true).map((e) => e.title)).toEqual(['Lakehouse', 'Media']);
+		expect(topNav(true).map((e) => e.title)).toEqual(['Lakehouse', 'Search', 'Annotate']);
 	});
 
 	it('gates governance + operations behind estate-admin, inside the Lakehouse panel', () => {
@@ -62,6 +62,7 @@ describe('topNav', () => {
 		expect(lakehouse.match('/lakehouse/lineage/runs')).toBe(true);
 		expect(lakehouse.match('/')).toBe(false);
 		expect(lakehouse.match('/media')).toBe(false);
+		expect(lakehouse.match('/annotator')).toBe(false);
 	});
 
 	it('lineage is a COLUMN of the lakehouse panel, never a trigger of its own', () => {
@@ -73,11 +74,20 @@ describe('topNav', () => {
 		expect(lakehouse.match('/lakehouse/lineage/runs')).toBe(true);
 	});
 
-	it('active-match: Media covers the annotator zone too — Annotate is its panel row', () => {
-		const media = topNav(false).find((e) => e.title === 'Media')!;
-		expect(media.match('/media')).toBe(true);
-		expect(media.match('/annotator')).toBe(true);
-		expect(media.items?.find((i) => i.title === 'Annotate')?.href).toBe('/annotator');
+	it('Search and Annotate are separate zones, so separate triggers', () => {
+		// One trigger per zone: the annotator is its own microfrontend, so it gets its own entry
+		// rather than hiding as a row in Search's panel. Neither trigger claims the other's zone.
+		const search = topNav(false).find((e) => e.title === 'Search')!;
+		const annotate = topNav(false).find((e) => e.title === 'Annotate')!;
+		expect(search.match('/media')).toBe(true);
+		expect(search.match('/annotator')).toBe(false);
+		expect(annotate.match('/annotator')).toBe(true);
+		expect(annotate.match('/media')).toBe(false);
+		// Annotate is a single surface — a plain link, not a one-row dropdown.
+		expect(annotate.items).toBeUndefined();
+		expect(annotate.groups).toBeUndefined();
+		// …and Annotate is no longer buried inside Search's panel.
+		expect(search.items?.some((i) => i.href === '/annotator')).toBe(false);
 	});
 
 	it('carries the expected rows per column', () => {
@@ -93,10 +103,15 @@ describe('topNav', () => {
 		expect(groups.Lineage).toEqual(['Datasets', 'Jobs', 'Runs', 'Columns', 'Graph']);
 	});
 
-	it('every panel row is an absolute path with a description', () => {
+	it('every entry is reachable: a panel with rows, or a plain link', () => {
 		for (const entry of topNav(true)) {
+			expect(entry.href.startsWith('/'), `${entry.title} href`).toBe(true);
 			const rows = [...(entry.items ?? []), ...(entry.groups ?? []).flatMap((g) => g.items)];
-			expect(rows.length).toBeGreaterThan(0);
+			// A zone with ONE surface is a plain link (Annotate) — no rows to check, and a one-row
+			// dropdown would be noise. A zone with a panel must not ship an EMPTY panel, which would
+			// render a trigger that opens onto nothing.
+			if (entry.items === undefined && entry.groups === undefined) continue;
+			expect(rows.length, `${entry.title} panel is empty`).toBeGreaterThan(0);
 			for (const item of rows) {
 				expect(item.href.startsWith('/')).toBe(true);
 				expect(item.description.length).toBeGreaterThan(0);

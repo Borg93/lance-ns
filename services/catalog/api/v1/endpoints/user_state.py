@@ -39,10 +39,11 @@ from datetime import datetime
 from typing import Annotated
 
 from common.schemas.workflow import SavedView, WorkflowGraph
-from common.user_state import UserStateDocument, UserStateStore
+from common.user_state import UserStateDocument, UserStateStore, UserStateUnreadable
 from fastapi import APIRouter, Depends, Request, Response, status
 from lance_namespace import (
     InvalidInputError,
+    InvalidTableStateError,
     ServiceUnavailableError,
     UnauthenticatedError,
 )
@@ -108,19 +109,37 @@ async def _fetch[T](
 ) -> tuple[str, datetime | None, T | None]:
     """``(subject, updated_at, value)`` for the caller's document; ``value`` is ``None`` when absent.
 
-    A stored document that no longer fits the schema is reported as absent (with an ERROR log): the client
-    seeds a fresh canvas either way, and 500ing on read would strand the user with no way to overwrite the
-    bad record.
+    "Absent" here means genuinely never written. A record that EXISTS but cannot be read is a 409, never a
+    200 saying ``exists: false`` — the earlier version reported both as absent, and the difference is a
+    user's work: told the document is empty, the client seeds a fresh canvas and its next autosave
+    overwrites the record that was still there. Verified live before this changed, by altering one field of
+    a real row from ``str`` to ``int`` (an ordinary schema evolution): the row was intact and the API said
+    ``exists: false``.
+
+    Raises:
+        InvalidTableStateError (409): The stored record exists and is unreadable — unparseable at the envelope
+            (:class:`UserStateUnreadable`) or at the document schema. The message names the fix, because
+            the user's escape is an explicit overwrite, not a silent one.
     """
     subject = _subject(token)
-    stored = await _require_store(store).get(subject=subject, document=document)
+    try:
+        stored = await _require_store(store).get(subject=subject, document=document)
+    except UserStateUnreadable as exc:
+        raise InvalidTableStateError(
+            f"your saved {document.value} exists but cannot be read ({exc.reason}). It has NOT been "
+            f"changed. Delete it to start fresh, or ask an operator to recover it."
+        ) from exc
     if stored is None:
         return subject, None, None
     try:
         return subject, stored.updated_at, adapter.validate_python(stored.value)
-    except ValidationError:
+    except ValidationError as exc:
+        # Same hazard one layer in: the envelope parsed but the document no longer fits its schema.
         log.exception("user_state_stale_schema", extra={"document": document.value})
-        return subject, None, None
+        raise InvalidTableStateError(
+            f"your saved {document.value} exists but no longer fits its schema. It has NOT been changed. "
+            f"Delete it to start fresh, or ask an operator to recover it."
+        ) from exc
 
 
 async def _store_document(

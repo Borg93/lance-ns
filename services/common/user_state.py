@@ -58,6 +58,21 @@ class UserStateDocument(StrEnum):
     SAVED_VIEWS = "saved-views"
 
 
+class UserStateUnreadable(Exception):
+    """A record exists but cannot be served — and must NOT be reported as absent.
+
+    The distinction is the whole point. "Absent" tells a client to seed a fresh document, and the client's
+    next autosave then overwrites whatever is really there. So an unparseable record (schema drift) and a
+    record whose stored owner disagrees with the derived key both raise this instead: the caller learns the
+    document is unavailable rather than empty, and a blind overwrite needs an explicit act.
+    """
+
+    def __init__(self, document: UserStateDocument, reason: str) -> None:
+        super().__init__(f"{document.value}: {reason}")
+        self.document = document
+        self.reason = reason
+
+
 class StoredState(BaseModel):
     """What is actually persisted: the value, its owner, and when it was written.
 
@@ -162,17 +177,23 @@ class UserStateStore:
             return None
         try:
             stored = StoredState.model_validate_json(response.content)
-        except ValidationError:
-            # A record we cannot parse is a record we must not serve. Absent (→ the client seeds) is the
-            # safe reading; the ERROR log is how an operator learns the store holds something stale.
+        except ValidationError as exc:
+            # NOT absent. This module's own docstring says a store that is down must look unavailable and
+            # never empty, "or the next autosave would overwrite the real document" — and an unparseable
+            # record is that same hazard arriving through schema drift instead of an outage. Reported as
+            # absent, the client seeds a fresh canvas and its next save destroys work the user still has.
+            # Proven live before this raised: one field of a real row changed from str to int (a plausible
+            # evolution) and `GET /v1/user-state/saved-views` answered `exists: false` over an intact row.
             log.exception("user_state_unreadable", extra={"document": document.value, "key": key})
-            return None
+            raise UserStateUnreadable(document, "the stored record no longer fits its schema") from exc
         if stored.subject != subject:
+            # Same reasoning, different cause: the key derivation and the record disagree. Serving it would
+            # be a cross-user leak, but calling it absent would let this caller overwrite the other's work.
             log.error(
                 "user_state_owner_mismatch",
                 extra={"document": document.value, "key": key, "stored_subject": stored.subject},
             )
-            return None
+            raise UserStateUnreadable(document, "the stored record belongs to another subject")
         return stored
 
     async def put(self, *, subject: str, document: UserStateDocument, value: JsonValue) -> StoredState:

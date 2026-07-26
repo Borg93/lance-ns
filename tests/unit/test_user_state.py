@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 from collections.abc import Iterator
 from typing import Any
 
@@ -36,6 +37,7 @@ from common.user_state import (
     StoredState,
     UserStateDocument,
     UserStateStore,
+    UserStateUnreadable,
     decode_subject,
     encode_subject,
     state_key,
@@ -97,7 +99,10 @@ class FakeSidecar:
         row = self.rows.get(self.stored_key(key))
         if row is None:
             return Response(status_code=204)
-        return Response(status_code=200, content=StoredState.model_validate(row).model_dump_json())
+        # Serve the stored bytes VERBATIM, the way a real sidecar does. Re-validating here made the fake
+        # stricter than the thing it stands in for, so a row that had drifted out of schema could not be
+        # expressed at all — which is exactly the case that turned out to lose data in production.
+        return Response(status_code=200, content=json.dumps(row))
 
     async def _delete(self, store: str, key: str) -> Response:
         bad = self._guard(store, key)
@@ -242,7 +247,9 @@ def test_record_owned_by_another_subject_is_refused(store: UserStateStore, sidec
     """Defence in depth: the record carries its owner, so a mis-keyed row still cannot be served.
 
     Simulates the only way this can happen — a row hand-written (or migrated) under bob's key while
-    carrying alice's subject. Reading it must yield nothing, not alice's canvas.
+    carrying alice's subject. Reading it must not yield alice's canvas, and must NOT read as absent
+    either: absent tells bob's client to seed, and its next autosave would destroy alice's work under
+    bob's key. Unreadable is the honest answer, and it is the answer that keeps the row intact.
     """
     bob_key = state_key("bob", UserStateDocument.WORKFLOW_GRAPH)
     forged = StoredState(
@@ -252,7 +259,28 @@ def test_record_owned_by_another_subject_is_refused(store: UserStateStore, sidec
         value={"nodes": []},
     )
     sidecar.rows[sidecar.stored_key(bob_key)] = forged.model_dump(mode="json")
-    assert asyncio.run(store.get(subject="bob", document=UserStateDocument.WORKFLOW_GRAPH)) is None
+    with pytest.raises(UserStateUnreadable, match="another subject"):
+        asyncio.run(store.get(subject="bob", document=UserStateDocument.WORKFLOW_GRAPH))
+
+
+def test_an_unparseable_record_is_unreadable_not_absent(store: UserStateStore, sidecar: FakeSidecar) -> None:
+    """The data-loss path: schema drift must never read as "you have no saved work".
+
+    Reproduced live before this raised — one field of a real row changed from ``str`` to ``int`` (an
+    ordinary schema evolution), the row entirely intact, and ``GET /v1/user-state/saved-views`` answered
+    ``exists: false``. A client told the document is empty seeds a fresh one, and its next autosave
+    overwrites the record that was still there. The module's own docstring already forbids this shape for
+    an outage ("must look unavailable, never empty, or the next autosave would overwrite the real
+    document"); it arrived through drift instead.
+    """
+    key = state_key("alice", UserStateDocument.SAVED_VIEWS)
+    sidecar.rows[sidecar.stored_key(key)] = {"subject": "alice", "value": [], "updated_at": "not-a-date"}
+
+    with pytest.raises(UserStateUnreadable, match="schema"):
+        asyncio.run(store.get(subject="alice", document=UserStateDocument.SAVED_VIEWS))
+
+    # And the row is still there — the point of refusing is that nothing destroyed it.
+    assert sidecar.stored_key(key) in sidecar.rows
 
 
 # ── the mirrored schemas ─────────────────────────────────────────────────────────────────────────────

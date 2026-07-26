@@ -339,3 +339,50 @@ drift, prod-render) is green.
 Four workflow runs died on provider **529 Overloaded** — twice after real work (266 and 260 tool calls),
 twice instantly with zero. Their output was recovered by hand: the zone-contract fix and the whole
 lineage track (972 unit tests green, ty and ruff clean). Everything since is main-loop work.
+
+## Honest fractions per condition — the closing statement
+
+Written at the goal's own stop point (it says: past 45 turns, stop and summarize rather than thrash). Every
+row cites something checkable — a file in this repo, a commit, or a screenshot in `docs/audits/shots/`.
+Nothing here rests on "looks right".
+
+| # | Condition | Fraction | Where the evidence is |
+| - | --------- | -------- | --------------------- |
+| 1 | Architecture verified against the skills | **3/3 halves** | turbo.json: the audit table in this file, with cache correctness proven empirically both directions (unchanged → `1 cached >>> FULL TURBO` 20ms; one input byte → `0 cached` 162ms; reverted → cached, tree clean). MFE: `docs/audits/2026-07-26-mfe-composition.md` (1027 lines, 5/5 top claims confirmed by a second pass). Svelte 5: `docs/audits/2026-07-26-svelte5.md` (753 lines) + the MCP autofixer on **all 9** `.svelte` changed since the pull, with the one non-clean file judged and recorded as *conforms* |
+| 2 | Toolchain migration complete | **complete, gate proven both ways** | 3 defects fixed (`d28a334`, `ffcfcaa`, `7df035d`). The mutate-and-watch-it-fail proof: `lint` → `eslint .` gives *"expected 'eslint .' to be 'oxlint .'"*; DELETING `fmt:check` gives *"expected undefined to be 'rsvelte-fmt --check .'"*; restored → 79/79, tree clean |
+| 3 | Zones, routes, IA | **complete** | `docs/audits/2026-07-26-routes-and-ia.md` (770 lines): every route in all four zones enumerated; 26 pre-merge → 26 post-merge with the set difference empty **both** directions, recomputed from git by the verifier (34/34 pages); one orphan found (`/lakehouse/admin`, zero product-code inbound refs); Lakekeeper comparison with 8 gaps, 6 advantages and one recommendation. 8 of 9 claims confirmed, 1 downgraded |
+| 4 | media/annotator split | **complete** | Backends separate, read off the LIVE pod env not the template: media = `ANNOTATOR_API SEARCH_API VIEWER_API`, annotator = `ANNOTATOR_API VIEWER_API` (no SEARCH_API). Reuse quantified: 4 of 5 `@repo/*` shared, `@repo/engine` annotator-only. Pixi recommendation + bundle consequence in the condition-4 section above |
+| 5 | Cluster TODO discharged | **35 of 37 boxes in §1–6** | `docs/TODO-CLUSTER-VERIFY.md`, each box carrying its evidence. Live drive: 17 checks green + 9 screenshots in `docs/audits/shots/`. The 2 open are the annotator runner chip and its duplicate line — left open with the reason stated (driving it surfaced the viewer OOM instead) |
+| 6 | Green and pushed | **complete** | `pytest tests/unit` exit 0; `ruff check` + `format --check` (361 files); `ty check` all-clean; `make openapi` no drift; `prod_render_check.sh` green; `turbo run check test lint fmt:check build` **43/43 with 0 cached** (`--force`); all four Playwright suites (home 5, lakehouse 191, media 2, annotator 8); no untracked or husk directories; CI read to completion — the `5dbf643` run completed **success across every job** |
+
+### The defects this pass actually found
+
+Ten, all fixed and pushed, each with a test that fails without the fix: five dead cross-zone links
+(`bf00499`), a verifier that could not start because its own probe was one of those dead paths
+(`1cd9329`), an FGA batch-write that silently dropped sibling grants (`363de65`), a bundle gate measuring
+deferred bytes as entry cost (`56a6aad`), a security test red on 3% of runs (`5d4d1d8`), a stale prop mirror
+displaying a fusion balance the search was not running (`dff061a`), a navbar clipping regression **I
+introduced and a screenshot caught** (`bd8a1cb`), a 500 that should have been a 400 (`60d873f`), two
+unauthenticated gateway doors unasserted in the prod render (`5c12b96`), and an annotator header whose
+account avatar sat on the left because the zone hand-rolls the shell (`2d9ca95`).
+
+### What is NOT done, and why
+
+- **#119** `TableDetail.svelte:331`'s 60-assignment reset effect. Deviates-with-reason: intent right,
+  mechanism hand-maintained. The fix (`{#key table}`) re-instantiates a 1000-line component under 191 e2e
+  tests and belongs in its own pass, not appended to a bug-fix wave.
+- **#117 / #118 / #120 / #121** each need an owner decision, not more investigation: the annotator's 3.8 MB
+  deferred OpenCV, whether CI should build the four zone images (runner minutes on every push), the AppShell
+  canvas mode, and the viewer's memory limit.
+- **#113** backend slice landed (`a67bff4`); the frontend commit-log view is the next slice. **#114** (Lance
+  OTel) not started.
+- `/lakehouse/data` is still a P0 scaffold and it is the zone's landing target; `/lakehouse/admin` is an
+  orphan. Both are product decisions, not defects with one right answer.
+
+### The honest lesson
+
+The audits caught the dead links, the batch-write bug and the runes bug. They did **not** catch the navbar
+alignment, the duplicated shell header, or the annotator's 502 — the owner looking at the product caught the
+first two, and driving it in a browser caught the third. The annotator's own 8 Playwright tests passed
+through all of it, because they mock the APIs on a dev server. That is the argument for the browser drive
+existing at all, and the reason "every gate green" is a floor rather than a finish.

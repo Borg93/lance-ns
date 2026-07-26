@@ -22,12 +22,12 @@ now means two different things, and only the second one is still moving.
 | Original conditions 1–6 | — | **Closed** | Nothing. Fractions and evidence at the foot of this file |
 | Navbar IA (four triggers) | — | **Closed** | Nothing; Compute stays unrendered until the zone exists |
 | Component reuse / one ui lib | #120 | **Closed** | Nothing — `AppShell` gained `canvas`, annotator dropped its forked header |
-| Search modes must be honest | #123 | **Half closed** | Deployment half: deploy an encoder + rerank, or declare semantic search out of scope. *Owner decision* |
-| Git-like data history | #113 | **Half closed** | Backend `GET /v1/table/{id}/history` landed (`a67bff4`, 4 tests). The lakehouse commit-log view is not built |
+| Search modes must be honest | #123 | **Half closed, in flight** | Deployment half: deploy an encoder + rerank, or declare semantic search out of scope and remove the modes. *Delegated to me 2026-07-26* |
+| Git-like data history | #113 | **Half closed, in flight** | Backend `GET /v1/table/{id}/history` landed (`a67bff4`, 4 tests). The lakehouse commit-log view is being built from the Lakekeeper study |
 | Lineage track | #111 | **Part landed** | Spec-fidelity and Marquez-parity reports. Gold finding + Dapr-delivery tests already in `b43b8ff` |
 | Reactive data flow | #102 | **Measured, not built** | The largest open frontend item: 15 `setInterval` files, `query.live` in one. Blocked behind #124 for the push signal |
 | Interactive state has no home | #124 | **Designed, not built** | `docs/DESIGN-interactive-state.md`. Extended 2026-07-26 to the micro-frontend layer at the owner's prompt — see the section below |
-| Annotate is its own domain | #122 | **Not started** | Needs the owner's call on the task schema. *Owner decision* |
+| Annotate is its own domain | #122 | **In flight** | The task schema — entities, states, who assigns, what "reviewed" means, what a publish emits. *Delegated to me 2026-07-26* |
 | Lance OTel | #114 | **Not started** | Whole item |
 | Storybook | — | **Not started** | Recommended, not adopted. Two presentation bugs this session were invisible to 191 e2e tests |
 | Annotator bundle weight | #117 | **Deferred by owner** | 3.8 MB deferred OpenCV. Analysis owed |
@@ -36,12 +36,14 @@ now means two different things, and only the second one is still moving.
 | `TableDetail` reset effect | #119 | **Deferred with reason** | `{#key table}` under 191 e2e tests; its own pass |
 | Settings surface | #112 | **Deferred by owner** | "Keep it as is" |
 | Media plane on the governed warehouse | #103 | **Not started** | Corpus as registered project tables rather than hostPath. Predates this goal; listed so it is not lost |
+| Notifications + progress tracking | #125 | **Answered, blocked on #124** | Transport is already NATS, and the broadcast pattern this needs already exists once in the chart. Missing: state store, actors, workflow, and a sidecar on the zones — see the section below |
 | Verify by looking | — | **Standing rule** | Active, and it has earned itself four times |
 
-Five of these wait on an owner decision, not on work: #123's deployment half, #122's task schema, #118's
-runner minutes, #121's memory limit, and #117's bundle budget. The rest is work, and the ordering that
-gets the most user-visible improvement per unit of it is #124 → #102 → #113's view, because #124 is the
-thing #102 and #122 both stand on.
+Five of these were waiting on an owner decision rather than on work — #123's deployment half, #122's task
+schema, #118's runner minutes, #121's memory limit, #117's bundle budget. **The owner delegated all five on
+2026-07-26** ("ofc track aswell and fix"), so they are mine to decide with justification, and each row above
+says so. The ordering that gets the most user-visible improvement per unit of work is #124 → #102 → #113's
+view, because #124 is the thing #102, #122 and #125 all stand on.
 
 ## Standing rules (owner-set)
 
@@ -399,6 +401,57 @@ turns a performance win into a tenancy leak, and `/v1/events` — the one change
 on `can_observe_events`, i.e. estate admin, so a BFF that subscribed with a service credential and fanned
 out to users would have bypassed that gate. The design is being produced with that adversarial half
 explicit rather than assumed; the recommendation lands in this section when it is.
+
+## Notifications and progress tracking — which Dapr component, and what we already have (#125)
+
+The owner asked: *"notifications system is missing, like if we want to track stuff and progress. Is pubsub
+something we could do with nats for better ux for frontend, or what is right dapr component here?"*
+
+**Pub/sub over NATS is right, and it is not a decision — it is already what this estate runs.**
+`chart/templates/dapr-component.yaml` is `type: pubsub.jetstream` against the in-cluster NATS. But pub/sub
+is only one of the four pieces, and using it alone would build a notification system that loses
+notifications.
+
+### The hard part is already solved once here — copy it, don't invent it
+
+The non-obvious problem with pushing events to browsers is *which replica gets the message*. Dapr's default
+is competing-consumer: with a `queueGroupName`, one replica per app-id receives each message, so a user whose
+stream lives on replica 2 never sees an event delivered to replica 1. This repo already has the fix, for the
+catalog's control events, and the chart says so in its own comment:
+
+> `# BROADCAST component … with NO queueGroupName → jetstream sets no DeliverGroup, so EVERY catalog replica`
+> `# receives EVERY event and appends it to its per-replica ring buffer (GET /v1/events).`
+
+That is exactly the semantic a notification stream needs. It is also the opposite of what the movers use, and
+the chart explains why both exist. So the pattern to follow is `catalog-control-pubsub`, deliberately, rather
+than the shared lineage component.
+
+### Why pub/sub alone would be the wrong answer
+
+That same component is **deliberately ephemeral** — no `durableName`, `deliverPolicy: new` — and its comment
+is explicit that the buffer is *"a live-refresh hint window, not a log"*. That is correct for a refresh hint
+and wrong for a notification: "your export finished" must survive the user being offline, and an unread count
+is state, not an event. Pub/sub delivers the nudge; something durable has to hold the inbox.
+
+### The component set, and what is actually missing
+
+| Piece | Component | Status |
+| ----- | --------- | ------ |
+| "Something happened" nudge | pub/sub, jetstream, **broadcast** variant | **Have it** — `catalog-control-pubsub` is the template |
+| Durable per-user inbox: unread / read / dismissed | **state store (KV)** | **Missing** — `grep "type: state\." chart/` returns nothing |
+| Unread counts that cannot race; expiry without a sweeper cron | **actors** (one per user inbox) + **reminders** | **Missing**, and gated on the state store having `actorStateStore: "true"` |
+| Progress of a long job | **workflow** | **Missing.** A workflow instance's status *is* the progress — durable, queryable, resumable — so do not hand-roll a progress table |
+| Delivery to the browser | zone BFF subscribes, streams via `query.live` | **Impossible today**: the four `web-<zone>` pods are 1/1 with zero `dapr.io/` annotations |
+
+### The trap to avoid
+
+`GET /v1/events` is gated on `can_observe_events`, i.e. **estate admin**. A per-user notification stream must
+not reuse that feed or a service credential to fan out from it — that would bypass the gate for every
+non-admin. Notifications are written *for a subject*, so the BFF reads only that subject's key and the admin
+gate never enters the path. This is the same failure mode as a BFF cache keyed without the identity.
+
+So: one root cause again (#124), and notifications are the clearest user-visible reason to fix it — "track
+stuff and progress" is precisely what a KV inbox plus a workflow status gives you, and neither exists yet.
 
 ## Outstanding
 

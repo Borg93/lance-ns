@@ -38,6 +38,7 @@ now means two different things, and only the second one is still moving.
 | Media plane on the governed warehouse | #103 | **Not started** | Corpus as registered project tables rather than hostPath. Predates this goal; listed so it is not lost |
 | Notifications + progress tracking | #125 | **Answered, blocked on #124** | Transport is already NATS, and the broadcast pattern this needs already exists once in the chart. Missing: state store, actors, workflow, and a sidecar on the zones — see the section below |
 | Verify by looking | — | **Standing rule** | Active, and it has earned itself four times |
+| **UX track — reactive, stateful frontends** | #102 #124 #125 | **In flight** | Its own goal + 7 conditions in `docs/GOAL-UX-REACTIVE.md`: deploy the history endpoint, keep live feeds alive past 60s, notifications from `/runs`, kill the 15 timers, persist user work, cache the atlas server-side, green and pushed |
 
 Five of these were waiting on an owner decision rather than on work — #123's deployment half, #122's task
 schema, #118's runner minutes, #121's memory limit, #117's bundle budget. **The owner delegated all five on

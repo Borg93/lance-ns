@@ -88,6 +88,30 @@ grep -q "LineageOutboxNotDraining" "$OUT" || fail "the proven alert rules must b
 grep -q "DaprConsumerWedge" "$OUT" || fail "the consumer-wedge rule must be mounted (SLO-as-code)"
 grep -q "name: lance-ns-vmagent$" "$OUT" && fail "vmagent must NOT be shipped (the OTel Collector owns the Dapr scrape)"
 
+# 8b. THE GATEWAY'S TWO UNAUTHENTICATED DOORS ARE SHUT IN PROD.
+#
+# The gateway is an nginx reverse proxy: no OIDC, no FGA. It forwards to the services, which enforce on the
+# bearer — so /catalog/ and /lineage/ answer 401 to an anonymous caller, verified live. Two locations are
+# NOT protected that way, and both were correct in values-prod.yaml while NOTHING here asserted them:
+#
+#   - POST /produce fires the medallion cascade and carries no auth of its own. Measured anonymously
+#     through the gateway on the dev render: 202. That is deliberate for the demo
+#     (`medallion.producer.expose: true`) and values-prod sets it false — a caller who could reach it
+#     could trigger cascades and forge medallion provenance.
+#   - /perses/ and /greptime/ are a dashboard suite and a raw telemetry store. Measured anonymously on the
+#     dev render: 200 and 200. values-prod turns on `observability.edgeAuth` to put basic-auth on both.
+#
+# Asserting the rendered OUTPUT rather than trusting the values file: a values edit, a template refactor, or
+# a `--set` in a deploy script can reopen either door, and neither failure is visible — an exposed /produce
+# looks like a working demo, and an open /greptime looks like a working dashboard.
+grep -q "location /produce" "$OUT" \
+  && fail "prod must NOT expose the unauthenticated /produce door (medallion.producer.expose)"
+grep -q "auth_basic_user_file /etc/nginx/edge-auth/htpasswd" "$OUT" \
+  || fail "prod must put basic-auth on the gateway's /perses/ + /greptime/ (observability.edgeAuth.enabled)"
+# One auth_basic per protected location, so a half-applied guard (one of the two) fails rather than passing.
+[ "$(grep -c 'auth_basic_user_file /etc/nginx/edge-auth/htpasswd' "$OUT")" = "2" ] \
+  || fail "both /perses/ AND /greptime/ must carry basic-auth in prod (found $(grep -c 'auth_basic_user_file' "$OUT"))"
+
 # 9. Catalog memory coherence (P1): the load-shed write cap must be sized to the catalog memory tier —
 # cap × maxBodyBytes of buffered Arrow-IPC bodies + 512Mi baseline headroom (process + pyarrow decode)
 # must fit the memory limit. The code default (16 × 256MiB = 4Gi) OOM-kills the 1Gi tier before shedding

@@ -1,22 +1,13 @@
 <script lang="ts">
 	/** Live run-status board: one row per run with a state pill, animated progress bar, and error
 	 * strip. Transport-agnostic (rask convention: the caller polls and passes `runs`; the lib never
-	 * owns an API client) — `RunStatusLike` is the STRUCTURAL shape this board reads, so any app whose
-	 * generated run type carries these fields can pass it straight through without adapters. */
+	 * owns an API client) — the run shape is `RunStatusLike` from `$lib/runs`, the package's ONE
+	 * reading of the lineage service's `RunStatus`. It used to be re-declared here, a second copy
+	 * missing `started_at`, `events` and `operation`; the notification surface reads the same rows,
+	 * so the type is now shared rather than forked. */
 	import { CheckCircle2, LoaderCircle, XCircle, CircleDashed } from '@lucide/svelte';
 	import { enter, bar, breathe } from '../../motion';
-
-	export type RunStatusLike = {
-		run_id: string;
-		job?: string | null;
-		state?: string | null;
-		author?: string | null;
-		outputs?: string[] | null;
-		progress_done?: number | null;
-		progress_total?: number | null;
-		error_message?: string | null;
-		updated_at?: string | null;
-	};
+	import type { RunStatusLike } from '../../runs/run-status.js';
 
 	let { runs }: { runs: RunStatusLike[] } = $props();
 

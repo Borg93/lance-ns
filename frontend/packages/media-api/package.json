@@ -15,6 +15,10 @@
 		"./base": {
 			"types": "./src/base.ts",
 			"default": "./src/base.ts"
+		},
+		"./server-cache": {
+			"types": "./src/server-cache.ts",
+			"default": "./src/server-cache.ts"
 		}
 	},
 	"scripts": {

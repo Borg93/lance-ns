@@ -9,7 +9,7 @@
 	import { IsMobile, SHELL_COLLAPSE_BREAKPOINT } from '../hooks/is-mobile.svelte.js';
 	import { ChevronRight, MoreHorizontal } from '@lucide/svelte';
 	import { gsap } from 'gsap';
-	import type { Me, Project, NavUser, ZoneNav } from './nav-config.js';
+	import type { Me, NotificationFeed, Project, NavUser, ZoneNav } from './nav-config.js';
 	import { collapseCrumbs, pathCrumbs, projectFromHost } from './breadcrumb.js';
 
 	// Subtle content settle-in. Runs once when the shell MOUNTS — i.e. on a fresh
@@ -50,6 +50,7 @@
 		zoneNav = null,
 		me = null,
 		meLoading = false,
+		notifications = null,
 		sidebarFooter,
 		canvas = false,
 		children,
@@ -65,6 +66,9 @@
 		me?: Me | null;
 		/** True while the zone's fetchMe() is in flight — the navbar renders skeletons. */
 		meLoading?: boolean;
+		/** The zone's run feed for the navbar's notification bell (see `NotificationFeed`). The shell
+		 *  never fetches it; `null` renders no bell at all. */
+		notifications?: NotificationFeed | null;
 		/** A zone whose CONTENT owns the whole viewport — an annotation canvas, not a page of panels.
 		 *  Drops the sidebar and the breadcrumb row and gives `children` the full height, while keeping the
 		 *  one thing every zone must share: this header, with the project switcher and the identity cluster
@@ -129,7 +133,15 @@
 				{/if}
 				<ProjectSwitcher project={shellProject} />
 				<Separator orientation="vertical" class="data-[orientation=vertical]:h-4" />
-				<TopNavbar {pathname} {me} {meLoading} {user} {authEnabled} class="min-w-0 flex-1" />
+				<TopNavbar
+					{pathname}
+					{me}
+					{meLoading}
+					{user}
+					{authEnabled}
+					{notifications}
+					class="min-w-0 flex-1"
+				/>
 			</div>
 			<!-- Row 2 — the breadcrumb bar. Its own slim row, so it can never be squeezed by (or
 			     overlap) the zone links; within the row, a trail too long to fit folds its MIDDLE

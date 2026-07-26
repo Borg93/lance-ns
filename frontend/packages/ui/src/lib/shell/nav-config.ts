@@ -1,7 +1,26 @@
 import { Database } from '@lucide/svelte';
+import type { RunStatusLike } from '../runs/run-status.js';
 
 /** All lucide icons share one component signature, so any icon's type fits. */
 export type IconComponent = typeof Database;
+
+/** What a zone hands the shell to light up the navbar's notification bell.
+ *
+ *  One optional object rather than six threaded props, so a zone opts in with a single `notifications=`
+ *  and a zone that has not wired the feed yet renders no bell at all (rather than an empty one that
+ *  looks broken). The shell never fetches it: `runs` is the zone's own `GET /runs` read, and the read
+ *  state comes back through the callbacks so the zone — which owns a per-subject store — can persist
+ *  it. Ids in `seen`/`dismissed` are NOTIFICATION ids (`run_id@STATE`), from `runNotificationId`. */
+export type NotificationFeed = {
+	/** The run rows, as the lineage service's `GET /runs` returns them. */
+	runs: RunStatusLike[];
+	seen?: string[];
+	dismissed?: string[];
+	onseen?: (seen: string[]) => void;
+	ondismiss?: (notificationId: string, dismissed: string[]) => void;
+	/** Optional "see everything" destination — the zone's own runs page. */
+	allHref?: string;
+};
 
 /** A leaf route inside the CURRENT zone's sidebar — same-zone (soft nav) unless `reload` says
  *  otherwise. */

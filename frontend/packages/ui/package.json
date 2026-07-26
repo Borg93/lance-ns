@@ -85,6 +85,10 @@
 			"types": "./dist/components/navigation-menu/index.d.ts",
 			"svelte": "./dist/components/navigation-menu/index.js"
 		},
+		"./popover": {
+			"types": "./dist/components/popover/index.d.ts",
+			"svelte": "./dist/components/popover/index.js"
+		},
 		"./progress": {
 			"types": "./dist/components/progress/index.d.ts",
 			"svelte": "./dist/components/progress/index.js"
@@ -96,6 +100,10 @@
 		"./resizable-split": {
 			"types": "./dist/components/resizable-split/index.d.ts",
 			"svelte": "./dist/components/resizable-split/index.js"
+		},
+		"./runs": {
+			"types": "./dist/runs/index.d.ts",
+			"default": "./dist/runs/index.js"
 		},
 		"./search-bar": {
 			"types": "./dist/components/search-bar/index.d.ts",

@@ -40,7 +40,12 @@ export default defineConfig({
 	// no real user produces. The estate itself is nowhere near this: 32 concurrent users on a zone
 	// replica is 6.4 probes/second against a BUILT server. So the cap is the honest fix — the suite was
 	// measuring the dev server's throughput, not the product.
-	workers: 8,
+	//
+	// And 8 is a BIG-BOX number. A GitHub runner has 2–4 cores, so eight browsers on one Vite dev server
+	// there is the same starvation an order of magnitude worse — which is what it looked like: 20+ specs
+	// failing together with `element(s) not found` after 5s, across files with nothing in common, while
+	// the same specs passed 6/6 locally. The suite was measuring the runner, not the product.
+	workers: process.env.CI ? 2 : 8,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
 	reporter: process.env.CI ? 'github' : 'list',

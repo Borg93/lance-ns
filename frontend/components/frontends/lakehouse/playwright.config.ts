@@ -1,5 +1,13 @@
 import { defineConfig, devices } from '@playwright/test';
-import { AUTH_OFF, AUTH_OFF_PORT, AUTH_ON, AUTH_ON_PORT, MOCK_CATALOG_PORT } from './e2e/ports';
+import {
+	AUTH_OFF,
+	AUTH_OFF_PORT,
+	AUTH_ON,
+	AUTH_ON_PORT,
+	MOCK_CATALOG_PORT,
+	MOCK_LINEAGE,
+	MOCK_LINEAGE_PORT,
+} from './e2e/ports';
 
 // Hermetic e2e for the whole lakehouse zone — all four areas (e2e/data, e2e/lineage, e2e/models,
 // e2e/admin), which used to be four separate zones each running their own dev server and browser.
@@ -23,6 +31,16 @@ export default defineConfig({
 	testDir: './e2e',
 	timeout: 30_000,
 	fullyParallel: true,
+	// Capped. `fullyParallel` with one worker per core (32 on this box) puts 32 browsers on ONE vite dev
+	// server, and dev is where SvelteKit pays full price per request — every remote-function call goes
+	// through the SSR module pipeline. It was already marginal (a cold baseline run failed 2 of 212 on
+	// nothing but timing); adding a live stream per page — held open, and outliving the closed page by a
+	// poll or two while the server notices — pushed it to 14, all of them "the navbar isn't there yet"
+	// after 5s. Measured at the mock lineage service: ~22 cursor probes/second at peak, from page churn
+	// no real user produces. The estate itself is nowhere near this: 32 concurrent users on a zone
+	// replica is 6.4 probes/second against a BUILT server. So the cap is the honest fix — the suite was
+	// measuring the dev server's throughput, not the product.
+	workers: 8,
 	forbidOnly: !!process.env.CI,
 	retries: process.env.CI ? 1 : 0,
 	reporter: process.env.CI ? 'github' : 'list',
@@ -34,6 +52,11 @@ export default defineConfig({
 			port: AUTH_OFF_PORT,
 			reuseExistingServer: !process.env.CI,
 			timeout: 120_000,
+			// The live cursor (`$lib/live/feeds.remote`) and the shell's run feed poll the LINEAGE service
+			// from the SERVER, so `page.route` cannot stand in for them the way it does for every other
+			// read. Point them at the mock lineage service below; without it the cursor never advances and
+			// no spec could tell a live surface from a dead one.
+			env: { LINEAGE_API: MOCK_LINEAGE },
 		},
 		{
 			command: `bun run dev --port ${AUTH_ON_PORT} --strictPort`,
@@ -45,11 +68,20 @@ export default defineConfig({
 				OIDC_CLIENT_ID: 'lance-admin-e2e',
 				OIDC_REDIRECT_URI: `${AUTH_ON}/auth/callback`,
 				CATALOG_API: `http://localhost:${MOCK_CATALOG_PORT}`,
+				// The DLQ panel's live cursor is the LINEAGE one, not the control feed (an outbox drains when
+				// lineage advances), so the admin server needs the mock lineage service too.
+				LINEAGE_API: MOCK_LINEAGE,
 			},
 		},
 		{
 			command: 'bun e2e/admin/mock-catalog.ts',
 			port: MOCK_CATALOG_PORT,
+			reuseExistingServer: !process.env.CI,
+			timeout: 30_000,
+		},
+		{
+			command: 'bun e2e/lineage/mock-lineage.ts',
+			port: MOCK_LINEAGE_PORT,
 			reuseExistingServer: !process.env.CI,
 			timeout: 30_000,
 		},

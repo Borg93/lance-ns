@@ -15,8 +15,7 @@
 	import { fetchDownstream, fetchProducers, fetchUpstream } from '$lib/api';
 	import { checkAccess, fetchAccess, grantAccess, revokeAccess } from '$lib/lineage/catalog';
 	import type { DatasetRef, ProducerInfo } from '@repo/api/lineage';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	const name = $derived(decodeURIComponent(page.params.name ?? ''));
 
@@ -60,12 +59,13 @@
 		}
 	}
 
-	$effect(() => {
-		const current = name;
-		load(current);
-		const timer = setInterval(() => load(current), POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// Keyed live read: the dataset name re-reads immediately on navigation, the lineage cursor re-reads
+	// when that dataset actually gains a run / neighbour. No timer, so an unchanged dataset is read once.
+	liveRead(
+		lineageTick,
+		(current: string) => load(current),
+		() => name,
+	);
 
 	const stateColor = (s?: string | null) =>
 		/FAIL|ABORT/i.test(s ?? '') ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : 'var(--mut)';

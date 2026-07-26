@@ -6,10 +6,12 @@
 	import { ModeWatcher } from 'mode-watcher';
 	import { Toaster } from 'svelte-sonner';
 	import { AppShell, ForbiddenPage } from '@repo/ui/shell';
+	import { base } from '$app/paths';
 	import { onMount, type Snippet } from 'svelte';
 	import type { Me } from '@repo/api';
 	import { fetchMeViaBff } from '$lib/http';
 	import { areaOf, lakehouseNav } from '$lib/nav';
+	import { lineageFeed, type LineagePulse } from '$lib/live/feeds.remote';
 	import type { LayoutData } from './$types';
 
 	let { children, data }: { children: Snippet; data: LayoutData } = $props();
@@ -25,6 +27,28 @@
 	});
 
 	const area = $derived(areaOf(page.url.pathname));
+
+	// The navbar's notification bell (@repo/ui's NotificationCenter, mounted by AppShell). The shell owns
+	// the surface and never fetches — the zone owns the transport — so this is the transport: the ONE
+	// `lineageFeed` stream, which re-reads `GET /runs` when a run actually changes state and hands back
+	// only the newest window, trimmed server-side (see `$lib/live/feeds.remote`). Every lineage-backed
+	// panel under this layout reads its cursor off the SAME stream, so the bell and the page beneath it
+	// can never be a poll apart. Mounted on the ROOT layout, so it follows the user across all four areas.
+	//
+	// Opened ON MOUNT, never at init: a live query touched during render makes the SERVER hold the page
+	// until the feed's first value — a run-board read on the critical path of every page in the zone.
+	// Same rule (and the same reason) as `$lib/live/tick.svelte`.
+	//
+	// `.current` is undefined until the first value lands; an empty feed and a not-yet-connected one both
+	// render as "no notifications", which is the honest reading of both.
+	let feed = $state<{ current: LineagePulse | undefined } | null>(null);
+	onMount(() => {
+		feed = lineageFeed();
+	});
+	const notifications = $derived({
+		runs: feed?.current?.runs ?? [],
+		allHref: `${base}/lineage/runs`,
+	});
 
 	// The ADMIN area's door, which used to be the admin zone's own root layout. Fail-closed on a
 	// governed stack: admin content renders ONLY once /v1/me resolves WITH the estate-admin privilege —
@@ -70,6 +94,7 @@
 	{zoneNav}
 	{me}
 	{meLoading}
+	{notifications}
 >
 	{#if forbidden}
 		<ForbiddenPage

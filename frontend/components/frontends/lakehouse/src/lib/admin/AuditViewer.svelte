@@ -23,9 +23,10 @@
 	import * as Sheet from '@repo/ui/sheet';
 	import { formatAbsolute, formatTimestamp } from '@repo/ui/utils';
 	import { ExternalLink, Filter, RefreshCw, ScrollText, ShieldAlert } from '@lucide/svelte';
-	import { untrack } from 'svelte';
 	import { page } from '$app/state';
 	import { requestJSON } from '$lib/http';
+	import { controlCursor } from '$lib/live/feeds.remote';
+	import { liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -82,12 +83,19 @@
 		}
 	}
 
-	// Load on mount and when the OUTCOME picker changes (tracked). The text filters are read untracked, so
-	// typing does NOT re-fire a GreptimeDB query per keystroke — those apply on the explicit Search button.
-	$effect(() => {
-		void outcome;
-		untrack(() => load());
-	});
+	// Live on the CONTROL cursor. This surface used to make exactly one request in its life: it read the
+	// trail on mount and then sat there, so an operator watching for a denial had to reload the page to
+	// see one. Every governed action that reaches this trail is a control-plane change, so the catalog's
+	// change feed is what says "there is something new to read" — and it is estate-admin gated, the same
+	// bar this whole area is behind.
+	//
+	// It ALSO still re-reads when the outcome picker changes (tracked). The text filters stay untracked,
+	// so typing does not re-fire a GreptimeDB query per keystroke — those apply on the Search button.
+	liveRead(
+		controlCursor,
+		() => load(),
+		() => outcome,
+	);
 
 	function tone(o: string): string {
 		if (o === 'DENY' || o === 'FAILURE') return 'deny';

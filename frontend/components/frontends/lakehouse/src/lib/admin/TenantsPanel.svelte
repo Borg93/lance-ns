@@ -25,6 +25,8 @@
 	import { page } from '$app/state';
 	import { ProjectsResponseSchema, type Project } from './tenants';
 	import { requestJSON } from '$lib/http';
+	import { controlCursor } from '$lib/live/feeds.remote';
+	import { liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -61,9 +63,10 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-	});
+	// Live on the CONTROL cursor — one request in its life before this. Projects, warehouses and the
+	// effective FGA admins on them are pure control plane: none of it writes a dataset, so none of it
+	// moves the lineage cursor, and the catalog's own change feed is the only thing that reports it.
+	liveRead(controlCursor, () => load());
 
 	// One row per WAREHOUSE (project repeated) — flat rows sort/filter honestly; a project with no
 	// warehouses still surfaces as a single warehouse-less row.

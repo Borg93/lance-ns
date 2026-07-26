@@ -28,8 +28,7 @@
 	import RowDrawer from './RowDrawer.svelte';
 	import { namespaceOfTable, stageOf, type StageInfo } from './stage';
 	import StageBadge from './StageBadge.svelte';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -57,11 +56,9 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// Same source as the table registry it groups (this view IS the table list, folded by namespace), so
+	// the two can no longer disagree about what exists — they now advance on one shared cursor.
+	liveRead(lineageTick, () => load());
 
 	// Group by the namespace segment (before the first `$`); a bare name with no delimiter is its own root.
 	type Row = { ns: string; count: number; stage: StageInfo | null };

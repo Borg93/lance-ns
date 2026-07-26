@@ -9,6 +9,12 @@
 	import { page } from '$app/state';
 	import { requestJSON } from '$lib/http';
 
+	// THE ONE SURVIVING TIMER IN THIS ZONE, and it survives on purpose. Every other panel re-reads on a
+	// cursor because its value changes when the estate changes. This panel does not: it renders
+	// `rate(lance_training_runs_total[5m])` and friends, a Prometheus rate over a MOVING five-minute
+	// window, whose value falls as the clock advances even when nothing whatsoever happens. Driving it
+	// from the lineage cursor would freeze a decaying rate at its last non-zero value and call it live —
+	// a worse lie than a poll. There is no event that means "the window moved", so the clock stays.
 	const POLL_MS = 5000;
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).

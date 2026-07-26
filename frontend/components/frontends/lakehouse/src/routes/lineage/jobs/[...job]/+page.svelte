@@ -9,16 +9,19 @@
 	import { enter } from '@repo/ui/motion';
 	import { fetchEvents, fetchRuns } from '$lib/api';
 	import type { EventRecord, RunStatus } from '@repo/api/lineage';
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
-	const POLL_MS = 5000;
 	const EVENTS_WINDOW = 200; // recent-events window the facet/neighbor fold reads
 	const MAX_EVENTS_SHOWN = 25; // cap the rendered feed — the full payload is per-event on demand
 
 	const jobId = $derived(page.params.job ?? '');
 
-	// Both reads keyed by the job they were fetched FOR (latest-wins by derivation).
+	// All three reads keyed by the job they were fetched FOR (latest-wins by derivation).
 	let runState = $state<{ for: string; runs: RunStatus[] } | null>(null);
 	let eventState = $state<{ for: string; events: EventRecord[] } | null>(null);
+	// The ONE raw OpenLineage payload this page renders — the newest event of this job, fetched on its own
+	// so the 200-event window can stay on the summary projection.
+	let facetState = $state<{ for: string; event: Record<string, unknown> | null } | null>(null);
 
 	const runs = $derived(runState?.for === jobId ? runState.runs : []);
 	const events = $derived(eventState?.for === jobId ? eventState.events : []);
@@ -29,7 +32,7 @@
 
 	// The latest event's facet payload — run + job facets exactly as emitted (spec-true, no reshaping).
 	const latestFacets = $derived.by((): Record<string, unknown> | null => {
-		const ev = events[0]?.event as Record<string, unknown> | undefined;
+		const ev = facetState?.for === jobId ? facetState.event : null;
 		if (!ev) return null;
 		const run = (ev.run as { facets?: Record<string, unknown> } | undefined)?.facets;
 		const job = (ev.job as { facets?: Record<string, unknown> } | undefined)?.facets;
@@ -38,25 +41,38 @@
 	});
 
 	async function load(current: string): Promise<void> {
-		const [allRuns, feed] = await Promise.all([fetchRuns(), fetchEvents({ limit: EVENTS_WINDOW })]);
+		// `summary: true` is not optional here. Without it the wire carries every event's full OpenLineage
+		// JSONB, measured live as alice through :8090: 471_217 bytes vs 46_625 with the flag — 10x, for a
+		// page that folds only `job`, `inputs` and `outputs` out of the payload. The one thing that DOES
+		// need the raw event is the facet panel, so it is fetched separately for the single newest event
+		// of this job rather than for all 200.
+		const [allRuns, feed] = await Promise.all([
+			fetchRuns(),
+			fetchEvents({ limit: EVENTS_WINDOW, summary: true }),
+		]);
 		if (jobId !== current) return; // latest-wins
 		if (allRuns) {
 			runState = { for: current, runs: (allRuns.runs ?? []).filter((r) => r.job === current) };
 		}
 		if (feed) {
-			eventState = {
-				for: current,
-				events: (feed.events ?? []).filter((ev) => ev.job === current),
-			};
+			const mine = (feed.events ?? []).filter((ev) => ev.job === current);
+			eventState = { for: current, events: mine };
+			// `after` is an EXCLUSIVE keyset over `seq` (rows with seq < after), so `seq + 1` with limit 1
+			// is exactly this one event — with its payload, since summary is off for this read alone.
+			const newest = mine[0];
+			const raw = newest ? await fetchEvents({ after: newest.seq + 1, limit: 1 }) : null;
+			if (jobId !== current) return; // latest-wins, again: the second read can outlive a navigation
+			facetState = { for: current, event: raw?.events?.[0]?.event ?? null };
 		}
 	}
 
-	$effect(() => {
-		const current = jobId;
-		load(current);
-		const timer = setInterval(() => load(current), POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// Keyed live read: the job id re-reads on navigation, the lineage cursor re-reads when this job
+	// actually emits. No timer.
+	liveRead(
+		lineageTick,
+		(current: string) => load(current),
+		() => jobId,
+	);
 
 	const stateColor = (s?: string | null) =>
 		/FAIL|ABORT/i.test(s ?? '') ? 'var(--fail)' : s === 'COMPLETE' ? 'var(--ok)' : 'var(--amber)';

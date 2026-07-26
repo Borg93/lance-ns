@@ -14,8 +14,7 @@
 		promoteModel,
 	} from './catalog';
 	import ModelDetail from './ModelDetail.svelte';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -59,11 +58,10 @@
 		}
 	}
 
-	$effect(() => {
-		refresh();
-		const timer = setInterval(refresh, POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// A model version is written by a training run, and a run is lineage — so a new candidate, a fresh
+	// metric or a promotion all move this cursor. Registry-wide and for the open detail alike (`refresh`
+	// re-reads the selected model too), so the list and the drill-in can never show different versions.
+	liveRead(lineageTick, () => refresh());
 
 	async function select(model: string): Promise<void> {
 		banner = null;

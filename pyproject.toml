@@ -95,6 +95,7 @@ markers = [
     "ray_batch: e2e for the Ray BATCH path — distributed Lance write/index/evolve/compact on a real KubeRay cluster — make e2e-ray-batch",
     "duckdb: e2e proving DuckDB's core lance extension reads lance-ns Lance datasets over the deployed S3 store — set LANCE_E2E_S3_*",
     "media_catalog: e2e for the folded lance-media annotations plane against a live catalog — set MEDIA_CATALOG_URL",
+    "user_state: e2e for per-subject user state on the Dapr state store against a live catalog — set LANCE_E2E_CATALOG_URL",
 ]
 
 [tool.ty.environment]

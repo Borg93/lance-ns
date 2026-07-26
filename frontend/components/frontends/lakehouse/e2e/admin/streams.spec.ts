@@ -4,7 +4,7 @@ import { mockMe, signIn } from './session';
 // Hermetic /streams coverage: the panel reads the trimmed JetStream overview via the /api/jetstream BFF.
 // Mock it; assert the stream cards + consumer lag rows render (service column first, DLQ flagged,
 // redelivery highlighted, stale consumers dimmed+chipped), the missing-consumer banner (the
-// dead-subscription detector), the "+N since last refresh" delta chips, and that a 403 renders the
+// dead-subscription detector), the "+N since the last change" delta chips, and that a 403 renders the
 // forbidden state.
 
 const json = (route: Route, body: unknown, status = 200) =>
@@ -206,7 +206,7 @@ test('a shrinking stream renders a neutral negative delta with an accurate toolt
 	const dlqDelta = page.getByLabel('Stream DLQ').locator('.delta');
 	await expect(dlqDelta).toHaveText('-3');
 	await expect(dlqDelta).toHaveClass(/neg/);
-	await expect(dlqDelta).toHaveAttribute('title', /removed since last refresh/);
+	await expect(dlqDelta).toHaveAttribute('title', /removed since the last change/);
 	const totalsDelta = page.locator('.bar .delta');
 	await expect(totalsDelta).toHaveText('-3');
 	await expect(totalsDelta).toHaveClass(/neg/);

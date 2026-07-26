@@ -15,8 +15,7 @@
 	import { useColorMode } from '@repo/ui/color-mode';
 	import { ColumnLineageState } from '$lib/lineage/columns.svelte';
 	import type { ColumnEdge, ColumnRef } from '@repo/api/lineage';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// The dataset whose field-to-field subgraph is shown; the page owns the picker.
 	let { dataset }: { dataset: string } = $props();
@@ -26,24 +25,32 @@
 	// Follow the estate theme live rather than pinning the canvas dark (see the graph page).
 	const theme = useColorMode();
 
-	// Load + poll the subgraph for the current dataset; switching datasets drops any open field
-	// panel (a field from the previous root has no place in the new subgraph).
+	// Switching datasets drops any open field panel — a field from the previous root has no place in the
+	// new subgraph. This is a DATASET-change reset and nothing else: folding it into the live read below
+	// would slam the user's open panel shut every time the estate changed.
 	$effect(() => {
-		const name = dataset;
-		store.selectedColumn = null;
-		store.loadGraph(name);
-		const t = setInterval(() => store.loadGraph(name), POLL_MS);
-		return () => clearInterval(t);
+		void dataset;
+		untrack(() => {
+			store.selectedColumn = null;
+		});
 	});
 
-	// When a field is focused, keep its provenance/impact fresh on the same cadence.
-	$effect(() => {
-		if (!store.selectedColumn) return;
-		const { dataset: ds, field } = store.selectedColumn;
-		store.loadNeighbors(ds, field);
-		const t = setInterval(() => store.loadNeighbors(ds, field), POLL_MS);
-		return () => clearInterval(t);
-	});
+	// The subgraph for the current dataset, live on the lineage cursor.
+	liveRead(
+		lineageTick,
+		(name: string) => store.loadGraph(name),
+		() => dataset,
+	);
+
+	// A focused field's provenance/impact, on the same cursor. Column lineage is derived from the very
+	// events the cursor counts, so a re-read on any other schedule was guesswork.
+	liveRead(
+		lineageTick,
+		(sel: { dataset: string; field: string } | null) => {
+			if (sel) store.loadNeighbors(sel.dataset, sel.field);
+		},
+		() => store.selectedColumn,
+	);
 
 	let nodes = $state.raw<ColumnNodeType[]>([]);
 	let edges = $state.raw<

@@ -26,8 +26,7 @@
 	import { page } from '$app/state';
 	import { fetchSearch, listDatasets } from '$lib/api';
 	import type { DatasetSummary } from '@repo/api/lineage';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -60,11 +59,9 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS); // a transient failure retries — "retrying" is honest
-		return () => clearInterval(timer);
-	});
+	// A dataset appears, gains a version or fails only via a lineage event, so the cursor is the exact
+	// trigger. A transient failure keeps the last-good rows and re-reads on the next advance.
+	liveRead(lineageTick, () => load());
 
 	const rows = $derived.by((): DatasetSummary[] => {
 		const all = datasets ?? [];

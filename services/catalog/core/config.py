@@ -272,6 +272,20 @@ class Settings(BaseSettings):
     # fell off the end (overflow) gets `reset: true` → the console `invalidateAll()`s.
     control_buffer_size: int = Field(default=512, ge=1, alias="LANCE_CONTROL_BUFFER_SIZE")
 
+    # Per-subject user state (`GET/PUT/DELETE /v1/user-state/*`) on the Dapr state store. The default names
+    # the component the chart already renders (`stateStore.name` in chart/values.yaml) and that the catalog
+    # app-id is already in the `scopes` of, so this needs NO new chart value; tests/unit/test_invariants.py
+    # asserts that agreement so a rename or a dropped scope reddens rather than 503ing in production.
+    user_state_store: str = Field(default="lance-statestore", alias="LANCE_USER_STATE_STORE")
+    # Injected into every app container by the Dapr sidecar injector — read it rather than restate it, so a
+    # non-default sidecar port cannot silently point us at a port nothing is listening on.
+    dapr_http_port: int = Field(default=3500, ge=1, le=65535, alias="DAPR_HTTP_PORT")
+    user_state_timeout_seconds: float = Field(default=5.0, ge=0.1, alias="LANCE_USER_STATE_TIMEOUT_SECONDS")
+    # A per-document ceiling. `max_body_bytes` is sized for Arrow-IPC writes (256 MiB), which is four orders
+    # of magnitude past anything a canvas or a saved-view list can legitimately be — and this is an
+    # unmetered per-user write surface onto a SHARED Postgres, so it gets its own honest bound.
+    user_state_max_bytes: int = Field(default=512 * 1024, ge=1, alias="LANCE_USER_STATE_MAX_BYTES")
+
     @model_validator(mode="after")
     def _validate_auth(self) -> Self:
         """Fail fast on incomplete auth / lineage configuration."""

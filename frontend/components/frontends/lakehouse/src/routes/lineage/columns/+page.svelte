@@ -10,8 +10,7 @@
 	import ColumnLineage from '$lib/lineage/ColumnLineage.svelte';
 	import { listDatasets } from '$lib/api';
 	import type { DatasetSummary } from '@repo/api/lineage';
-
-	const POLL_MS = 15_000; // the catalog options list only — the canvas has its own poll
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
@@ -42,11 +41,10 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// The dataset picker's options. This page and the canvas below it used to run two independent timers
+	// at different periods (15s here, 5s there), so the list and the graph could disagree about which
+	// datasets exist; both now hang off the ONE shared lineage cursor and move together.
+	liveRead(lineageTick, () => load());
 </script>
 
 <svelte:head><title>Columns · lineage · lance</title></svelte:head>

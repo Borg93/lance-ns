@@ -25,8 +25,7 @@
 	import { listRuns } from '$lib/api';
 	import RunInputs from '$lib/lineage/RunInputs.svelte';
 	import type { RunStatus } from '@repo/api/lineage';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
@@ -50,11 +49,9 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// The board is 330 KB on the live estate (875 runs), and the old timer paid that every 5s whether or
+	// not a run had moved. A run's state change IS a lineage event, so the cursor is exact here.
+	liveRead(lineageTick, () => load());
 
 	// Newest first by default — the board is a feed.
 	let sorting = $state<SortingState>([{ id: 'updated', desc: true }]);

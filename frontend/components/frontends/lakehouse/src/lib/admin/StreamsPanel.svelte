@@ -13,13 +13,15 @@
 	import { JetStreamOverviewSchema, type JetStreamOverview } from './jetstream';
 	import { requestJSON } from '$lib/http';
 	import StreamConsumers from './StreamConsumers.svelte';
+	import { jetstreamCursor } from '$lib/live/feeds.remote';
+	import { liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
 	let overview = $state<JetStreamOverview | null>(null);
-	// The PREVIOUS successful poll's message counts (totals + per-stream), so a manual Refresh can show
-	// "+N since last refresh" chips — flow visibility without adding any timer (same manual/on-mount model).
+	// The PREVIOUS successful read's message counts (totals + per-stream), so the panel can show "+N since
+	// the last change" chips — flow visibility with no browser timer.
 	let prev = $state<{ messages: number; streamMessages: Record<string, number> } | null>(null);
 	let lastStatus = $state(0);
 	let settled = $state(false);
@@ -47,7 +49,7 @@
 				// honest unreachable state instead of a UI built from values that lie about their type.
 				const next = parse(JetStreamOverviewSchema, res.data);
 				// Snapshot the OUTGOING poll's counts before replacing it — the delta baseline. A failed
-				// interim poll keeps the last good baseline ("since last refresh" = last RENDERED refresh).
+				// interim read keeps the last good baseline (the delta is always against what is on screen).
 				if (overview !== null) {
 					prev = {
 						messages: overview.totals.messages,
@@ -72,15 +74,22 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-	});
+	// Live on the JETSTREAM cursor, and this is the surface that proves why neither event feed would do.
+	// This panel exists to show a wedged or missing consumer — and a wedged consumer emits no lineage
+	// events and no control events, so either feed would leave the panel frozen in precisely the incident
+	// it is here to catch. JetStream depth is a gauge with no change-event source, so its live feed is a
+	// server-side probe of the NATS monitor's own totals (see feeds.remote.ts), yielded only when they
+	// move. Estate-admin gated in the generator, because /jsz is unauthenticated by design.
+	//
+	// Before this the panel read once on mount and then sat still: a backlog draining and a backlog
+	// wedged looked exactly the same until someone clicked Refresh.
+	liveRead(jetstreamCursor, () => load());
 
 	// The lineage transactional-outbox DLQ stream (#83) — visually flagged so an operator scanning the
 	// fabric spots dead-letter backlog at a glance.
 	const isDlq = (name: string) => name === 'DLQ' || name.startsWith('DLQ_');
 
-	// "+N since last refresh" deltas — no chip until a baseline exists or when nothing changed. A
+	// "+N since the last change" deltas — no chip until a baseline exists or when nothing changed. A
 	// NEGATIVE delta (messages left the stream — retention, purge, GC or a replay drain) renders
 	// neutral, not in the growth green, with a tooltip that says what it actually measures.
 	const totalsDelta = $derived(
@@ -94,8 +103,8 @@
 	const fmtDelta = (d: number): string => (d > 0 ? `+${d.toLocaleString()}` : d.toLocaleString());
 	const deltaTitle = (d: number): string =>
 		d > 0
-			? 'messages added since last refresh'
-			: 'messages removed since last refresh (retention, purge, or a drain)';
+			? 'messages added since the last change'
+			: 'messages removed since the last change (retention, purge, or a drain)';
 
 	function fmtBytes(n: number): string {
 		if (n < 1024) return `${n} B`;

@@ -20,6 +20,7 @@ from common.lance_metrics import instrument_lance_if_available
 from common.obs import configure_app_logging
 from common.oidc import OIDCVerifier
 from common.secrets import fetch_required_secrets
+from common.user_state import UserStateStore
 from dapr.aio.clients import DaprClient
 from fastapi import FastAPI, Request
 from fastapi.concurrency import run_in_threadpool
@@ -147,6 +148,15 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         pubsub=settings.control_pubsub,
         timeout_seconds=settings.control_emit_timeout_seconds,
     )
+    # Per-subject user state on the Dapr state store (endpoints/user_state.py). Built unconditionally: it
+    # is a client over the local sidecar, so construction is pure and does no I/O — a deployment without a
+    # reachable state store fails at the first request with a fail-closed 503, never at boot, and never by
+    # looking like an empty document set.
+    app.state.user_state = UserStateStore.build(
+        store_name=settings.user_state_store,
+        dapr_http_port=settings.dapr_http_port,
+        timeout_seconds=settings.user_state_timeout_seconds,
+    )
     app.state.startup_complete = True
     try:
         yield
@@ -163,6 +173,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         if dapr_client is not None:
             with suppress(Exception):
                 await dapr_client.close()
+        with suppress(Exception):
+            await app.state.user_state.aclose()
 
 
 _settings = get_settings()

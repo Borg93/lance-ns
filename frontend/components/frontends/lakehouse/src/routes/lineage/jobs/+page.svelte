@@ -22,8 +22,7 @@
 	import { page } from '$app/state';
 	import { listJobs } from '$lib/api';
 	import type { JobSummary } from '@repo/api/lineage';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
 
@@ -45,11 +44,8 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// Jobs are folded from lineage events, so the cursor is the exact trigger for this list.
+	liveRead(lineageTick, () => load());
 
 	// Job identity is `namespace/name` — the detail route is a rest segment, so encode per part.
 	// A namespace-less job (nullable on the wire) is addressed by bare name.

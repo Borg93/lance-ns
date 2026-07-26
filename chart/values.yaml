@@ -556,6 +556,14 @@ frontend:
     tag: dev
   service:
     port: 3000
+  # How long a zone's Bun server tolerates an idle connection, in seconds — the FIRST cut on a live query,
+  # not the edge. svelte-adapter-bun defaults it to 10, which turned `query.live` into a ~12s reconnect
+  # loop on kind (nginx logged "upstream prematurely closed connection", upstream_response_time 12.001).
+  # 255 is Bun's maximum; it must stay ABOVE ingress.annotations' proxy-read-timeout to be the slack rather
+  # than the limit, and 0 (disable) is deliberately not the default — a wedged client would hold a socket
+  # for ever. A live feed that must outlive 255s of silence needs a keepalive in the stream, not a bigger
+  # number here.
+  idleTimeoutSeconds: 255
   # The bare FGA subject the zones' BFF names when reading lineage as a SERVICE (no user session) — must be
   # READER on the warehouse (seed_medallion_fga.sh) + allowlisted in LINEAGE_SERVICE_SUBJECTS. The same
   # identity the retired web pod used, so the seeded grants carry over unchanged.
@@ -906,7 +914,21 @@ ingress:
   # zone was unreachable through the edge while its pod served 200s (found live 2026-07-24).
   # 16 KB fits the largest zone with headroom; harmless for the others. Keyed defaults, so an
   # operator's own annotations still merge (and can override these).
+  #
+  # proxy-read-timeout is what keeps a live query alive. ingress-nginx defaults to 60s, and it counts
+  # from the last byte READ FROM the upstream, not from the last request — so a `query.live` generator
+  # that yields only when its data changes (the correct discipline: see the lakehouse zone's
+  # controlEvents) is severed by the edge after 60 idle seconds. SvelteKit's SSE transport sends no
+  # keepalive of its own (kit 2.70.1 runtime/server/remote.js has exactly one enqueue, the payload),
+  # so nothing refreshes that clock from the app side. The client then reconnects and re-runs the
+  # generator from scratch, which is strictly worse than polling: the same traffic plus a full
+  # re-subscribe every minute. 3600s lets a stream idle for an hour; a genuinely dead upstream is
+  # still reaped, just on a timescale that matches a human session rather than a poll interval.
+  # proxy-send-timeout moves with it — the two are one setting in practice, and leaving the send side
+  # at 60s reaps the same connection from the other end.
   annotations:
     nginx.ingress.kubernetes.io/proxy-buffer-size: 16k
     nginx.ingress.kubernetes.io/proxy-buffers-number: "4"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
   tls: [] # e.g. [{ secretName: lance-tls, hosts: ["lance.example.com"] }]

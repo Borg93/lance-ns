@@ -96,6 +96,16 @@ parks on dlq.lance-ray, each mover on dlq.<subTopic> — all queue-grouped by ap
 {{- end }}
 - { name: LANCE_GATEWAY_URL, value: "http://{{ include "lance.fullname" . }}-gateway:{{ .Values.gateway.port }}" }
 - { name: PORT, value: "3000" }
+{{/* IDLE_TIMEOUT is read by svelte-adapter-bun's server bootstrap (dist/files/index.js:
+`parseInt(env("IDLE_TIMEOUT", "10"))` → Bun.serve's idleTimeout, in SECONDS) and it is the FIRST thing
+that severs a live query, well before the edge. Measured on kind 2026-07-26: with the ingress annotation
+alone, `query.live` streams died every ~12s — nginx logged "upstream prematurely closed connection" with
+upstream_response_time 12.001, i.e. the zone's own server hung up 10s after its last yield, not the proxy.
+A generator that yields only on change is idle by design, so the default made every live subscription a
+12-second reconnect loop: more traffic than the setInterval it replaced. Bun caps idleTimeout at 255s, so
+that is the ceiling here (0 would disable reaping entirely and leak sockets on wedged clients). Pair it
+with ingress.annotations' proxy-read-timeout: both hops must hold, and the SMALLER one always wins. */}}
+- { name: IDLE_TIMEOUT, value: {{ .Values.frontend.idleTimeoutSeconds | default 255 | quote }} }
 {{- if .Values.auth.enabled }}
 # Governed READ fallback: with no user session the BFF authenticates to lineage as a SERVICE (bounded by
 # frontend.serviceIdentity's FGA READER rung), so the read-only UI works without a per-user browser login.

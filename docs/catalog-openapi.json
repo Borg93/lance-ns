@@ -7928,6 +7928,195 @@
         "title": "RestoreTableResponse",
         "type": "object"
       },
+      "SavedView": {
+        "description": "A named selection for a dataset (``\"\"`` = the default DB), as ``saved-views.ts`` stores it.",
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "spec": {
+            "$ref": "#/components/schemas/SearchSpec"
+          }
+        },
+        "required": [
+          "name",
+          "dataset",
+          "spec"
+        ],
+        "title": "SavedView",
+        "type": "object"
+      },
+      "SearchSpec": {
+        "description": "A read-plane selection \u2014 mirrors the ``SearchSpec`` interface in ``@repo/media-api``.\n\n``image`` (a ``File``) is absent by design: ``stripEphemeral`` drops it before a view is saved, and a\nfile handle cannot round-trip anyway.",
+        "properties": {
+          "dataset": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filters"
+          },
+          "fuzziness": {
+            "anyOf": [
+              {
+                "enum": [
+                  0,
+                  1,
+                  2
+                ],
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fuzziness"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowSearchMode"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "n": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "N"
+          },
+          "phrase": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Phrase"
+          },
+          "prefilter": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prefilter"
+          },
+          "q": {
+            "title": "Q",
+            "type": "string"
+          },
+          "qVec": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Qvec"
+          },
+          "rerank": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerank"
+          },
+          "rerankN": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rerankn"
+          },
+          "topic": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Topic"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "where": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Where"
+          }
+        },
+        "required": [
+          "q"
+        ],
+        "title": "SearchSpec",
+        "type": "object"
+      },
       "StringFtsQuery": {
         "description": "StringFtsQuery",
         "properties": {
@@ -8588,6 +8777,107 @@
         "title": "UpdateTableTagResponse",
         "type": "object"
       },
+      "UserStateDocument": {
+        "description": "The documents a user owns. A closed set: the key space is ours, not the caller's.",
+        "enum": [
+          "workflow-graph",
+          "saved-views"
+        ],
+        "title": "UserStateDocument",
+        "type": "string"
+      },
+      "UserStateEnvelope_WorkflowGraph_": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/UserStateDocument"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WorkflowGraph"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "subject",
+          "document",
+          "exists"
+        ],
+        "title": "UserStateEnvelope[WorkflowGraph]",
+        "type": "object"
+      },
+      "UserStateEnvelope_list_SavedView__": {
+        "properties": {
+          "document": {
+            "$ref": "#/components/schemas/UserStateDocument"
+          },
+          "exists": {
+            "title": "Exists",
+            "type": "boolean"
+          },
+          "subject": {
+            "title": "Subject",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SavedView"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "subject",
+          "document",
+          "exists"
+        ],
+        "title": "UserStateEnvelope[list[SavedView]]",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -8737,6 +9027,283 @@
         ],
         "title": "WarehouseResponse",
         "type": "object"
+      },
+      "WorkflowEdge": {
+        "description": "A persisted edge. ``target_handle`` distinguishes the Search node's two input ports.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          },
+          "source": {
+            "title": "Source",
+            "type": "string"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          },
+          "targetHandle": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Targethandle"
+          }
+        },
+        "required": [
+          "id",
+          "source",
+          "target"
+        ],
+        "title": "WorkflowEdge",
+        "type": "object"
+      },
+      "WorkflowGraph": {
+        "description": "A whole persisted canvas \u2014 the document behind ``lance-media-workflow-graph-v1``.\n\n``nodes`` must be non-empty, mirroring ``v.minLength(1)``: an empty canvas is what the client seeds,\nnot something worth storing.",
+        "properties": {
+          "config": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/WorkflowNodeConfig"
+            },
+            "title": "Config",
+            "type": "object"
+          },
+          "edges": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowEdge"
+            },
+            "title": "Edges",
+            "type": "array"
+          },
+          "nodes": {
+            "items": {
+              "$ref": "#/components/schemas/WorkflowNode"
+            },
+            "minItems": 1,
+            "title": "Nodes",
+            "type": "array"
+          },
+          "tags": {
+            "additionalProperties": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "title": "Tags",
+            "type": "object"
+          }
+        },
+        "required": [
+          "nodes"
+        ],
+        "title": "WorkflowGraph",
+        "type": "object"
+      },
+      "WorkflowNode": {
+        "description": "A persisted node: identity, kind and position. Runtime results are never persisted.",
+        "properties": {
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "position": {
+            "$ref": "#/components/schemas/WorkflowNodePosition"
+          },
+          "type": {
+            "$ref": "#/components/schemas/WorkflowNodeKind"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "position"
+        ],
+        "title": "WorkflowNode",
+        "type": "object"
+      },
+      "WorkflowNodeConfig": {
+        "description": "Per-node user input \u2014 one flat shape covering every kind, as the zone stores it.\n\n``captured_atlas_selection`` is typed ``None`` on purpose: the zone deliberately does NOT persist the\natlas capture (a full ``Row[]`` \u2014 too heavy and stale-prone), so a document carrying one is a client\nbug, not something to store.",
+        "properties": {
+          "capturedAtlasSelection": {
+            "title": "Capturedatlasselection",
+            "type": "null"
+          },
+          "combineMode": {
+            "default": "union",
+            "enum": [
+              "union",
+              "intersect"
+            ],
+            "title": "Combinemode",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exportColumns": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exportcolumns"
+          },
+          "exportFormat": {
+            "default": "csv",
+            "enum": [
+              "json",
+              "csv"
+            ],
+            "title": "Exportformat",
+            "type": "string"
+          },
+          "filters": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Filters",
+            "type": "object"
+          },
+          "imageName": {
+            "default": "",
+            "title": "Imagename",
+            "type": "string"
+          },
+          "label": {
+            "default": "",
+            "title": "Label",
+            "type": "string"
+          },
+          "minScore": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Minscore"
+          },
+          "mode": {
+            "$ref": "#/components/schemas/WorkflowSearchMode",
+            "default": "fts"
+          },
+          "n": {
+            "default": 24,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "N",
+            "type": "integer"
+          },
+          "q": {
+            "default": "",
+            "title": "Q",
+            "type": "string"
+          },
+          "refineScope": {
+            "default": "video",
+            "enum": [
+              "video",
+              "chunk"
+            ],
+            "title": "Refinescope",
+            "type": "string"
+          },
+          "rerank": {
+            "default": false,
+            "title": "Rerank",
+            "type": "boolean"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "where": {
+            "default": "",
+            "title": "Where",
+            "type": "string"
+          }
+        },
+        "title": "WorkflowNodeConfig",
+        "type": "object"
+      },
+      "WorkflowNodeKind": {
+        "description": "The pipeline stages \u2014 mirrors ``NODE_KINDS`` in the zone's ``workflow/types.ts``.",
+        "enum": [
+          "query",
+          "image",
+          "filter",
+          "atlas",
+          "search",
+          "combine",
+          "tagger",
+          "results",
+          "export"
+        ],
+        "title": "WorkflowNodeKind",
+        "type": "string"
+      },
+      "WorkflowNodePosition": {
+        "description": "A node's canvas coordinates.",
+        "properties": {
+          "x": {
+            "title": "X",
+            "type": "number"
+          },
+          "y": {
+            "title": "Y",
+            "type": "number"
+          }
+        },
+        "required": [
+          "x",
+          "y"
+        ],
+        "title": "WorkflowNodePosition",
+        "type": "object"
+      },
+      "WorkflowSearchMode": {
+        "description": "Mirrors the zone's ``MODE_VALUES`` (itself ``satisfies readonly SearchMode[]``).\n\nDuplicated rather than imported from ``search.services.spec``: ``common`` is the shared kernel every\nservice imports, so importing a service package here would invert the layering. The duplication cannot\ndrift \u2014 ``tests/unit/test_user_state.py`` asserts these members equal ``SearchMode``'s.",
+        "enum": [
+          "fts",
+          "semantic",
+          "visual",
+          "scene",
+          "scene_fts",
+          "hybrid",
+          "all"
+        ],
+        "title": "WorkflowSearchMode",
+        "type": "string"
       }
     },
     "securitySchemes": {
@@ -14839,6 +15406,190 @@
         "summary": "Describe Transaction",
         "tags": [
           "transaction"
+        ]
+      }
+    },
+    "/v1/user-state/saved-views": {
+      "delete": {
+        "description": "Discard the caller's saved views.",
+        "operationId": "delete_saved_views_v1_user_state_saved_views_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Saved Views",
+        "tags": [
+          "user-state"
+        ]
+      },
+      "get": {
+        "description": "The caller's named read-plane selections, in the order the client stored them.",
+        "operationId": "get_saved_views_v1_user_state_saved_views_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStateEnvelope_list_SavedView__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Saved Views",
+        "tags": [
+          "user-state"
+        ]
+      },
+      "put": {
+        "description": "Replace the caller's saved-view list wholesale \u2014 the client owns the ordering and the dedupe.",
+        "operationId": "put_saved_views_v1_user_state_saved_views_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "items": {
+                  "$ref": "#/components/schemas/SavedView"
+                },
+                "title": "Views",
+                "type": "array"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStateEnvelope_list_SavedView__"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Saved Views",
+        "tags": [
+          "user-state"
+        ]
+      }
+    },
+    "/v1/user-state/workflow-graph": {
+      "delete": {
+        "description": "Discard the caller's saved canvas.",
+        "operationId": "delete_workflow_graph_v1_user_state_workflow_graph_delete",
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Delete Workflow Graph",
+        "tags": [
+          "user-state"
+        ]
+      },
+      "get": {
+        "description": "The caller's saved workflow canvas, or ``exists: false`` if they have never saved one.",
+        "operationId": "get_workflow_graph_v1_user_state_workflow_graph_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStateEnvelope_WorkflowGraph_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get Workflow Graph",
+        "tags": [
+          "user-state"
+        ]
+      },
+      "put": {
+        "description": "Save the caller's workflow canvas, replacing whatever they had.",
+        "operationId": "put_workflow_graph_v1_user_state_workflow_graph_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkflowGraph"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UserStateEnvelope_WorkflowGraph_"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Put Workflow Graph",
+        "tags": [
+          "user-state"
         ]
       }
     },

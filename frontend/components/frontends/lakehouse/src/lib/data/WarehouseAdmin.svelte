@@ -31,8 +31,8 @@
 		type WarehouseRecord,
 	} from './catalog';
 	import RowDrawer from './RowDrawer.svelte';
-
-	const POLL_MS = 5000;
+	import { controlCursor } from '$lib/live/feeds.remote';
+	import { liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -68,11 +68,16 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// The CONTROL cursor, not the lineage one, and this is the surface that shows why the distinction is
+	// real: provisioning a warehouse, binding a namespace or deactivating a bucket writes no dataset and
+	// therefore emits no lineage event — the lineage cursor would never move for any of it. Warehouse
+	// lifecycle is a catalog control-plane change, so that is the feed that reports it.
+	//
+	// The control feed is estate-admin gated (`can_observe_events` on the FGA root) while these READS are
+	// open to any signed-in user, so a non-admin simply never ticks: they get the initial read plus the
+	// re-read every mutation below already performs. That is the honest degradation — a non-admin cannot
+	// change any of this, and the writes are project-admin gated anyway.
+	liveRead(controlCursor, () => load());
 
 	function fail(status: number, detail: string): void {
 		if (status === 401)

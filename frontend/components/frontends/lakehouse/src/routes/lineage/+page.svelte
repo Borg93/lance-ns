@@ -27,8 +27,7 @@
 	import { countUp, stagger } from '@repo/ui/motion';
 	import { useColorMode } from '@repo/ui/color-mode';
 	import { LAYER, type GraphEdge } from '@repo/api/lineage';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// The canvas follows the estate theme LIVE (the shell's theme button toggles `.dark` on
 	// <html>). It used to be pinned to `colorMode="dark"`, which painted a black canvas inside
@@ -63,11 +62,10 @@
 	// failed, the canvas KEEPS the last good state and says so.
 	const status = $derived(!store.settled ? 'connecting' : store.online ? 'live' : 'offline');
 
-	$effect(() => {
-		store.poll();
-		const timer = setInterval(() => store.poll(), POLL_MS);
-		return () => clearInterval(timer);
-	});
+	// One tick = /graph + /events + /runs, so a blind 5s timer here re-read the whole estate graph
+	// whether or not anything had happened. The lineage cursor gates it: the canvas re-reads when the
+	// estate actually changed, and an idle estate costs one 245-byte probe per tick, server-side.
+	liveRead(lineageTick, () => store.poll());
 
 	let nodes = $state.raw<FlowNode[]>([]);
 	let edges = $state.raw<

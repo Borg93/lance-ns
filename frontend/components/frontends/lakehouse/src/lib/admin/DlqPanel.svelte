@@ -26,6 +26,7 @@
 	import { page } from '$app/state';
 	import { fetchDlq, replayDlq } from '$lib/api';
 	import type { DlqBacklog, DlqEvent } from '@repo/api/lineage';
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -80,9 +81,12 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-	});
+	// Live on the LINEAGE cursor, not the control one — this is the only admin panel where that is the
+	// right feed. The outbox holds lineage events staged but not yet confirmed delivered, so it drains
+	// exactly when the lineage feed advances: the cursor moving IS the relay making progress, and the
+	// backlog shrinking is what an operator is watching for. Before this the panel read once on mount and
+	// never again, so a drain in progress looked identical to a wedged one.
+	liveRead(lineageTick, () => load());
 
 	function age(seconds: number): string {
 		if (seconds < 60) return `${Math.round(seconds)}s`;

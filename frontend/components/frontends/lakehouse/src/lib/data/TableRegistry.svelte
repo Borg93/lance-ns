@@ -27,8 +27,7 @@
 	import RowDrawer from './RowDrawer.svelte';
 	import { namespaceOfTable, stageOfTable, type StageInfo } from './stage';
 	import StageBadge from './StageBadge.svelte';
-
-	const POLL_MS = 5000;
+	import { lineageTick, liveRead } from '$lib/live/tick.svelte';
 
 	// Return here after the OIDC round-trip (the shell's ?redirect= contract, nav-user.svelte).
 	const loginHref = $derived(`/auth/login?redirect=${encodeURIComponent(page.url.pathname)}`);
@@ -60,11 +59,12 @@
 		}
 	}
 
-	$effect(() => {
-		load();
-		const timer = setInterval(load, POLL_MS); // a transient failure retries, so "retrying" is honest
-		return () => clearInterval(timer);
-	});
+	// The LINEAGE cursor, not the catalog control feed: the control feed is estate-admin only (a terminal
+	// 403 for everyone else), while this registry is for any signed-in user — and a table appearing is a
+	// lineage event (the catalog records its creator on one), so the governed-per-subject feed sees it.
+	// A transient failure keeps the last-good rows and re-reads on the next advance, so "retrying" is
+	// still honest.
+	liveRead(lineageTick, () => load());
 
 	async function runDeclare(): Promise<void> {
 		const ns = declNs.trim();

@@ -16,7 +16,11 @@ export const AUTH_OFF_PORT = 5294;
 export const AUTH_ON_PORT = 5295;
 /** The mock catalog backing the admin area's control-event feed. NOT a zone dev-server port. */
 export const MOCK_CATALOG_PORT = 5292;
+/** The mock LINEAGE service backing the live cursor + the shell's run feed, which both run
+ *  server-side and so cannot be reached by `page.route`. NOT a zone dev-server port. */
+export const MOCK_LINEAGE_PORT = 5291;
 
 export const AUTH_OFF = `http://localhost:${AUTH_OFF_PORT}`;
 export const AUTH_ON = `http://localhost:${AUTH_ON_PORT}`;
 export const MOCK_CATALOG = `http://localhost:${MOCK_CATALOG_PORT}`;
+export const MOCK_LINEAGE = `http://localhost:${MOCK_LINEAGE_PORT}`;

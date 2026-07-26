@@ -39,12 +39,20 @@
 <div class="flex h-svh flex-col overflow-hidden">
 	<!-- The cross-zone estate navbar — the one constant across every microfrontend. -->
 	<header class="border-border bg-background flex h-12 shrink-0 items-center border-b px-4">
+		<!-- `min-w-0 flex-1` is not decoration: it is the same class AppShell passes at
+		     app-shell.svelte:109, and it is what makes the navbar span the row so its identity/theme
+		     cluster sits on the RIGHT. Without it TopNavbar shrinks to content width and the account
+		     avatar sits immediately after the last zone link — which is why this zone's login icon
+		     appeared pushed to the left while media and lakehouse looked correct. Hand-rolling the
+		     header instead of reusing AppShell is what let the two drift; see the follow-up task to
+		     give AppShell a canvas mode so this zone can use it. -->
 		<TopNavbar
 			pathname={page.url.pathname}
 			{me}
 			{meLoading}
 			user={data.user}
 			authEnabled={data.authEnabled}
+			class="min-w-0 flex-1"
 		/>
 	</header>
 	<main class="min-h-0 flex-1 overflow-hidden">

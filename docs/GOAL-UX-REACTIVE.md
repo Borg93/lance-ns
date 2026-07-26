@@ -264,7 +264,7 @@ commit that closed it; none is closed on my say-so.
 | 4 | `home 0 · lakehouse 3 · media 1 · annotator 0`, every survivor carrying `POLL REASON:`, enforced by `poll-reason.test.ts` |
 | 5 | Written in one browser context, read in a fresh one, against `lance-statestore` on the existing Postgres |
 | 6 | A second caller warm, an anonymous caller refused *while warm* in both zones that mount the viewer, junk `v` unable to fork the key |
-| 7 | 1021 backend unit tests, `ruff check` + `format --check` (368 files), no OpenAPI drift, prod-render-check, `turbo run check test lint fmt:check build test:e2e` **47/47**, all four zone suites (home 5, lakehouse 215, media 2, annotator 8) |
+| 7 | 1021 backend unit tests, `ruff check` + `format --check` (368 files), no OpenAPI drift, prod-render-check, `turbo run check test lint fmt:check build test:e2e` **47/47**, all four zone suites (home 5, lakehouse 215, media 2, annotator 8) — **and CI read to completion: 7 of 7 jobs green on `687c7d5`**, after fixing the two CI-only failures below |
 | 8 | Digests before/after for every zone and service touched, pods **deleted** rather than restarted |
 | 9 | `scripts/verify_all_zones_both_users.mjs` — alice **and** bob, all four zones, real Dex login through `:8090`; alice 200 with the admin surface, bob **403** with the reason |
 | 10 | Element crops at `deviceScaleFactor: 3` plus DOM measurement. Three of my own suspicions measured and withdrawn before any of them reached this file |
@@ -278,6 +278,24 @@ commit that closed it; none is closed on my say-so.
 | 18 | `—` with a `title` explaining it, and my "improvement" reverted after it dropped 6 of 10 versions |
 | 19 | The data-loss path named (unreadable ≠ empty), fixed server- and client-side, covered by tests that fail without the fix |
 | 20 | `parallel` → `pipeline`; the distinguishing test recorded rather than remembered |
+
+### Condition 7's other half: CI, read to completion
+
+"Green and pushed" means the pipeline, not my terminal. Reading it found **main had been red for five
+consecutive runs**, on two causes neither of which reproduced locally:
+
+- **`media#build: ENOENT .svelte-kit/types/route_meta_data.json`.** `check` runs `svelte-kit sync`, which
+  generates and prunes the very tree `vite build` is reading, and `turbo.json` ordered `check` only against
+  `^build` — so within a package the two ran concurrently. It never reproduces where `.svelte-kit` is warm,
+  and it lands on whichever zone happens to interleave, which is why it read as a flake. `test` already
+  depended on its own package's `build` for exactly this reason; `check` and `check:tsgo` now do too.
+- **20+ lakehouse specs failing together with `element(s) not found`.** Not a product defect: the config
+  pins `workers: 8`, a number chosen for a 64-core box. A GitHub runner has 2–4 cores, so eight browsers on
+  one Vite dev server starved it and the suite measured the runner. Now `process.env.CI ? 2 : 8`.
+
+After both: **7 of 7 jobs green** — `zone-images · frontend · test · ray-e2e · lineage-e2e · e2e-stack ·
+auth-e2e` — on `687c7d5`. Neither fix touches product code, and both were invisible to every local gate,
+which is the whole argument for the last clause of condition 7.
 
 **What the last drive found after every condition already looked met**, which is the honest closing note:
 the notification bell was mounted in **one zone out of four**, `networkidle` waits sat in ten places where

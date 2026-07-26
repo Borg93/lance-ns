@@ -31,13 +31,42 @@ version: hundreds of manifests a minute, a version history that is noise rather 
 read-modify-write contention between annotators on a format with no row-level locking. It is not a
 limitation of Lance; it is a category error to ask an OLAP format for OLTP semantics.
 
+## Which store, decided — two, each chosen for a property it has (owner-approved 2026-07-26)
+
+The owner's constraints: *"I'm fine with adding redis as well for cache etc. As long as cloud native and
+makes sense together. However still want to use jetstream for event driven workflows of course, due to its
+complex and high performance."* Both are satisfied, and the split is not arbitrary.
+
+| Purpose | Component | Why this one and not the other |
+| ------- | --------- | ------------------------------ |
+| Expensive shared reads, hot ephemeral state | **`state.redis`** with `ttlInSeconds`, `actorStateStore: false` | A cache must *forget*. TTL eviction and memory-bound behaviour are what Redis is actually best at, and `ttlInSeconds` is a first-class metadata field |
+| Actors, workflow, durable domain state (annotation tasks, the notification inbox) | **`state.postgresql`** on the already-deployed `lance-ns-age-0`, `actorStateStore: "true"` | Durable workflow that loses its state on a pod restart is not durable. Postgres is durable by default and already backed up and monitored; a Redis without AOF configured in kind loses everything on restart. Stable actor support in v1 and v2 |
+| The event backbone | **`pubsub.jetstream`** — unchanged | Already deployed and already correct, including the broadcast variant. No change at all |
+
+Two state stores is idiomatic Dapr, not a compromise: components are named by purpose, and a service asks
+for the one whose guarantees it needs. What would be wrong is one store pretending to be both — a cache
+that must not lose data, or a durable store that must evict.
+
+**On the Redis image:** Dapr's Redis state store is tested against **Valkey 8.x and 9.x**, so Valkey works
+and is BSD-licensed rather than Redis Ltd's RSALv2/SSPL. The one caveat from the component reference: stock
+Valkey images bundle neither RediSearch nor RedisJSON, so the **Query API** and the `queryIndexes` metadata
+field will not work. Neither is needed here — a cache and a KV inbox use get/set/TTL, transactions and
+ETag — so record the constraint and do not reach for the Query API later expecting it to be there.
+
+**JetStream stays, and Dapr Workflow does not replace it.** These are different tools and it matters:
+the medallion cascade (`medallion.raw` → `medallion.bronze` → …), control events and lineage delivery are
+**event-driven fan-out**, which is exactly what JetStream is for and is already high-performance and proven
+here. Dapr Workflow is **orchestration with queryable status** — a named instance, a step counter, retries
+and compensation. It is additive, for the `#122` publish saga and export jobs where a user needs "step 3 of
+7" and a failed step must roll back. Using workflow to replace the cascade would be a regression; using
+pub/sub to report progress is what forced 15 polling timers.
+
 ## The shape that fits, per building block
 
 - **Lance** — published, immutable, versioned analytical data. Unchanged, and correct as it is.
-- **Dapr state store (KV)** — annotation project/task state, assignments, review states, feed cursors, and
-  caches of expensive shared reads (the lineage graph, the atlas projection). Small frequent reads and
-  writes, no version per keystroke. The Dapr skill's own `statestore.yaml` is a `state.redis` component
-  with `actorStateStore: "true"`.
+- **Dapr state store (KV)** — split as decided above: annotation project/task state, assignments, review
+  states and feed cursors on Postgres; caches of expensive shared reads on Redis with a TTL. Small frequent
+  reads and writes, no version per keystroke.
 - **Dapr actors** — one actor per task (or per project): single-threaded per entity, so two annotators
   cannot claim the same task, and a progress counter needs no lock. Actor **reminders** give claim leases
   for free — a task claimed and abandoned returns to the queue without a sweeper cron.
@@ -58,18 +87,71 @@ Every `setInterval` in the frontend, and the idea that annotation state could li
 Neither is a small cleanup: the timers are a workaround for a missing subscription, and the state question
 decides whether `#122` is buildable at all.
 
+## Three corrections this document needed (design fan-out, 2026-07-26)
+
+Written before a measured design pass, the plan below had three faults. All three are corrected here, and
+the corrections are cheaper than what they replace.
+
+**1. Do not put Dapr sidecars on the four zone pods.** This document implied the zones needed to reach a
+state store themselves. They do not, and a sidecar there is the most expensive item on the list: +127 MiB
+measured (4 × ~31.7 MiB working set — 1.4× the annotator zone's own memory); the zone base path makes the
+Dapr app channel unreachable, so `/dapr/subscribe` is a 404 on `web-media` and programmatic pub/sub would
+fail *silently*; `annotator` is already a Dapr app-id (`chart/values.yaml:789`), a direct collision; and the
+zones are readiness-probed by a TCP dial while every backend probes its own sidecar's health, so a zone with
+a sidecar would serve traffic before Dapr enrolled, on every rollout. Meanwhile `catalog`, `lineage`,
+`viewer`, `search` and `annotator` are **already 2/2**. Anything needing a store, an actor or a workflow
+lives in one of those, and the zone BFF reaches it by HTTP proxy — which is its entire job already.
+
+**2. The cache belongs in the browser, not in the BFF.** This is the correction that dissolves the tenancy
+risk. A BFF cache of authorized reads needs a key derived from the subject, and getting that key wrong is a
+cross-user leak rather than a slow page. An in-app memo needs no such key: it lives in the user's own tab, so
+it is per-user by construction, immune to the `replicas: 2` coherence problem (there is no session affinity
+on the Ingress), and it has no failure mode when a component is down. The biggest measured waste in the
+estate is `/media/api/atlas/points` at **6,679,228 bytes on every mount and every Text/Visual toggle** —
+25.5 MiB in ~30 s of ordinary clicking, which OOM-killed the viewer mid-measurement and took the media plane
+to 502. That is `#121` with a cause attached, and the fix is a memo keyed on the `v=6` token already in the
+URL. Version tokens and content hashes make invalidation **free**: a new build changes the key and the old
+entry is unreachable.
+
+**3. A per-user change feed already exists, and it is not the catalog's.** The claim that `query.live` was
+blocked on event scoping is true of the **catalog** control feed only (`can_observe_events`, estate admin).
+The **lineage** service's `GET /events` is already per-subject governed — an event is shown only if the
+caller `can_get_metadata` on *every* dataset it references — and already has a keyset cursor (`after`). The
+TypeScript client implements it (`packages/api/src/lineage/client.ts:117-126`) and **no caller passes it**.
+The lineage plane is where 8 of the 13 lakehouse pollers live, so a non-admin's live refresh is available
+today with no backend change and no Dapr: `admin.remote.ts` pointed at lineage instead of the catalog.
+
 ## Order of work
 
-1. **State store component** in the chart (`actorStateStore: "true"` — it gates actors and workflow both).
-2. **Annotation project/task state on it**, as `#122`'s own store. This is the piece that unblocks the
-   labeling-platform task model.
-3. **Publish on save** from the annotator, so there is an event to react to — and the active-learning
-   trigger stops needing a poll.
-4. **`query.live` per feed** in the zones, deleting each timer as its surface moves (`#102`).
-5. **Workflow for the sync**, once there is state worth publishing.
-6. **Cache the expensive shared reads** last — it is the only item here that is an optimisation rather than
-   a correctness fix, and it needs an invalidation story the pub/sub signal now provides.
+**Step 0, prerequisites and free wins — before any `query.live` expansion.**
 
-Steps 1–3 are backend and need no UI decision. Step 4 is mechanical once 3 exists. The owner's call is
-needed only on the task schema in `#122` — what states a task has, who assigns, what "reviewed" means, and
-what exactly a sync publishes.
+- `nginx.ingress.kubernetes.io/proxy-read-timeout` on the ingress. Confirmed live: the running controller
+  has `proxy_read_timeout 60s`, there is no override annotation, and SvelteKit's SSE transport emits **no
+  keepalive** (kit 2.70.1, `runtime/server/remote.js:90` is the only `enqueue`, no timer anywhere in
+  `runtime/server`). So an idle live feed is severed every 60 s, and each reconnect re-primes the whole
+  200-event window and writes an audit record. Replicating `query.live` 15× without this would make the
+  estate **slower while looking faster**.
+- Pass `summary: true` on the lineage jobs page — measured **464,318 → 46,980 bytes**, 10×, on a page
+  currently moving 528 MB/hour to render one job. The flag is already passed one file over.
+- One health fetcher per zone in media. **Done** — `7f688d6`, with the invariant now enforced by a test.
+
+**Then, in impact order.**
+
+1. **The browser memo** for the atlas projection, content-addressed thumbnails and the descriptor. Highest
+   user-visible gain per unit of work in the whole inventory, and the fix for `#121`. No infra, no chart, no
+   backend change.
+2. **Adopt what SvelteKit already ships**: data `load` functions (deployed, used by exactly one page), and
+   `query` in place of the 13 hand-rolled poll/loading/401/offline triples — whose four-way drift is
+   currently a correctness bug, since two lineage pages keep rendering governed rows after the session dies.
+3. **One `query.live` per feed on the lineage cursor** (correction 3). Deletes the remaining timers and
+   fixes the opposite failure at the same time: four admin surfaces make **zero requests, ever**.
+4. **`form` + single-flight + `withOverride`** at the six mutation sites, removing the trailing `await
+   load()` round trip after every write.
+5. **The two state store components** (Redis for cache, Postgres with `actorStateStore: "true"` for actors
+   and workflow), then `#122`'s task state on Postgres, then publish-on-save so there is an event rather
+   than a poll, then workflow for the publish saga and `#125`'s notification inbox.
+
+Note the reordering: the store moved from first to last. Steps 0–4 need no new component at all, and they
+carry most of the measured user-visible gain. The store is required for `#122` and `#125` — durable task
+state and a notification inbox genuinely cannot be built without it — but it was never the prerequisite for
+making the existing surfaces feel responsive, which is what the polling timers were about.

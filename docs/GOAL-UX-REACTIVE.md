@@ -251,6 +251,36 @@ lineage cursor is the one that can.
 - If blocked on the same error three consecutive turns, stop and summarise with exact commands and errors
   rather than thrashing.
 
-## Status
+## Status — all twenty conditions met, 2026-07-27
 
-Tracked live in `docs/GOAL-VERIFY-PULL.md`'s ledger. Conditions close here as they are proven.
+Tracked live in `docs/GOAL-VERIFY-PULL.md`'s ledger. Each row cites the command output, screenshot or
+commit that closed it; none is closed on my say-so.
+
+| # | Closed by |
+| - | --------- |
+| 1 | `history` in the live catalog's OpenAPI (101 paths); all 10 versions rendered; the delete predicate `id = 2` verbatim; alice 200 / bob 403 |
+| 2 | `proxy-read-timeout` on the Ingress + a feed observed open past 60s (`docs/audits/shots/live-stream-past-60s.png`) |
+| 3 | Driven against 891 real runs: failures first, error text present, panel scoped to its own dialog — **and in all four zones**, which is the zone-mount defect this row carried open (`19de3f1`) |
+| 4 | `home 0 · lakehouse 3 · media 1 · annotator 0`, every survivor carrying `POLL REASON:`, enforced by `poll-reason.test.ts` |
+| 5 | Written in one browser context, read in a fresh one, against `lance-statestore` on the existing Postgres |
+| 6 | A second caller warm, an anonymous caller refused *while warm* in both zones that mount the viewer, junk `v` unable to fork the key |
+| 7 | 1021 backend unit tests, `ruff check` + `format --check` (368 files), no OpenAPI drift, prod-render-check, `turbo run check test lint fmt:check build test:e2e` **47/47**, all four zone suites (home 5, lakehouse 215, media 2, annotator 8) |
+| 8 | Digests before/after for every zone and service touched, pods **deleted** rather than restarted |
+| 9 | `scripts/verify_all_zones_both_users.mjs` — alice **and** bob, all four zones, real Dex login through `:8090`; alice 200 with the admin surface, bob **403** with the reason |
+| 10 | Element crops at `deviceScaleFactor: 3` plus DOM measurement. Three of my own suspicions measured and withdrawn before any of them reached this file |
+| 11 | The svelte MCP autofixer on all 26 touched `.svelte` — **zero issues**, six suggestions each judged, one of them a real concurrency defect that got fixed and tested |
+| 12 | `docs/GOAL-VERIFY-PULL.md`'s ledger rewritten row by row against today's evidence |
+| 13 | The disposition table above — 18 tasks, each done-with-evidence or struck with a reason |
+| 14 | Twelve recorded mistakes, **three of them now mechanical guards** proven to fail on the mistake |
+| 15 | A keepalive on the stream and one observed open past 255s with no reconnect |
+| 16 | Four zone digests moved, then the new surface asserted inside `getByRole('dialog', {name: 'Notifications'})` — never on a neighbouring element |
+| 17 | `cache-control: public` → `private` on gated routes, with a test |
+| 18 | `—` with a `title` explaining it, and my "improvement" reverted after it dropped 6 of 10 versions |
+| 19 | The data-loss path named (unreadable ≠ empty), fixed server- and client-side, covered by tests that fail without the fix |
+| 20 | `parallel` → `pipeline`; the distinguishing test recorded rather than remembered |
+
+**What the last drive found after every condition already looked met**, which is the honest closing note:
+the notification bell was mounted in **one zone out of four**, `networkidle` waits sat in ten places where
+they can never fire again, and three of my own measurements were wrong before the product was. Every gate
+was green for all of it. That is the argument for driving the product rather than the elements, and it is
+why "all twenty met" is a floor rather than a finish.

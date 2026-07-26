@@ -28,6 +28,7 @@
 		type Hit,
 	} from '@repo/media-api';
 	import { crossFilter, buildKeyIndex, hitKey, type ColorBy } from './cross-filter.svelte';
+	import { gpuUnsupportedReason } from './gpu-support';
 	import { activeView } from '@repo/media-api/descriptor';
 	import { buildGrid, nearestIndex, type SpatialGrid } from './atlas-grid';
 	import { hexToRgb, hueRgb, buildHuePalette, type Rgb } from './atlas-colors';
@@ -210,10 +211,38 @@
 		};
 	});
 
+	// Can this browser draw the map at all? Probed once, and BEFORE any projection is fetched.
+	// `undefined` = not probed yet, `null` = supported, a string = the reason it is not. The three states
+	// are distinct on purpose: treating "not yet known" as "supported" would fetch on the first tick and
+	// defeat the gate, and treating it as "unsupported" would flash an error on every load.
+	//
+	// The svelte MCP autofixer flags assigning state inside an `$effect` and suggests `$derived`. Judged and
+	// kept, deliberately: this zone does enable `compilerOptions.experimental.async`, so
+	// `$derived(await gpuUnsupportedReason())` would compile — but awaiting in a derived *suspends* the
+	// subtree until it settles, which needs a `<svelte:boundary>` with a pending snippet and changes what
+	// every load renders. This is a one-shot async probe with a cancellation guard, which is the documented
+	// correct shape for `$effect`; and the three-state above is load-bearing, since "not yet known" is
+	// precisely the state that must not fetch. Deviates from the suggestion, with a reason.
+	let gpuReason = $state<string | null | undefined>(undefined);
+	$effect(() => {
+		let cancelled = false;
+		void gpuUnsupportedReason().then((reason) => {
+			if (!cancelled) gpuReason = reason;
+		});
+		return () => {
+			cancelled = true;
+		};
+	});
+
 	// Load whenever the chosen space changes (initial mount + Text/Visual toggle).
 	$effect(() => {
 		const space = crossFilter.space;
 		if (!hasAtlas) return;
+		// The projection is 6.6 MB and the renderer is WebGPU-only with no fallback, so on a browser that
+		// cannot run it every one of those bytes buys a red error message. Measured before this gate
+		// existed: 31.8 MiB across four toggles, all of it discarded. Wait for the probe rather than
+		// racing it — `undefined` means we do not yet know, and guessing costs a download.
+		if (gpuReason !== null) return;
 		void load(space);
 	});
 
@@ -655,7 +684,17 @@
 		role="presentation"
 		class="bg-background relative h-full min-h-0"
 	>
-		{#if loading || !x || !y || !xBits || !yBits || !pts || !baseRgb || !pointState}
+		{#if gpuReason}
+			<!-- The reason belongs HERE, not only in <GpuScatter>: now that an unsupported browser never
+			     fetches, `pts` stays null and the scatter never mounts, so its own message would never be
+			     reached and the panel would spin for ever. Same wording, one source (`gpu-support.ts`). -->
+			<div
+				class="text-muted-foreground flex h-full flex-col items-center justify-center gap-1 px-6 text-center text-sm"
+			>
+				<span class="text-destructive">{gpuReason}</span>
+				<span>The embedding map needs WebGPU. Search, Tree and Graph work without it.</span>
+			</div>
+		{:else if loading || !x || !y || !xBits || !yBits || !pts || !baseRgb || !pointState}
 			<div class="text-muted-foreground flex h-full items-center justify-center gap-2 text-sm">
 				<Loader2 class="size-4 animate-spin" /> Loading embedding map…
 			</div>

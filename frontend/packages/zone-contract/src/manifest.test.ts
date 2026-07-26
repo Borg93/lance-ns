@@ -298,4 +298,36 @@ describe('nothing outside the frontend still points at a moved path', () => {
 		const src = readFileSync(path, 'utf8');
 		expect(DEAD.filter((d) => src.includes(d))).toEqual([]);
 	});
+
+	// The list above holds PACKAGE and DIRECTORY names, so a retired URL path walked straight through it —
+	// including in the very file the comment names. `verify_cross_zone_oidc.sh` polled
+	// `http://localhost:$ORIGIN_PORT/data` as its readiness probe; the merge made that a 404, so the probe
+	// never matched, the loop fail()ed after 30 tries, and the ONE script that proves cross-zone OIDC end
+	// to end could not start. That is why five dead `/data` links reached main with every gate green: the
+	// artifact that would have walked into them was itself broken by the same rename.
+	//
+	// Only lines carrying a URL are checked, and only the pre-merge zone roots. `/data` as a filesystem
+	// path or a values key is none of this gate's business, and a false positive here is how a gate gets
+	// deleted rather than fixed.
+	const DEAD_URL_PATHS = ['data', 'lineage', 'models', 'admin'];
+	it.each(SEARCHED)('%s drives no retired ORIGIN path', (rel) => {
+		const path = resolve(REPO_ROOT, rel);
+		if (!existsSync(path)) return;
+		const offences: string[] = [];
+		readFileSync(path, 'utf8')
+			.split('\n')
+			.forEach((line, i) => {
+				if (!line.includes('http')) return;
+				if (line.trimStart().startsWith('#')) return; // prose, not a request
+				for (const dead of DEAD_URL_PATHS) {
+					// A URL path segment right after the authority: `…:$PORT/data`, `…example.com/lineage`.
+					if (new RegExp(`https?://[^/\\s"']+/${dead}(?=["'/?\\s]|$)`).test(line)) {
+						offences.push(
+							`${rel}:${i + 1} requests /${dead} — an area of /lakehouse since the merge`,
+						);
+					}
+				}
+			});
+		expect(offences).toEqual([]);
+	});
 });

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # P5 live proof: a REAL per-user Dex login driven through the INGRESS (one origin, all zones), asserting
-# the sealed session cookie carries ACROSS zones (sign in on /data → still signed in on /admin) + per-user
+# the sealed session cookie carries ACROSS zones (sign in on /lakehouse/data → still signed in on
+# /lakehouse/admin) + per-user
 # authz through the zones' BFF (alice, project-admin → the produce door 2xx; bob, no grant → 403). Drives
 # the LIVE kind `lance` cluster with the P5 micro-frontend zones deployed OIDC-on behind ingress-nginx.
 #
@@ -30,9 +31,18 @@ kubectl -n ingress-nginx port-forward svc/ingress-nginx-controller "$ORIGIN_PORT
 kubectl port-forward "svc/$RELEASE-dex" 5556:5556 >/tmp/pf-dex.log 2>&1 & PIDS+=($!)
 kubectl port-forward "svc/$RELEASE-openfga" 8081:8080 >/tmp/pf-fga.log 2>&1 & PIDS+=($!)
 for i in $(seq 1 30); do
-  w=$(curl -s -o /dev/null -w '%{http_code}' -m2 "http://localhost:$ORIGIN_PORT/data" 2>/dev/null || true)
+  # Probe the ORIGIN ROOT, not a zone path. This polled "/data" — a path the 7 -> 4 zone merge deleted
+  # (data is an area of the lakehouse zone now), so it answered 404, never matched, and the loop below
+  # fail()ed after 30 tries. The one script that proves cross-zone OIDC end to end could not start, which
+  # is precisely why five dead /data links reached main unnoticed. "/" is served by the catch-all zone for
+  # as long as there is a frontend at all, so it cannot rot the same way.
+  w=$(curl -s -o /dev/null -w '%{http_code}' -m2 "http://localhost:$ORIGIN_PORT/" 2>/dev/null || true)
   d=$(curl -s -o /dev/null -w '%{http_code}' -m2 http://localhost:5556/dex/.well-known/openid-configuration 2>/dev/null || true)
-  { [ "$w" = "200" ] || [ "$w" = "308" ]; } && [ "$d" = "200" ] && { echo "✓ forwards ready (ingress/data=$w dex=$d)"; break; }
+  # Anything that is not a transport failure means the ingress is answering: 200 signed-in, 302 to the
+  # login-first gate when anonymous, 307/308 on a base redirect. Pinning two exact codes is what made the
+  # old probe brittle in the first place.
+  case "$w" in 200|302|307|308) ready=1 ;; *) ready=0 ;; esac
+  [ "$ready" = "1" ] && [ "$d" = "200" ] && { echo "✓ forwards ready (ingress/=$w dex=$d)"; break; }
   [ "$i" = "30" ] && { echo "ingress=$w dex=$d"; cat /tmp/pf-ingress.log /tmp/pf-dex.log; fail "port-forwards never became ready"; }
   sleep 1
 done

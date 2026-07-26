@@ -32,11 +32,22 @@ const shot = async (page, name) => {
 	console.log(`     shot: ${file}`);
 };
 
-/** The AppShell nav-user trigger button — its accessible name is the identity ("Sign in" when signed out,
- *  the user's name/email when signed in). The sidebar footer button. */
+/** The signed-in identity, read from the account menu.
+ *
+ *  This used to match `getByRole('button', {name: /Sign in|@|alice|bob/i})` — the shell's old nav-user
+ *  button, whose accessible name WAS the identity. The shell now renders an avatar carrying only initials
+ *  ("AL") with `aria-label="Account"`, so that selector matches nothing and the script died on a 10s
+ *  timeout: a stale test contract, not a defect. Verified against the live pod before changing it — the
+ *  identity is still there, one click deeper.
+ *
+ *  Opening the menu is also the stronger assertion. Initials are ambiguous (two users can share them);
+ *  the menu carries the email, so this proves WHO is signed in rather than that somebody is. */
 const navUserText = async (page) => {
-	const btn = page.getByRole('button', { name: /Sign in|@|alice|bob/i }).last();
-	return ((await btn.textContent({ timeout: 10000 })) ?? '').replace(/\s+/g, ' ').trim();
+	await page.getByRole('button', { name: 'Account' }).click({ timeout: 10000 });
+	const menu = page.locator('[role="menu"], [data-slot*="dropdown-menu-content"]').first();
+	const text = ((await menu.textContent({ timeout: 5000 })) ?? '').replace(/\s+/g, ' ').trim();
+	await page.keyboard.press('Escape'); // leave the menu closed so later steps see a normal page
+	return text;
 };
 
 /** Drive a real Dex login for `user`, starting on `startPath`. The home zone owns /auth/login
@@ -160,8 +171,18 @@ console.log('→ anonymous: page 302s to login, API 401s, writes refused');
 const anonCtx = await (await chromium.launch({ args: ARGS })).newContext();
 const anon = await anonCtx.newPage();
 const anonResp = await anon.goto(`${ORIGIN}/lakehouse/data`, { waitUntil: 'domcontentloaded' });
-ok(/\/auth\/login/.test(anon.url()), `anonymous page load lands on the login gate (${anon.url()})`);
-ok((anonResp?.status() ?? 0) < 400, 'the redirect itself is not an error page');
+// Assert what actually matters — an anonymous visitor does not get the app — rather than a specific login
+// URL. The login-first gate 302s to /auth/login, which immediately redirects on to the issuer, so the
+// browser's FINAL url is the IdP's (`/dex/auth/local/login?…` today). Matching `/auth/login` failed on that
+// second hop and read as a broken gate. It is also the wrong thing to pin: the IdP is swappable (Keycloak
+// et al), so its login path is not our contract. What IS our contract: we left the requested app path, and
+// no app chrome rendered.
+ok(!anon.url().startsWith(`${ORIGIN}/lakehouse/data`), `anonymous load left the app (${anon.url()})`);
+ok(
+	(await anon.getByRole('button', { name: 'Account' }).count()) === 0,
+	'no app shell rendered for an anonymous visitor',
+);
+ok((anonResp?.status() ?? 0) < 400, 'the redirect chain itself is not an error page');
 await shot(anon, 'anonymous-login-gate');
 for (const [path, verb] of [
 	['/lakehouse/capi/v1/access/check', 'POST'],

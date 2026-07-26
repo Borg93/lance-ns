@@ -22,9 +22,9 @@ is carried in conversation memory alone.
 
 | # | Condition | Status |
 | - | --------- | ------ |
-| 1 | Architecture verified against the skills (turbo.json, 4-zone MFE, Svelte 5) | **turbo.json DONE** (audit table + cache proof below). MFE/Svelte partial |
-| 2 | Toolchain migration complete (no eslint/prettier; identical scripts; gates real) | **DONE** — 3 defects found and fixed |
-| 3 | Zones/routes/abstractions right; judged against the Lakekeeper console | **structural half DONE** (26→26 exact diff). Lakekeeper comparison + orphan sweep OUTSTANDING |
+| 1 | Architecture verified against the skills (turbo.json, 4-zone MFE, Svelte 5) | **DONE** — turbo.json (empirical cache proof), MFE and Svelte 5 all audited + adversarially verified; 3 bugs fixed, 2 deviations recorded with reasons |
+| 2 | Toolchain migration complete (no eslint/prettier; identical scripts; gates real) | **DONE** — 3 defects fixed, and the gate proven to FAIL on drift in both directions: changing media's `lint` to `eslint .` → *"media is missing the shared lint script: expected 'eslint .' to be 'oxlint .'"*; DELETING its `fmt:check` → *"expected undefined to be 'rsvelte-fmt --check .'"*; restored → 79/79 green, tree clean |
+| 3 | Zones/routes/abstractions right; judged against the Lakekeeper console | **DONE** — 26→26 parity, orphan sweep (one orphan: `/lakehouse/admin`), 8 gaps + 6 advantages vs their console, one recommendation |
 | 4 | media/annotator split sound and documented; Pixi recommendation | **DONE** — backends separate (live pod env), reuse quantified (4 of 5 `@repo/*` shared), Pixi verdict written, and the bundle-budget gate it exposed is fixed + tested |
 | 5 | The cluster TODO (`docs/TODO-CLUSTER-VERIFY.md` §1–6) discharged | **essentially DONE** — see the evidence table |
 | 6 | All gates green, stale dirs deleted, pushed, CI confirmed | **DONE** — every gate green, pushed `e489f2b..f8f1480`, CI `test` job green, rest under watch |
@@ -197,6 +197,86 @@ transaction log has no notion of a user, and it should not. So the work is:
 Tasks #65/#66 surfaced versions, tags, manifests and schema. Neither answers "who changed this row, and
 what did they change" — that is what this adds, and step 1 is a prerequisite nothing else can substitute.
 
+## Condition 1 — the MFE + Svelte 5 halves (adversarially verified)
+
+Three audits ran in parallel, each re-checked by a second agent whose default verdict was REFUTED unless
+the code itself carried the claim. Outcome: **MFE 5/5 top claims confirmed, routes 8 of 9 confirmed
+(1 downgraded), Svelte 5 confirmed-with-corrections** — the verifier refuted 3 of the Svelte report's
+sub-claims, which is the point of running it.
+
+### MFE composition
+
+- **Dead cross-zone links (BUG, fixed `bf00499`).** Five `<a>` on pre-merge roots. The verifier
+  re-reproduced the 404s on a fresh server rather than trusting the first pass, and confirmed the
+  enumeration is complete (a wider grep over single quotes, `{'…'}`, component props and `goto()` found
+  the same five and no more).
+- **The cross-zone verifier could not start (BUG, fixed `1cd9329`).** Its readiness probe was itself one
+  of the dead paths. Two escape hatches were tried and both closed: no `set -e` (refuted — `fail()` exits
+  explicitly) and a possible 308 from the login gate (refuted twice — it is 302, and `isGatedPageRequest`
+  needs `accept: text/html`, which a bare curl does not send).
+- **Nothing composes all four zones automatically (DEVIATES).** `frontend/package.json:13` `dev` runs
+  `turbo run dev dev:proxy`, so the proxy exists — but `dev:proxy` appears in no test, config or workflow,
+  and `e2e_stack.sh:110` deploys with `--set frontend.enabled=false`. The single-origin composition is
+  therefore only ever exercised by hand. This is what made the dead links invisible in aggregate.
+- **The zone images are never built in CI (DEVIATES, verified independently).** `make frontend-images` /
+  `.docker/frontend.dockerfile` are invoked by nothing automated: the only two `docker build` matches in
+  `.github/workflows/*.yml` are prose inside comments. Four dockerfiles sit on the deploy path with no
+  automated build. They DO build by hand — see the cluster evidence above — but a break would reach main.
+
+### Svelte 5
+
+- **A stale prop mirror (BUG, fixed `dff061a`).** `search-settings.svelte` copied `weightPct` into local
+  `$state` and synced back with an `$effect`, so a saved view's balance was displayed wrongly and then
+  overwritten. Now derived from the prop with callback writes. The `svelte-runes` skill's own
+  `effect-vs-derived.svelte` example names this anti-pattern verbatim; the MCP autofixer reports zero
+  issues on the result and on every other `.svelte` this session touched.
+- **The verifier refuted 3 of the report's claims, and it was right to.** Two of the five `$effect`s the
+  report wanted deleted (`filter-popover.svelte:126-129`, `search-bar.svelte:119-123`) are
+  options-validity clamps driven by a `$derived` options list, not change-detection — the prescribed
+  "delete all five" would have regressed both. `LayerPanel`'s guard was graded a bug for having "no
+  explanatory comment"; it has a five-line one at `:14-18`. Both downgraded to deviates-with-reason.
+- **`TableDetail.svelte:331` — one `$effect`, 60 assignments (DEVIATES-WITH-REASON, not fixed).** It
+  resets every editor field when the `table` prop changes, and its comment names the bug that motivated it
+  (an editor opened on A surviving into B, so Save writes A's draft to B — audit 2026-07-16). The intent
+  is right and the direction is safe (it clears scratch fields; it cannot clobber a parent value the way
+  the media bug did). The mechanism is the problem: the invariant is hand-maintained, so a new `$state`
+  field that nobody adds to the block silently reintroduces the leak. Recommended follow-up, deliberately
+  NOT done in this pass: `{#key table}` at the call site, which re-instantiates the component and deletes
+  the whole block. That is a real refactor of a 1000-line component under 191 e2e tests and does not
+  belong in a bug-fix wave.
+- Runes hygiene otherwise clean: 135 component-tag `bind:` directives, 0 binding to a non-`$bindable`
+  prop (re-counted by AST, not regex — the report's 133 was an undercount); 253 `.svelte` × client+server
+  plus 18 `.svelte.ts` compile with 0 diagnostics.
+
+## Condition 3 — IA judged against the Lakekeeper console
+
+Route parity was already proven (26 pre-merge → 26 lakehouse, set difference empty both directions;
+recomputed from git by the verifier: 34/34 pages). Their console's route set was read directly from
+`lakekeeper/console`'s `pages/**`; what could NOT be verified is stated as such in the audit file.
+
+**Where theirs is better** (8 gaps, each grep-verified against ours): soft-deleted objects as a
+first-class view with time-bounded undrop (we have no undrop surface at all — our `restore` is Lance
+*version* restore, a different thing); **roles** as a managed, nestable object between principal and grant
+(ours is tuple-level only); an identity/user directory and profile; server settings + bootstrap +
+dependencies + license (our #112, owner-deferred); **per-object** task/queue visibility (ours is
+estate-global, so "what is queued for THIS table" is unanswerable); `health` and `files` tabs on table
+detail; views and generic tables as distinct object types; and **nested namespaces** (ours are flat
+medallion tiers).
+
+**Where ours is better**: lineage as a whole area including column-level lineage (7 routes, no analogue in
+their tree); a model registry with a promotion pipeline; an authorization *workbench* rather than a
+per-object permission tab — Graph explorer, raw tuple browser, live Check simulator, compiled model; a
+compliance audit trail with resource-pivot jump links; event-plane ops (live control events, JetStream
+consumer lag, DLQ replay); and a row-level write surface on table detail.
+
+**The one recommendation**: make the warehouse and namespace **detail** pages the hierarchy's landing
+surfaces and delete the two P0 scaffolds behind them. `/lakehouse/data` is still an 8-line scaffold whose
+text names the deleted `apps/web`, and it is the zone's landing target (`routes/+page.ts:7` redirects
+there, `nav-config.ts:236` points at it); `/lakehouse/admin` is the repo's only orphan page — a precise
+grep for inbound links returns three Playwright `toHaveCount(0)` assertions and zero product references.
+Lakekeeper has no such intermediate: `/warehouse/[id]` IS the surface. Not fixed in this pass because
+"what should the data landing page be" is a product decision, not a defect with one right answer.
+
 ## Dapr coverage for the merged services (owner question)
 
 **Verdict: nothing is missing, and the absences are a design boundary rather than an oversight.**
@@ -225,7 +305,9 @@ needs a pubsub scope AND the app-token annotation, because the annotator would t
 
 ## Outstanding
 
-1. Lakekeeper console comparison + orphan-route sweep (condition 3).
+1. Condition 5 re-drive in a browser as alice and bob with screenshots — the frontend changed under it
+   (navbar zone-root row, five repointed links, the media Settings fix), so the earlier evidence no longer
+   covers the shipped code.
 3. Lineage track: spec-fidelity and Marquez-parity reports (gold finding + Dapr-delivery/spec-conformance
    tests already landed in `b43b8ff`).
 4. Confirm `e2e-stack` goes green on `363de65` (every other job is already green: `test`, `frontend`,

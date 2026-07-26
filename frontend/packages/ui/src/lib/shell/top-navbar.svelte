@@ -174,6 +174,28 @@
 								{entry.title}
 							</NavigationMenu.Trigger>
 							<NavigationMenu.Content>
+								{#if !entry.groups.some((g) => g.items.some((i) => i.href === entry.href))}
+									<!-- The zone root, on the SAME terms as the `items` branch below: a panel must not
+									     be the only way in, and the trigger is a `<button>`, not a link. This branch
+									     shipped without it, which left the Lakehouse zone root reachable on a wide
+									     screen only by breadcrumb or by typing the URL — while the narrow bar's
+									     `overflowItems` comment claimed it prepends the root "exactly like the desktop
+									     panel". Skipped when a group row already IS the root, so no href appears twice. -->
+									<div class="px-2 pt-2">
+										<NavigationMenu.Link
+											href={entry.href}
+											active={norm(pathname) === entry.href}
+											data-sveltekit-reload={crossZone(entry.href) ? '' : undefined}
+											{@attach warm(entry.href)}
+											class="bg-muted/40 p-3"
+										>
+											<span class="text-foreground text-sm leading-none font-medium">{entry.title}</span>
+											<span class="text-muted-foreground text-xs leading-snug">
+												Open the {entry.title.toLowerCase()} zone.
+											</span>
+										</NavigationMenu.Link>
+									</div>
+								{/if}
 								<div
 									class="grid gap-x-3 gap-y-1 p-2 md:w-[46rem]"
 									style="grid-template-columns: repeat({entry.groups.length}, minmax(0, 1fr))"

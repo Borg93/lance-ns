@@ -184,6 +184,26 @@ test('above the breakpoint the zone links stay on the bar (no overflow menu) (#1
 	await expect(page.getByRole('link', { name: 'Annotate', exact: true })).toBeVisible();
 });
 
+test('the wide Lakehouse panel offers a way into the zone ROOT, not only its sub-areas', async ({
+	page,
+	baseURL,
+}) => {
+	// The `groups` branch shipped without the zone-root row that the `items` branch renders and its own
+	// comment declares mandatory ("a panel must not be the only way in, and the trigger is a button, not a
+	// link"). Consequence, on every wide screen: /lakehouse/data was reachable by breadcrumb or by typing
+	// the URL, and by nothing you could click. The narrow bar asserted this all along (the overflow test
+	// above lists /lakehouse/data); the wide bar only asserted that the trigger was VISIBLE, so opening the
+	// panel — the thing a user actually does — was never checked.
+	await page.setViewportSize({ width: 1440, height: 900 });
+	await openShell(page, baseURL);
+	await page.getByRole('button', { name: 'Lakehouse' }).click();
+	const panel = page.locator('[data-slot="navigation-menu-viewport"]');
+	await expect(panel.locator('a[href="/lakehouse/data"]')).toHaveCount(1);
+	// The trigger stays a button (that is the whole reason the row is needed), so this is not a regression
+	// to a link-trigger — the panel row is the way in.
+	await expect(page.getByRole('button', { name: 'Lakehouse' })).toBeVisible();
+});
+
 test('the breadcrumb truncates MIDDLE segments and always shows the current page (#105)', async ({
 	page,
 	baseURL,

@@ -22,7 +22,11 @@
 			<div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
 				{#each data.projects as p (p.project)}
 					<!-- Cross-zone card into the data zone's project page (hard nav). -->
-					<a href={`/data/projects/${p.project}`} data-sveltekit-reload class="group block">
+					<a
+						href={`/lakehouse/data/projects/${p.project}`}
+						data-sveltekit-reload
+						class="group block"
+					>
 						<Card
 							class="hover:border-ring/40 hover:bg-accent flex h-full flex-col gap-2 p-5 transition-colors"
 						>

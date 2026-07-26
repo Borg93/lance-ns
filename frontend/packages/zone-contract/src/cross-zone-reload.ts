@@ -23,7 +23,7 @@ export const ZONES = ['lakehouse', 'media', 'annotator'];
 const ZONE_PATH = new RegExp(`^\\/(${ZONES.join('|')})(?:\\/|$)`);
 
 /** Opaque-expression placeholder. Cannot contain '/', so it never completes a zone prefix. */
-const EXPR = '￿';
+export const EXPR = '￿';
 
 /** True when an href targets another zone and so must hard-navigate. */
 export function isCrossZonePath(path: string | null): boolean {
@@ -34,7 +34,7 @@ export function isCrossZonePath(path: string | null): boolean {
  * Flatten an href attribute value to a comparable string: static text verbatim, every `{…}` as EXPR.
  * Returns null for a shorthand/spread href that cannot be read statically (never flagged).
  */
-function hrefToPath(value: unknown): string | null {
+export function hrefToPath(value: unknown): string | null {
 	if (value === true || value == null) return null;
 	const nodes = Array.isArray(value) ? value : [value];
 	let out = '';
@@ -79,10 +79,18 @@ export interface Violation {
 	line: number;
 }
 
-/** Every cross-zone `<a>` in one component that does not hard-navigate. */
-export function findViolations(source: string): Violation[] {
+/** One `<a>` element found in a component: its attributes and 1-based source line. */
+export interface Anchor {
+	attributes: { type?: string; name?: string; value?: unknown }[];
+	line: number;
+}
+
+/** Every `<a>` in a component, in source order. Shared by this gate and `link-targets`, which asks a
+ *  different question of the same elements (does the target exist) and must not re-derive the walk —
+ *  a second traversal would drift, and the blocks ({#if}/{#each}/{#snippet}) are the fiddly part. */
+export function walkAnchors(source: string): Anchor[] {
 	const ast = parse(source, { modern: true });
-	const out: Violation[] = [];
+	const out: Anchor[] = [];
 
 	const walk = (node: unknown): void => {
 		if (!node || typeof node !== 'object') return;
@@ -95,17 +103,10 @@ export function findViolations(source: string): Violation[] {
 			start?: number;
 		};
 		if (n.type === 'RegularElement' && n.name === 'a') {
-			const attrs = n.attributes ?? [];
-			const href = attrs.find((a) => a.type === 'Attribute' && a.name === 'href');
-			if (href) {
-				const path = hrefToPath(href.value);
-				if (isCrossZonePath(path) && !hasReloadEnabled(attrs)) {
-					out.push({
-						href: path!.replaceAll(EXPR, '${…}'),
-						line: source.slice(0, n.start ?? 0).split('\n').length,
-					});
-				}
-			}
+			out.push({
+				attributes: n.attributes ?? [],
+				line: source.slice(0, n.start ?? 0).split('\n').length,
+			});
 		}
 		for (const child of n.fragment?.nodes ?? n.nodes ?? []) walk(child);
 		// Blocks ({#if}, {#each}, {#snippet}, …) hold their children in named fragments.
@@ -117,5 +118,19 @@ export function findViolations(source: string): Violation[] {
 	};
 
 	walk(ast.fragment);
+	return out;
+}
+
+/** Every cross-zone `<a>` in one component that does not hard-navigate. */
+export function findViolations(source: string): Violation[] {
+	const out: Violation[] = [];
+	for (const { attributes, line } of walkAnchors(source)) {
+		const href = attributes.find((a) => a.type === 'Attribute' && a.name === 'href');
+		if (!href) continue;
+		const path = hrefToPath(href.value);
+		if (isCrossZonePath(path) && !hasReloadEnabled(attributes)) {
+			out.push({ href: path!.replaceAll(EXPR, '${…}'), line });
+		}
+	}
 	return out;
 }

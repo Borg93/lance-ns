@@ -52,7 +52,11 @@
 	<DropdownMenu.Content class="min-w-56 rounded-lg" align="start" side="bottom" sideOffset={4}>
 		<DropdownMenu.Label class="text-muted-foreground text-xs">Projects</DropdownMenu.Label>
 		<DropdownMenu.Item class="p-0">
-			<a href="/data" data-sveltekit-reload class="flex w-full items-center gap-2 px-2 py-1.5">
+			<a
+				href="/lakehouse/data"
+				data-sveltekit-reload
+				class="flex w-full items-center gap-2 px-2 py-1.5"
+			>
 				<div class="flex size-6 items-center justify-center rounded-md border">
 					<Boxes class="size-3.5 shrink-0" />
 				</div>

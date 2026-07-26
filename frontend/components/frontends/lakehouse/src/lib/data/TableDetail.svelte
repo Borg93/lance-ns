@@ -927,7 +927,7 @@
 		<div class="empty">
 			<p>
 				Not a catalog-registered table — storage-managed datasets (medallion zones) have no catalog
-				detail. Its lineage is on the <a href="/lineage" data-sveltekit-reload>explorer</a>.
+				detail. Its lineage is on the <a href="/lakehouse/lineage" data-sveltekit-reload>explorer</a>.
 			</p>
 		</div>
 	{:else if denied}
@@ -935,7 +935,7 @@
 			<ShieldAlert size={16} />
 			<p>
 				You don't have read access to this table's catalog metadata — its lineage is on the <a
-					href="/lineage"
+					href="/lakehouse/lineage"
 					data-sveltekit-reload>explorer</a
 				>.
 			</p>

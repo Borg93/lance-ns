@@ -92,7 +92,7 @@
 		<a class="viewlink" href={`${base}/lineage/columns?dataset=${encodeURIComponent(name)}`}>
 			<Columns3 size={12} /> column lineage
 		</a>
-		<a class="viewlink" href="{base}/"><Network size={12} /> graph</a>
+		<a class="viewlink" href="{base}/lineage"><Network size={12} /> graph</a>
 	</header>
 
 	<div class="grid">

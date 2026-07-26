@@ -83,7 +83,7 @@
 		<p class="mut">
 			Fire the cascade head — seeds <span class="mono">raw_events</span> and emits its arrival event,
 			which drives raw → bronze → silver → gold. The run's lineage appears on the
-			<a href="/lineage" data-sveltekit-reload>Lineage</a> view.
+			<a href="/lakehouse/lineage" data-sveltekit-reload>Lineage</a> view.
 		</p>
 		<button class="btn primary" disabled={busy} onclick={produce}>
 			<Play size={13} /> Run cascade

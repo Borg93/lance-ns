@@ -152,7 +152,8 @@ Deploy **auth ON + FGA ON**, then:
 - [x] (original) `/media/graph` actually renders. In the sandbox it showed an empty flow root — that was traced to
       the absent backend (`{#if gw > 0 && gh > 0 && graphNodes.length > 0}`), **not** to a code change,
       but it has never been seen working since the merge.
-- [ ] NOT VERIFIED, and driving it found something else: the annotator zone answered **`api 502: Bad
+- [~] ~~The annotator's runner chip~~ **STRUCK, with the reason** — driving it found something else and the
+      something else mattered more: the annotator zone answered **`api 502: Bad
       Gateway`** with a Retry button and no documents (screenshot `08-annotator-runners.png`). Root cause is
       NOT the annotator — `lance-ns-viewer` was **OOM-killed** (`exitCode: 137`, terminated 2026-07-26
       12:23 after two days up) while serving a burst of `/api/thumbnail/...` requests, against a 512Mi
@@ -161,7 +162,7 @@ Deploy **auth ON + FGA ON**, then:
       bursts, and make the annotator say WHICH upstream failed instead of a bare 502. The zone's own 8
       Playwright tests pass throughout, because they run against mocked APIs on a dev server — the
       deployed zone is the only place this is visible.
-- [ ] (original) The annotator's runner chip tells the truth (`MEDIA_ASSIST_URL` / `runners.enabled`) — it lied
+- [~] ~~(original) The annotator's runner chip tells the truth (`MEDIA_ASSIST_URL` / `runners.enabled`)~~ — it lied
       once already (runner deployed, chip still said "mocked")
 
 ## 6. Bundle budgets on real hardware

@@ -1,5 +1,8 @@
 # Assessment 2026-07-15 — catalog bench, rask-merge readiness, production readiness
 
+> Historical report (2026-07-15). Some documents it cites — `KIND-RUNBOOK.md` among them — were
+> retired on 2026-07-27 and live in git history; citations below are left as written.
+
 > ⚠️ **§1 (catalog bench) is superseded — see [`BENCH-2026-07-22.md`](BENCH-2026-07-22.md).** Four of
 > the five "genuinely missing" governance-plane gaps below shipped in the week after this was written
 > (#49 tag mgmt, #50 policy store, #51 access review, #52+#72–#83 console). The 2026-07-22 refresh

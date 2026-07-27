@@ -130,7 +130,7 @@ its digest is identical across every service. `tests/unit/test_invariants.py` no
 
 26 `.svelte` files changed since the goal was set. All 26 through `mcp__svelte__svelte-autofixer` at
 `desired_svelte_version: 5`. **Twenty returned `{"issues":[],"suggestions":[]}`. Zero issues across all 26.**
-Six returned suggestions; each judged in `GOAL-UX-REACTIVE.md`. One was a real defect — `saved-views` called
+Six returned suggestions; each judged in the goal tracker (retired — git history). One was a real defect — `saved-views` called
 `load()` inside an `$effect` whose guard reads state `load()` assigns, so two components mounting in the
 same tick each issued a full GET. Fixed with an in-flight promise; broken deliberately →
 `AssertionError: expected 3 to be 1`.
@@ -143,8 +143,8 @@ lives in the rask plan.
 
 ## 13 — every open task disposed of
 
-The disposition table in `GOAL-UX-REACTIVE.md` — 18 tasks, each done-with-evidence or struck with a stated
-reason. Carried-over open work is enumerated in `OPEN-WORK.md` so it survives the merge.
+The disposition table — 18 tasks, each done-with-evidence or struck with a stated
+reason — lived in the retired goal tracker (git history). The still-open items carry in `OPEN-WORK.md` so they survive the merge.
 
 ## 14 — the recorded mistakes have guards, and the guards were broken on purpose
 

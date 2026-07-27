@@ -74,16 +74,20 @@ Related and already learned the hard way: **`waitUntil: 'networkidle'` can never
 these apps have no idle network by design. Ten such waits were replaced and
 `@repo/zone-contract/no-networkidle.test.ts` fails on a new one. P6's new spec files must not reintroduce it.
 
-## 4b. Owner ruling R8 (2026-07-27) — the surviving zone set
+## 4b. Owner rulings R8 + R9 (2026-07-27) — the surviving zone set
 
-Recorded in the plan's ruling table. **`home + lakehouse + media + annotator + compute`.**
+Recorded in the plan's ruling table. **`home + lakehouse + media + annotator + compute + studio`** — six
+zones.
 
 - rask's **browse / viewing / search** surfaces are eaten by the media plane — R6, reconfirmed by the owner.
 - **`compute` survives** (Ray dashboard, jobs, actors, cluster) — the plane rask owns.
 - **`storage` folds INTO `lakehouse`**: an S3 object browser is a lakehouse view of the warehouse's own
   buckets, not a separate destination. `train` folds in with it via lance `models`, now a lakehouse route.
   `overview` folds into `home`.
-- **`studio` is undecided** — no ruling covers it; it must be decided before P2.4, not defaulted.
+- **`studio` survives as its own top-navbar zone (R9)** — not folded into anything. This matches what it
+  already is on the rask side: a top-level nav entry in `packages/ui/src/lib/shell/nav-config.ts:81`
+  (`Studio`, `Shapes` icon) with its own `/animation` route, so the ruling preserves a surface rather than
+  inventing one.
 
 ## 4c. Two preconditions the plan did not have
 

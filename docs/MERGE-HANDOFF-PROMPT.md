@@ -49,9 +49,9 @@ Also new and absent from the old plan: the **Dapr state store** (`chart/template
 the **runners** deployable, catalog `user_state`/`me`/`access_admin` endpoints, and a **run-notification SSE
 transport** mounted in all four zone shells.
 
-## R8 — the surviving zone set
+## R8 + R9 — the surviving zone set
 
-**`home + lakehouse + media + annotator + compute`.**
+**`home + lakehouse + media + annotator + compute + studio`** — six zones.
 
 - rask's **browse / viewing / search** surfaces are eaten by the media plane (R6, reconfirmed): the
   `discover` zone, the EAD `/api/v1/catalog` endpoints, `search_api`, and `volumes_api`'s page/ALTO viewing
@@ -61,7 +61,9 @@ transport** mounted in all four zone shells.
   buckets, not a separate destination.
 - `train` folds in with it (lance `models` absorbed it, and `models` is a lakehouse route).
 - `overview` folds into `home`.
-- **`studio` is undecided.** No ruling covers it. Ask before P2.4; do not default it.
+- **`studio` survives as its own top-navbar zone (R9).** It is not folded into anything. That matches what
+  it already is here: a top-level entry in `packages/ui/src/lib/shell/nav-config.ts:81` (`Studio`, `Shapes`
+  icon) with its own `/animation` route.
 
 ## Landmines that already cost real time — do not rediscover them
 
@@ -116,7 +118,6 @@ versions with `svelte-check` at 0 errors — treat that component carefully). `#
 1. Read `docs/architecture/lance-ns-merge.md` in full.
 2. Clear rask's 70 `ty` errors as a standalone commit; confirm `make check` and the pre-commit hook pass.
 3. Decide the frontend toolchain direction (precondition 2) and land the pure-format commit.
-4. Decide `studio`.
-5. Then P1, per the plan.
+4. Then P1, per the plan. (`studio` is settled — R9; no zone decision is outstanding.)
 
 Report an honest fraction at each phase gate. Never mark a gate met on a check you did not run.

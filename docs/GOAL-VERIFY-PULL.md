@@ -62,10 +62,12 @@ side is *empirically tuned infrastructure* — KubeRay + Kueue with GPU Serve pa
 raylet-killing cascade — which you re-tune rather than copy. Ours is application code plus a chart, and its
 proof travels with it. You move the code to the compute.
 
-**Owner ruling R8 (2026-07-27)** — the surviving zone set is `home + lakehouse + media + annotator +
-compute`: rask's browse/viewing/search are eaten by the media plane, `compute` survives as the plane rask
-owns, `storage` folds INTO the lakehouse, `train` folds in via `models`, `overview` into `home`, and
-**`studio` is undecided**.
+**Owner rulings R8 + R9 (2026-07-27)** — the surviving zone set is
+**`home + lakehouse + media + annotator + compute + studio`**, six zones: rask's browse/viewing/search are
+eaten by the media plane, `compute` survives as the plane rask owns, `storage` folds INTO the lakehouse,
+`train` folds in via `models`, `overview` into `home`, and **`studio` keeps its own top-navbar entry (R9)**
+— it is not folded into anything, which matches what it already is on the rask side
+(`packages/ui/src/lib/shell/nav-config.ts:81`).
 
 **The plan was 190 commits stale** and is now re-pinned (`df70b63` → `502150b`, rask commit `2d80e49`).
 Three drifts were structural, not cosmetic — four zones not seven, `@repo/*` not `@rask/*`, and

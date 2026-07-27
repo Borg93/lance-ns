@@ -84,7 +84,7 @@ describe('findViolations reads the markup, not a regex', () => {
 describe('every cross-zone link in the estate hard-navigates', () => {
 	// The gate itself. A soft nav into another zone resolves against a route manifest that does not
 	// contain the target — a 404 that type-checks, unit-tests and renders fine.
-	const components = globSync('components/frontends/*/src/**/*.svelte', { cwd: FRONTEND_ROOT });
+	const components = globSync('microfrontends/*/src/**/*.svelte', { cwd: FRONTEND_ROOT });
 
 	it('finds components to check', () => {
 		expect(components.length).toBeGreaterThan(100);

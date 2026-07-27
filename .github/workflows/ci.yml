@@ -78,7 +78,7 @@ jobs:
           curl -fsSL https://dl.dagger.io/dagger/install.sh | DAGGER_VERSION=0.21.7 BIN_DIR=/usr/local/bin sh
 
       # Turborepo workspace bun gates — svelte-check, TypeScript 7 (tsgo), unit tests, lint and fmt:check
-      # fan out over the packages/* AND components/frontends/* (the 4 micro-frontend zones) workspace. All
+      # fan out over the packages/* AND microfrontends/* (the 4 micro-frontend zones) workspace. All
       # five are PACKAGE tasks now, so turbo parallelises and caches them instead of running lint/fmt once
       # repo-wide over a hand-maintained path list. ONE linter and ONE formatter cover every extension:
       # oxlint (with @rsvelte/oxlint-plugin for .svelte) and rsvelte-fmt (which delegates everything that
@@ -118,7 +118,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-report
-          path: frontend/components/frontends/*/test-results/
+          path: frontend/microfrontends/*/test-results/
           retention-days: 7
 
   # The four micro-frontend zone images. Until now `.docker/frontend.dockerfile` was hand-run only, out
@@ -150,7 +150,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # The zone list is DERIVED, not restated here. A directory under components/frontends holding a
+      # The zone list is DERIVED, not restated here. A directory under microfrontends holding a
       # package.json is what makes a zone a bun workspace member and a turbo package — the same rule
       # @repo/zone-contract's zoneDirs() resolves by, and the reason it does not use bare isDirectory()
       # (a deleted zone leaves gitignored build output behind). Two things follow: a newly added zone is
@@ -167,7 +167,7 @@ jobs:
       # always returns 0.
       - name: Resolve the zone list
         run: |
-          zones=$(cd frontend/components/frontends && for d in */; do
+          zones=$(cd frontend/microfrontends && for d in */; do
                     if [ -f "${d}package.json" ]; then printf '%s ' "${d%/}"; fi
                   done)
           echo "ZONES=${zones% }" >> "$GITHUB_ENV"
@@ -247,7 +247,7 @@ jobs:
               fail=1
               continue
             fi
-            cfg="frontend/components/frontends/$z/svelte.config.js"
+            cfg="frontend/microfrontends/$z/svelte.config.js"
             base=$(sed -n "s/.*paths:[[:space:]]*{[^}]*base:[[:space:]]*['\"]\([^'\"]*\)['\"].*/\1/p" "$cfg" | head -1)
             docker rm -f "smoke-$z" >/dev/null 2>&1 || true
             docker run -d --name "smoke-$z" -p 3000:3000 "lance-$z:dev" >/dev/null

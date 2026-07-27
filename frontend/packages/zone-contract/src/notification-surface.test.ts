@@ -22,7 +22,7 @@ import { FRONTEND_ROOT, zoneDirs } from './manifest';
  */
 describe('the notification surface is estate-wide, not lakehouse-only', () => {
 	for (const zone of zoneDirs()) {
-		const dir = join(FRONTEND_ROOT, 'components/frontends', zone);
+		const dir = join(FRONTEND_ROOT, 'microfrontends', zone);
 		const layout = join(dir, 'src/routes/+layout.svelte');
 		const feed = join(dir, 'src/lib/live/feeds.remote.ts');
 

@@ -5,7 +5,7 @@ import { defineConfig } from 'vite';
 export default defineConfig({
 	plugins: [tailwindcss(), sveltekit()],
 	server: {
-		// Bind the port declared in components/frontends/home/microfrontends.json — the composition proxy
+		// Bind the port declared in microfrontends/home/microfrontends.json — the composition proxy
 		// routes by it. This zone used to pass `--port 5176` in its `dev` script WITHOUT strictPort, which
 		// is the port `models` binds with strictPort: under `turbo run dev` models won the race and the
 		// annotator silently drifted to the next free port, so every /annotator link landed on models.

@@ -24,7 +24,7 @@ describe('there is exactly one config per tool, at the workspace root', () => {
 		'eslint.config.js',
 	])('%s exists only at the frontend root', (name) => {
 		const strays: string[] = [];
-		for (const dir of ['packages', 'components/frontends']) {
+		for (const dir of ['packages', 'microfrontends']) {
 			for (const pkg of readdirSync(resolve(FRONTEND_ROOT, dir), { withFileTypes: true })) {
 				if (!pkg.isDirectory()) continue;
 				const found = readdirSync(resolve(FRONTEND_ROOT, dir, pkg.name));

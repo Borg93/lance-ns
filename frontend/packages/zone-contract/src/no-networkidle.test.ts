@@ -38,7 +38,7 @@ const isComment = (line: string) => /^\s*(\/\/|\*|\/\*)/.test(line);
 describe('no zone test waits for an idle network', () => {
 	for (const zone of zoneDirs()) {
 		it(`${zone}`, () => {
-			const offenders = testFiles(join(FRONTEND_ROOT, 'components/frontends', zone, 'e2e'))
+			const offenders = testFiles(join(FRONTEND_ROOT, 'microfrontends', zone, 'e2e'))
 				.flatMap((file) =>
 					readFileSync(file, 'utf8')
 						.split('\n')

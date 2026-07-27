@@ -1,9 +1,9 @@
 node_modules
 .turbo
-components/frontends/*/build
-components/frontends/*/.svelte-kit
+microfrontends/*/build
+microfrontends/*/.svelte-kit
 .svelte-check
-components/frontends/*/test-results
+microfrontends/*/test-results
 packages/*/dist
 storybook-static/
 .svelte-kit

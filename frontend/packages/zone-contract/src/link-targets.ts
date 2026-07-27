@@ -41,7 +41,7 @@ function baseSegment(zone: string): string {
  *  anything — both are skipped rather than guessed at, which keeps this a lower bound: the gate can only
  *  ever be too permissive, never wrongly red. */
 function routeSegments(zone: string): string[] {
-	const dir = resolve(FRONTEND_ROOT, `components/frontends/${zone}/src/routes`);
+	const dir = resolve(FRONTEND_ROOT, `microfrontends/${zone}/src/routes`);
 	if (!existsSync(dir)) return [];
 	return readdirSync(dir, { withFileTypes: true })
 		.filter((e) => e.isDirectory() && !e.name.startsWith('(') && !e.name.startsWith('['))

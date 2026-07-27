@@ -17,7 +17,7 @@ decides authorization — it decides **disclosure**.
 1. **Information architecture** — the navbar and sidebar do not render a link to a surface the
    identity cannot use. `estate_admin` is the only fact the nav reads
    (`packages/ui/src/lib/shell/nav-config.ts`). This is courtesy, not security.
-2. **The route door** — `components/frontends/lakehouse/src/routes/admin/+layout.server.ts` throws
+2. **The route door** — `microfrontends/lakehouse/src/routes/admin/+layout.server.ts` throws
    `403` on the SERVER for a non-`estate_admin`, before any admin component is rendered or sent. The
    root `+layout.svelte` repeats the check client-side so a soft navigation cannot outrun it.
    Fail-closed on every ambiguity: no token, a 401/403, a timeout, an unreachable catalog, or a
@@ -70,7 +70,7 @@ The BFF is a bearer-forwarding proxy, not a policy engine. Its own rules:
 
 ## What pins this
 
-`components/frontends/lakehouse/e2e/admin/admin-gate.spec.ts` — a member is refused on every admin
+`microfrontends/lakehouse/e2e/admin/admin-gate.spec.ts` — a member is refused on every admin
 route by the server door, an admin passes, a catalog outage fails closed, and a browser that lies about
 its own identity (a member's session plus a mocked `/v1/me` claiming `estate_admin`) still gets `403`,
 because the door that decides never asked the browser.

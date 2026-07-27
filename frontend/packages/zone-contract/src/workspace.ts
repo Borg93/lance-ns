@@ -12,7 +12,7 @@ import { FRONTEND_ROOT } from './manifest';
 
 /** Every workspace package, as a frontend-root-relative directory (`packages/api`, …). */
 export function workspacePackages(): string[] {
-	return ['packages', 'components/frontends'].flatMap((dir) =>
+	return ['packages', 'microfrontends'].flatMap((dir) =>
 		readdirSync(resolve(FRONTEND_ROOT, dir), { withFileTypes: true })
 			.filter(
 				(e) => e.isDirectory() && existsSync(resolve(FRONTEND_ROOT, dir, e.name, 'package.json')),
@@ -23,7 +23,7 @@ export function workspacePackages(): string[] {
 
 /** A zone's e2e helper servers (mock backends) — the other place a port literal hides. */
 export function e2eServers(zone: string): string[] {
-	const dir = resolve(FRONTEND_ROOT, `components/frontends/${zone}/e2e`);
+	const dir = resolve(FRONTEND_ROOT, `microfrontends/${zone}/e2e`);
 	if (!existsSync(dir)) return [];
 	return readdirSync(dir, { recursive: true, encoding: 'utf8' })
 		.filter((f) => f.endsWith('.ts') && !f.endsWith('.spec.ts'))

@@ -25,7 +25,7 @@ frontend/
   TOOLING.md        # the toolchain: ONE linter, ONE formatter, and the rules that are off with reasons
   .oxlintrc.json    # oxlint — every extension, .svelte included (via @rsvelte/oxlint-plugin)
   .oxfmtrc.json     # rsvelte-fmt + oxfmt — every extension
-  components/frontends/
+  microfrontends/
     home/           # catch-all zone (base '/'); owns the OIDC /auth/{login,callback,logout} routes
     lakehouse/      # /lakehouse — the governed estate, four AREAS in one router:
                     #     /lakehouse/data     projects, tables, namespaces, warehouses
@@ -85,9 +85,9 @@ Each zone image builds from the parametrized
 `.docker/frontend.dockerfile` (`--build-arg APP=<zone>` → `lance-<zone>:dev`); runtime contract
 `bun ./build/index.js`, uid 1000. `make frontend-images` / `make frontend-load` build + side-load them all.
 
-Adding a zone = `components/frontends/<name>` (its own `svelte.config.js` with `paths.base`, and a
+Adding a zone = `microfrontends/<name>` (its own `svelte.config.js` with `paths.base`, and a
 package **named for the directory** — turbo resolves routing keys against package names) + the chart's
-`frontend.apps` list + the Ingress route + an entry in `components/frontends/home/microfrontends.json`
+`frontend.apps` list + the Ingress route + an entry in `microfrontends/home/microfrontends.json`
 with a unique dev port. `@repo/zone-contract`'s tests fail if any of those four disagree.
 Its `hooks.server.ts`, `+layout.server.ts` and BFF catch-all routes are one line each — the factories in
 `@repo/api/bff` (`makeZoneHooks`, `zoneLayoutLoad`, `makeCatalogProxy`, `makeLineageProxy`,

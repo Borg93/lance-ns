@@ -3,7 +3,7 @@
 # (svelte-adapter-bun ships a Bun *server*, not static files). Build context = repo root; the JS
 # workspace lives under frontend/. Mirrors rask/.docker/frontend.dockerfile.
 #
-# Parametrized over the zone via --build-arg APP=<dir under frontend/components/frontends>:
+# Parametrized over the zone via --build-arg APP=<dir under frontend/microfrontends>:
 #   docker build -f .docker/frontend.dockerfile --build-arg APP=lakehouse \
 #     --build-arg BUILD_DATE=$(date -u +%FT%TZ) --build-arg VCS_REF=$(git rev-parse HEAD) \
 #     --build-arg VERSION=$(git describe --always) -t lance-lakehouse:dev .
@@ -35,7 +35,7 @@ WORKDIR /src
 COPY frontend/package.json frontend/bun.lock frontend/turbo.json ./
 COPY frontend/patches patches
 COPY frontend/packages packages
-COPY frontend/components/frontends components/frontends
+COPY frontend/microfrontends microfrontends
 
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun install --frozen-lockfile
@@ -45,7 +45,7 @@ RUN --mount=type=cache,target=/root/.bun/install/cache \
 # hadolint ignore=DL3059
 RUN --mount=type=cache,target=/root/.bun/install/cache \
     bun run --cwd packages/ui build \
-    && bun run --cwd components/frontends/${APP} build
+    && bun run --cwd microfrontends/${APP} build
 
 # ---- runtime: minimal Bun runtime serving the adapter-bun server ---------------------------------
 FROM oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04 AS runtime
@@ -73,12 +73,12 @@ RUN useradd -r -u 10001 --no-create-home --shell /usr/sbin/nologin app
 WORKDIR /app
 
 # Preserve the isolated-linker layout: the store (root node_modules) + the app with its symlinked
-# node_modules at the SAME relative depth the symlinks expect (components/frontends/<app>).
+# node_modules at the SAME relative depth the symlinks expect (microfrontends/<app>).
 COPY --from=builder --chown=10001:10001 /src/node_modules ./node_modules
-COPY --from=builder --chown=10001:10001 /src/components/frontends/${APP} ./components/frontends/${APP}
+COPY --from=builder --chown=10001:10001 /src/microfrontends/${APP} ./microfrontends/${APP}
 
 # Re-anchor the workdir at the app via a stable symlink so CMD is APP-agnostic.
-RUN ln -s "components/frontends/${APP}" /app/app
+RUN ln -s "microfrontends/${APP}" /app/app
 WORKDIR /app/app
 
 USER 10001

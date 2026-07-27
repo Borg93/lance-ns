@@ -9,7 +9,7 @@
  * must have a local harness for.
  *
  * It routes by longest path prefix to the zone that owns it, straight out of
- * `components/frontends/home/microfrontends.json` — the same file the Ingress rules, the base paths and
+ * `microfrontends/home/microfrontends.json` — the same file the Ingress rules, the base paths and
  * the zone-contract tests are all checked against, so there is no second source of truth. A zone that
  * is not running answers 502 with which zone and which port, instead of a connection reset.
  *

@@ -11,7 +11,7 @@ export default defineConfig({
 		include: ['@techstark/opencv-js'],
 	},
 	server: {
-		// Bind the port declared in components/frontends/home/microfrontends.json — the composition proxy
+		// Bind the port declared in microfrontends/home/microfrontends.json — the composition proxy
 		// routes by it. strictPort fails loudly on a clash instead of silently drifting to the next free
 		// port. This zone's port used to live only in its `dev` script and was absent from the routing
 		// config, so the proxy had no way to reach it.

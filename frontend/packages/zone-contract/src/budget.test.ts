@@ -45,7 +45,7 @@ import budget from './budget.json' with { type: 'json' };
  * distinguishes `imports` from `dynamicImports` at the source of truth, and a regex over minified
  * output cannot tell `import"./x.js"` from `import("./x.js")` reliably.
  */
-const CLIENT = (zone: string) => `components/frontends/${zone}/.svelte-kit/output/client`;
+const CLIENT = (zone: string) => `microfrontends/${zone}/.svelte-kit/output/client`;
 
 interface ViteChunk {
 	file: string;

@@ -73,7 +73,7 @@ describe('every domain-relative link in the estate lands somewhere', () => {
 	// The file set includes packages/**, which the reload gate does NOT scan — and that omission is
 	// exactly how the project switcher shipped a dead `/data` in the shell of all four zones.
 	const components = [
-		...globSync('components/frontends/*/src/**/*.svelte', { cwd: FRONTEND_ROOT }),
+		...globSync('microfrontends/*/src/**/*.svelte', { cwd: FRONTEND_ROOT }),
 		...globSync('packages/*/src/**/*.svelte', { cwd: FRONTEND_ROOT }),
 	];
 	const served = servedSegments();

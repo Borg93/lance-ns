@@ -112,7 +112,7 @@ const ProblemSchema = v.object({ detail: v.optional(v.string()), title: v.option
  *  and the cause was the VIEWER being OOM-killed while serving thumbnails. Nothing in the message
  *  pointed there. Derived from the request path rather than threaded through every call site, because
  *  the path is already on the Response and the mapping is a property of the BFF routes, not of callers.
- *  Kept in sync with `components/frontends/{media,annotator}/src/routes/api/**`. */
+ *  Kept in sync with `microfrontends/{media,annotator}/src/routes/api/**`. */
 export function upstreamFor(path: string): string | null {
 	const api = path.replace(/^\/(media|annotator)/, '');
 	if (!api.startsWith('/api/')) return null;

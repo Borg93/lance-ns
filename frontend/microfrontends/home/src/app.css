@@ -4,4 +4,4 @@
 
 /* Scan the shared @repo/ui component library so its Tailwind classes are generated —
    Tailwind 4 ignores node_modules by default. */
-@source '../../../../packages/ui/dist';
+@source '../../../packages/ui/dist';

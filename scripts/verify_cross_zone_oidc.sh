@@ -66,5 +66,5 @@ for i in $(seq 1 30); do
 done
 
 # The @playwright/test browser lives in a zone's node_modules (any zone has it); run from there.
-cd frontend/components/frontends/lakehouse
+cd frontend/microfrontends/lakehouse
 ORIGIN="http://localhost:$ORIGIN_PORT" node "$ROOT/scripts/verify_cross_zone_oidc.mjs"

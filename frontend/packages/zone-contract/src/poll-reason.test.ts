@@ -48,7 +48,7 @@ describe('every deliberate poll states its reason', () => {
 	it('no file calls setInterval without a POLL REASON', () => {
 		const offenders: string[] = [];
 		for (const zone of zoneDirs()) {
-			for (const file of sources(join(FRONTEND_ROOT, 'components/frontends', zone, 'src'))) {
+			for (const file of sources(join(FRONTEND_ROOT, 'microfrontends', zone, 'src'))) {
 				const body = readFileSync(file, 'utf8');
 				if (!callsIt(body)) continue;
 				if (body.includes(MARKER)) continue;
@@ -63,7 +63,7 @@ describe('every deliberate poll states its reason', () => {
 		// explaining nothing, which is the failure mode of every marker convention.
 		const empty: string[] = [];
 		for (const zone of zoneDirs()) {
-			for (const file of sources(join(FRONTEND_ROOT, 'components/frontends', zone, 'src'))) {
+			for (const file of sources(join(FRONTEND_ROOT, 'microfrontends', zone, 'src'))) {
 				const body = readFileSync(file, 'utf8');
 				const at = body.indexOf(MARKER);
 				if (at < 0) continue;

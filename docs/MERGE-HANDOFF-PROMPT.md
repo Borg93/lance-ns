@@ -112,6 +112,19 @@ Six zones, all six in the top navbar: **`home · lakehouse · media · annotator
 
 ## The traps, in copy order
 
+- **Tailwind `@source` climbs break SILENTLY when a directory moves — audit yours NOW.** Found in lance-ns
+  after the same rename you did: each zone's `src/app.css` carried
+  `@source '../../../../packages/ui/dist'` — one `../` too many at the new depth, so Tailwind v4 simply
+  stopped scanning `@repo/ui` and never emitted its `lg:*` utilities. The entire estate sidebar collapsed
+  to `display:none` with **markup present in SSR, zero console errors, zero page errors** — only an
+  element-visibility assertion caught it, after a four-experiment bisect. Your exposure is identical twice
+  over: your zones moved (`components/frontends/<z>` → `frontend/microfrontends/<z>`) AND your
+  `packages/ui` moved into `frontend/packages/ui`, so any `@source '../../../../packages/ui/…'` in a rask
+  zone now resolves to the Python-only root `packages/`. Audit:
+  `grep -rn "@source" frontend/microfrontends/*/src/` plus `grep -rn '\.\./\.\./\.\./'` over zone files,
+  and verify every relative target EXISTS (`python3 -c "import os; print(os.path.abspath(...))"`) from the
+  file's own directory. The incoming lance-ns zones are already fixed (`'../../../packages/ui/dist'`).
+
 - **`rask-web-<zone>`** for every frontend k8s object. The live instance of the collision class: the
   `annotator` ZONE vs the `services/annotator` backend Service under one release.
 - **The state store** (`dapr-statestore.yaml`): DSN from OpenBao through `lance-secrets`, never a k8s

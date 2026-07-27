@@ -10,9 +10,9 @@ export default defineConfig({
 		noExternal: ['svelte-sonner', 'mode-watcher'],
 	},
 	server: {
-		// Bind the port declared in components/frontends/home/microfrontends.json — the
+		// Bind the port declared in microfrontends/home/microfrontends.json — the
 		// composition proxy routes by it. strictPort fails loudly on a clash.
-		port: 5273,
+		port: 5174,
 		strictPort: true,
 		proxy: {
 			'^/api(/.*)?$': { target: LANCE_BACKEND, changeOrigin: true },

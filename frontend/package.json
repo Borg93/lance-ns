@@ -3,7 +3,7 @@
 	"private": true,
 	"workspaces": [
 		"packages/*",
-		"components/frontends/*"
+		"microfrontends/*"
 	],
 	"type": "module",
 	"scripts": {

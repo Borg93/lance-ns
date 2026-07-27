@@ -24,7 +24,7 @@
 @source './lib';
 @source './routes';
 @source './app.html';
-@source '../../../../packages/ui/dist';
+@source '../../../packages/ui/dist';
 
 @layer base {
 	html,

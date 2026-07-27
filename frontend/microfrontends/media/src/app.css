@@ -24,7 +24,7 @@
 @source './app.html';
 /* Scan the shared @repo/ui component library so its Tailwind classes are generated —
    Tailwind 4 ignores node_modules by default. */
-@source '../../../../packages/ui/dist';
+@source '../../../packages/ui/dist';
 
 /* ── the one media-only token ──────────────────────────────────────────
  * `--highlight` is the transcript-reading affordance (search-match underline

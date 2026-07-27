@@ -99,7 +99,7 @@ describe('no two zones bind the same port, in dev OR in e2e', () => {
 	// pointed the admin tests at a real dev server and called it the mock.
 	const declared = zones.flatMap((zone) =>
 		['vite.config.ts', 'playwright.config.ts', ...e2eServers(zone)]
-			.map((f) => resolve(FRONTEND_ROOT, `components/frontends/${zone}`, f))
+			.map((f) => resolve(FRONTEND_ROOT, `microfrontends/${zone}`, f))
 			.filter((p) => existsSync(p))
 			.flatMap((p) => {
 				const src = readFileSync(p, 'utf8');

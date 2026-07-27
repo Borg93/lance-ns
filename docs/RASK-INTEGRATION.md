@@ -20,7 +20,7 @@ and what to drop. Grounded in rask's actual chart (`rask/chart/`) + this repo's 
 - ⚠️ **NOT the frontend, any more.** This line used to read "Frontends (SvelteKit microfrontends)", which
   contradicted §5 in the same document. `apps/web` was retired in the P5 migration and **the four zones ARE
   the frontend** — home / lakehouse / media / annotator, in rask's exact Turborepo shape. They graft into
-  `rask/components/frontends/`; nothing of ours is dropped here. See §5.
+  `rask/microfrontends/`; nothing of ours is dropped here. See §5.
 
 ## Pre-flight (rask already has these — no action)
 NATS, Dapr, OpenFGA (server), CloudNativePG, rustfs-operator, KubeRay, Kueue, GreptimeDB stack, Traefik. The
@@ -79,9 +79,9 @@ secret).
 - `chart/templates/{age-postgres,rustfs,backup-pg,backup-snapshot}.yaml` → CNPG / rustfs-operator.
 - `frontend/` + the zone Deployments + `gateway.yaml` → rask's SvelteKit frontends + Traefik Ingress.
   **Grafted-shape (P5, 2026-07-22):** `frontend/` is now a Turborepo + bun workspace in rask's exact shape —
-  the 4 `components/frontends/<zone>` apps (home/lakehouse/media/annotator) on the shared `@repo/ui` design
+  the 4 `microfrontends/<zone>` apps (home/lakehouse/media/annotator) on the shared `@repo/ui` design
   system + the `@repo/api` seam (the old single `apps/web` app + `@repo/ui` were retired in P5) — so folding
-  in is a directory graft of the zones into `rask/components/frontends/`, not untangling a monolith.
+  in is a directory graft of the zones into `rask/microfrontends/`, not untangling a monolith.
 - `openbao` dev-mode + the dev `infra-credentials` static Secret → external-secrets from rask's Vault.
 - The `dex` demo IdP → rask's real IdP (or keep for local-only).
 

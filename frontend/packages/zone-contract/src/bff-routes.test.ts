@@ -44,7 +44,7 @@ function sourceFiles(): string[] {
 			}
 		}
 	};
-	for (const root of ['components', 'packages']) walk(resolve(FRONTEND_ROOT, root));
+	for (const root of ['microfrontends', 'packages']) walk(resolve(FRONTEND_ROOT, root));
 	return out;
 }
 
@@ -72,21 +72,15 @@ const grep = (pattern: string): string =>
 
 /** The route paths a zone serves, as URL prefixes (`/api/annotations/tags`). */
 function bffRoutes(zone: string): string[] {
-	const out = execFileSync(
-		'find',
-		[`components/frontends/${zone}/src/routes`, '-name', '+server.ts'],
-		{
-			cwd: FRONTEND_ROOT,
-			encoding: 'utf8',
-		},
-	);
+	const out = execFileSync('find', [`microfrontends/${zone}/src/routes`, '-name', '+server.ts'], {
+		cwd: FRONTEND_ROOT,
+		encoding: 'utf8',
+	});
 	return (
 		out
 			.split('\n')
 			.filter(Boolean)
-			.map((f) =>
-				f.replace(`components/frontends/${zone}/src/routes`, '').replace('/+server.ts', ''),
-			)
+			.map((f) => f.replace(`microfrontends/${zone}/src/routes`, '').replace('/+server.ts', ''))
 			.filter((r) => r.startsWith('/api/'))
 			// The catch-all is the zone's default upstream by definition; it has no literal to grep for.
 			.filter((r) => !r.endsWith('[...path]'))
@@ -137,7 +131,7 @@ describe('the chart hands a zone only the upstreams its routes use', () => {
 	function upstreamsUsed(zone: string): Set<string> {
 		const out = execFileSync(
 			'sh',
-			['-c', `grep -rhoE 'env\\.[A-Z_]+_API' components/frontends/${zone}/src/routes || true`],
+			['-c', `grep -rhoE 'env\\.[A-Z_]+_API' microfrontends/${zone}/src/routes || true`],
 			{ cwd: FRONTEND_ROOT, encoding: 'utf8' },
 		);
 		return new Set(
@@ -177,7 +171,7 @@ describe('the chart hands a zone only the upstreams its routes use', () => {
 
 describe('no zone declares an upstream it never routes to', () => {
 	it.each(zoneDirs())('%s', (zone) => {
-		const server = `components/frontends/${zone}/server.ts`;
+		const server = `microfrontends/${zone}/server.ts`;
 		let src: string;
 		try {
 			src = readFileSync(`${FRONTEND_ROOT}/${server}`, 'utf8');

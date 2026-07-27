@@ -14,7 +14,7 @@ import (
 const bunImage = "oven/bun:1.3.14-slim@sha256:d56a2534ffd262e92c12fd3249d3924d296d97086da773f821d7d0477435ea04"
 
 // frontendBase returns the installed turborepo workspace container: the bun image + source +
-// `bun install --frozen-lockfile` (the packages/* + components/frontends/* workspace from frontend/bun.lock).
+// `bun install --frozen-lockfile` (the packages/* + microfrontends/* workspace from frontend/bun.lock).
 // Unexported → a shared private helper, not a Dagger Function. The bun install cache mirrors the
 // dockerfile's `--mount=type=cache,target=/root/.bun/install/cache`.
 func (m *LanceNs) frontendBase(src *dagger.Directory) *dagger.Container {
@@ -29,9 +29,9 @@ func (m *LanceNs) frontendBase(src *dagger.Directory) *dagger.Container {
 				"node_modules",
 				"frontend/node_modules",
 				"frontend/.turbo",
-				"frontend/components/frontends/*/.svelte-kit",
-				"frontend/components/frontends/*/build",
-				"frontend/components/frontends/*/test-results",
+				"frontend/microfrontends/*/.svelte-kit",
+				"frontend/microfrontends/*/build",
+				"frontend/microfrontends/*/test-results",
 			},
 		}).
 		WithWorkdir("/src/frontend").

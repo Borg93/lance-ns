@@ -22,12 +22,12 @@ export interface RoutingConfig {
 	applications: Record<string, RoutingConfigApp>;
 }
 
-/** `components/frontends/home/microfrontends.json` — the default app ships the routing config. */
+/** `microfrontends/home/microfrontends.json` — the default app ships the routing config. */
 export function routingConfig(): RoutingConfig {
-	return JSON.parse(read('components/frontends/home/microfrontends.json')) as RoutingConfig;
+	return JSON.parse(read('microfrontends/home/microfrontends.json')) as RoutingConfig;
 }
 
-/** The zone directories that actually exist under components/frontends — the ground truth every other
+/** The zone directories that actually exist under microfrontends — the ground truth every other
  *  declaration is checked against.
  *
  *  A zone is a directory with a `package.json`, which is what makes it a bun workspace member and a
@@ -40,12 +40,10 @@ export function routingConfig(): RoutingConfig {
  *  something to weigh. A gate that fires on leftover build output is worse than no gate: the fix
  *  people reach for is deleting the gate. */
 export function zoneDirs(): string[] {
-	return readdirSync(resolve(FRONTEND_ROOT, 'components/frontends'), { withFileTypes: true })
+	return readdirSync(resolve(FRONTEND_ROOT, 'microfrontends'), { withFileTypes: true })
 		.filter((e) => e.isDirectory())
 		.map((e) => e.name)
-		.filter((name) =>
-			existsSync(resolve(FRONTEND_ROOT, 'components/frontends', name, 'package.json')),
-		)
+		.filter((name) => existsSync(resolve(FRONTEND_ROOT, 'microfrontends', name, 'package.json')))
 		.sort();
 }
 
@@ -68,13 +66,13 @@ export function hasLintableFiles(pkgDir: string): boolean {
 
 /** The `paths.base` a zone serves under, from its svelte.config.js. `''` for the catch-all zone. */
 export function svelteBase(zone: string): string {
-	const src = read(`components/frontends/${zone}/svelte.config.js`);
+	const src = read(`microfrontends/${zone}/svelte.config.js`);
 	return /paths:\s*\{[^}]*base:\s*['"]([^'"]*)['"]/.exec(src)?.[1] ?? '';
 }
 
 /** The dev port a zone's vite.config.ts binds, and whether it binds it strictly. */
 export function vitePort(zone: string): { port: number | null; strict: boolean } {
-	const src = read(`components/frontends/${zone}/vite.config.ts`);
+	const src = read(`microfrontends/${zone}/vite.config.ts`);
 	const port = /^\s*port:\s*(\d+)/m.exec(src)?.[1];
 	return { port: port ? Number(port) : null, strict: /strictPort:\s*true/.test(src) };
 }
@@ -83,12 +81,12 @@ export function vitePort(zone: string): { port: number | null; strict: boolean }
  *  PACKAGE names, so a zone whose package is scoped differently than its key is silently unroutable —
  *  `turbo boundaries` warns, nothing fails. */
 export function packageName(zone: string): string {
-	return JSON.parse(read(`components/frontends/${zone}/package.json`)).name as string;
+	return JSON.parse(read(`microfrontends/${zone}/package.json`)).name as string;
 }
 
 /** A zone's `dev` script, so we can assert the port is not ALSO declared there (two sources of truth). */
 export function devScript(zone: string): string {
-	return JSON.parse(read(`components/frontends/${zone}/package.json`)).scripts?.dev ?? '';
+	return JSON.parse(read(`microfrontends/${zone}/package.json`)).scripts?.dev ?? '';
 }
 
 export interface ChartApp {

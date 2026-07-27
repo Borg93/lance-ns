@@ -24,17 +24,19 @@ Your restructure is well underway and mostly right: `components/` dissolved, `se
    `packages/storage` 4 — post-move paths) and **38 are in `.venv/`**, which means the ty config stopped
    excluding the virtualenv after the moves — fix the exclusion first, then clear the real ones. Do NOT
    `--no-verify` the restructure commit; if the gate is relaxed here it never comes back.
-3. **The zone directory is a shape nobody ruled: `frontend/microfrontends/`.** Not lance-ns's
-   `components/frontends/`, not the `apps/` in your own table. The incoming lance-ns tree arrives with
-   `workspaces: ['packages/*', 'components/frontends/*']` and a zone-contract manifest that reads
-   `components/frontends/home/microfrontends.json` by LITERAL path — 13 proven gate files encode it, and
-   they fail on arrival against your shape. **Recommended: `git mv frontend/microfrontends
-   frontend/components/frontends` now** (one move; the gates arrive unchanged; it also ends the
-   `microfrontends/` -dir vs `microfrontends.json` -file name collision). If you instead keep your name,
-   you own patching the workspaces glob + manifest path + `frontend.dockerfile` in the SAME commit as the
-   copy, with the full gate suite re-run — a deliberate contract change, not a drive-by. Also: your new
-   `frontend/packages/zone-contract` is a 2-file stub (`cross-zone-reload` only) — do not grow it; the
-   full incoming `@repo/zone-contract` (10 test files, 591 tests) REPLACES it at copy.
+3. **The zone directory is OWNER-RULED (R11): `frontend/microfrontends/` is the shape. Keep it.** Record
+   R11 in `docs/architecture/lance-ns-merge.md`'s ruling table. The consequence lands at COPY time, not
+   now: the incoming lance-ns frontend encodes `components/frontends/` and must be adapted to
+   `microfrontends/` **in the same commit as the copy**, with the full gate suite re-run. The measured
+   patch surface (from the source tree, node_modules excluded) is exactly:
+   `frontend/package.json` (the workspaces glob) · `frontend/turbo.json` (1 ref) · the four zones'
+   `vite.config.ts` (1 each) · `packages/media-api/src/api.ts` (1) · and **14 files in
+   `packages/zone-contract/src/`** (manifest.ts carries 9 refs incl. the literal read of
+   `components/frontends/home/microfrontends.json`; the rest 1–4 each). It is a mechanical
+   find-and-replace of one path segment, and `@repo/zone-contract`'s own manifest tests then verify the
+   result — if the rename is incomplete, the suite fails rather than silently passing. Your current
+   2-file `zone-contract` stub is REPLACED by the full incoming package (10 test files, 591 tests) as
+   part of the same commit.
 4. **`runners/` does not exist and `services/runner` is still a workspace member** carrying
    `ray[data,default,serve]>=2.52,<2.56` inside the fleet's resolution — against the ABSOLUTE rule (a
    runner is NEVER a member; no "resolves-today" exception). `git mv services/runner runners/htr`; it
@@ -79,16 +81,17 @@ Six zones, all six in the top navbar: **`home · lakehouse · media · annotator
 
 1. `frontend/` exists; `components/` is gone; `eslint.config.js` and every prettier config are deleted
    (R10 — oxlint + oxfmt + rsvelte-fmt won; bun-first).
-2. **The frontend's internal shape is lance-ns's** (Part A item 3 executed): zones live at
-   `frontend/components/frontends/*`, matching the incoming workspaces glob and the zone-contract
-   manifest's literal read of `components/frontends/home/microfrontends.json`.
+2. **The zone directory is `frontend/microfrontends/*` (R11).** The incoming lance-ns tree is adapted to
+   it at copy (Part A item 3): the workspaces glob, `turbo.json`, the zones' `vite.config.ts`,
+   `media-api/src/api.ts` and all of `zone-contract/src/` have their `components/frontends` path segment
+   replaced with `microfrontends`, in the same commit as the copy, gates re-run.
 3. `uvx ty check` clean (the 70 pre-existing rask errors were yours to clear), gates green, committed.
 
 ## The copy manifest — R1 is TOTAL; every top-level item has a destination
 
 | lance-ns | → rask | Note |
 |---|---|---|
-| `frontend/` | `frontend/` — **wholesale**: zones home/lakehouse/media/annotator, the 7 `@repo/*` packages, `package.json`, `bun.lock`, `turbo.json`, `knip.json`, `microfrontends.json`, `.oxlintrc.json`, `.oxfmtrc.json` | The JS plane root is `frontend/`, not the repo root (owner-ruled). rask's `compute` + `studio` merge in as zones; rask's `packages/{api,ui}` fold INTO `@repo/api`/`@repo/ui` (keep rask's storybook + `navMain(project)`). Dev ports: incoming zones take fresh slots — lance `lakehouse` 5174 collides with rask `storage` 5174, lance `annotator` 5177 with `studio` 5177, and R9 keeps studio, so that one is live |
+| `frontend/` | `frontend/` — zones land at **`frontend/microfrontends/{home,lakehouse,media,annotator}`** (R11); the 7 `@repo/*` packages at `frontend/packages/*`; `package.json`, `bun.lock`, `turbo.json`, `knip.json`, `microfrontends.json`, `.oxlintrc.json`, `.oxfmtrc.json` at the `frontend/` root — with the `components/frontends` → `microfrontends` path adaptation from Part A item 3 applied in the same commit | The JS plane root is `frontend/`, not the repo root (owner-ruled). rask's `compute` + `studio` merge in as zones; rask's `packages/{api,ui}` fold INTO `@repo/api`/`@repo/ui` (keep rask's storybook + `navMain(project)`). Dev ports: incoming zones take fresh slots — lance `lakehouse` 5174 collides with rask `storage` 5174, lance `annotator` 5177 with `studio` 5177, and R9 keeps studio, so that one is live |
 | `services/` (catalog, lineage, medallion, compaction, viewer, search, annotator) | `services/*` | src-layout conversion at copy; entrypoints preserved (`catalog.main:app`) |
 | `packages/` (`common`, `ratch` — **ratch already moved**, `45912c8`) | `packages/*` | Workspace members. `common` keeps import root `common` (zero rewrites); `ratch` gains its own pyproject with its ray/lance-ray/typer deps at P1, resolving its old root-tooling exclusion |
 | `runners/` (asr, diarize, kg, topics, voiceprint, assist — **already sealed**, `a4cf8f6`) | `runners/` top-level | **ABSOLUTE rule: a runner is NEVER a workspace member.** Each keeps its own pyproject + deps (+ `assist`'s own `uv.lock` and image). rask's `components/cli/runner` (HTR) also lands here as `runners/htr`, sealed, OUT of the workspace — no "resolves today" exception |

@@ -74,6 +74,29 @@ Related and already learned the hard way: **`waitUntil: 'networkidle'` can never
 these apps have no idle network by design. Ten such waits were replaced and
 `@repo/zone-contract/no-networkidle.test.ts` fails on a new one. P6's new spec files must not reintroduce it.
 
+## 4b. Owner ruling R8 (2026-07-27) — the surviving zone set
+
+Recorded in the plan's ruling table. **`home + lakehouse + media + annotator + compute`.**
+
+- rask's **browse / viewing / search** surfaces are eaten by the media plane — R6, reconfirmed by the owner.
+- **`compute` survives** (Ray dashboard, jobs, actors, cluster) — the plane rask owns.
+- **`storage` folds INTO `lakehouse`**: an S3 object browser is a lakehouse view of the warehouse's own
+  buckets, not a separate destination. `train` folds in with it via lance `models`, now a lakehouse route.
+  `overview` folds into `home`.
+- **`studio` is undecided** — no ruling covers it; it must be decided before P2.4, not defaulted.
+
+## 4c. Two preconditions the plan did not have
+
+1. **rask's `ty` gate is red before the merge starts.** `uvx ty check` on rask's unmodified
+   `feat/lance-ns-merge` reports **70 errors** — `components/scripts/index_alto.py` (39),
+   `components/services/core` (24), `packages/htr/src` (10), `components/services/ray_api` (7),
+   `packages/storage/src` (4). None is lance-ns code. P1's gate requires `make check` green and rask's
+   pre-commit hook enforces it, so **nothing can be committed on the branch** until it is cleared. The
+   re-pin commit itself needed `--no-verify`.
+2. **The two frontends have incompatible toolchains.** rask: eslint + prettier. lance-ns: oxlint + oxfmt,
+   with `@repo/zone-contract` asserting byte-identical `lint`/`fmt`/`fmt:check` scripts everywhere. Decide
+   the direction and land it as one pure-format commit before any 3-way merge.
+
 ## 5. Open work carried over
 
 Nothing here blocks the merge's own four verification conditions. It carries over so it is not lost.

@@ -95,9 +95,12 @@ Consequences you must apply:
 - **`packages/ratch` and the sealed runners are ALREADY DONE in lance-ns** (`45912c8`, `a4cf8f6`) — copy
   straight across, no path translation. ratch is a *package* (owner-ruled); its heavy deps move into its
   own pyproject at P1, resolving its old root-tooling exclusion.
-- **The `runners/` membership rule**: shares the fleet's resolution → workspace member; pinned to an
-  external runtime → `runners/`, own env. Measured: `assist` has its own `uv.lock`, `>=3.12,<3.14` against
-  the root's `>=3.13`, and `+cpu` torch from the pytorch index; the offline runners pin `cu128` torch.
+- **The runner rule is ABSOLUTE: a runner is NEVER a workspace member.** Each is its own sealed project —
+  own `pyproject.toml`, own dependencies, own `uv.lock` where it builds an image. No
+  "resolves-with-the-fleet-today" exception: a model's pins move on their own cadence and must never hold
+  the fleet's resolution hostage. Measured: `assist` has its own `uv.lock`, `>=3.12,<3.14` against the
+  root's `>=3.13`, `+cpu` torch from the pytorch index; the offline runners pin `cu128` torch. rask's
+  `components/cli/runner` (HTR) moves OUT of the workspace to `runners/htr` at copy time.
   Each runner is sealed — README + pyproject (+ lock where it builds an image), **no `__init__.py` glue**.
   ratch `cli/`'s leftover `from runners.…` imports are unwired heritage, replaced by the Ray-native name
   seam (`Stage.runner=` + worker `runtime_env`) — never "fixed" by making runners importable again.

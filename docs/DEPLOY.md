@@ -185,8 +185,9 @@ catalog/lineage.
   chaos-verified; the durable-orphan failure applies only to durables WITHOUT a queue group). Since
   2026-07-12 the **Dapr Resiliency + DLQ layer is DEFAULT ON** (`dapr.resiliency.enabled`): the sidecar
   owns delivery retries (30s→300s ×5) and exhaustion PARKS the message on the per-app `dlq.*` topic
-  (own DLQ stream) — see docs/RESILIENCE.md gap #2. The durable PULL consumer move remains the last
-  hardening follow-up.
+  (own DLQ stream) — see docs/RESILIENCE.md gap #2. (The once-planned durable PULL consumer move was
+  retired 2026-07-12 by the Dapr-first rule — RESILIENCE.md records the ruling; the remaining
+  resilience residuals are in OPEN-WORK.md E2.)
 - **Upgrade caveat: a consumer-config-changing upgrade silently stalls durable subscriptions for up
   to ~25 min** (observed live 2026-07-13). JetStream durables are create-once, so after an upgrade
   that changes the consumer config (e.g. the resiliency/DLQ default-ON maxDeliver/backOff change)

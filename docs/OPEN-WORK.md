@@ -101,7 +101,8 @@ is a component that punishes casual edits and needs its own pass with a browser 
 
 Ten conditions — annotator loop, runners, one-nav, FGA workbench, create-project, preview, lineage facets,
 drawers, registry, gates. Orthogonal to the merge. Its premise is the one worth keeping: *drive the product
-as a skeptical first user, not the elements.*
+as a skeptical first user, not the elements.* (The "lineage facets" condition is the same gap as **E1**
+below — one item, two names; close it once.)
 
 ### C3 · Lineage track remainder *(was #111)*
 
@@ -113,6 +114,15 @@ plan's **P7b gold schema contract**. Do it once, there.
 
 Residuals from the retired `GOAL-production-readiness` tracker. Re-derive against the merged chart rather
 than the lance-ns one — several will have been answered by rask's operators.
+
+**Where the enumeration lives:** `ASSESSMENT-2026-07-15.md` §3 is the only in-tree gap-by-gap roll-up
+(kept for exactly this reason — historical banner, live enumeration). Verified still open on 2026-07-27:
+gap 1 (Dex demo-IdP prod posture — `values-prod.yaml` does not touch dex), gap 5 (OpenBao auto-unseal via
+a secrets operator — ESO / bank-vaults; `RUNBOOK-oncall.md:63` cites "ASSESSMENT gap #5", and
+`OPERATORS.md` §5 row 5 says *verify whether rask already operates one* before adopting), gap 6
+(registry-qualified image repos + `imagePullSecrets` — zero hits in `chart/`). Also unnamed anywhere else:
+audit-log retention rides the observability store's TTL (`observability.retention`, 14d default) — a
+compliance deploy must raise it manually (`API.md` records the caveat).
 
 ---
 
@@ -126,6 +136,59 @@ than the lance-ns one — several will have been answered by rask's operators.
 | **Annotator residuals** *(was #100)* — export serializers (COCO / YOLO / CSV / HF) + managed label taxonomy | Owner to schedule. ⚠️ **The export half is the same service as the merge plan's P7c `exporter`** (ALTO 4.4 first, owner-ruled R4: serialization is a separate microservice, never inside the lakehouse or the movers). COCO/YOLO/CSV/HF become additional projections from gold — new functions in that service, not a second export path. Do not build these twice |
 | **Storybook** | Struck for now — rask keeps its own (plan P2 step 3); adopt rask's rather than re-deciding |
 | `/lakehouse/data` scaffold, `/lakehouse/admin` orphan | Product decisions, not defects with one right answer |
+
+---
+
+## E. Latent — surfaced by the pre-copy docs audit (2026-07-27), adversarially verified open
+
+These were living only inside reference docs, several anchored to tracker IDs that no longer exist.
+Recorded here so the merge cannot lose them; each was verified against the code, not just the doc.
+
+### E1 · OpenLineage "where/why" facets are not captured *(same gap as C2's "lineage facets" condition)*
+
+**What.** `parent` (job hierarchy), `jobDependencies` (why a run waits on another) and `processingEngine`
+(Ray version) are in the spec, surfaced by Marquez, and unimplemented here — `LINEAGE.md`'s captured-facets
+table omits all three; zero hits in `services/`. Was "Tracked in todo #10b / #12b / #17" in
+`event-driven-pipeline.md` — a tracker that no longer exists (`dataQualityAssertions` from that same list
+DID land via the quality gate).
+
+**The seam, so it is not rediscovered:** `parent` is already name-reserved in `_RESERVED_RUN_FACETS`
+(`services/catalog/core/lineage_emit.py:244`) — but only a rejection test exists, no consumer, and the
+docstring at line 240 overstates this. Also unrecorded anywhere durable: ingest handles **RunEvent only**
+(no JobEvent/DatasetEvent) — likely deliberate scope, but the scope decision itself was never written down;
+decide and record it when this is picked up.
+
+### E2 · Resilience residuals `RESILIENCE.md` carries inline, recorded nowhere else
+
+- The chaos rows (pull-a-service → recover) were driven by hand and never encoded as an automated
+  mutating harness (deliberately out of default `make e2e` — they scale shared infra).
+- Gap #2's "live check remaining: poison-inject → Dapr `deadLetterTopic` parking" was never driven live
+  (only unit tests; the #83 DLQ drive exercised the *outbox* surface, not sidecar parking) and the
+  runbook section it pointed at (§6.5) no longer exists after the symptom-first rewrite.
+- Honesty-note row 1 — lineage scale-0 → restart-replay under the per-app queue-group components — still
+  awaits its one-shot re-verify on a fresh deploy (row 3's was closed 2026-07-06; row 1's never was).
+- The bottom-line item "transactional outbox / Ray durable producer belongs to the rask merge" is the
+  merge plan's P5 Ray unification — `RESILIENCE.md` is its only other record.
+
+### E3 · Lakekeeper-study adoption backlog, the unshipped remainder *(SYSTEM-SKETCH.md, study wfb25lg74)*
+
+Verified item-by-item against the code; none appear in DECISIONS §9. In priority order:
+
+- **#12 · URL-encode user IDs when serializing to OpenFGA** — subjects are raw-interpolated
+  (`f"user:{user}"`, `services/common/fga.py`); the study ruled this *mandatory before prod OIDC* if
+  subjects can contain `@`/`+`/`:`. OIDC subjects here are emails. Smallest and sharpest of the set.
+- **#9 · Versioned authz-model migration** (`ACTIVE_MODEL_VERSION` + idempotent `migrate()`) — was ruled
+  "mandatory before the 3-axis model"; the 3-axis model shipped without it.
+- **#11 · Reconcile-from-catalog** — additive FGA rebuild + opt-in drift deletion with dry-run; absent
+  (the only `reconcile.py` is lineage storage-drift, a different thing).
+- **#10 · Split tuple helpers (`tuples.py`) + golden tuple tests** — `grant_on_create` is still one
+  inline grant; the FGA contract test is not this.
+- **#2 · Vended-response `credentials` vs `config` split** — `expires_at_millis` shipped per-vendor; the
+  dict split did not.
+- **#3 · `request_id` + actor propagation** — zero hits in `services/`; *possibly* superseded by OTel
+  tracing + the audit trail, but nobody ever recorded that verdict — record it or build it.
+- **#14 · `/refresh-credentials` + `revalidation_window_ms`** — conditional: only if STS/web-identity
+  vending is enabled (the default profile is `mode_b`, which never expires); carry the conditionality.
 
 ---
 

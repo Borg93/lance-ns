@@ -1,14 +1,54 @@
-# Handoff prompt v2 — the copy phase (step 3)
+# Handoff prompt v3 — mend, then copy
 
-For the rask session AFTER it reports step 1 (rebase onto origin/main) and step 2 (rask-side restructure
-into the D7 tree) done with gates green. Paste everything below the line.
+Paste everything below the line into the rask session NOW. Part A closes the gaps an external audit found
+in its live tree (2026-07-27); Part B is the copy phase it flows straight into.
 
 ---
 
 You are continuing the lance-ns → rask merge on `/home/blackwell/Desktop/rask`, branch
-`feat/lance-ns-merge`. Steps 1–2 are done. This is **step 3: copy lance-ns in — ALL of it (R1, total
-merge).** The authority is `docs/architecture/lance-ns-merge.md` (rulings R1–R10, D7); this prompt carries
-the copy manifest and the traps.
+`feat/lance-ns-merge`. The authority is `docs/architecture/lance-ns-merge.md` (rulings R1–R10, D7).
+
+# PART A — mend the restructure first (externally audited 2026-07-27; verify each from the tree)
+
+Your restructure is well underway and mostly right: `components/` dissolved, `services/` at root, root
+`packages/` Python-only, uv members are globs, eslint+prettier deleted, the JS tooling moved into
+`frontend/`. Five things are wrong or unfinished. Fix them in this order and commit as you go.
+
+1. **Commit before you rebase — your step order inverted itself.** The branch sits **69 commits behind
+   `origin/main`** with the entire restructure UNCOMMITTED (401 files: 360 R, 26 RM, 15 M, 4 D, 3 ??).
+   Git cannot rebase a dirty tree, and rename detection works far better on committed renames. So:
+   clear item 2, **commit the restructure as its own series**, THEN rebase onto `origin/main` and
+   delete the orphaned `projects/controlplane` your earlier removal missed.
+2. **`ty` is red at 88 diagnostics — and your pre-commit hook enforces it.** ~50 are the pre-existing set
+   (`scripts/index_alto.py` 39, `services/core` 24, `packages/htr` 10, `services/ray_api` 7,
+   `packages/storage` 4 — post-move paths) and **38 are in `.venv/`**, which means the ty config stopped
+   excluding the virtualenv after the moves — fix the exclusion first, then clear the real ones. Do NOT
+   `--no-verify` the restructure commit; if the gate is relaxed here it never comes back.
+3. **The zone directory is a shape nobody ruled: `frontend/microfrontends/`.** Not lance-ns's
+   `components/frontends/`, not the `apps/` in your own table. The incoming lance-ns tree arrives with
+   `workspaces: ['packages/*', 'components/frontends/*']` and a zone-contract manifest that reads
+   `components/frontends/home/microfrontends.json` by LITERAL path — 13 proven gate files encode it, and
+   they fail on arrival against your shape. **Recommended: `git mv frontend/microfrontends
+   frontend/components/frontends` now** (one move; the gates arrive unchanged; it also ends the
+   `microfrontends/` -dir vs `microfrontends.json` -file name collision). If you instead keep your name,
+   you own patching the workspaces glob + manifest path + `frontend.dockerfile` in the SAME commit as the
+   copy, with the full gate suite re-run — a deliberate contract change, not a drive-by. Also: your new
+   `frontend/packages/zone-contract` is a 2-file stub (`cross-zone-reload` only) — do not grow it; the
+   full incoming `@repo/zone-contract` (10 test files, 591 tests) REPLACES it at copy.
+4. **`runners/` does not exist and `services/runner` is still a workspace member** carrying
+   `ray[data,default,serve]>=2.52,<2.56` inside the fleet's resolution — against the ABSOLUTE rule (a
+   runner is NEVER a member; no "resolves-today" exception). `git mv services/runner runners/htr`; it
+   keeps its own `pyproject.toml`, gains its own `uv.lock` (`cd runners/htr && uv lock`), and is matched
+   by no members glob. Re-run `uv lock` at root after — the fleet's resolution must shrink, not grow.
+5. **Strays:** `batches.db.20260527T105358Z` still at the root (your own step-1 list deletes it).
+   `frontend/packages/{api,ui}` are still `@rask/api`/`@rask/ui` — fine for now, they fold into `@repo/*`
+   at copy; just don't add new imports of those names.
+
+**Part A gates before proceeding:** clean `git status`; rebased on `origin/main`; `uvx ty check` clean;
+`uv sync` clean; `bun install` + `turbo run build` green from `frontend/`; helm lint green. Report an
+honest fraction, then continue below.
+
+# PART B — the copy: lance-ns in, ALL of it (R1, total merge)
 
 **Source pin: `/home/blackwell/Desktop/lance-ns` at current `main` (`378970d` at authoring; docs-only
 since `f8df8de` — re-pin to `git -C /home/blackwell/Desktop/lance-ns rev-parse main` at copy time; copies
@@ -39,12 +79,9 @@ Six zones, all six in the top navbar: **`home · lakehouse · media · annotator
 
 1. `frontend/` exists; `components/` is gone; `eslint.config.js` and every prettier config are deleted
    (R10 — oxlint + oxfmt + rsvelte-fmt won; bun-first).
-2. **The frontend's internal shape must be lance-ns's, because the gates encode it**: the JS workspace
-   root declares `workspaces: ['packages/*', 'components/frontends/*']`, and
-   `@repo/zone-contract/src/manifest.ts` reads `components/frontends/home/microfrontends.json` by that
-   literal path. If step 2 put rask's zones at `frontend/apps/*`, move them to
-   `frontend/components/frontends/*` NOW — otherwise the incoming gates fail on arrival, and "fixing"
-   them means editing 13 proven test files instead of moving two directories.
+2. **The frontend's internal shape is lance-ns's** (Part A item 3 executed): zones live at
+   `frontend/components/frontends/*`, matching the incoming workspaces glob and the zone-contract
+   manifest's literal read of `components/frontends/home/microfrontends.json`.
 3. `uvx ty check` clean (the 70 pre-existing rask errors were yours to clear), gates green, committed.
 
 ## The copy manifest — R1 is TOTAL; every top-level item has a destination

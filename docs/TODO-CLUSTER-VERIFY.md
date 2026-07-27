@@ -17,8 +17,8 @@ changed under it.
 make frontend-images          # docker build × 4, lance-<zone>:dev
 ```
 
-**Why:** `.docker/frontend.dockerfile` has not successfully built since before the zone merge, and two
-separate bugs were fixed blind:
+**Why it was the highest risk:** `.docker/frontend.dockerfile` had not successfully built since before
+the zone merge, and two separate bugs in it were fixed blind:
 
 - `eslint-rules` was a frontend workspace member the dockerfile never `COPY`d, so
   `bun install --frozen-lockfile` inside the builder would fail with **"Workspace not found"** for
@@ -26,8 +26,9 @@ separate bugs were fixed blind:
 - `Makefile: ZONES` still listed the seven pre-merge zones, so the loop died on
   `--build-arg APP=data` and never reached `lakehouse`.
 
-Both now have gates in `@repo/zone-contract` (every workspace glob has a COPY line; `ZONES` equals the
-zone directories), but **a passing gate is not a passing build.**
+Both have gates in `@repo/zone-contract` (every workspace glob has a COPY line; `ZONES` equals the zone
+directories) — but a passing gate is not a passing build, which is why the `zone-images:` CI job now
+does the real thing on every push.
 
 - [x] All four images build: `home`, `lakehouse`, `media`, `annotator` — verified 2026-07-26; rebuilt again
       the same day after the navbar/link fixes so the running images match the shipped source.
@@ -40,6 +41,16 @@ zone directories), but **a passing gate is not a passing build.**
       the others, so the wasm is not the blowup this line feared. The surprise was elsewhere and is now
       measured: of the annotator's 4179 KB gzipped CLIENT bundle, 3809 KB is the OpenCV chunk and it loads
       only on first use of the magnetic tool — see the budget-gate defect in docs/GOAL-VERIFY-PULL.md.
+
+### CI now builds them — check the job, don't re-run it by hand
+
+The gap that let both bugs survive is **closed**: `.github/workflows/ci.yml` has a `zone-images:` job
+that runs `make frontend-images` on every push, cold (no layer cache, deliberately — a cache hit means
+it replayed instead of building). It derives the zone list from the filesystem rather than restating
+it, so it also fails if `Makefile: ZONES` goes stale again.
+
+So item 1 above is now **verified by CI, not by you** — read the job's result. What CI still does not
+do is *run* the images, which is what the remaining boxes are for:
 
 ## 2. Render the chart
 

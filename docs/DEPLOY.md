@@ -137,7 +137,7 @@ calls `MEDALLION_API`, so keep `medallion.enabled=true` when `frontend.oidc.enab
 Ingress controller. These steps mutate the cluster — run them yourself (or `!`-prefix each):
 
 ```bash
-# 1. build + side-load the 5 zone images into kind
+# 1. build + side-load the 4 zone images into kind
 !make frontend-images && make frontend-load
 
 # 2. one-time: an Ingress controller on kind (ingress-nginx)

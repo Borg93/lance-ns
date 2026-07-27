@@ -1,183 +1,109 @@
-# Handoff prompt for the rask session
+# Handoff prompt v2 — the copy phase (step 3)
 
-Copy everything below the line into the rask Opus 5 session. It is written to be pasted verbatim.
+For the rask session AFTER it reports step 1 (rebase onto origin/main) and step 2 (rask-side restructure
+into the D7 tree) done with gates green. Paste everything below the line.
 
 ---
 
-You are working the lance-ns → rask merge on `/home/blackwell/Desktop/rask`, branch
-`feat/lance-ns-merge`. **Read `docs/architecture/lance-ns-merge.md` first, end to end, before touching
-anything.** It is the authority: owner rulings R1–R9 are ACCEPTED and supersede any other document,
-including `RASK-INTEGRATION.md` in the lance-ns repo.
+You are continuing the lance-ns → rask merge on `/home/blackwell/Desktop/rask`, branch
+`feat/lance-ns-merge`. Steps 1–2 are done. This is **step 3: copy lance-ns in — ALL of it (R1, total
+merge).** The authority is `docs/architecture/lance-ns-merge.md` (rulings R1–R10, D7); this prompt carries
+the copy manifest and the traps.
 
-## Hygiene (from the plan, non-negotiable)
+**Source pin: `/home/blackwell/Desktop/lance-ns` at `main@f8df8de`.** Never edit that repo — copy out
+only. Never push rask to any remote; never commit to or merge with rask `main`.
 
-- All commits land on `feat/lance-ns-merge` in `/home/blackwell/Desktop/rask`. **Never push to any rask
-  remote. Never commit to or merge with rask `main`.**
-- **Never edit `/home/blackwell/Desktop/lance-ns`** — copy out of it only. It is at `main@502150b` and the
-  plan is re-pinned there as of 2026-07-27.
-- Conventional commits; each phase is one reviewable commit series; each commit cites the lance-ns source
-  commit. Git-history grafting is out of scope — provenance is by citation.
+## The zone set — who survives, who is eaten, who owns the top navbar (R6 + R8 + R9)
 
-## Two preconditions before P1 — both will stop you cold if you skip them
+Six zones, all six in the top navbar: **`home · lakehouse · media · annotator · compute · studio`**.
 
-1. **rask's own `ty` gate is RED.** `uvx ty check` on the unmodified branch reports **70 errors**:
-   `components/scripts/index_alto.py` (39), `components/services/core` (24), `packages/htr/src` (10),
-   `components/services/ray_api` (7), `packages/storage/src` (4). None is lance-ns code. P1's gate requires
-   `make check` green, and the **pre-commit hook enforces it — so you cannot commit anything** until this is
-   cleared. Do it as a standalone pre-P1 commit, provable against rask alone. Do not relax the gate to
-   accommodate them; that is the failure this plan exists to prevent. (The plan's own re-pin commit needed
-   `--no-verify` for exactly this reason.)
-2. **The toolchain direction is RULED (R10) — lance-ns's wins.** oxlint + oxfmt + rsvelte-fmt replace
-   rask's eslint + prettier, and the chart and all lance-ns configs come with the merge. What remains is
-   the *execution*: one pure-format commit reformatting rask's surviving zones (`compute`, `studio`, home
-   content) and `packages/{api,ui}` under the lance-ns toolchain, **before any 3-way merge** — or the
-   formatter noise gets baked into the conflicts. `@repo/zone-contract`'s script-parity gate then applies
-   to every package unchanged.
+- **rask's viewing / browse / search estate is EATEN by the lance-ns media plane.** The `discover` zone
+  (browse + search), the EAD `/api/v1/catalog` endpoints, `search_api`, and `volumes_api`'s page/ALTO
+  viewing all retire; lance-ns `viewer`/`search`/`annotator` services and the `media` + `annotator` zones
+  replace them. What survives of `volumes_api` is only the `/objects` S3 browser — re-landing as a view
+  *inside* `lakehouse`, not a zone.
+- **`compute` survives as its own top-navbar zone** — Ray dashboard, jobs, actors, cluster. The plane rask
+  owns.
+- **`studio` survives as its own top-navbar zone** (R9) — not folded into anything; it already is one
+  (`nav-config.ts`, its own `/animation` route).
+- `storage` folds INTO `lakehouse`; `train` folds in via `models` (a lakehouse route); `overview` folds
+  into `home`. One home: rask's home content folds into the incoming `home` zone, which owns
+  `/auth/{login,callback,logout}` and the catch-all.
 
-## What changed in lance-ns since the plan was first written (190 commits)
+## Before copying — verify your own step 2, from the tree, not from memory
 
-Full detail: `/home/blackwell/Desktop/lance-ns/docs/MERGE-REPIN-DELTA.md`. The three that break the old plan:
+1. `frontend/` exists; `components/` is gone; `eslint.config.js` and every prettier config are deleted
+   (R10 — oxlint + oxfmt + rsvelte-fmt won; bun-first).
+2. **The frontend's internal shape must be lance-ns's, because the gates encode it**: the JS workspace
+   root declares `workspaces: ['packages/*', 'components/frontends/*']`, and
+   `@repo/zone-contract/src/manifest.ts` reads `components/frontends/home/microfrontends.json` by that
+   literal path. If step 2 put rask's zones at `frontend/apps/*`, move them to
+   `frontend/components/frontends/*` NOW — otherwise the incoming gates fail on arrival, and "fixing"
+   them means editing 13 proven test files instead of moving two directories.
+3. `uvx ty check` clean (the 70 pre-existing rask errors were yours to clear), gates green, committed.
 
-- **Four zones, not seven.** `home`, `lakehouse`, `media`, `annotator`. The old `data`/`lineage`/`models`/
-  `admin` zones were merged into **one `lakehouse` zone** — they are its *routes* now. One app, one port
-  slot, one ingress rule, one image, one spec dir.
-- **`@repo/*`, not `@rask/*`.** Seven packages: `api`, `ui`, `config`, `engine`, `labeling`, `media-api`,
-  `zone-contract`. The last two are net-new. **`zone-contract` is the package that makes the frontend
-  claims falsifiable** — wire its suite into rask's test run or it silently never executes.
-- **`frontend/eslint-rules/` does not exist.** The cross-zone-reload guard is a *test* in `zone-contract`.
+## The copy manifest — R1 is TOTAL; every top-level item has a destination
 
-Also new and absent from the old plan: the **Dapr state store** (`chart/templates/dapr-statestore.yaml`),
-the **runners** deployable, catalog `user_state`/`me`/`access_admin` endpoints, and a **run-notification SSE
-transport** mounted in all four zone shells.
+| lance-ns | → rask | Note |
+|---|---|---|
+| `frontend/` | `frontend/` — **wholesale**: zones home/lakehouse/media/annotator, the 7 `@repo/*` packages, `package.json`, `bun.lock`, `turbo.json`, `knip.json`, `microfrontends.json`, `.oxlintrc.json`, `.oxfmtrc.json` | The JS plane root is `frontend/`, not the repo root (owner-ruled). rask's `compute` + `studio` merge in as zones; rask's `packages/{api,ui}` fold INTO `@repo/api`/`@repo/ui` (keep rask's storybook + `navMain(project)`). Dev ports: incoming zones take fresh slots — lance `lakehouse` 5174 collides with rask `storage` 5174, lance `annotator` 5177 with `studio` 5177, and R9 keeps studio, so that one is live |
+| `services/` (catalog, lineage, medallion, compaction, viewer, search, annotator) | `services/*` | src-layout conversion at copy; entrypoints preserved (`catalog.main:app`) |
+| `packages/` (`common`, `ratch` — **ratch already moved**, `45912c8`) | `packages/*` | Workspace members. `common` keeps import root `common` (zero rewrites); `ratch` gains its own pyproject with its ray/lance-ray/typer deps at P1, resolving its old root-tooling exclusion |
+| `runners/` (asr, diarize, kg, topics, voiceprint, assist — **already sealed**, `a4cf8f6`) | `runners/` top-level | **ABSOLUTE rule: a runner is NEVER a workspace member.** Each keeps its own pyproject + deps (+ `assist`'s own `uv.lock` and image). rask's `components/cli/runner` (HTR) also lands here as `runners/htr`, sealed, OUT of the workspace — no "resolves today" exception |
+| `pyproject.toml` + `uv.lock` | the workspace conversion | Root `[tool.uv.workspace] members = ["packages/*", "services/*"]` — GLOBS (runners matched by no glob). Regenerate `uv.lock`; append `tests/unit`, `tests/integration`, `tests/e2e-py` to the explicit `testpaths` with a **collection-count assertion** — silent testpaths loss is rask's own risk 5 |
+| `chart/` — **ALL of it** | grafted into `rask/chart/` | Per P4: subchart dedupe (rask's deps, lance-ns's richer values), every template incl. `dapr-statestore.yaml` and `runners.yaml`, all hooks with explicit component labels, NetworkPolicies ported AND extended over rask's fleet, `values-prod.yaml`, `prod_render_check.sh` adapted to `rask-` names |
+| `deploy/` | three destinations | `cnpg-age-cluster.yaml` → `chart/templates/age-cluster.yaml` (AGE as a CNPG ImageVolume extension — decided and proven; needs K8s 1.33+); `kind/kind-config.yaml` → keep at `deploy/kind/` — `make kind-up` reads it and kind is this branch's proof vehicle; `ray-lance-demo.yaml` → copy transitional, retired at P5 by the unified RayCluster |
+| `.docker/` — all dockerfiles | `.docker/` | P3: `rest-catalog` rewritten for src-layout (`uv sync --package`) and it must cover or split the media trio; `frontend.dockerfile` builds the six-zone set; `assist-runner` builds from `runners/assist`'s own lock; `cnpg-age-ext` as-is |
+| `.dagger/` + `dagger.json` | merged into rask's module | One `dagger.json`; `TestPg`/`MigrateUp` untouched; source paths rewritten to the D7 tree |
+| `.github/workflows/` | copied, paths adapted | Inert until a push exists; the merged Dagger module is the CI vehicle — local `make ci` / `make e2e-ci` / `make e2e-ray-ci` are the branch's enforcement, logged in the merge doc |
+| `tests/` | `tests/unit`, `tests/integration`; Python live suites → `tests/e2e-py` | `tests/e2e` stays the `@rask/e2e` bun package |
+| `scripts/` — all | `scripts/` | No name collisions (verified). Object names and ports adapted at P6: `rask-`/`rask-web-` prefixes, gateway `:8888` |
+| `docs/` — **copy `OPEN-WORK.md` + `GOAL-UX-REACTIVE-EVIDENCE.md` FIRST, before any code** | `rask/docs/` + zensical nav | `OPEN-WORK.md` is the durable backlog; P8 reconciles it (closed items struck WITH evidence), never drops it. The evidence file is what merged-tree regressions get compared against |
+| `lance_docs/` (vendored upstream Lance format docs, 171 files) | `rask/lance_docs/` | As-is |
+| `.claude/` + `skills-lock.json` | merged into rask's `.claude` | Combine the skill sets; the `rask-*` skills are redrawn at P8 for the merged fleet |
+| `Makefile` | merged | lance-ns's kind lifecycle (`bootstrap/kind-up/deps/images/load/deploy/up`, `e2e-ci`, `e2e-ray-ci`) lands ALONGSIDE rask's k3s targets |
+| `Tiltfile`, `.devcontainer/`, `.hadolint.yaml`, `.dockerignore`, `.gitignore`, `.vulture-whitelist.py`, `.python-version`, `README.md` | carried / merged | Reconcile the dev loops (Tilt vs `dev-micro.sh`) at P6 — don't silently drop either |
+| `LICENSE` | **surface, don't decide** | Risk 8: lance-ns carries an Apache relabel; rask's identity is AGPL-3.0-only. Restore rask's original labels and flag the question to the owner |
 
-## R8 + R9 — the surviving zone set
+## The traps, in copy order
 
-**`home + lakehouse + media + annotator + compute + studio`** — six zones.
+- **`rask-web-<zone>`** for every frontend k8s object. The live instance of the collision class: the
+  `annotator` ZONE vs the `services/annotator` backend Service under one release.
+- **The state store** (`dapr-statestore.yaml`): DSN from OpenBao through `lance-secrets`, never a k8s
+  Secret; `scopes` must list every app owning operational state or saved work 503s with only a sidecar
+  log to show for it — `tests/unit/test_invariants.py` pins the agreement; keep it collected.
+- **Live SSE streams**: every zone shell holds one open. Traefik needs the equivalent of nginx's
+  `proxy-read-timeout: 3600` or every zone reconnects on a timer, re-priming the event window and writing
+  an audit record each time. Verify with `scripts/verify_live_stream_timeout.mjs`, `HOLD_S` past 255.
+  Corollary: **`networkidle` can never fire in any zone** — `no-networkidle.test.ts` enforces it; wait on
+  the element you act on, or assert the effect with `.toPass()`.
+- **Helm**: numeric values use `hasKey` + `ternary`, never `| default` (an explicit `0` is swallowed);
+  Job/CronJob pod templates need explicit component labels (prod default-deny blocks them; kindnet hides
+  it); never `helm upgrade -f chart/values.yaml` against a live release — `helm get values` first.
+- **kind**: after `kind load`, DELETE pods (rollout restart keeps the old digest) and verify the app
+  container's `imageID` **by name** — `containerStatuses[0]` is the daprd sidecar on a 2/2 pod. Never
+  delete the OpenBao pod: dev-mode, in-memory, every secret dies with it.
+- **Gateway rows (P1)**: `/api/catalog→catalog`, `/api/lineage→lineage`, `/api/produce`+`/api/train→
+  medallion`, the whole-plane media namespace `/api/media→viewer`, `/api/media/search→search`,
+  `/api/media/annotations→annotator` (R5), plus catalog `user_state`/`me`/`access_admin`. lance services
+  serve `/v1/...` internally — a wrong strip prefix 404s silently.
+- **ratch**: its `cli/` still holds unwired repo-relative `from runners.…` imports (lance-audio
+  heritage). They are replaced by the Ray-native name seam (`Stage.runner=` + worker `runtime_env` from
+  the runner's own pyproject) — never resolved by making `runners/` importable again.
 
-- rask's **browse / viewing / search** surfaces are eaten by the media plane (R6, reconfirmed): the
-  `discover` zone, the EAD `/api/v1/catalog` endpoints, `search_api`, and `volumes_api`'s page/ALTO viewing
-  all retire.
-- **`compute` survives** — Ray dashboard, jobs, actors, cluster. It is the plane rask owns.
-- **`storage` folds INTO `lakehouse`** — an S3 object browser is a lakehouse view of the warehouse's own
-  buckets, not a separate destination.
-- `train` folds in with it (lance `models` absorbed it, and `models` is a lakehouse route).
-- `overview` folds into `home`.
-- **`studio` survives as its own top-navbar zone (R9).** It is not folded into anything. That matches what
-  it already is here: a top-level entry in `packages/ui/src/lib/shell/nav-config.ts:81` (`Studio`, `Shapes`
-  icon) with its own `/animation` route.
+## Gates for this step
 
-## The layout target — D7, settled by experiment (owner-ruled 2026-07-27)
+`uv sync` clean · `make check` (ruff format --check + ty, whole repo) · `make test` with the
+collection-count assertion (≥67 unit + 13 integration files at the pin; re-derive at copy) ·
+`turbo run check test lint fmt:check build` green from `frontend/` across the six-zone set · **the full
+`@repo/zone-contract` suite collected and green** — it is the falsifiability layer; if it silently never
+runs, every frontend claim is unguarded · helm lint + render invariants (incl. the rendered-name
+uniqueness assertion) + `prod_render_check` · all images build and `kind load`.
 
-Two **language-pure planes**, not one mixed root `packages/`. The deciding facts, reproducible in a
-scratch dir: `uv lock` **errors** on a non-Python dir matched by a members glob (an `exclude` list is
-enumeration renamed), and `bun install` **silently skips** non-JS dirs — safe-looking until a Python
-package gains a `package.json` and gets swept in without a word. Language-pure directories are the only
-shape where globs are both possible and safe, and there are **zero cross-language package deps** in either
-repo.
+Then the P6 global live drive on kind: `seed_medallion_fga.sh` + restart lance-ray (green e2e ≠
+drive-ready), alice `/produce` 202 / bob 403 / anon 403 → cascade rows per stage → lineage populated →
+cross-zone OIDC (sign in on `/lakehouse`, still signed in on `/media` and `/annotator`; alice 2xx / bob
+403) → rask's `mfe.spec` green against the SAME deploy → DLQ view + replay → `prod_render_check` green.
 
-```
-frontend/     ← lance-ns's JS plane, WHOLESALE: bun.lock, turbo.json, oxlint/oxfmt configs, and all 13
-                @repo/zone-contract gate files travel unchanged. rask's compute + studio move INTO it.
-services/     ← Python deployables, src-layout: catalog, lineage, medallion, compaction, viewer, search,
-                annotator + rask's gateway/core/ray_api. components/ dissolves.
-packages/     ← Python-only shared: common, ratch, storage, service-kit, ray-kit, htr, tracker, validate.
-runners/      ← SEALED projects OUTSIDE the workspace: asr, diarize, kg, topics, voiceprint (pyproject =
-                the Ray worker runtime_env) + assist (own uv.lock, own image). NEVER under services/ —
-                the members glob would sweep them into the workspace.
-pyproject.toml  [tool.uv.workspace] members = ["packages/*", "services/*"]   ← GLOBS, no enumeration
-```
-
-Consequences you must apply:
-- **The P0 frontend direction FLIPS**: do not graft lance zones into `components/frontends` — move rask's
-  two surviving zones into `frontend/`. Fewer moves, and the proven gates arrive as-is.
-- **P2's `packages/ui` merge inverts**: rask's storybook + `navMain(project)` fold INTO `@repo/ui`.
-- The manifest-completeness gate is unnecessary under D7 — globs enforce membership structurally.
-- **`packages/ratch` and the sealed runners are ALREADY DONE in lance-ns** (`45912c8`, `a4cf8f6`) — copy
-  straight across, no path translation. ratch is a *package* (owner-ruled); its heavy deps move into its
-  own pyproject at P1, resolving its old root-tooling exclusion.
-- **The runner rule is ABSOLUTE: a runner is NEVER a workspace member.** Each is its own sealed project —
-  own `pyproject.toml`, own dependencies, own `uv.lock` where it builds an image. No
-  "resolves-with-the-fleet-today" exception: a model's pins move on their own cadence and must never hold
-  the fleet's resolution hostage. Measured: `assist` has its own `uv.lock`, `>=3.12,<3.14` against the
-  root's `>=3.13`, `+cpu` torch from the pytorch index; the offline runners pin `cu128` torch. rask's
-  `components/cli/runner` (HTR) moves OUT of the workspace to `runners/htr` at copy time.
-  Each runner is sealed — README + pyproject (+ lock where it builds an image), **no `__init__.py` glue**.
-  ratch `cli/`'s leftover `from runners.…` imports are unwired heritage, replaced by the Ray-native name
-  seam (`Stage.runner=` + worker `runtime_env`) — never "fixed" by making runners importable again.
-- Per-individual-service packages are rejected: shared-by-one is not shared.
-
-## Landmines that already cost real time — do not rediscover them
-
-- **`waitUntil: 'networkidle'` can never fire again in any zone.** Every shell holds a `query.live` SSE
-  stream open by design, so an idle-network wait sits until its timeout and reports the product as hanging.
-  Ten such waits were replaced in lance-ns; `@repo/zone-contract/no-networkidle.test.ts` fails on a new one.
-  Wait on the element you are about to act on, or assert the effect and retry with `.toPass()`.
-- **The live stream needs the ingress to permit it.** Proven at 270.1s with 0 severed on nginx via
-  `proxy-read-timeout: 3600`. **rask uses Traefik** — find its equivalent, or every zone reconnects on a
-  timer and each reconnect re-primes the event window and writes an audit record.
-  `scripts/verify_live_stream_timeout.mjs` takes `HOLD_S`; run it past 255 against rask's ingress.
-- **k8s object names**: every frontend zone object must be `rask-web-<zone>`. A bare zone name collides with
-  a backend Service selector — lance-ns hit exactly this, and the live instance in the merged tree is the
-  **`annotator` ZONE vs the `services/annotator` BACKEND** under one release.
-- **The dev ports collide.** lance `lakehouse` 5174 vs rask `storage` 5174; lance `annotator` 5177 vs rask
-  `studio` 5177 — and R9 keeps `studio`, so that one is live rather than incidental. The three incoming
-  zones need fresh slots (the plan proposes lakehouse 5180, media 5181, annotator 5182). rask currently
-  holds home 5273 / overview 5179 / storage 5174 / compute 5175 / discover 5178 / train 5176 / studio 5177.
-- **Job/CronJob pod templates need an explicit component label** or prod default-deny blocks them. kindnet
-  hides the violation, so it only appears in prod.
-- **`helm --reuse-values`**: a new values key renders EMPTY under it. All new numeric keys use
-  `hasKey` + `ternary`, never `| default` — `default` treats an explicit `0` as absent.
-- **kind same-tag images**: rebuilding under a reused `:dev` tag and rolling out does NOT update running
-  pods. `kind load`, then **delete** the pods, then verify the pod's `imageID` digest actually changed.
-  Read the app container **by name** — `containerStatuses[0]` is the daprd sidecar on a 2/2 pod.
-- **Deleting the OpenBao pod wipes every secret** (it runs `server -dev`, in-memory) and nine pods then
-  correctly fail closed. Never include it in a redeploy sweep; if it dies, re-seed before restarting anything.
-- **The state store's `scopes`** must list every app that owns operational state. An app outside `scopes`
-  gets "component not found" from its sidecar and every user's saved work 503s — logged by the sidecar and
-  noticed by nothing else. `tests/unit/test_invariants.py` pins the agreement; keep that test.
-
-## What to verify rather than assume
-
-- **Green gates are a floor, not a finish.** In lance-ns, two adversarial passes returned 4/4 REFUTED on
-  claims that were already pushed and green, including an anonymous 6.6 MB read reachable in two zones.
-- **Drive the product, not the elements.** The notification bell was shipped, shared, and tested — and
-  mounted in **one zone out of four**. Nothing was red. Only signing in and looking found it.
-- **Take screenshots and open them.** Element crops at `deviceScaleFactor: 3`; when you suspect a defect,
-  measure it in the DOM (`clientHeight` vs `scrollHeight`) rather than judging by eye. A `line-clamp` with a
-  `title` is intentional truncation; a two-pixel overflow with no marker is a clipped descender.
-- **CI-only failures are real failures.** lance-ns main was red for five runs on two causes invisible
-  locally: `svelte-kit sync` racing `vite build` over `.svelte-kit/types` (turbo `check` must depend on its
-  own package's `build`), and Playwright `workers: 8` starving a small runner (`CI ? 2 : 8`). rask inherits
-  neither fix automatically.
-
-## Carried-over open work — read `docs/OPEN-WORK.md`, it travels with the merge
-
-`lance-ns/docs/OPEN-WORK.md` is the durable backlog and the plan's P0 copies it to `rask/docs/OPEN-WORK.md`.
-It is self-describing — what each item is, why it is open, where the code lives, what closes it — because
-the old record was session task IDs that outlive nothing. **P8 reconciles it: items the merge closed get
-struck with the evidence, the rest carry forward, none silently dropped.**
-
-Two entries change what you do rather than waiting for you:
-
-- **A1 — the media corpus must leave its node hostPath.** Deferred in lance-ns, **blocking here**: P4 rules
-  no hostPath ships. Split it — registering the corpus as catalog-governed project tables is portable and
-  worth doing first; the physical destination (PVC vs a rustfs-backed bucket on rask's Tenant) belongs in
-  P4, decided once against the cluster it will live on.
-- **D · annotator export serializers** (COCO / YOLO / CSV / HF) are the **same service** as P7c's `exporter`
-  (ALTO 4.4 first, R4). Additional projections from gold, not a second export path. Do not build it twice.
-
-Also open, all with stated reasons in that file: the state store has **no actor type and no workflow
-registered** (the `actorStateStore` flag is on and unused), the notification inbox has no actor, annotation
-projects are designed but need those actors, `TableDetail`'s reset effect needs its own pass (an edit there
-dropped 6 of 10 history versions with `svelte-check` at 0 errors), the product-works pass, the gold
-whole-history JSONB embed — which is the same artifact as your **P7b gold schema contract**, so do it once,
-there.
-
-## Start here
-
-1. Read `docs/architecture/lance-ns-merge.md` in full.
-2. Clear rask's 70 `ty` errors as a standalone commit; confirm `make check` and the pre-commit hook pass.
-3. Land the R10 pure-format commit (lance-ns toolchain over rask's surviving zones and packages).
-4. Then P1, per the plan — with D7's tree as the copy destination. No zone or structure decision is outstanding.
-
-Report an honest fraction at each phase gate. Never mark a gate met on a check you did not run.
+Report an honest fraction at each gate. Never mark a gate met on a check you did not run. When a claim
+can be settled by reading the tree or running one command, do that instead of remembering.

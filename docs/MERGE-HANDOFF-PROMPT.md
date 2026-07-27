@@ -76,7 +76,12 @@ transport** mounted in all four zone shells.
   timer and each reconnect re-primes the event window and writes an audit record.
   `scripts/verify_live_stream_timeout.mjs` takes `HOLD_S`; run it past 255 against rask's ingress.
 - **k8s object names**: every frontend zone object must be `rask-web-<zone>`. A bare zone name collides with
-  a backend Service selector — lance-ns hit exactly this.
+  a backend Service selector — lance-ns hit exactly this, and the live instance in the merged tree is the
+  **`annotator` ZONE vs the `services/annotator` BACKEND** under one release.
+- **The dev ports collide.** lance `lakehouse` 5174 vs rask `storage` 5174; lance `annotator` 5177 vs rask
+  `studio` 5177 — and R9 keeps `studio`, so that one is live rather than incidental. The three incoming
+  zones need fresh slots (the plan proposes lakehouse 5180, media 5181, annotator 5182). rask currently
+  holds home 5273 / overview 5179 / storage 5174 / compute 5175 / discover 5178 / train 5176 / studio 5177.
 - **Job/CronJob pod templates need an explicit component label** or prod default-deny blocks them. kindnet
   hides the violation, so it only appears in prod.
 - **`helm --reuse-values`**: a new values key renders EMPTY under it. All new numeric keys use

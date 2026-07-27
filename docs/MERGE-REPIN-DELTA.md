@@ -101,6 +101,26 @@ zones.
    with `@repo/zone-contract` asserting byte-identical `lint`/`fmt`/`fmt:check` scripts everywhere. Decide
    the direction and land it as one pure-format commit before any 3-way merge.
 
+## 4d. What an adversarial sweep of the plan found after the first re-pin
+
+21 agents over rask's `docs/architecture/`, its other docs, `CLAUDE.md` + `.claude/**`, and its config
+manifests. **9 confirmed, 8 rejected.** Every confirmed finding was in the merge plan itself — the first
+re-pin amended the sections it was looking at and left identical drift in nine others in the same file
+(P0 naming rule 3, P3's "13 zones", P4's "6 lance zones", the reserved-segment guard, the global
+live-proof's `/data`+`/admin` drive, risk 4, risk 7). All nine fixed in rask `aa26827`.
+
+**rask's own agent-facing docs came back clean.** All 8 rejections were verifiers refusing findings against
+`CLAUDE.md` and the vendored `rask-*` skills because those correctly describe rask *as it is today* — a doc
+describing rask's present is not stale; only one describing the merged result can be.
+
+Two findings were new rather than corrections, and both matter at P2.4:
+
+- **The dev ports collide.** lance `lakehouse` 5174 vs rask `storage` 5174, and lance `annotator` 5177 vs
+  rask `studio` 5177 — and R9 keeps `studio`, so it is live. The three incoming zones must be reassigned.
+- **The naming rule's own rationale cited a zone that no longer exists** (`lineage` zone vs `lineage`
+  backend). The collision class is still real and now sharper: the **`annotator` zone vs the
+  `services/annotator` backend** under one release.
+
 ## 5. Open work carried over
 
 Nothing here blocks the merge's own four verification conditions. It carries over so it is not lost.

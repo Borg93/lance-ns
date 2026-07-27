@@ -16,7 +16,11 @@ and what to drop. Grounded in rask's actual chart (`rask/chart/`) + this repo's 
 - **CloudNativePG** — the Postgres `Cluster` (`<release>-postgres`).
 - **rustfs-operator** — the S3 `Tenant` (`<release>-rustfs`, with a `buckets:` list).
 - **KubeRay + Kueue** — the Ray cluster (`RayService`) + job admission, and the `ray-kit` / orchestrator submission path.
-- **Frontends** (SvelteKit microfrontends) + **Traefik Ingress** + the **Alembic migration Job** + **GreptimeDB/Vector/Perses** observability + **NATS** + **Dapr**.
+- **Traefik Ingress** + the **Alembic migration Job** + **GreptimeDB/Vector/Perses** observability + **NATS** + **Dapr**.
+- ⚠️ **NOT the frontend, any more.** This line used to read "Frontends (SvelteKit microfrontends)", which
+  contradicted §5 in the same document. `apps/web` was retired in the P5 migration and **the four zones ARE
+  the frontend** — home / lakehouse / media / annotator, in rask's exact Turborepo shape. They graft into
+  `rask/components/frontends/`; nothing of ours is dropped here. See §5.
 
 ## Pre-flight (rask already has these — no action)
 NATS, Dapr, OpenFGA (server), CloudNativePG, rustfs-operator, KubeRay, Kueue, GreptimeDB stack, Traefik. The
@@ -39,9 +43,20 @@ The externalization hooks added in this repo make this a **values flip**, not a 
 | `age.externalHost` | `<release>-postgres-rw` | CNPG `Cluster` (rw service) |
 | `openfga.datastore.uri` | `postgres://…@<release>-postgres-rw:5432/openfga…` | CNPG |
 | `observability.externalOtlpEndpoint` | rask's GreptimeDB OTLP | shared observability |
+| `stateStore.*` (**new**) | DSN → `<release>-postgres-rw` via the Dapr secret store | CNPG |
+
+⚠️ **The state store did not exist when this table was written.** `lance-statestore` is a Dapr
+`state.postgresql` component with `actorStateStore: "true"`, pointed at the AGE Postgres today and resolving
+its DSN from OpenBao through `lance-secrets` — never a k8s Secret. On rask it moves to CNPG like the rest,
+and its `scopes` must list every app that owns operational state (today: catalog, annotator). An app outside
+`scopes` gets "component not found" from its sidecar and every user's saved work 503s, which the sidecar logs
+and nothing else notices — `tests/unit/test_invariants.py` pins the agreement.
 
 - **Add the buckets** to rask's `rustfs.buckets`: the lakehouse (`lance-catalog`) + observability (`lance-observability`).
-- **Add the databases** to CNPG: `lineage` + `openfga`. ⚠️ **AGE caveat** — the lineage graph needs the Apache **AGE extension**; CNPG runs stock Postgres, so either (a) point CNPG at a **custom Postgres image with AGE**, (b) keep AGE as a separate operand, or (c) execute the `docs/DECISIONS.md` AGE-on-CNPG decision to move lineage to a **Lance-native graph** (drops the AGE/Postgres dependency entirely). Decide before the fold-in.
+- **Add the databases** to CNPG: `lineage` + `openfga`. **AGE caveat — DECIDED and proven, 2026-07.** AGE reached PG18 (v1.7.0), so it mounts as a CNPG
+  **ImageVolume extension on a STOCK image** — option (a) without a custom Postgres build. Proven end to end
+  on a throwaway kind cluster with the real CNPG operator (`docs/CNPG-AGE.md`, `.docker/cnpg-age-ext.dockerfile`).
+  The CSI-mount leg needs K8s 1.33+. No Lance-native-graph rewrite is required.
 
 ### 2. lance-ray → a real Ray Data job (the one in-scope gap)
 Today `services/medallion/producer.py` + the movers are **dummy Ray jobs** — pure lineage emitters by
@@ -69,6 +84,38 @@ secret).
   in is a directory graft of the zones into `rask/components/frontends/`, not untangling a monolith.
 - `openbao` dev-mode + the dev `infra-credentials` static Secret → external-secrets from rask's Vault.
 - The `dex` demo IdP → rask's real IdP (or keep for local-only).
+
+### 6. The media plane — absent from every earlier version of this document
+
+`services/{viewer,search,annotator}` merged in under #91 (`docs/LANCE_NS_HANDOFF.md`) and this checklist has
+never mentioned them. They are part of the unit that merges, and one of them carries the merge's sharpest
+edge:
+
+- **The corpus is a node `hostPath`** (`/var/media-corpus` on this kind node), not a governed table. That is
+  fine on a single-node dev cluster and **will not survive a move to rask's cluster** — a hostPath binds a
+  pod to a node that happens to hold the data. This is #103 ("media plane on the governed warehouse: corpus
+  as registered project tables"), which is deferred today and becomes **blocking at the merge**. Decide
+  between: register the corpus as project tables on the governed warehouse (the intended shape), or give
+  rask a PVC/object-store path for it.
+- **The viewer needs its memory tier.** It was OOM-killed serving thumbnails and now runs 1536Mi/768Mi,
+  sized from a measured 955Mi cgroup peak. Carry the tier, not the default.
+- **The encoders are URLs, not Deployments** (`encoders.*Url`). This cluster has no `nvidia.com/gpu` in node
+  capacity, so vector/hybrid/rerank render disabled with the reason. If rask has GPUs, the same values point
+  at real servers with no code change — the wiring is already proven to flip 503 → 200.
+
+### 7. Live streams need the ingress to permit them — on Traefik, not nginx
+
+Every zone's shell now holds a `query.live` SSE stream open for the run-notification bell. Proven here at
+**269.6s with 0 streams severed**, past both nginx's 60s default and Bun's 255s `IDLE_TIMEOUT`. That rests on
+two things, and only the second travels:
+
+- `nginx.ingress.kubernetes.io/proxy-read-timeout: 3600` on our Ingress — **rask uses Traefik**, so this needs
+  its equivalent (a `ServersTransport` / `responseForwarding` setting) or every zone reconnects on a timer and
+  each reconnect re-primes the event window and writes an audit record.
+- The application-level keepalive in `@repo/api/runs-feed`, which re-yields the last pulse every 20s. That is
+  ours and moves with the code.
+
+`scripts/verify_live_stream_timeout.mjs` takes `HOLD_S`; run it past 255 against rask's ingress to confirm.
 
 ## lance-ray seam contract (so the real job drops in)
 The dummy producer/movers define the contract the real Ray Data jobs must reproduce **exactly**:
@@ -103,9 +150,14 @@ Reproduce those four behaviors in the Ray Data job and the cascade keeps working
 
 ## Open decisions (resolve before/early in the merge)
 1. **AGE on CNPG** — custom AGE image vs separate operand vs Lance-native graph (`docs/DECISIONS.md` #age-on-cnpg-vs-lance-native-graph-the-lineage-store-decision). Affects §1.
-2. **Tenancy** — this repo is single-warehouse (`warehouse:lance_catalog`); rask is single implicit `default`
-   project. Confirm one warehouse-per-deploy stays the model (no multi-warehouse routing).
-3. **Catalog 501s** — the **7** genuinely backend-stubbed ops (`docs/COVERAGE.md`: rename / backfill /
+2. ~~**Tenancy**~~ — **overtaken by shipped work, no longer a decision.** This read "the repo is
+   single-warehouse; confirm one warehouse-per-deploy stays the model". It is not: `chart/values.yaml`'s
+   `#3-A per-warehouse physical multi-tenancy` provisions a physically separate bucket per warehouse and
+   binds top-level namespaces to it (Lakekeeper parity, #27), and #84 added per-tenant medallion zones with a
+   project-level policy default. rask's single implicit `default` project is the side that has to widen —
+   its services would sit under one project in our model, which is the degenerate case and works unchanged.
+3. **Catalog 501s** — **confirmed 7** against `docs/COVERAGE.md` (47/54 backed). A crude `grep -c 501` over
+   `services/catalog` reads 8 and is wrong — it counts prose. The 7 genuinely backend-stubbed ops (`docs/COVERAGE.md`: rename / backfill /
    alter_transaction / MV create+refresh / batch-create+batch-commit versions) stay 501 until the upstream
    Rust `DirectoryNamespace` (or a REST/managed backend) implements them — a parallel upstream contribution,
    independent of the merge. (Was "13"; version describe/create/delete + branches are now backed — see the

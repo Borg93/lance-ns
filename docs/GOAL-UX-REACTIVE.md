@@ -272,7 +272,7 @@ commit that closed it; none is closed on my say-so.
 | 12 | `docs/GOAL-VERIFY-PULL.md`'s ledger rewritten row by row against today's evidence |
 | 13 | The disposition table above — 18 tasks, each done-with-evidence or struck with a reason |
 | 14 | Twelve recorded mistakes, **three of them now mechanical guards** proven to fail on the mistake |
-| 15 | A keepalive on the stream and one observed open past 255s with no reconnect |
+| 15 | **Re-proven 2026-07-27 at the real bar.** The earlier evidence held 100s and its artifact was named `live-stream-past-60s.png` — that clears nginx's 60s, not Bun's 255s, and I had been treating the two as one proof. Re-run with `HOLD_S=270`: `#1 opened at t+0.9s, STILL OPEN after 270.1s`, `no stream was severed during 270s — 2 opened, 0 closed`. The script now names the bar it actually clears (`clearing the 255s bar`) instead of always saying 60s |
 | 16 | Four zone digests moved, then the new surface asserted inside `getByRole('dialog', {name: 'Notifications'})` — never on a neighbouring element |
 | 17 | `cache-control: public` → `private` on gated routes, with a test |
 | 18 | `—` with a `title` explaining it, and my "improvement" reverted after it dropped 6 of 10 versions |
@@ -296,6 +296,28 @@ consecutive runs**, on two causes neither of which reproduced locally:
 After both: **7 of 7 jobs green** — `zone-images · frontend · test · ray-e2e · lineage-e2e · e2e-stack ·
 auth-e2e` — on `687c7d5`. Neither fix touches product code, and both were invisible to every local gate,
 which is the whole argument for the last clause of condition 7.
+
+### Re-proven end to end, 2026-07-27
+
+A stop-hook challenge was right that "all twenty met" rested partly on evidence produced in an earlier
+context window rather than in the transcript that claimed it. Everything was re-run:
+
+```
+condition 1   101 paths · /v1/table/{id}/history · table_history_v1_table__id__history_get
+condition 2   proxy-read-timeout=3600 on lance-ns-frontend
+condition 4   home 0 · lakehouse 1 real (+2 prose) · media 1 · annotator 0 · gate 2/2
+condition 5   ✓ condition 5 PROVEN            condition 6   ✓ condition 6 PROVEN
+condition 7   ruff ✓ · format 368 files ✓ · uvx ty check ✓ · no OpenAPI drift · 1213 passed
+condition 15  270.1s, 2 opened, 0 closed
+condition 17  21 passed; broken → expected 'public, max-age=300' to be 'private, max-age=300' ×3
+condition 18  24 passed, incl. "rows/bytes are shown only where the writer measured them"
+condition 19  broken → 1 failed; restored → 35 passed
+condition 20  ux-reactive-track parallel:0 pipeline:1 · the one survivor feeds a single judge
+```
+
+One correction came out of it, and it is the kind worth keeping: condition 15's script had always printed
+"past a 60s nginx default" no matter how long it held, so a 300s run was proving the harder bar while
+labelling itself with the easier one. Evidence that mislabels itself is not evidence.
 
 **What the last drive found after every condition already looked met**, which is the honest closing note:
 the notification bell was mounted in **one zone out of four**, `networkidle` waits sat in ten places where

@@ -21,6 +21,9 @@ import { chromium } from '@playwright/test';
 const ORIGIN = process.env.ORIGIN ?? 'http://localhost:8090';
 const HOLD_S = Number(process.env.HOLD_S ?? 100);
 const SHOT_DIR = process.env.SHOT_DIR ?? '/tmp/lance-verify-shots';
+// The bar this run actually clears. nginx severs an idle stream at its 60s default; Bun's own
+// IDLE_TIMEOUT is the harder one at 255s, and only a hold longer than that proves the keepalive.
+const BAR_S = HOLD_S > 255 ? 255 : 60;
 const ARGS = ['--host-resolver-rules=MAP lance-ns-dex:5556 127.0.0.1:5556'];
 const PAGE = '/lakehouse/admin/events'; // the one page driven by a query.live subscription
 
@@ -52,7 +55,7 @@ async function login(context, user, startPath) {
 
 const browser = await chromium.launch({ args: ARGS });
 const context = await browser.newContext();
-console.log(`→ alice signs in and opens ${PAGE} (holding ${HOLD_S}s past a 60s nginx default)`);
+console.log(`→ alice signs in and opens ${PAGE} (holding ${HOLD_S}s, clearing the ${BAR_S}s bar)`);
 const page = await login(context, 'alice@example.com', PAGE);
 
 // Every request kit makes for the live subscription, with the second it started and how it ended.
@@ -84,7 +87,7 @@ for (let s = 10; s <= HOLD_S; s += 10) {
 }
 
 mkdirSync(SHOT_DIR, { recursive: true });
-const shotFile = `${SHOT_DIR}/live-stream-past-60s.png`;
+const shotFile = `${SHOT_DIR}/live-stream-past-${BAR_S}s.png`;
 await page.screenshot({ path: shotFile, fullPage: true });
 console.log(`     shot: ${shotFile}`);
 
@@ -119,5 +122,5 @@ ok(
 );
 
 await browser.close();
-console.log(failures ? `\n✗ ${failures} check(s) failed` : '\n✓ the live stream survived past 60s');
+console.log(failures ? `\n✗ ${failures} check(s) failed` : `\n✓ the live stream survived past ${BAR_S}s`);
 process.exit(failures ? 1 : 0);

@@ -46,7 +46,7 @@ _OUTPUT_STATS_FACET_URL = (
     "https://openlineage.io/spec/facets/1-0-2/OutputStatisticsOutputDatasetFacet.json"
     "#/$defs/OutputStatisticsOutputDatasetFacet"
 )
-PRODUCER = "https://github.com/Borg93/lance-audio/tree/main/src/ratch"
+PRODUCER = "https://github.com/Borg93/lance-audio/tree/main/packages/ratch"
 
 #: One field→field edge: (output_field, input_field, transformation_subtype).
 #: Carried columns are "IDENTITY"; derived artifacts are "TRANSFORMATION".

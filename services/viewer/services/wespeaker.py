@@ -3,7 +3,7 @@
 Vendored from ``runners/voiceprint/voiceprint.py`` (``VoiceEncoder``,
 ``load_wav_16k_mono``, ``l2_normalize``, ``MIN_TURN_DURATION_S``, ``TurnSpan``,
 ``embed_turn_slices`` + their internal helpers) and
-``src/ratch/modalities/av/wav.py`` (``extract_wav_16k_mono``,
+``packages/ratch/modalities/av/wav.py`` (``extract_wav_16k_mono``,
 ``TARGET_SAMPLE_RATE``): the backend must not import the ``ratch`` pipeline
 package (LANCE_MEDIA_MERGE §4.4), and this file is the upload voice-search
 path's whole model surface. The pipeline-side writers (Lance table output,

@@ -24,7 +24,7 @@ _TOPIC_LAYER_PREFIX = "topic_l"
 def topic_layer_columns(schema_names: Sequence[str]) -> list[str]:
     """``topic_l0 … topic_l{N-1}`` present on a table, broadest layer first.
 
-    Vendored from ``src/ratch/features/topic_tree.py`` (``topic_layer_columns``)
+    Vendored from ``packages/ratch/features/topic_tree.py`` (``topic_layer_columns``)
     because the backend may not import the pipeline package (§4.4); kept
     byte-equivalent in behavior so the search topic filter can't drift from the
     layers the topic tree/atlas were built on. The ``isdigit`` guard skips

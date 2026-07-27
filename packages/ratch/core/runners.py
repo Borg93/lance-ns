@@ -68,7 +68,7 @@ class RunnerContext(BaseModel):
 
 
 def runners_root() -> Path:
-    """The repo's ``runners/`` directory (three parents up from ``src/ratch/core``)."""
+    """The repo's ``runners/`` directory (three parents up from ``packages/ratch/core``)."""
     return Path(__file__).resolve().parents[3] / "runners"
 
 

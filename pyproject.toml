@@ -106,11 +106,11 @@ root = ["services", "."]
 # The vulture whitelist is, by design, a file of BARE NAMES — that is how vulture marks a symbol as "used".
 # To a type-checker every line is an unresolved reference, so `ty check` fails on it. It is not real code and
 # is never imported; exclude it rather than contorting the file into something vulture no longer understands.
-# src/ratch + runners are the folded lance-media pipeline/runner trees: unwired (no service imports them,
+# packages/ratch + runners are the folded lance-media pipeline/runner trees: unwired (no service imports them,
 # not in any image) and their deps are deliberately absent here — runners are sealed-env model workers
 # (their own pyprojects → their own images; lance-audio excluded them from ty for the same reason), and
 # ratch's ray[data]/lance-ray/typer stack lands with the pipeline step. Include ratch when that wiring lands.
-exclude = [".vulture-whitelist.py", "src/ratch", "runners"]
+exclude = [".vulture-whitelist.py", "packages/ratch", "runners"]
 
 [tool.ruff]
 line-length = 110

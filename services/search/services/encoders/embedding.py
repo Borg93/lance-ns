@@ -1,6 +1,6 @@
 """Bi-encoder embedding client: text + image queries → vectors via vLLM.
 
-Vendored from ``src/ratch/clients/embedding.py`` (backend split, §4.4: no
+Vendored from ``packages/ratch/clients/embedding.py`` (backend split, §4.4: no
 ``ratch`` imports in ``backend/``) with the pipeline's schema constant
 inverted: the expected vector dimension is a constructor argument — callers
 pass the dataset descriptor's vector-binding ``dim`` — so this client carries

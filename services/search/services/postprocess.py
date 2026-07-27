@@ -4,7 +4,7 @@ Ported from ``backend.search.postprocess``: pops each hit's alignments column
 into ``alignments`` (parsed), attaches the representative-frame caption, and
 provides the RRF fusion for the multi-ranking modes — all keyed on the
 descriptor's identity fields instead of a hardcoded chunk key.
-``parse_alignments_json`` is vendored from ``src/ratch/retrieval/search.py``
+``parse_alignments_json`` is vendored from ``packages/ratch/retrieval/search.py``
 because the backend may not import the pipeline package (§4.4).
 """
 

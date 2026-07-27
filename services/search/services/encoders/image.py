@@ -1,7 +1,7 @@
 """Pure, stateless image/vector transforms for the query encoders: L2
 normalization and image → data-URL encoding. No network, no model state.
 
-Vendored from ``src/ratch/clients/image.py`` (backend split, §4.4: no
+Vendored from ``packages/ratch/clients/image.py`` (backend split, §4.4: no
 ``ratch`` imports in ``backend/``), trimmed to the query-time surface — the
 caption-frame encoding stays in the pipeline package. The pipeline's embedding
 dimension constant is replaced by an ``expected_dim`` parameter supplied by the

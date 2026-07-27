@@ -1,7 +1,7 @@
 """Shared HTTP transport + wire shapes for the vLLM OpenAI-style model servers.
 
-Vendored from ``src/ratch/clients/base.py`` and the request/response models of
-``src/ratch/clients/schemas.py`` (backend split, §4.4: no ``ratch`` imports in
+Vendored from ``packages/ratch/clients/base.py`` and the request/response models of
+``packages/ratch/clients/schemas.py`` (backend split, §4.4: no ``ratch`` imports in
 ``backend/``). Every model client POSTs JSON to a long-running vLLM server and
 fans concurrent calls out over a thread pool — vLLM's continuous batching fuses
 them into one GPU pass. This transport owns the httpx connection pool and the

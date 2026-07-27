@@ -121,6 +121,31 @@ Two findings were new rather than corrections, and both matter at P2.4:
   backend). The collision class is still real and now sharper: the **`annotator` zone vs the
   `services/annotator` backend** under one release.
 
+## 4e. The layout decision (owner question + ruling, 2026-07-27)
+
+**rask's `components/` + `packages/` layout is the target, and the reason is the uv workspace, not tidiness.**
+
+lance-ns has **no uv workspace**. It is a single package named `lance-ns` with
+`pythonpath = ["services", "."]` — a pytest path hack that makes `catalog`, `lineage`, `medallion` and the
+rest import as top-level modules. Because nothing declares a dependency on anything, nothing can violate
+one: `catalog` reaching into `medallion`'s internals is not an error, it is just an import.
+
+rask is a real workspace: **14 members**, each with its own `pyproject.toml`, `src/`, `tests/` and declared
+deps (`service-kit` depends on `storage`). The move is a conversion from implicit to *enforced* module
+boundaries, with the resolver doing the enforcing.
+
+Three lance-ns oddities are symptoms of the same missing workspace, and all three get a home:
+
+| Today | Why it is odd | Lands as |
+| --- | --- | --- |
+| `services/common` | A library living in the services directory — no `main.py`, no `app.py` | `packages/common` (import root stays `common`, zero rewrites) |
+| `src/ratch` | Excluded from the root's own tooling (`pyproject.toml:113`) because its `ray[data]`/`lance-ray`/`typer` stack is not wanted at root | **`packages/ratch`** — a workspace member, which is what *resolves* the exclusion: the heavy deps move into its own pyproject. **Owner-ruled: ratch is a package, not a `components/cli` deployable** |
+| `runners/` | A deployable with nowhere to be | `components/runners/assist` |
+
+The frontend half is already done: the P5 migration deliberately put `frontend/` into rask's exact internal
+shape, so `frontend/components/frontends/<zone>` → `components/frontends/<zone>` is a directory move. The
+Python side is the real work.
+
 ## 5. Open work carried over
 
 Nothing here blocks the merge's own four verification conditions. It carries over so it is not lost.

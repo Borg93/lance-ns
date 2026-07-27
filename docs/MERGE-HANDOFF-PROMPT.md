@@ -65,6 +65,21 @@ transport** mounted in all four zone shells.
   it already is here: a top-level entry in `packages/ui/src/lib/shell/nav-config.ts:81` (`Studio`, `Shapes`
   icon) with its own `/animation` route.
 
+## The layout target, and why (owner-ruled 2026-07-27)
+
+rask's `components/` + `packages/` is the target — **because of the uv workspace, not the directory names.**
+lance-ns has *no* workspace: one package, `pythonpath = ["services", "."]`, so no module declares a
+dependency on any other and no boundary can be violated. rask has 14 declared members with real deps. P1 is
+therefore a **conversion**, not an append: every incoming module gets a declared home and declared deps for
+the first time, and that is the first moment anything can fail. Expect it to.
+
+- `services/common` → `packages/common` (import root stays `common`, zero import rewrites)
+- **`src/ratch` → `packages/ratch`** — a *package*, not a `components/cli` deployable. It is unwired today
+  and excluded from lance-ns's root tooling because its `ray[data]`/`lance-ray`/`typer` stack is not wanted
+  there; making it a workspace member is what resolves that.
+- `runners/assist` → `components/runners/assist`
+- the 7 services → `components/services/*` in src-layout
+
 ## Landmines that already cost real time — do not rediscover them
 
 - **`waitUntil: 'networkidle'` can never fire again in any zone.** Every shell holds a `query.live` SSE

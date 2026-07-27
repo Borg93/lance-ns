@@ -137,13 +137,14 @@ same tick each issued a full GET. Fixed with an in-flight promise; broken delibe
 
 ## 12 — the ledger is current
 
-`docs/GOAL-VERIFY-PULL.md` rewritten row by row against today's evidence, including the merge section with
-rulings R8 + R9.
+The parent tracker (`GOAL-VERIFY-PULL.md`) was rewritten row by row against the day's evidence, then
+retired with the goal on 2026-07-27 (git history). Open work moved to `OPEN-WORK.md`; the merge state
+lives in the rask plan.
 
 ## 13 — every open task disposed of
 
 The disposition table in `GOAL-UX-REACTIVE.md` — 18 tasks, each done-with-evidence or struck with a stated
-reason. Carried-over open work is enumerated in `MERGE-REPIN-DELTA.md` §5 so it survives the merge.
+reason. Carried-over open work is enumerated in `OPEN-WORK.md` so it survives the merge.
 
 ## 14 — the recorded mistakes have guards, and the guards were broken on purpose
 

@@ -1,16 +1,17 @@
 # Open work — the backlog that must survive the merge
 
 This file exists because the open items were only ever recorded as **session task IDs** (`#103`, `#124`, …)
-in a task tracker that does not outlive the session, and in `MERGE-REPIN-DELTA.md`, whose own closing line
-says to delete it. After the merge nobody in rask knows what "#103" means.
+in a task tracker that does not outlive the session, and in a re-pin diff that was applied and deleted by
+design. After the merge nobody in rask knows what "#103" means.
 
 So every entry below is **self-describing**: what it is, why it is open, where the code lives, and what
 would close it. The old task numbers are kept only as a cross-reference for anyone reading the lance-ns
 history. **`docs/architecture/lance-ns-merge.md` P0 copies this file into rask** — it is not left behind,
 and P8 reconciles it rather than dropping it.
 
-Status as of lance-ns `main@ba776ad`, 2026-07-27. The twenty conditions of `GOAL-UX-REACTIVE.md` are met
-(evidence in `GOAL-UX-REACTIVE-EVIDENCE.md`); everything here is what remains *after* that.
+Status as of 2026-07-27. The twenty UX-goal conditions are met — the goal tracker is retired (git
+history); **the durable artifact is [`GOAL-UX-REACTIVE-EVIDENCE.md`](GOAL-UX-REACTIVE-EVIDENCE.md)**.
+Everything here is what remains *after* that.
 
 ---
 
@@ -133,4 +134,6 @@ than the lance-ns one — several will have been answered by rask's operators.
 1. **P0** of `docs/architecture/lance-ns-merge.md` copies this file to `rask/docs/OPEN-WORK.md`.
 2. **P8** reconciles it — items closed *by* the merge get struck with the evidence; the rest carry forward
    into rask's own tracking, renumbered or not, but never silently dropped.
-3. `MERGE-REPIN-DELTA.md` is a diff and is meant to be deleted after the re-pin. **This file is not.**
+3. `MERGE-REPIN-DELTA.md` was a diff, was applied (the plan is re-pinned, rulings R8–R10 + D7 recorded),
+   and was deleted as its own instructions required — git history keeps it. **This file is not deletable**;
+   it is reconciled at P8, never dropped.

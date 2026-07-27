@@ -634,7 +634,7 @@ Every path:line below was opened independently; every command was re-run. Nine c
 defect in §4.
 
 **Tree drift first.** The report is headed `HEAD f9fe691`; HEAD is now `dfa95f9`.
-`git diff --stat f9fe691..HEAD` = `docs/GOAL-VERIFY-PULL.md`, `packages/api/tests/oidc.test.ts`,
+`git diff --stat f9fe691..HEAD` = `docs/GOAL-VERIFY-PULL.md (tracker retired 2026-07-27; git history)`, `packages/api/tests/oidc.test.ts`,
 `packages/zone-contract/src/budget.json`, `budget.test.ts` — **no route, nav, chart or component file
 touched**, so every finding still stands at HEAD. All ~30 path:line cites I opened resolved to the claimed
 text; no off-by-one worth reporting.

@@ -1,60 +1,59 @@
-# Handoff prompt v3 — mend, then copy
+# Handoff prompt v4 — the copy, in a fresh session
 
-Paste everything below the line into the rask session NOW. Part A closes the gaps an external audit found
-in its live tree (2026-07-27); Part B is the copy phase it flows straight into.
+Part A (the restructure mend) is complete and externally verified from the tree (2026-07-27). This prompt
+is written to be pasted into a FRESH rask session so the largest phase gets a clean context budget. Paste
+everything below the line.
 
 ---
 
-You are continuing the lance-ns → rask merge on `/home/blackwell/Desktop/rask`, branch
-`feat/lance-ns-merge`. The authority is `docs/architecture/lance-ns-merge.md` (rulings R1–R10, D7).
+You are executing the copy phase of the lance-ns → rask merge, in `/home/blackwell/Desktop/rask`, branch
+`feat/lance-ns-merge`. The authority is `docs/architecture/lance-ns-merge.md` (rulings R1–R11, decisions
+D1–D7) — read it before touching anything. A prior session did the restructure; you inherit its tree, not
+its memory.
 
-# PART A — mend the restructure first (externally audited 2026-07-27; verify each from the tree)
+## Standing constraints — non-negotiable
 
-Your restructure is well underway and mostly right: `components/` dissolved, `services/` at root, root
-`packages/` Python-only, uv members are globs, eslint+prettier deleted, the JS tooling moved into
-`frontend/`. Five things are wrong or unfinished. Fix them in this order and commit as you go.
+- **Never push rask to any remote. Never commit to or merge with rask `main`.** All work stays on
+  `feat/lance-ns-merge`.
+- **Never edit `/home/blackwell/Desktop/lance-ns`** — copy out only, taken fresh at copy time.
+- Commit messages: plain conventional, **no trailers** (no Co-Authored-By).
+- Secrets: app services consume from OpenBao via the Dapr secret store as strict sole source, fail-closed
+  — never a k8s Secret, never plaintext env. Never delete the OpenBao pod (dev-mode, in-memory).
+- Every claim cites command output or a screenshot; "looks right" is not evidence. Report an honest
+  fraction at each gate; never mark a gate met on a check you did not run.
+- A gate that can only observe the build step cannot see a failure in a step the build doesn't run. Treat
+  "the command exited 0" and "the artifact is correct" as separate claims, and find a cheap observation
+  for the second (the built-CSS byte-count A/B below is the reusable pattern).
+- Backward compatibility does not matter — change to the right thing and update all callers.
 
-1. **Commit before you rebase — your step order inverted itself.** The branch sits **69 commits behind
-   `origin/main`** with the entire restructure UNCOMMITTED (401 files: 360 R, 26 RM, 15 M, 4 D, 3 ??).
-   Git cannot rebase a dirty tree, and rename detection works far better on committed renames. So:
-   clear item 2, **commit the restructure as its own series**, THEN rebase onto `origin/main` and
-   delete the orphaned `projects/controlplane` your earlier removal missed.
-2. **`ty` is red at 88 diagnostics — and your pre-commit hook enforces it.** ~50 are the pre-existing set
-   (`scripts/index_alto.py` 39, `services/core` 24, `packages/htr` 10, `services/ray_api` 7,
-   `packages/storage` 4 — post-move paths) and **38 are in `.venv/`**, which means the ty config stopped
-   excluding the virtualenv after the moves — fix the exclusion first, then clear the real ones. Do NOT
-   `--no-verify` the restructure commit; if the gate is relaxed here it never comes back.
-3. **The zone directory is OWNER-RULED (R11): `frontend/microfrontends/` is the shape. Keep it.** Record
-   R11 in `docs/architecture/lance-ns-merge.md`'s ruling table. The consequence lands at COPY time, not
-   now: the incoming lance-ns frontend encodes `components/frontends/` and must be adapted to
-   `microfrontends/` **in the same commit as the copy**, with the full gate suite re-run. The measured
-   patch surface (from the source tree, node_modules excluded) is exactly:
-   `frontend/package.json` (the workspaces glob) · `frontend/turbo.json` (1 ref) · the four zones'
-   `vite.config.ts` (1 each) · `packages/media-api/src/api.ts` (1) · and **14 files in
-   `packages/zone-contract/src/`** (manifest.ts carries 9 refs incl. the literal read of
-   `components/frontends/home/microfrontends.json`; the rest 1–4 each). It is a mechanical
-   find-and-replace of one path segment, and `@repo/zone-contract`'s own manifest tests then verify the
-   result — if the rename is incomplete, the suite fails rather than silently passing. Your current
-   2-file `zone-contract` stub is REPLACED by the full incoming package (10 test files, 591 tests) as
-   part of the same commit.
-4. **`runners/` does not exist and `services/runner` is still a workspace member** carrying
-   `ray[data,default,serve]>=2.52,<2.56` inside the fleet's resolution — against the ABSOLUTE rule (a
-   runner is NEVER a member; no "resolves-today" exception). `git mv services/runner runners/htr`; it
-   keeps its own `pyproject.toml`, gains its own `uv.lock` (`cd runners/htr && uv lock`), and is matched
-   by no members glob. Re-run `uv lock` at root after — the fleet's resolution must shrink, not grow.
-5. **Strays:** `batches.db.20260527T105358Z` still at the root (your own step-1 list deletes it).
-   `frontend/packages/{api,ui}` are still `@rask/api`/`@rask/ui` — fine for now, they fold into `@repo/*`
-   at copy; just don't add new imports of those names.
+## The state you inherit — verify from the tree (~60 seconds), then go
 
-**Part A gates before proceeding:** clean `git status`; rebased on `origin/main`; `uvx ty check` clean;
-`uv sync` clean; `bun install` + `turbo run build` green from `frontend/`; helm lint green. Report an
-honest fraction, then continue below.
+The prior session: dissolved `components/`, put deployables at `services/`, made root `packages/`
+Python-only with glob members, sealed `runners/htr` OUT of the workspace with its own pyproject + lock,
+deleted eslint+prettier (R10: oxlint + oxfmt + rsvelte-fmt won; bun-first), renamed the zone directory to
+`frontend/microfrontends/` (R11), fixed the Tailwind `@source` climb in all 7 zones (41 KB of styling was
+silently missing), recorded R11 + the lance-ns pin in the plan, rebased onto `origin/main`, and left ruff
++ ty green on a clean tree.
+
+Verify each — from the tree, not from this prompt:
+
+```bash
+git status --short                                     # empty
+git rev-list --left-right --count origin/main...HEAD   # 0 <tab> N — zero behind
+ls frontend/microfrontends/                            # the rask zones; frontend/components/ gone
+grep -rn "@source" frontend/microfrontends/*/src/app.css  # every climb '../../../packages/ui/dist'
+grep -n "R11" docs/architecture/lance-ns-merge.md      # the ruling is recorded
+test -f runners/htr/pyproject.toml && test -f runners/htr/uv.lock && echo sealed
+uvx ty check && uv run ruff check .                    # both clean
+```
+
+If any check fails, STOP and reconcile before copying — do not build on an unverified inheritance.
 
 # PART B — the copy: lance-ns in, ALL of it (R1, total merge)
 
-**Source pin: `/home/blackwell/Desktop/lance-ns` at current `main` (`378970d` at authoring; docs-only
-since `f8df8de` — re-pin to `git -C /home/blackwell/Desktop/lance-ns rev-parse main` at copy time; copies
-are taken fresh, never stale).** Never edit that repo — copy out only. Never push rask to any remote;
+**Source pin: `/home/blackwell/Desktop/lance-ns` at current `main` — re-pin to
+`git -C /home/blackwell/Desktop/lance-ns rev-parse main` at copy time, record the SHA in the plan, and
+take every copy fresh from that pin, never stale. (`6fbaa0e` + docs-only commits at authoring.)** Never edit that repo — copy out only. Never push rask to any remote;
 never commit to or merge with rask `main`. **Copy-completeness gate:** after copying, diff the top-level
 inventory — every item in `git -C …/lance-ns ls-files | cut -d/ -f1 | sort -u` (28 today) must exist in
 the rask tree or appear in your commit message with the manifest row that transformed it. Nothing from
@@ -77,21 +76,11 @@ Six zones, all six in the top navbar: **`home · lakehouse · media · annotator
   into `home`. One home: rask's home content folds into the incoming `home` zone, which owns
   `/auth/{login,callback,logout}` and the catch-all.
 
-## Before copying — verify your own step 2, from the tree, not from memory
-
-1. `frontend/` exists; `components/` is gone; `eslint.config.js` and every prettier config are deleted
-   (R10 — oxlint + oxfmt + rsvelte-fmt won; bun-first).
-2. **The zone directory is `frontend/microfrontends/*` (R11).** The incoming lance-ns tree is adapted to
-   it at copy (Part A item 3): the workspaces glob, `turbo.json`, the zones' `vite.config.ts`,
-   `media-api/src/api.ts` and all of `zone-contract/src/` have their `components/frontends` path segment
-   replaced with `microfrontends`, in the same commit as the copy, gates re-run.
-3. `uvx ty check` clean (the 70 pre-existing rask errors were yours to clear), gates green, committed.
-
 ## The copy manifest — R1 is TOTAL; every top-level item has a destination
 
 | lance-ns | → rask | Note |
 |---|---|---|
-| `frontend/` | `frontend/` — zones land at **`frontend/microfrontends/{home,lakehouse,media,annotator}`** (R11); the 7 `@repo/*` packages at `frontend/packages/*`; `package.json`, `bun.lock`, `turbo.json`, `knip.json`, `microfrontends.json`, `.oxlintrc.json`, `.oxfmtrc.json` at the `frontend/` root — with the `components/frontends` → `microfrontends` path adaptation from Part A item 3 applied in the same commit | The JS plane root is `frontend/`, not the repo root (owner-ruled). rask's `compute` + `studio` merge in as zones; rask's `packages/{api,ui}` fold INTO `@repo/api`/`@repo/ui` (keep rask's storybook + `navMain(project)`). Dev ports: incoming zones take fresh slots — lance `lakehouse` 5174 collides with rask `storage` 5174, lance `annotator` 5177 with `studio` 5177, and R9 keeps studio, so that one is live |
+| `frontend/` | `frontend/` — zones land at **`frontend/microfrontends/{home,lakehouse,media,annotator}`** (R11); the 7 `@repo/*` packages at `frontend/packages/*`; `package.json`, `bun.lock`, `turbo.json`, `knip.json`, `microfrontends.json`, `.oxlintrc.json`, `.oxfmtrc.json` at the `frontend/` root — **no path translation**: both trees are `frontend/microfrontends/` (R11; lance-ns renamed to match, `6fbaa0e`) | The JS plane root is `frontend/`, not the repo root (owner-ruled). rask's `compute` + `studio` merge in as zones; rask's `packages/{api,ui}` fold INTO `@repo/api`/`@repo/ui` (keep rask's storybook + `navMain(project)`). The incoming `@repo/zone-contract` (10 test files, 591 tests) REPLACES rask's 2-file stub in the same commit — it is the falsifiability layer for every frontend claim. Dev ports: incoming zones take fresh slots — lance `lakehouse` 5174 collides with rask `storage` 5174, lance `annotator` 5177 with `studio` 5177, and R9 keeps studio, so that one is live |
 | `services/` (catalog, lineage, medallion, compaction, viewer, search, annotator) | `services/*` | src-layout conversion at copy; entrypoints preserved (`catalog.main:app`) |
 | `packages/` (`common`, `ratch` — **ratch already moved**, `45912c8`) | `packages/*` | Workspace members. `common` keeps import root `common` (zero rewrites); `ratch` gains its own pyproject with its ray/lance-ray/typer deps at P1, resolving its old root-tooling exclusion |
 | `runners/` (asr, diarize, kg, topics, voiceprint, assist — **already sealed**, `a4cf8f6`) | `runners/` top-level | **ABSOLUTE rule: a runner is NEVER a workspace member.** Each keeps its own pyproject + deps (+ `assist`'s own `uv.lock` and image). rask's `components/cli/runner` (HTR) also lands here as `runners/htr`, sealed, OUT of the workspace — no "resolves today" exception |
@@ -112,18 +101,15 @@ Six zones, all six in the top navbar: **`home · lakehouse · media · annotator
 
 ## The traps, in copy order
 
-- **Tailwind `@source` climbs break SILENTLY when a directory moves — audit yours NOW.** Found in lance-ns
-  after the same rename you did: each zone's `src/app.css` carried
-  `@source '../../../../packages/ui/dist'` — one `../` too many at the new depth, so Tailwind v4 simply
-  stopped scanning `@repo/ui` and never emitted its `lg:*` utilities. The entire estate sidebar collapsed
-  to `display:none` with **markup present in SSR, zero console errors, zero page errors** — only an
-  element-visibility assertion caught it, after a four-experiment bisect. Your exposure is identical twice
-  over: your zones moved (`components/frontends/<z>` → `frontend/microfrontends/<z>`) AND your
-  `packages/ui` moved into `frontend/packages/ui`, so any `@source '../../../../packages/ui/…'` in a rask
-  zone now resolves to the Python-only root `packages/`. Audit:
-  `grep -rn "@source" frontend/microfrontends/*/src/` plus `grep -rn '\.\./\.\./\.\./'` over zone files,
-  and verify every relative target EXISTS (`python3 -c "import os; print(os.path.abspath(...))"`) from the
-  file's own directory. The incoming lance-ns zones are already fixed (`'../../../packages/ui/dist'`).
+- **Tailwind `@source` climbs break SILENTLY when a directory moves — both trees are fixed today; the
+  CLASS is not.** Each zone's `src/app.css` reaches `@repo/ui` by a relative climb
+  (`@source '../../../packages/ui/dist'`). One `../` too many and Tailwind v4 simply stops scanning the
+  package: no error, markup present in SSR, every `lg:*` utility silently unemitted. In lance-ns the
+  estate sidebar collapsed to `display:none` and only an element-visibility assertion caught it, after a
+  four-experiment bisect; in rask the same defect cost 41 KB (~48%) of the built stylesheet (fixed —
+  A/B 44,796 → 86,011 bytes). After ANY directory-depth change:
+  `grep -rn "@source" frontend/microfrontends/*/src/`, verify every relative target EXISTS from the
+  file's own directory, then A/B the built CSS byte count — observe the artifact, not the exit code.
 
 - **`rask-web-<zone>`** for every frontend k8s object. The live instance of the collision class: the
   `annotator` ZONE vs the `services/annotator` backend Service under one release.

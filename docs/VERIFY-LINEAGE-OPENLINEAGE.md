@@ -143,8 +143,8 @@ facet_fields: [{'name': 'id', 'type': 'int64'}, {'name': 'lineage', 'type': 'ext
 ```
 
 which contradicts the `("lineage", "json")` label `services/lineage/seed.py` already emits for the same
-column. This is not hypothetical for the merged media path: `src/ratch/model/schema.py` writes
-`pa.field("alignments_json", pa.json_())` and `src/ratch/features/topic_tree.py` writes `hierarchy` the
+column. This is not hypothetical for the merged media path: `packages/ratch/model/schema.py` writes
+`pa.field("alignments_json", pa.json_())` and `packages/ratch/features/topic_tree.py` writes `hierarchy` the
 same way, and those tables are emitted through the vendored mirror
 `common.lancekit.openlineage._type_label`, which had the same gap.
 

@@ -139,7 +139,7 @@ Three lance-ns oddities are symptoms of the same missing workspace, and all thre
 | Today | Why it is odd | Lands as |
 | --- | --- | --- |
 | `services/common` | A library living in the services directory — no `main.py`, no `app.py` | `packages/common` (import root stays `common`, zero rewrites) |
-| `src/ratch` | Excluded from the root's own tooling (`pyproject.toml:113`) because its `ray[data]`/`lance-ray`/`typer` stack is not wanted at root | **`packages/ratch`** — a workspace member, which is what *resolves* the exclusion: the heavy deps move into its own pyproject. **Owner-ruled: ratch is a package, not a `components/cli` deployable** |
+| `packages/ratch` | Excluded from the root's own tooling (`pyproject.toml:113`) because its `ray[data]`/`lance-ray`/`typer` stack is not wanted at root | **`packages/ratch`** — a workspace member, which is what *resolves* the exclusion: the heavy deps move into its own pyproject. **Owner-ruled: ratch is a package, not a `components/cli` deployable** |
 | `runners/` | A deployable with nowhere to be | `components/runners/assist` |
 
 The frontend half is already done: the P5 migration deliberately put `frontend/` into rask's exact internal

@@ -89,7 +89,7 @@ Consequences you must apply:
   two surviving zones into `frontend/`. Fewer moves, and the proven gates arrive as-is.
 - **P2's `packages/ui` merge inverts**: rask's storybook + `navMain(project)` fold INTO `@repo/ui`.
 - The manifest-completeness gate is unnecessary under D7 — globs enforce membership structurally.
-- `src/ratch` → `packages/ratch` (a *package*, owner-ruled — its heavy deps move into its own pyproject,
+- `packages/ratch` → `packages/ratch` (a *package*, owner-ruled — its heavy deps move into its own pyproject,
   which resolves its current exclusion). Per-individual-service packages are rejected: shared-by-one is
   not shared.
 

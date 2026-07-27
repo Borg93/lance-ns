@@ -63,6 +63,17 @@ and *dismissed* are per-subject state the run feed cannot carry.
 **What closes it.** One actor per subject inbox, unread counts that cannot race, expiry via reminders rather
 than a sweeper cron.
 
+### B2b · ratch's runner imports become the Ray-native name seam *(new, 2026-07-27)*
+
+**What.** `packages/ratch/cli/{speaker,transcribe}.py` still lazily import `from runners.diarize.diarize
+import …` — repo-relative module paths from the lance-audio heritage, working only when the repo root is on
+`sys.path`. The runners tree deliberately carries no `__init__.py` glue any more (`a4cf8f6`) and runners are
+sealed non-members of the workspace, so these imports are dead code walking.
+
+**What closes it.** When ratch is wired (the pipeline step): ratch passes runner NAMES and each runner's
+`pyproject.toml` as the Ray worker `runtime_env`; the actor module imports on the WORKER. The contract is
+stated in `runners/README.md`. Do not resolve this by making `runners.` importable again.
+
 ### B3 · Annotation projects are designed, not built *(was #122)*
 
 **What.** `docs/DESIGN-annotation-projects.md` — entities, both state machines, the authz doors, what a

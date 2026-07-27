@@ -79,8 +79,11 @@ repo.
 frontend/     ← lance-ns's JS plane, WHOLESALE: bun.lock, turbo.json, oxlint/oxfmt configs, and all 13
                 @repo/zone-contract gate files travel unchanged. rask's compute + studio move INTO it.
 services/     ← Python deployables, src-layout: catalog, lineage, medallion, compaction, viewer, search,
-                annotator + rask's gateway/core/ray_api + runners/assist. components/ dissolves.
+                annotator + rask's gateway/core/ray_api. components/ dissolves.
 packages/     ← Python-only shared: common, ratch, storage, service-kit, ray-kit, htr, tracker, validate.
+runners/      ← SEALED projects OUTSIDE the workspace: asr, diarize, kg, topics, voiceprint (pyproject =
+                the Ray worker runtime_env) + assist (own uv.lock, own image). NEVER under services/ —
+                the members glob would sweep them into the workspace.
 pyproject.toml  [tool.uv.workspace] members = ["packages/*", "services/*"]   ← GLOBS, no enumeration
 ```
 
@@ -89,9 +92,16 @@ Consequences you must apply:
   two surviving zones into `frontend/`. Fewer moves, and the proven gates arrive as-is.
 - **P2's `packages/ui` merge inverts**: rask's storybook + `navMain(project)` fold INTO `@repo/ui`.
 - The manifest-completeness gate is unnecessary under D7 — globs enforce membership structurally.
-- `packages/ratch` → `packages/ratch` (a *package*, owner-ruled — its heavy deps move into its own pyproject,
-  which resolves its current exclusion). Per-individual-service packages are rejected: shared-by-one is
-  not shared.
+- **`packages/ratch` and the sealed runners are ALREADY DONE in lance-ns** (`45912c8`, `a4cf8f6`) — copy
+  straight across, no path translation. ratch is a *package* (owner-ruled); its heavy deps move into its
+  own pyproject at P1, resolving its old root-tooling exclusion.
+- **The `runners/` membership rule**: shares the fleet's resolution → workspace member; pinned to an
+  external runtime → `runners/`, own env. Measured: `assist` has its own `uv.lock`, `>=3.12,<3.14` against
+  the root's `>=3.13`, and `+cpu` torch from the pytorch index; the offline runners pin `cu128` torch.
+  Each runner is sealed — README + pyproject (+ lock where it builds an image), **no `__init__.py` glue**.
+  ratch `cli/`'s leftover `from runners.…` imports are unwired heritage, replaced by the Ray-native name
+  seam (`Stage.runner=` + worker `runtime_env`) — never "fixed" by making runners importable again.
+- Per-individual-service packages are rejected: shared-by-one is not shared.
 
 ## Landmines that already cost real time — do not rediscover them
 

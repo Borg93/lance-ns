@@ -53,6 +53,29 @@ The ordering that got the most user-visible improvement per unit of work turned 
 #124 → #102 → #113's view — #124's state store is what #102's push signal, #122's projects and #125's
 notifications all stand on, and it landed first.
 
+## The rask merge — where it stands (2026-07-27)
+
+The authority is **`rask/docs/architecture/lance-ns-merge.md`** on `feat/lance-ns-merge`, not
+`RASK-INTEGRATION.md` here. Direction is settled by **R1: total merge, lance-ns → rask**. The file-count
+asymmetry (lance-ns 1643 tracked files vs rask 639) argues the other way and is the wrong measure: rask's
+side is *empirically tuned infrastructure* — KubeRay + Kueue with GPU Serve packing OOM-tuned against a
+raylet-killing cascade — which you re-tune rather than copy. Ours is application code plus a chart, and its
+proof travels with it. You move the code to the compute.
+
+**Owner ruling R8 (2026-07-27)** — the surviving zone set is `home + lakehouse + media + annotator +
+compute`: rask's browse/viewing/search are eaten by the media plane, `compute` survives as the plane rask
+owns, `storage` folds INTO the lakehouse, `train` folds in via `models`, `overview` into `home`, and
+**`studio` is undecided**.
+
+**The plan was 190 commits stale** and is now re-pinned (`df70b63` → `502150b`, rask commit `2d80e49`).
+Three drifts were structural, not cosmetic — four zones not seven, `@repo/*` not `@rask/*`, and
+`frontend/eslint-rules/` gone. Two preconditions it lacked are now recorded: **rask's own `ty` gate is red
+(70 errors on its unmodified tree**, which blocks every commit via its pre-commit hook) and the two repos
+have **incompatible frontend toolchains**.
+
+Working detail: [`MERGE-REPIN-DELTA.md`](MERGE-REPIN-DELTA.md). Copy-pasteable brief for the rask session:
+[`MERGE-HANDOFF-PROMPT.md`](MERGE-HANDOFF-PROMPT.md).
+
 ## Standing rules (owner-set)
 
 - **Evidence, not assertion.** Every claim cites command output, a rendered manifest, or a screenshot.

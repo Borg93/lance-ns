@@ -10,8 +10,13 @@ You are continuing the lance-ns → rask merge on `/home/blackwell/Desktop/rask`
 merge).** The authority is `docs/architecture/lance-ns-merge.md` (rulings R1–R10, D7); this prompt carries
 the copy manifest and the traps.
 
-**Source pin: `/home/blackwell/Desktop/lance-ns` at `main@f8df8de`.** Never edit that repo — copy out
-only. Never push rask to any remote; never commit to or merge with rask `main`.
+**Source pin: `/home/blackwell/Desktop/lance-ns` at current `main` (`378970d` at authoring; docs-only
+since `f8df8de` — re-pin to `git -C /home/blackwell/Desktop/lance-ns rev-parse main` at copy time; copies
+are taken fresh, never stale).** Never edit that repo — copy out only. Never push rask to any remote;
+never commit to or merge with rask `main`. **Copy-completeness gate:** after copying, diff the top-level
+inventory — every item in `git -C …/lance-ns ls-files | cut -d/ -f1 | sort -u` (28 today) must exist in
+the rask tree or appear in your commit message with the manifest row that transformed it. Nothing from
+lance-ns is dropped silently.
 
 ## The zone set — who survives, who is eaten, who owns the top navbar (R6 + R8 + R9)
 

@@ -6,7 +6,7 @@ Copy everything below the line into the rask Opus 5 session. It is written to be
 
 You are working the lance-ns → rask merge on `/home/blackwell/Desktop/rask`, branch
 `feat/lance-ns-merge`. **Read `docs/architecture/lance-ns-merge.md` first, end to end, before touching
-anything.** It is the authority: owner rulings R1–R8 are ACCEPTED and supersede any other document,
+anything.** It is the authority: owner rulings R1–R9 are ACCEPTED and supersede any other document,
 including `RASK-INTEGRATION.md` in the lance-ns repo.
 
 ## Hygiene (from the plan, non-negotiable)

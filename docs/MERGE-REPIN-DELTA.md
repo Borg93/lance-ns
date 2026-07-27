@@ -146,7 +146,7 @@ The frontend half is already done: the P5 migration deliberately put `frontend/`
 shape, so `frontend/components/frontends/<zone>` → `components/frontends/<zone>` is a directory move. The
 Python side is the real work.
 
-## 5. Open work carried over
+## 5. Open work carried over *(summary — the authority is [`OPEN-WORK.md`](OPEN-WORK.md))*
 
 Nothing here blocks the merge's own four verification conditions. It carries over so it is not lost.
 
@@ -168,3 +168,9 @@ Nothing here blocks the merge's own four verification conditions. It carries ove
 At the next phase copy: re-pin the plan's header to current lance-ns `main`, apply §1 and §2 to the P0
 layout table and the P2/P4/P6 gate lists, strike the §3 rows from the open-decisions list, and add §4 to P4.
 Then delete this file — it is a diff, not a design record, and a stale diff is worse than none.
+
+⚠️ **Deleting this file must NOT take the backlog with it.** §5 below used to be the only written home for
+the open work, and it was recorded as session task IDs that outlive nothing. That list now lives in
+**[`OPEN-WORK.md`](OPEN-WORK.md)**, which is self-describing, is copied into `rask/docs/` by the merge
+plan's P0, and is reconciled — not dropped — at P8. §5 is kept here only as a summary; **`OPEN-WORK.md` is
+the authority, and it is not deletable with this file.**

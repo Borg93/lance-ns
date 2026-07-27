@@ -75,6 +75,10 @@ Three drifts were structural, not cosmetic — four zones not seven, `@repo/*` n
 (70 errors on its unmodified tree**, which blocks every commit via its pre-commit hook) and the two repos
 have **incompatible frontend toolchains**.
 
+**The open backlog is [`OPEN-WORK.md`](OPEN-WORK.md)** — self-describing, copied into rask by the plan's P0
+and reconciled at P8, so nothing is lost in the move. It replaces the session task IDs (`#103`, `#124`, …),
+which outlive nothing.
+
 Working detail: [`MERGE-REPIN-DELTA.md`](MERGE-REPIN-DELTA.md). Copy-pasteable brief for the rask session:
 [`MERGE-HANDOFF-PROMPT.md`](MERGE-HANDOFF-PROMPT.md).
 

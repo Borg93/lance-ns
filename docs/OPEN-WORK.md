@@ -1,0 +1,125 @@
+# Open work — the backlog that must survive the merge
+
+This file exists because the open items were only ever recorded as **session task IDs** (`#103`, `#124`, …)
+in a task tracker that does not outlive the session, and in `MERGE-REPIN-DELTA.md`, whose own closing line
+says to delete it. After the merge nobody in rask knows what "#103" means.
+
+So every entry below is **self-describing**: what it is, why it is open, where the code lives, and what
+would close it. The old task numbers are kept only as a cross-reference for anyone reading the lance-ns
+history. **`docs/architecture/lance-ns-merge.md` P0 copies this file into rask** — it is not left behind,
+and P8 reconciles it rather than dropping it.
+
+Status as of lance-ns `main@ba776ad`, 2026-07-27. The twenty conditions of `GOAL-UX-REACTIVE.md` are met
+(evidence in `GOAL-UX-REACTIVE-EVIDENCE.md`); everything here is what remains *after* that.
+
+---
+
+## A. The merge forces this one
+
+### A1 · The media corpus must leave its node hostPath *(was #103)*
+
+**What.** `services/{viewer,search,annotator}` read the corpus from a node-local `hostPath`
+(`/var/media-corpus`, `chart/templates/media.yaml:126`), staged from the lance-audio box. `MEDIA_DB_ROOT`,
+`MEDIA_DB` and `MEDIA_DESCRIPTOR_DIR` all hang off `media.corpusMountPath`; 10+ files across the three
+services read it.
+
+**Why it is open.** It was correct for a single-node kind cluster and deliberately deferred — "NO data move:
+the corpus stays node-local", per the template's own comment.
+
+**Why the merge forces it.** A hostPath binds a pod to whichever node holds the data. The merge plan's P4
+already rules **"no hostPath ships"**.
+
+**What closes it.** Two halves, and they should be decided separately:
+- *Portable:* register the corpus as **catalog-governed project tables** (the intended read-plane shape).
+  This survives any destination and is the part worth doing first.
+- *Destination-specific:* a PVC, or a rustfs-backed corpus bucket on rask's operator Tenant. Decide this in
+  P4 against the cluster it will actually live on — deciding it in lance-ns means deciding it twice.
+
+---
+
+## B. Built halfway — the second half is named and small
+
+### B1 · No actor type and no workflow are registered *(was #124, second half)*
+
+**What is done.** `lance-statestore` is live: `state.postgresql` on the AGE Postgres, DSN resolved from
+OpenBao through `lance-secrets`, `actorStateStore: "true"`, scoped to `catalog` + `annotator`. Per-subject
+user state round-trips through it and is proven across browser contexts.
+
+**What is not.** The flag that gates actors *and* workflow is on and **nothing uses it**. No actor type is
+registered; no workflow is registered.
+
+**What closes it.** An actor type hosted by a service in the component's `scopes`, proven by a round trip
+through the sidecar. Keep `tests/unit/test_invariants.py`'s scope check — an app missing from `scopes` gets
+"component not found" and every user's saved work 503s, logged by the sidecar and noticed by nothing else.
+
+### B2 · The notification inbox has no actor *(was #128)*
+
+**What.** Read/dismissed state for notifications is per-tab. The bell itself is done and estate-wide (all
+four zones, shared `@repo/api/runs-feed`), because `GET /runs` already carries the lifecycle — but *read*
+and *dismissed* are per-subject state the run feed cannot carry.
+
+**Why it is open.** It needs B1.
+
+**What closes it.** One actor per subject inbox, unread counts that cannot race, expiry via reminders rather
+than a sweeper cron.
+
+### B3 · Annotation projects are designed, not built *(was #122)*
+
+**What.** `docs/DESIGN-annotation-projects.md` — entities, both state machines, the authz doors, what a
+publish emits, and a slice plan.
+
+**Where it stands.** Slices `S1`–`S4` (domain core, FGA type, publish schema, catalog `create` pin) need no
+store and are the next buildable unit. `S5`–`S10` need B1's actors.
+
+---
+
+## C. Carrying a stated reason
+
+### C1 · `TableDetail`'s 60-assignment reset effect *(was #119)*
+
+**What.** `TableDetail.svelte` resets ~60 assignments in an `$effect` where `{#key table}` would do it
+structurally.
+
+**Why it is still open, with evidence.** The fix re-instantiates a 1000-line component under 215 e2e tests.
+This is not caution for its own sake: an edit to that component during this session **dropped 6 of its 10
+history versions** (`missing: 9, 8, 7, 5, 4, 3`) with `svelte-check` reporting 0 errors and 0 warnings. It
+is a component that punishes casual edits and needs its own pass with a browser drive, not a tidy-up.
+
+### C2 · The product-works pass *(was #97)*
+
+Ten conditions — annotator loop, runners, one-nav, FGA workbench, create-project, preview, lineage facets,
+drawers, registry, gates. Orthogonal to the merge. Its premise is the one worth keeping: *drive the product
+as a skeptical first user, not the elements.*
+
+### C3 · Lineage track remainder *(was #111)*
+
+Spec-fidelity and Marquez-parity reports are done; Dapr-delivery and gold-finding tests landed in `b43b8ff`.
+**What remains is the gold whole-history JSONB embed** — and note it is the *same artifact* as the merge
+plan's **P7b gold schema contract**. Do it once, there.
+
+### C4 · Prod-readiness residuals *(was #86)*
+
+Residuals from the retired `GOAL-production-readiness` tracker. Re-derive against the merged chart rather
+than the lance-ns one — several will have been answered by rask's operators.
+
+---
+
+## D. Owner-deferred — not work, decisions already made
+
+| Item | Ruling |
+| --- | --- |
+| **Settings surface** *(was #112)* — break out auth / authz / audit | Owner: *"keep it as is"* |
+| **NATS HA / nack operator + GitOps; query engine** *(was #20)* | Owner-parked. The merge plan's PROPOSED decision 5 holds it parked too, noting rask's JetStream is on but streamless and lance-ns's stream-job is its first real consumer |
+| **Models registry MLflow parity** *(was #101)* | Deprioritized until after the product pass |
+| **Annotator residuals** *(was #100)* — export serializers (COCO / YOLO / CSV / HF) + managed label taxonomy | Owner to schedule. ⚠️ **The export half is the same service as the merge plan's P7c `exporter`** (ALTO 4.4 first, owner-ruled R4: serialization is a separate microservice, never inside the lakehouse or the movers). COCO/YOLO/CSV/HF become additional projections from gold — new functions in that service, not a second export path. Do not build these twice |
+| **Storybook** | Struck for now — rask keeps its own (plan P2 step 3); adopt rask's rather than re-deciding |
+| `/lakehouse/data` scaffold, `/lakehouse/admin` orphan | Product decisions, not defects with one right answer |
+
+---
+
+## How this survives
+
+1. **P0** of `docs/architecture/lance-ns-merge.md` copies this file to `rask/docs/OPEN-WORK.md`.
+2. **P8** reconciles it — items closed *by* the merge get struck with the evidence; the rest carry forward
+   into rask's own tracking, renumbered or not, but never silently dropped.
+3. `MERGE-REPIN-DELTA.md` is a diff and is meant to be deleted after the re-pin. **This file is not.**

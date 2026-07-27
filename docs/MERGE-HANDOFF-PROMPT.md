@@ -124,14 +124,28 @@ the first time, and that is the first moment anything can fail. Expect it to.
   own package's `build`), and Playwright `workers: 8` starving a small runner (`CI ? 2 : 8`). rask inherits
   neither fix automatically.
 
-## Carried-over open work (none of it blocks the merge's own gates)
+## Carried-over open work — read `docs/OPEN-WORK.md`, it travels with the merge
 
-`#103` media corpus off its node hostPath — **deferred in lance-ns, blocking here**, since P4 rules that no
-hostPath ships. `#122` annotation projects (designed; slices S1–S4 need no store, S5–S10 need actors).
-`#124` second half — the state store is live but **no actor type and no workflow are registered**. `#128`
-the notification actor. `#119` the `TableDetail` reset effect (an edit there dropped 6 of 10 history
-versions with `svelte-check` at 0 errors — treat that component carefully). `#97`, `#111`, `#86`, `#100`,
-`#101`, `#112`, `#20`.
+`lance-ns/docs/OPEN-WORK.md` is the durable backlog and the plan's P0 copies it to `rask/docs/OPEN-WORK.md`.
+It is self-describing — what each item is, why it is open, where the code lives, what closes it — because
+the old record was session task IDs that outlive nothing. **P8 reconciles it: items the merge closed get
+struck with the evidence, the rest carry forward, none silently dropped.**
+
+Two entries change what you do rather than waiting for you:
+
+- **A1 — the media corpus must leave its node hostPath.** Deferred in lance-ns, **blocking here**: P4 rules
+  no hostPath ships. Split it — registering the corpus as catalog-governed project tables is portable and
+  worth doing first; the physical destination (PVC vs a rustfs-backed bucket on rask's Tenant) belongs in
+  P4, decided once against the cluster it will live on.
+- **D · annotator export serializers** (COCO / YOLO / CSV / HF) are the **same service** as P7c's `exporter`
+  (ALTO 4.4 first, R4). Additional projections from gold, not a second export path. Do not build it twice.
+
+Also open, all with stated reasons in that file: the state store has **no actor type and no workflow
+registered** (the `actorStateStore` flag is on and unused), the notification inbox has no actor, annotation
+projects are designed but need those actors, `TableDetail`'s reset effect needs its own pass (an edit there
+dropped 6 of 10 history versions with `svelte-check` at 0 errors), the product-works pass, the gold
+whole-history JSONB embed — which is the same artifact as your **P7b gold schema contract**, so do it once,
+there.
 
 ## Start here
 

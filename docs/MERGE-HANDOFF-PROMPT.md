@@ -27,11 +27,12 @@ including `RASK-INTEGRATION.md` in the lance-ns repo.
    cleared. Do it as a standalone pre-P1 commit, provable against rask alone. Do not relax the gate to
    accommodate them; that is the failure this plan exists to prevent. (The plan's own re-pin commit needed
    `--no-verify` for exactly this reason.)
-2. **The two repos have incompatible frontend toolchains.** rask is eslint + prettier. lance-ns is
-   **oxlint + oxfmt**, with no eslint and no prettier anywhere, and `@repo/zone-contract` asserts
-   *byte-identical* `lint`/`fmt`/`fmt:check` scripts in every workspace package (proven to fail on drift in
-   both directions). Decide the direction at P2 step 1 and execute it as **one pure-format commit before any
-   3-way merge**, or the formatter noise gets baked into the conflicts.
+2. **The toolchain direction is RULED (R10) — lance-ns's wins.** oxlint + oxfmt + rsvelte-fmt replace
+   rask's eslint + prettier, and the chart and all lance-ns configs come with the merge. What remains is
+   the *execution*: one pure-format commit reformatting rask's surviving zones (`compute`, `studio`, home
+   content) and `packages/{api,ui}` under the lance-ns toolchain, **before any 3-way merge** — or the
+   formatter noise gets baked into the conflicts. `@repo/zone-contract`'s script-parity gate then applies
+   to every package unchanged.
 
 ## What changed in lance-ns since the plan was first written (190 commits)
 
@@ -65,20 +66,32 @@ transport** mounted in all four zone shells.
   it already is here: a top-level entry in `packages/ui/src/lib/shell/nav-config.ts:81` (`Studio`, `Shapes`
   icon) with its own `/animation` route.
 
-## The layout target, and why (owner-ruled 2026-07-27)
+## The layout target — D7, settled by experiment (owner-ruled 2026-07-27)
 
-rask's `components/` + `packages/` is the target — **because of the uv workspace, not the directory names.**
-lance-ns has *no* workspace: one package, `pythonpath = ["services", "."]`, so no module declares a
-dependency on any other and no boundary can be violated. rask has 14 declared members with real deps. P1 is
-therefore a **conversion**, not an append: every incoming module gets a declared home and declared deps for
-the first time, and that is the first moment anything can fail. Expect it to.
+Two **language-pure planes**, not one mixed root `packages/`. The deciding facts, reproducible in a
+scratch dir: `uv lock` **errors** on a non-Python dir matched by a members glob (an `exclude` list is
+enumeration renamed), and `bun install` **silently skips** non-JS dirs — safe-looking until a Python
+package gains a `package.json` and gets swept in without a word. Language-pure directories are the only
+shape where globs are both possible and safe, and there are **zero cross-language package deps** in either
+repo.
 
-- `services/common` → `packages/common` (import root stays `common`, zero import rewrites)
-- **`src/ratch` → `packages/ratch`** — a *package*, not a `components/cli` deployable. It is unwired today
-  and excluded from lance-ns's root tooling because its `ray[data]`/`lance-ray`/`typer` stack is not wanted
-  there; making it a workspace member is what resolves that.
-- `runners/assist` → `components/runners/assist`
-- the 7 services → `components/services/*` in src-layout
+```
+frontend/     ← lance-ns's JS plane, WHOLESALE: bun.lock, turbo.json, oxlint/oxfmt configs, and all 13
+                @repo/zone-contract gate files travel unchanged. rask's compute + studio move INTO it.
+services/     ← Python deployables, src-layout: catalog, lineage, medallion, compaction, viewer, search,
+                annotator + rask's gateway/core/ray_api + runners/assist. components/ dissolves.
+packages/     ← Python-only shared: common, ratch, storage, service-kit, ray-kit, htr, tracker, validate.
+pyproject.toml  [tool.uv.workspace] members = ["packages/*", "services/*"]   ← GLOBS, no enumeration
+```
+
+Consequences you must apply:
+- **The P0 frontend direction FLIPS**: do not graft lance zones into `components/frontends` — move rask's
+  two surviving zones into `frontend/`. Fewer moves, and the proven gates arrive as-is.
+- **P2's `packages/ui` merge inverts**: rask's storybook + `navMain(project)` fold INTO `@repo/ui`.
+- The manifest-completeness gate is unnecessary under D7 — globs enforce membership structurally.
+- `src/ratch` → `packages/ratch` (a *package*, owner-ruled — its heavy deps move into its own pyproject,
+  which resolves its current exclusion). Per-individual-service packages are rejected: shared-by-one is
+  not shared.
 
 ## Landmines that already cost real time — do not rediscover them
 
@@ -151,7 +164,7 @@ there.
 
 1. Read `docs/architecture/lance-ns-merge.md` in full.
 2. Clear rask's 70 `ty` errors as a standalone commit; confirm `make check` and the pre-commit hook pass.
-3. Decide the frontend toolchain direction (precondition 2) and land the pure-format commit.
-4. Then P1, per the plan. (`studio` is settled — R9; no zone decision is outstanding.)
+3. Land the R10 pure-format commit (lance-ns toolchain over rask's surviving zones and packages).
+4. Then P1, per the plan — with D7's tree as the copy destination. No zone or structure decision is outstanding.
 
 Report an honest fraction at each phase gate. Never mark a gate met on a check you did not run.

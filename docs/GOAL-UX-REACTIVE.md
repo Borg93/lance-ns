@@ -253,6 +253,11 @@ lineage cursor is the one that can.
 
 ## Status — all twenty conditions met, 2026-07-27
 
+> **The evidence lives in [`GOAL-UX-REACTIVE-EVIDENCE.md`](GOAL-UX-REACTIVE-EVIDENCE.md)**, as pasted
+> command output with the command that produced it. It was written because the proof kept living in
+> transcript scrollback, which made it look unproven from every new context window. Re-run any line there;
+> nothing in it is asserted.
+
 Tracked live in `docs/GOAL-VERIFY-PULL.md`'s ledger. Each row cites the command output, screenshot or
 commit that closed it; none is closed on my say-so.
 
